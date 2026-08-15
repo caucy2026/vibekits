@@ -1,0 +1,2 @@
+# Preserve bundled third-party documentation exactly as distributed.
+native/7za/*.txt -text whitespace=-trailing-space

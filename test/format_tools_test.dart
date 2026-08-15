@@ -1,0 +1,47 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/dev_tools/domain/format_tools.dart';
+import 'package:vibekits/features/dev_tools/domain/tool_result.dart';
+
+void main() {
+  group('JSON 格式化', () {
+    test('对象格式化含缩进', () {
+      final String output =
+          (FormatTools.jsonFormat('{"a":1}') as ToolSuccess).output;
+      expect(output, contains('\n'));
+      expect(output, contains('  "a": 1'));
+    });
+
+    test('数组格式化', () {
+      final String output =
+          (FormatTools.jsonFormat('[1,2]') as ToolSuccess).output;
+      expect(output, contains('1'));
+    });
+
+    test('非法 JSON 返回位置', () {
+      final ToolResult result = FormatTools.jsonFormat('{"a":');
+      expect(result, isA<ToolFailure>());
+      final ToolFailure failure = result as ToolFailure;
+      expect(failure.position, isNotNull);
+    });
+  });
+
+  group('JSON 校验', () {
+    test('有效对象', () {
+      expect(
+        (FormatTools.jsonValidate('{"a":1}') as ToolSuccess).output,
+        contains('对象'),
+      );
+    });
+
+    test('有效数组', () {
+      expect(
+        (FormatTools.jsonValidate('[1,2]') as ToolSuccess).output,
+        contains('数组'),
+      );
+    });
+
+    test('无效返回失败', () {
+      expect(FormatTools.jsonValidate('{'), isA<ToolFailure>());
+    });
+  });
+}
