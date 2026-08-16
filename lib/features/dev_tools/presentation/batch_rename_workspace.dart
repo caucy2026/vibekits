@@ -3,14 +3,29 @@ import 'dart:async';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../domain/batch_rename_background_runner.dart';
 import '../domain/file_tools.dart';
 
 typedef DirectoryPicker = Future<String?> Function();
+typedef BatchRenamePlanBuilder = Future<BatchRenamePlan> Function(
+  String directory,
+  BatchRenameOptions options,
+);
+typedef BatchRenameExecutor = Future<BatchRenameReport> Function(
+  BatchRenamePlan plan,
+);
 
 class BatchRenameWorkspace extends StatefulWidget {
-  const BatchRenameWorkspace({super.key, this.directoryPicker});
+  const BatchRenameWorkspace({
+    super.key,
+    this.directoryPicker,
+    this.planBuilder,
+    this.executor,
+  });
 
   final DirectoryPicker? directoryPicker;
+  final BatchRenamePlanBuilder? planBuilder;
+  final BatchRenameExecutor? executor;
 
   @override
   State<BatchRenameWorkspace> createState() => _BatchRenameWorkspaceState();
@@ -33,8 +48,11 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
   RenameLetterCase _letterCase = RenameLetterCase.keep;
   bool _addSequence = false;
   bool _executing = false;
+  bool _planning = false;
   bool _suppressRefresh = false;
   String? _completedSummary;
+  Timer? _planDebounce;
+  int _planSerial = 0;
 
   @override
   void initState() {
@@ -53,6 +71,8 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
 
   @override
   void dispose() {
+    _planDebounce?.cancel();
+    _planSerial++;
     for (final TextEditingController controller in <TextEditingController>[
       _findController,
       _replaceController,
@@ -80,10 +100,35 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
 
   void _refreshPlan() {
     if (!mounted || _directory == null || _suppressRefresh) return;
-    setState(() {
-      _completedSummary = null;
-      _plan = FileTools.buildBatchRenamePlan(_directory!, _options);
-    });
+    _completedSummary = null;
+    _planDebounce?.cancel();
+    final int serial = ++_planSerial;
+    _planDebounce = Timer(
+      const Duration(milliseconds: 180),
+      () => unawaited(_loadPlan(serial)),
+    );
+  }
+
+  Future<void> _loadPlan(int serial) async {
+    final String? directory = _directory;
+    if (directory == null || !mounted) return;
+    setState(() => _planning = true);
+    try {
+      final BatchRenamePlan plan = widget.planBuilder == null
+          ? await BatchRenameBackgroundRunner.buildPlan(directory, _options)
+          : await widget.planBuilder!(directory, _options);
+      if (!mounted || serial != _planSerial) return;
+      setState(() {
+        _plan = plan;
+        _planning = false;
+      });
+    } on Object catch (error) {
+      if (!mounted || serial != _planSerial) return;
+      setState(() {
+        _planning = false;
+        _completedSummary = '预览失败：$error';
+      });
+    }
   }
 
   Future<void> _pickDirectory() async {
@@ -94,8 +139,9 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
     setState(() {
       _directory = path;
       _completedSummary = null;
-      _plan = FileTools.buildBatchRenamePlan(path, _options);
+      _plan = null;
     });
+    await _loadPlan(++_planSerial);
   }
 
   Future<void> _execute() async {
@@ -124,9 +170,9 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
     if (!confirmed || !mounted) return;
 
     setState(() => _executing = true);
-    final BatchRenameReport report = await Future<BatchRenameReport>(
-      () => FileTools.executeBatchRename(plan),
-    );
+    final BatchRenameReport report = widget.executor == null
+        ? await BatchRenameBackgroundRunner.execute(plan)
+        : await widget.executor!(plan);
     if (!mounted) return;
     if (report.isSuccess) {
       _suppressRefresh = true;
@@ -142,9 +188,11 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
       if (report.isSuccess) {
         _addSequence = false;
         _letterCase = RenameLetterCase.keep;
-        _plan = FileTools.buildBatchRenamePlan(_directory!, _options);
+        _plan = null;
       }
     });
+    if (report.isSuccess) await _loadPlan(++_planSerial);
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(report.summary)));
   }
@@ -169,7 +217,7 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
               const Spacer(),
               OutlinedButton.icon(
                 key: const Key('batch-rename-pick-directory'),
-                onPressed: _executing ? null : _pickDirectory,
+                onPressed: _executing || _planning ? null : _pickDirectory,
                 icon: const Icon(Icons.folder_open, size: 18),
                 label: Text(_directory == null ? '选择文件夹' : '更换文件夹'),
               ),
@@ -270,6 +318,18 @@ class _BatchRenameWorkspaceState extends State<BatchRenameWorkspace> {
   }
 
   Widget _buildPreview(BatchRenamePlan? plan) {
+    if (_planning) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.hourglass_top_outlined, size: 30),
+            SizedBox(height: 10),
+            Text('正在后台生成预览…'),
+          ],
+        ),
+      );
+    }
     if (_directory == null) {
       return const Center(child: Text('先选择文件夹，不会自动修改任何文件'));
     }

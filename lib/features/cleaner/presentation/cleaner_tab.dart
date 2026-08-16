@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -40,6 +41,7 @@ class CleanerTab extends StatefulWidget {
     this.initialTotalReleasedBytes = 0,
     this.initialCompletedRuns = 0,
     this.onCleanupStatsChanged,
+    this.availableTargets,
   });
 
   final CleanupScanRunner? scanRunner;
@@ -55,6 +57,7 @@ class CleanerTab extends StatefulWidget {
   final int initialCompletedRuns;
   final Future<void> Function(int totalReleasedBytes, int completedRuns)?
   onCleanupStatsChanged;
+  final List<CleanupScanTarget>? availableTargets;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -66,9 +69,9 @@ class _CleanerTabState extends State<CleanerTab> {
   late Set<String> _whitelist = CleanupWhitelist.sanitize(
     widget.initialWhitelist,
   ).toSet();
-  late final List<CleanupScanTarget> _availableTargets =
-      CleanupTargetDiscovery.discover();
-  late Set<String> _enabledTargetIds = _initialTargetIds();
+  List<CleanupScanTarget> _availableTargets = const <CleanupScanTarget>[];
+  Set<String> _enabledTargetIds = <String>{};
+  bool _discoveringTargets = true;
   bool _scanning = false;
   bool _cleaning = false;
   CleanupCancellationToken? _taskToken;
@@ -86,6 +89,33 @@ class _CleanerTabState extends State<CleanerTab> {
   @override
   void initState() {
     super.initState();
+    final List<CleanupScanTarget>? supplied = widget.availableTargets;
+    if (supplied != null) {
+      _applyDiscoveredTargets(supplied);
+    } else {
+      unawaited(_discoverTargets());
+    }
+  }
+
+  Future<void> _discoverTargets() async {
+    try {
+      final List<CleanupScanTarget> targets =
+          await CleanupBackgroundRunner.discoverTargets();
+      if (mounted) _applyDiscoveredTargets(targets);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _discoveringTargets = false;
+        _message = '扫描范围加载失败：$error';
+      });
+    }
+  }
+
+  void _applyDiscoveredTargets(List<CleanupScanTarget> targets) {
+    _availableTargets = List<CleanupScanTarget>.unmodifiable(targets);
+    _enabledTargetIds = _initialTargetIds();
+    _discoveringTargets = false;
+    if (mounted) setState(() {});
     if (widget.initialTargetCatalogVersion <
         CleanupTargetDiscovery.catalogVersion) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -143,6 +173,7 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Future<void> _scan() async {
+    if (_discoveringTargets || _enabledTargetIds.isEmpty) return;
     setState(() {
       _scanning = true;
       _message = '';
@@ -693,7 +724,13 @@ class _CleanerTabState extends State<CleanerTab> {
           return Row(
             children: <Widget>[
               ElevatedButton.icon(
-                onPressed: _scanning || _cleaning ? null : _scan,
+                onPressed:
+                    _scanning ||
+                        _cleaning ||
+                        _discoveringTargets ||
+                        _enabledTargetIds.isEmpty
+                    ? null
+                    : _scan,
                 icon: _scanning
                     ? const SizedBox(
                         width: 16,
@@ -728,12 +765,16 @@ class _CleanerTabState extends State<CleanerTab> {
               if (veryCompact)
                 IconButton(
                   tooltip: '范围（${_enabledTargetIds.length}）',
-                  onPressed: _scanning || _cleaning ? null : _manageScanTargets,
+                  onPressed: _scanning || _cleaning || _discoveringTargets
+                      ? null
+                      : _manageScanTargets,
                   icon: const Icon(Icons.tune, size: 18),
                 )
               else
                 OutlinedButton.icon(
-                  onPressed: _scanning || _cleaning ? null : _manageScanTargets,
+                  onPressed: _scanning || _cleaning || _discoveringTargets
+                      ? null
+                      : _manageScanTargets,
                   icon: const Icon(Icons.tune, size: 18),
                   label: Text('范围（${_enabledTargetIds.length}）'),
                 ),
@@ -759,6 +800,18 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Widget _buildBody() {
+    if (_discoveringTargets) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.hourglass_top_outlined, size: 34),
+            SizedBox(height: 10),
+            Text('正在后台识别可清理范围…'),
+          ],
+        ),
+      );
+    }
     if (_scanning) {
       final CleanupScanProgress? progress = _scanProgress;
       return Center(

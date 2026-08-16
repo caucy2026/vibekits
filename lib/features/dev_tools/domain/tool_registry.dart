@@ -311,6 +311,12 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     group: ToolGroups.file,
     description: '按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。',
   ),
+  const ToolSpec(
+    id: 'file_search',
+    name: '文件搜索',
+    group: ToolGroups.file,
+    description: '按文件名或内容快速搜索，结果可定位、复制路径并继续计算哈希。',
+  ),
 ];
 
 const Set<String> _standaloneToolIds = <String>{
@@ -321,6 +327,7 @@ const Set<String> _standaloneToolIds = <String>{
   'git_workspace',
   'github_diagnostics',
   'file_hash',
+  'file_search',
   'batch_rename',
   'duplicate_files',
 };

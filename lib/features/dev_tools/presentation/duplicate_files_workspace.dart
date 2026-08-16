@@ -4,9 +4,11 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../cleaner/domain/cleanup_deleter.dart';
+import '../../cleaner/domain/cleanup_background_runner.dart';
 import '../../cleaner/domain/cleanup_report.dart';
 import '../../cleaner/domain/cleanup_scanner.dart';
 import '../../cleaner/domain/cleanup_task.dart';
+import '../domain/duplicate_file_background_runner.dart';
 import '../domain/duplicate_file_scanner.dart';
 
 typedef DuplicateDirectoryPicker = Future<String?> Function();
@@ -98,7 +100,7 @@ class _DuplicateFilesWorkspaceState extends State<DuplicateFilesWorkspace> {
     });
     try {
       final DuplicateScanResult result = widget.scanRunner == null
-          ? await DuplicateFileScanner.scan(
+          ? await DuplicateFileBackgroundRunner.scan(
               root,
               recursive: _recursive,
               minimumSize: _minimumSize,
@@ -200,10 +202,14 @@ class _DuplicateFilesWorkspaceState extends State<DuplicateFilesWorkspace> {
       _deleteProgress = null;
       _message = null;
     });
+    final CleanupCancellationToken deleteToken = CleanupCancellationToken();
+    _token = deleteToken;
     try {
       final CleanupDeleteResult deleted = widget.deleteRunner == null
-          ? await CleanupDeleter.deleteCandidates(
+          ? await CleanupBackgroundRunner.deleteCandidates(
               candidates,
+              cancellationToken: deleteToken,
+              permanentFallback: false,
               onProgress: _updateDeleteProgress,
             )
           : await widget.deleteRunner!(
@@ -258,6 +264,7 @@ class _DuplicateFilesWorkspaceState extends State<DuplicateFilesWorkspace> {
       if (mounted) setState(() => _message = '删除失败：$error；请确认文件未被占用后重试');
     } finally {
       if (mounted) setState(() => _deleting = false);
+      if (identical(_token, deleteToken)) _token = null;
     }
   }
 
@@ -517,14 +524,20 @@ class _DuplicateFilesWorkspaceState extends State<DuplicateFilesWorkspace> {
               child: Icon(Icons.description_outlined, size: 18),
             ),
           ),
-        FilledButton.icon(
-          key: const Key('duplicates-delete'),
-          onPressed: _selected.isEmpty || _scanning || _deleting
-              ? null
-              : _deleteSelected,
-          icon: const Icon(Icons.delete_outline, size: 18),
-          label: Text('移入回收站 ${_selected.length}'),
-        ),
+        if (_deleting)
+          OutlinedButton.icon(
+            key: const Key('duplicates-cancel-delete'),
+            onPressed: _token?.cancel,
+            icon: const Icon(Icons.stop, size: 18),
+            label: const Text('停止处理'),
+          )
+        else
+          FilledButton.icon(
+            key: const Key('duplicates-delete'),
+            onPressed: _selected.isEmpty || _scanning ? null : _deleteSelected,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: Text('移入回收站 ${_selected.length}'),
+          ),
       ],
     );
   }

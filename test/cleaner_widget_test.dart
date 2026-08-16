@@ -6,9 +6,20 @@ import 'package:vibekits/features/archive/domain/disk_space.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
 
 void main() {
+  const List<CleanupScanTarget> testTargets = <CleanupScanTarget>[
+    CleanupScanTarget(
+      id: 'test-temp',
+      label: '测试临时目录',
+      path: r'C:\Temp',
+      category: CleanupCategory.userTemp,
+      defaultEnabled: true,
+    ),
+  ];
+
   testWidgets('扫描显示进度并可取消且保留部分结果', (WidgetTester tester) async {
     final Completer<CleanupScanResult> completer =
         Completer<CleanupScanResult>();
@@ -19,6 +30,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            availableTargets: testTargets,
             scanRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -79,6 +91,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            availableTargets: testTargets,
             initialWhitelist: const <String>[root],
             scanRunner:
                 ({
@@ -130,6 +143,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            availableTargets: testTargets,
             scanRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -176,6 +190,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            availableTargets: testTargets,
             initialTotalReleasedBytes: 1024,
             initialCompletedRuns: 2,
             scanRunner:

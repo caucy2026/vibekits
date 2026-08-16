@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
 import '../../../app/supported_file_types.dart';
+import '../domain/archive_background_runner.dart';
 import '../domain/archive_service.dart';
 import '../domain/seven_zip.dart';
 
@@ -57,6 +58,7 @@ class _ArchiveTabState extends State<ArchiveTab> {
   ArchiveCancellationToken? _extractToken;
   ArchiveExtractProgress? _extractProgress;
   Stopwatch? _extractClock;
+  final Stopwatch _extractUiClock = Stopwatch();
 
   @override
   void initState() {
@@ -135,9 +137,8 @@ class _ArchiveTabState extends State<ArchiveTab> {
         });
         return;
       }
-      final Uint8List bytes = await source.readAsBytes();
-      final ArchiveListing listing = ArchiveService.list(
-        bytes,
+      final ArchiveListing listing = await ArchiveBackgroundRunner.listFile(
+        path,
         fileName,
         maxEntries: widget.maxEntries,
         maxSingleExpandedBytes: widget.maxSingleExpandedBytes,
@@ -182,6 +183,9 @@ class _ArchiveTabState extends State<ArchiveTab> {
         _extractToken = token;
         _extractProgress = null;
         _extractClock = Stopwatch()..start();
+        _extractUiClock
+          ..reset()
+          ..start();
         _message = '';
       });
       try {
@@ -197,9 +201,7 @@ class _ArchiveTabState extends State<ArchiveTab> {
               ? 'ask'
               : 'rename',
           cancellationToken: token,
-          onProgress: (ArchiveExtractProgress progress) {
-            if (mounted) setState(() => _extractProgress = progress);
-          },
+          onProgress: _updateExtractProgress,
           onConflict: _askConflict,
           maxEntries: widget.maxEntries,
           maxSingleExpandedBytes: widget.maxSingleExpandedBytes,
@@ -234,6 +236,9 @@ class _ArchiveTabState extends State<ArchiveTab> {
       _extractToken = token;
       _extractProgress = null;
       _extractClock = Stopwatch()..start();
+      _extractUiClock
+        ..reset()
+        ..start();
       _message = '';
     });
     try {
@@ -243,9 +248,7 @@ class _ArchiveTabState extends State<ArchiveTab> {
         selectedNames: Set<String>.from(_selected),
         policy: _policy,
         cancellationToken: token,
-        onProgress: (ArchiveExtractProgress progress) {
-          if (mounted) setState(() => _extractProgress = progress);
-        },
+        onProgress: _updateExtractProgress,
         onConflict: _askConflict,
       );
       if (mounted) {
@@ -267,6 +270,16 @@ class _ArchiveTabState extends State<ArchiveTab> {
         });
       }
     }
+  }
+
+  void _updateExtractProgress(ArchiveExtractProgress progress) {
+    if (!mounted ||
+        (_extractUiClock.elapsedMilliseconds < 100 &&
+            progress.writtenBytes < progress.totalBytes)) {
+      return;
+    }
+    _extractUiClock.reset();
+    setState(() => _extractProgress = progress);
   }
 
   Future<void> _create() async {
@@ -332,30 +345,20 @@ class _ArchiveTabState extends State<ArchiveTab> {
       extensions: <String>['*'],
     );
     try {
-      final List<(String, List<int>)> entries;
+      String? directory;
+      List<(String, String)> files = const <(String, String)>[];
       if (source == _ArchiveSource.directory) {
-        final String? directory = await getDirectoryPath();
+        directory = await getDirectoryPath();
         if (directory == null) return;
-        entries = await ArchiveService.collectDirectory(
-          directory,
-          maxEntries: widget.maxEntries,
-          maxTotalBytes: widget.maxSingleExpandedBytes,
-        );
       } else {
-        final List<XFile> files = await openFiles(
+        final List<XFile> selectedFiles = await openFiles(
           acceptedTypeGroups: <XTypeGroup>[group],
         );
-        if (files.isEmpty) return;
-        entries = <(String, List<int>)>[];
-        for (final XFile file in files) {
-          entries.add((file.name, await file.readAsBytes()));
-        }
+        if (selectedFiles.isEmpty) return;
+        files = selectedFiles
+            .map((XFile file) => (file.path, file.name))
+            .toList(growable: false);
       }
-      if (entries.isEmpty) throw const FormatException('所选来源中没有可打包文件');
-      final Uint8List bytes = ArchiveService.createArchive(
-        files: entries,
-        format: format,
-      );
       final String suggestedName = switch (format) {
         ArchiveFormat.zip => 'archive.zip',
         ArchiveFormat.tar => 'archive.tar',
@@ -367,7 +370,14 @@ class _ArchiveTabState extends State<ArchiveTab> {
       );
       final String? path = location?.path;
       if (path == null) return;
-      await File(path).writeAsBytes(bytes, flush: true);
+      await ArchiveBackgroundRunner.create(
+        format: format,
+        outputPath: path,
+        maxEntries: widget.maxEntries,
+        maxTotalBytes: widget.maxSingleExpandedBytes,
+        directory: directory,
+        files: files,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('已创建 $path')));

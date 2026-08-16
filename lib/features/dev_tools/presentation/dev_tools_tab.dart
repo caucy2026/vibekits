@@ -7,6 +7,7 @@ import 'api_workspace.dart';
 import 'database_workspace.dart';
 import 'duplicate_files_workspace.dart';
 import 'file_hash_workspace.dart';
+import 'file_search_workspace.dart';
 import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
 import 'programmer_calculator_workspace.dart';
@@ -22,6 +23,9 @@ class DevToolsTab extends StatefulWidget {
     super.key,
     this.fileHashPickFiles,
     this.fileHashCalculator,
+    this.fileSearchDirectoryPicker,
+    this.fileSearchRunner,
+    this.fileSearchReveal,
     this.initialDatabasePath,
     this.databasePickFile,
     this.databaseInspect,
@@ -38,6 +42,9 @@ class DevToolsTab extends StatefulWidget {
 
   final FileHashPicker? fileHashPickFiles;
   final FileHashCalculator? fileHashCalculator;
+  final FileSearchDirectoryPicker? fileSearchDirectoryPicker;
+  final FileSearchRunner? fileSearchRunner;
+  final FileSearchReveal? fileSearchReveal;
   final String? initialDatabasePath;
   final SqliteFilePicker? databasePickFile;
   final SqliteInspector? databaseInspect;
@@ -60,6 +67,8 @@ class _DevToolsTabState extends State<DevToolsTab> {
   String _query = '';
   ToolSpec _selected = devToolRegistry.first;
   String? _utilityInitialToolId;
+  List<String> _hashInitialPaths = const <String>[];
+  int _hashRequestSerial = 0;
 
   @override
   void initState() {
@@ -107,6 +116,10 @@ class _DevToolsTabState extends State<DevToolsTab> {
   void _selectTool(ToolSpec tool) {
     setState(() {
       _selected = tool;
+      if (tool.id == 'file_hash') {
+        _hashInitialPaths = const <String>[];
+        _hashRequestSerial++;
+      }
       if (tool.id == utilityCollectionTool.id && _query.trim().isNotEmpty) {
         final String lower = _query.trim().toLowerCase();
         _utilityInitialToolId = utilityToolRegistry
@@ -119,6 +132,16 @@ class _DevToolsTabState extends State<DevToolsTab> {
             .firstOrNull
             ?.id;
       }
+    });
+  }
+
+  void _openHashFor(String path) {
+    setState(() {
+      _hashInitialPaths = <String>[path];
+      _hashRequestSerial++;
+      _selected = devToolRegistry.firstWhere(
+        (ToolSpec tool) => tool.id == 'file_hash',
+      );
     });
   }
 
@@ -227,10 +250,20 @@ class _DevToolsTabState extends State<DevToolsTab> {
     if (tool.id == 'duplicate_files') {
       return const DuplicateFilesWorkspace();
     }
+    if (tool.id == 'file_search') {
+      return FileSearchWorkspace(
+        directoryPicker: widget.fileSearchDirectoryPicker,
+        searchRunner: widget.fileSearchRunner,
+        reveal: widget.fileSearchReveal,
+        onHashRequested: _openHashFor,
+      );
+    }
     if (tool.id == 'file_hash') {
       return FileHashWorkspace(
+        key: ValueKey<int>(_hashRequestSerial),
         pickFiles: widget.fileHashPickFiles,
         calculate: widget.fileHashCalculator,
+        initialPaths: _hashInitialPaths,
       );
     }
     return const Center(child: Text('该工具暂不可用'));

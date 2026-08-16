@@ -96,7 +96,7 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
     expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
     expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
-    expect(find.textContaining('v1.6.1+8'), findsWidgets);
+    expect(find.textContaining('v1.7.0+9'), findsWidgets);
     expect(find.text('任务 0'), findsNothing);
   });
 

@@ -7,6 +7,15 @@ import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 
 void main() {
+  test('清理范围发现不占用 UI Isolate', () async {
+    final List<CleanupScanTarget> targets =
+        await CleanupBackgroundRunner.discoverTargets();
+    expect(
+      targets.every((CleanupScanTarget target) => target.id.isNotEmpty),
+      isTrue,
+    );
+  });
+
   test('后台扫描可跨 Isolate 接收进度并取消', () async {
     final Directory directory = Directory.systemTemp.createTempSync(
       'vibekits_background_scan_',

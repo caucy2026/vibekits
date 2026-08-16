@@ -11,6 +11,11 @@ import 'cleanup_targets.dart';
 /// Cancellation is forwarded through a dedicated send port, so pressing stop
 /// remains responsive even while the worker is enumerating many files.
 abstract final class CleanupBackgroundRunner {
+  static Future<List<CleanupScanTarget>> discoverTargets() => Isolate.run(
+    CleanupTargetDiscovery.discover,
+    debugName: 'vibekits-cleanup-target-discovery',
+  );
+
   static Future<CleanupScanResult> scanTargets(
     List<CleanupScanTarget> targets, {
     required CleanupCancellationToken cancellationToken,

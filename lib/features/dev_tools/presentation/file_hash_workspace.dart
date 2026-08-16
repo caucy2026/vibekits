@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../domain/file_hash_background_runner.dart';
 import '../domain/file_hash_service.dart';
 
 typedef FileHashPicker = Future<List<String>> Function();
@@ -14,10 +15,16 @@ typedef FileHashCalculator = Future<FileHashResult> Function(
 );
 
 class FileHashWorkspace extends StatefulWidget {
-  const FileHashWorkspace({super.key, this.pickFiles, this.calculate});
+  const FileHashWorkspace({
+    super.key,
+    this.pickFiles,
+    this.calculate,
+    this.initialPaths = const <String>[],
+  });
 
   final FileHashPicker? pickFiles;
   final FileHashCalculator? calculate;
+  final List<String> initialPaths;
 
   @override
   State<FileHashWorkspace> createState() => _FileHashWorkspaceState();
@@ -29,6 +36,15 @@ class _FileHashWorkspaceState extends State<FileHashWorkspace> {
   FileHashCancellation? _cancellation;
   int _runSerial = 0;
   bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rows.addAll(widget.initialPaths.map(_HashRow.new));
+    if (_rows.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _calculateAll());
+    }
+  }
 
   Future<List<String>> _pickFiles() async {
     if (widget.pickFiles != null) return widget.pickFiles!();
@@ -78,7 +94,7 @@ class _FileHashWorkspaceState extends State<FileHashWorkspace> {
       }
 
       final FileHashResult result = widget.calculate == null
-          ? await calculateFileHash(
+          ? await FileHashBackgroundRunner.calculate(
               row.path,
               _algorithm,
               cancellation: cancellation,
