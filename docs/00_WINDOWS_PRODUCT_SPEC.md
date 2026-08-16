@@ -65,6 +65,8 @@ Vibekits 是面向程序员的本地工具箱。Windows V1 使用单窗口、五
 | Windows 临时目录 | 默认不勾选 | 无权限项目只报告，不提升权限绕过 |
 | 回收站 | 默认不勾选 | 单独显示大小并二次确认 |
 | 浏览器缓存 | 默认勾选 | Edge、Chrome、Firefox 的纯缓存目录，不删除账号和 Cookie |
+| 应用缓存 | 默认勾选 | VS Code、Discord 等应用的 Cache、Code Cache、GPUCache，不删除配置和账号数据 |
+| 系统图形缓存 | 默认勾选 | 当前用户 DirectX 着色器缓存，可由系统重新生成 |
 | 开发缓存 | 默认不勾选 | NuGet、npm、pnpm、Yarn、Gradle、Maven、pip 等可再生成缓存 |
 | 下载目录 | 永不默认勾选 | 只做大文件、重复文件和长期未使用文件建议 |
 | 日志/崩溃转储 | 默认勾选 | 用户级日志和系统允许访问的转储文件 |
@@ -92,7 +94,7 @@ Vibekits 是面向程序员的本地工具箱。Windows V1 使用单窗口、五
 
 ### 5.1 正式格式
 
-首版明确支持 25 个后缀：
+首版基础阅读支持 25 个后缀，并将常见源码、脚本和开发配置作为同一只读文本解码能力：
 
 - 文本/日志：`.txt`、`.log`
 - Markdown：`.md`、`.markdown`
@@ -102,6 +104,8 @@ Vibekits 是面向程序员的本地工具箱。Windows V1 使用单窗口、五
 - 结构化数据：`.json`、`.xml`
 - Web/电子书/矢量：`.html`、`.htm`、`.epub`、`.svg`、`.svgz`
 - 二进制：`.bin`
+- 源码/脚本：`.dart`、`.js/.mjs/.cjs`、`.ts/.tsx/.jsx`、`.css/.scss/.less`、`.vue/.svelte`、`.py/.pyw`、`.java`、`.kt/.kts`、`.c/.h/.cc/.cpp/.cxx/.hpp`、`.cs`、`.go`、`.rs`、`.swift`、`.sh/.bash/.zsh`、`.bat/.cmd/.ps1`、`.sql`
+- 开发配置：`.env`、`.editorconfig`、`.gitignore`、`.gradle`、`.cmake`、`Dockerfile`
 
 未知后缀允许用户手动选择“文本查看”或“十六进制查看”，但不计入正式格式数量。
 

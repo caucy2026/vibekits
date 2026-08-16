@@ -215,9 +215,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
                     child: Text(
                       entry.key,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: VibekitsColors.textSecondary,
+                        color: context.vibe.muted,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -252,10 +252,10 @@ class _DevToolsTabState extends State<DevToolsTab> {
             children: <Widget>[
               Text(
                 tool.name,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: VibekitsColors.textPrimary,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 8),
@@ -263,10 +263,10 @@ class _DevToolsTabState extends State<DevToolsTab> {
               const Spacer(),
               Tooltip(
                 message: tool.description,
-                child: const Icon(
+                child: Icon(
                   Icons.help_outline,
                   size: 16,
-                  color: VibekitsColors.textSecondary,
+                  color: context.vibe.muted,
                 ),
               ),
             ],
@@ -346,7 +346,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
                 fontSize: 13,
                 color: _outputIsError
                     ? VibekitsColors.danger
-                    : VibekitsColors.textPrimary,
+                    : Theme.of(context).colorScheme.onSurface,
               ),
               decoration: const InputDecoration(
                 hintText: '输出',

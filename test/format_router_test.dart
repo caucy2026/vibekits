@@ -13,6 +13,9 @@ void main() {
     expect(documentModeForPath('g.csv'), DocViewMode.structured);
     expect(documentModeForPath('h.html'), DocViewMode.web);
     expect(documentModeForPath('i.epub'), DocViewMode.web);
+    expect(documentModeForPath('main.dart'), DocViewMode.text);
+    expect(documentModeForPath('script.ps1'), DocViewMode.text);
+    expect(documentModeForPath('.gitignore'), DocViewMode.text);
     expect(documentModeForPath('j.xyz'), DocViewMode.unsupported);
   });
 

@@ -1,0 +1,114 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_report.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
+
+void main() {
+  test('逐项清理真实记录成功、跳过和失败', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_clean_delete',
+    );
+    addTearDown(() {
+      if (sandbox.existsSync()) sandbox.deleteSync(recursive: true);
+    });
+    final File success = File('${sandbox.path}/success.tmp')
+      ..writeAsStringSync('1234');
+    final File failure = File('${sandbox.path}/failure.tmp')
+      ..writeAsStringSync('12');
+    final List<CleanupCandidate> candidates = <CleanupCandidate>[
+      CleanupCandidate(
+        path: success.path,
+        size: success.lengthSync(),
+        modified: success.lastModifiedSync(),
+        category: CleanupCategory.userTemp,
+        reason: '测试',
+      ),
+      CleanupCandidate(
+        path: '${sandbox.path}/missing.tmp',
+        size: 1,
+        category: CleanupCategory.userTemp,
+        reason: '测试',
+      ),
+      CleanupCandidate(
+        path: failure.path,
+        size: failure.lengthSync(),
+        modified: failure.lastModifiedSync(),
+        category: CleanupCategory.userTemp,
+        reason: '测试',
+      ),
+    ];
+
+    final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
+      candidates,
+      recycle: (String path) {
+        if (path == success.path) {
+          File(path).deleteSync();
+          return true;
+        }
+        return false;
+      },
+    );
+
+    expect(result.succeeded, 1);
+    expect(result.skipped, 1);
+    expect(result.failed, 1);
+    expect(result.releasedBytes, 4);
+  });
+
+  test('报告不持久化候选路径或文件内容', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_clean_report',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    const String privatePath = r'C:\Users\private\secret.txt';
+    const CleanupDeleteResult result = CleanupDeleteResult(
+      items: <CleanupItemResult>[
+        CleanupItemResult(
+          candidate: CleanupCandidate(
+            path: privatePath,
+            size: 12,
+            category: CleanupCategory.userTemp,
+            reason: '临时文件',
+          ),
+          status: CleanupItemStatus.failed,
+          reason: '访问被拒绝',
+        ),
+      ],
+      cancelled: false,
+      releasedBytes: 0,
+    );
+
+    final File report = await CleanupReportWriter.write(
+      result,
+      directory: sandbox,
+    );
+    final String contents = await report.readAsString();
+
+    expect(contents, isNot(contains(privatePath)));
+    expect(contents, contains('访问被拒绝'));
+    expect(contents, contains('"failed": 1'));
+  });
+
+  test('清理取消与失败状态分离', () async {
+    final CleanupCancellationToken token = CleanupCancellationToken()..cancel();
+    final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
+      const <CleanupCandidate>[
+        CleanupCandidate(
+          path: r'C:\not-touched.tmp',
+          size: 1,
+          category: CleanupCategory.userTemp,
+          reason: '测试',
+        ),
+      ],
+      cancellationToken: token,
+      recycle: (String _) => throw StateError('不应执行'),
+    );
+
+    expect(result.cancelled, isTrue);
+    expect(result.failed, 0);
+    expect(result.items, isEmpty);
+  });
+}

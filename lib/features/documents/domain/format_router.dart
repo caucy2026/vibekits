@@ -1,3 +1,5 @@
+import '../../../app/supported_file_types.dart';
+
 /// 文档查看模式（docs/00 §5.1）。
 enum DocViewMode { empty, text, markdown, hex, structured, web, unsupported }
 
@@ -12,21 +14,25 @@ DocViewMode documentModeForPath(String path) {
   if (lower.endsWith('.bin')) {
     return DocViewMode.hex;
   }
-  const List<String> textExts = <String>[
-    '.txt',
-    '.log',
-    '.ini',
-    '.cfg',
-    '.conf',
-    '.properties',
-    '.yaml',
-    '.yml',
-    '.toml',
-    '.diff',
-    '.patch',
-    '.tex',
-    '.latex',
-  ];
+  final List<String> textExts = SupportedFileTypes.documentExtensions
+      .where(
+        (String extension) => !<String>{
+          'md',
+          'markdown',
+          'bin',
+          'csv',
+          'tsv',
+          'json',
+          'xml',
+          'html',
+          'htm',
+          'epub',
+          'svg',
+          'svgz',
+        }.contains(extension),
+      )
+      .map((String extension) => '.$extension')
+      .toList(growable: false);
   for (final String ext in textExts) {
     if (lower.endsWith(ext)) {
       return DocViewMode.text;

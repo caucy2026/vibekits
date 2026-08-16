@@ -1,5 +1,9 @@
 import 'dart:io';
 
+import 'archive_service.dart';
+import 'disk_space.dart';
+import 'atomic_file.dart';
+
 /// 7z 格式支持，基于官方 7za 命令行（native/7za/7za.exe）。
 class SevenZipEntry {
   const SevenZipEntry({
@@ -115,19 +119,207 @@ abstract final class SevenZip {
     List<String>? selectedEntries,
     String policy = 'rename',
   }) async {
+    final ExtractResult result = await extractCancellable(
+      archivePath,
+      targetDir,
+      selectedEntries: selectedEntries,
+      policy: policy,
+    );
+    if (result.failed > 0) {
+      throw FileSystemException('7z 解压失败：${result.failures.join('；')}');
+    }
+  }
+
+  static Future<ExtractResult> extractCancellable(
+    String archivePath,
+    String targetDir, {
+    List<String>? selectedEntries,
+    String policy = 'rename',
+    ArchiveCancellationToken? cancellationToken,
+    void Function(ArchiveExtractProgress progress)? onProgress,
+    ArchiveConflictResolver? onConflict,
+    int? Function(String path)? availableDiskBytes,
+  }) async {
+    final ArchiveCancellationToken token =
+        cancellationToken ?? ArchiveCancellationToken();
     final String? exe = findExecutable();
     if (exe == null) {
       throw const FileSystemException('未找到 7za.exe');
     }
-    Directory(targetDir).createSync(recursive: true);
+    final List<SevenZipEntry> listing = await list(archivePath);
+    final Set<String>? selected = selectedEntries?.toSet();
+    final List<SevenZipEntry> plan = listing
+        .where(
+          (SevenZipEntry entry) =>
+              !entry.isDirectory &&
+              (selected == null || selected.contains(entry.name)),
+        )
+        .toList(growable: false);
+    for (final SevenZipEntry entry in plan) {
+      if (ArchiveService.safeRelativePath(entry.name) == null) {
+        throw FormatException('7z 条目路径不安全：${entry.name}');
+      }
+    }
+    if (token.isCancelled || (selected != null && plan.isEmpty)) {
+      return ExtractResult(
+        succeeded: 0,
+        skipped: 0,
+        failed: 0,
+        failures: const <String>[],
+        cancelled: token.isCancelled,
+      );
+    }
+    final int totalBytes = plan.fold<int>(
+      0,
+      (int sum, SevenZipEntry entry) => sum + entry.size,
+    );
+    final int? available = (availableDiskBytes ?? DiskSpace.availableBytes)(
+      targetDir,
+    );
+    if (available != null && available < totalBytes) {
+      throw FileSystemException(
+        '目标磁盘空间不足：需要 $totalBytes 字节，可用 $available 字节',
+        targetDir,
+      );
+    }
+    final Directory target = Directory(targetDir);
+    await target.create(recursive: true);
+    final Directory staging = Directory(
+      '${target.path}${Platform.pathSeparator}.vibekits-7z-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await staging.create();
     final List<String> args = <String>['x', archivePath];
-    if (selectedEntries != null && selectedEntries.isNotEmpty) {
-      args.addAll(selectedEntries);
+    if (plan.isNotEmpty) {
+      args.addAll(plan.map((SevenZipEntry entry) => entry.name));
     }
-    args.addAll(<String>['-o$targetDir', '-y', sevenZipOverwriteArg(policy)]);
-    final ProcessResult result = await Process.run(exe, args);
-    if (result.exitCode != 0) {
-      throw FileSystemException('7z 解压失败：${result.stderr}');
+    // Bundled 7za 9.20 does not support the newer -bsp progress switch.
+    args.addAll(<String>['-o${staging.path}', '-y', '-aoa']);
+    final Process process = await Process.start(exe, args);
+    final StringBuffer outputs = StringBuffer();
+    final StringBuffer errors = StringBuffer();
+    final Future<void> stdoutDone = process.stdout
+        .transform(const SystemEncoding().decoder)
+        .forEach((String chunk) {
+          outputs.write(chunk);
+          final Match? match = RegExp(r'(\d+)%').firstMatch(chunk);
+          final int percent = int.tryParse(match?.group(1) ?? '') ?? 0;
+          onProgress?.call(
+            ArchiveExtractProgress(
+              currentFile: '7z 解压进程',
+              completedFiles: 0,
+              totalFiles: plan.length,
+              writtenBytes: totalBytes * percent ~/ 100,
+              totalBytes: totalBytes,
+            ),
+          );
+        });
+    final Future<void> stderrDone = process.stderr
+        .transform(const SystemEncoding().decoder)
+        .forEach(errors.write);
+    while (!token.isCancelled) {
+      final bool exited = await Future.any(<Future<bool>>[
+        process.exitCode.then((int _) => true),
+        Future<bool>.delayed(const Duration(milliseconds: 50), () => false),
+      ]);
+      if (exited) break;
     }
+    if (token.isCancelled) process.kill();
+    final int exitCode = await process.exitCode;
+    await stdoutDone;
+    await stderrDone;
+    if (token.isCancelled) {
+      await _deleteStaging(staging);
+      return const ExtractResult(
+        succeeded: 0,
+        skipped: 0,
+        failed: 0,
+        failures: <String>[],
+        cancelled: true,
+      );
+    }
+    if (exitCode != 0) {
+      await _deleteStaging(staging);
+      throw FileSystemException(
+        '7z 解压失败（退出码 $exitCode）：${errors.isEmpty ? outputs : errors}',
+      );
+    }
+
+    int succeeded = 0;
+    int skipped = 0;
+    int failed = 0;
+    int writtenBytes = 0;
+    final List<String> failures = <String>[];
+    for (final SevenZipEntry entry in plan) {
+      if (token.isCancelled) break;
+      final String safe = ArchiveService.safeRelativePath(entry.name)!;
+      final File source = File('${staging.path}${Platform.pathSeparator}$safe');
+      File destination = File('${target.path}${Platform.pathSeparator}$safe');
+      try {
+        if (!await source.exists()) {
+          failed++;
+          failures.add('${entry.name}（7z 未生成该文件）');
+          continue;
+        }
+        await destination.parent.create(recursive: true);
+        if (await destination.exists()) {
+          String effectivePolicy = policy;
+          if (policy == 'ask') {
+            final ConflictPolicy decision =
+                await onConflict?.call(destination.path) ?? ConflictPolicy.skip;
+            effectivePolicy = decision.name;
+          }
+          if (effectivePolicy == 'skip') {
+            skipped++;
+            continue;
+          }
+          if (effectivePolicy == 'rename') {
+            destination = _renameTarget(destination);
+          }
+        }
+        await AtomicFile.commit(source, destination);
+        succeeded++;
+        writtenBytes += entry.size;
+        onProgress?.call(
+          ArchiveExtractProgress(
+            currentFile: entry.name,
+            completedFiles: succeeded,
+            totalFiles: plan.length,
+            writtenBytes: writtenBytes,
+            totalBytes: totalBytes,
+          ),
+        );
+      } catch (error) {
+        failed++;
+        failures.add('${entry.name}（$error）');
+      }
+    }
+    await _deleteStaging(staging);
+    return ExtractResult(
+      succeeded: succeeded,
+      skipped: skipped,
+      failed: failed,
+      failures: failures,
+      cancelled: token.isCancelled,
+      writtenBytes: writtenBytes,
+    );
+  }
+
+  static File _renameTarget(File file) {
+    final String directory = file.parent.path;
+    final String name = file.uri.pathSegments.last;
+    final int dot = name.lastIndexOf('.');
+    final String stem = dot > 0 ? name.substring(0, dot) : name;
+    final String extension = dot > 0 ? name.substring(dot) : '';
+    for (int index = 1; index < 10000; index++) {
+      final File candidate = File(
+        '$directory${Platform.pathSeparator}$stem ($index)$extension',
+      );
+      if (!candidate.existsSync()) return candidate;
+    }
+    throw const FileSystemException('无法生成无冲突文件名');
+  }
+
+  static Future<void> _deleteStaging(Directory staging) async {
+    if (await staging.exists()) await staging.delete(recursive: true);
   }
 }

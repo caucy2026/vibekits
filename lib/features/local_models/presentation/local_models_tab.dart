@@ -17,14 +17,18 @@ String defaultModelDirectory() {
 
 /// T5 本地模型 Tab（模型管理已实现；推理运行时属后续接入）。
 class LocalModelsTab extends StatefulWidget {
-  const LocalModelsTab({super.key});
+  const LocalModelsTab({super.key, this.directory = ''});
+
+  final String directory;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
 }
 
 class _LocalModelsTabState extends State<LocalModelsTab> {
-  final String _directory = defaultModelDirectory();
+  late final String _directory = widget.directory.trim().isEmpty
+      ? defaultModelDirectory()
+      : widget.directory.trim();
   List<ModelInfo> _models = const <ModelInfo>[];
   String _message = '';
   String _workspace = 'OCR';
@@ -35,10 +39,9 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     _refresh();
   }
 
-  void _refresh() {
-    setState(() {
-      _models = ModelStore.list(_directory);
-    });
+  Future<void> _refresh() async {
+    final List<ModelInfo> models = await ModelStore.list(_directory);
+    if (mounted) setState(() => _models = models);
   }
 
   Future<void> _import() async {
@@ -106,10 +109,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
               Expanded(
                 child: Text(
                   _directory,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: VibekitsColors.textSecondary,
-                  ),
+                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -121,20 +121,20 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Text(
               _message,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: VibekitsColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),
         const Divider(height: 1),
         Expanded(
           child: _models.isEmpty
-              ? const Center(
+              ? Center(
                   child: Text(
                     '暂无模型\n点击“导入模型”添加本地模型文件',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: VibekitsColors.textSecondary),
+                    style: TextStyle(color: context.vibe.muted),
                   ),
                 )
               : ListView.builder(
@@ -150,8 +150,17 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
-                        '${model.capability} · ${_formatSize(model.size)}',
-                        style: const TextStyle(fontSize: 11),
+                        '${model.capability} · ${_formatSize(model.size)} · ${switch (model.integrity) {
+                          ModelIntegrity.verified => '校验通过',
+                          ModelIntegrity.modified => '文件已变化',
+                          ModelIntegrity.untracked => '未登记',
+                        }}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: model.integrity == ModelIntegrity.modified
+                              ? VibekitsColors.danger
+                              : null,
+                        ),
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline, size: 18),
@@ -188,7 +197,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                 '$_workspace 工作区\n\n推理运行时（ONNX Runtime / sherpa-onnx）待接入，\n'
                 '模型管理、导入、校验已就绪。',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: VibekitsColors.textSecondary),
+                style: TextStyle(color: context.vibe.muted),
               ),
             ),
           ),

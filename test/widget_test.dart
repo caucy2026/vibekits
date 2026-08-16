@@ -1,7 +1,13 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/app/app.dart';
+import 'package:vibekits/app/app_settings.dart';
+import 'package:vibekits/app/main_shell.dart';
+import 'package:vibekits/features/documents/presentation/documents_tab.dart';
 
 void main() {
   testWidgets('启动后显示五个 Tab 与第一个页面', (WidgetTester tester) async {
@@ -46,6 +52,8 @@ void main() {
 
     await pressCtrlWithKey(LogicalKeyboardKey.digit3);
     expect(find.text('打开文件'), findsOneWidget);
+    await pressCtrlWithKey(LogicalKeyboardKey.keyF);
+    expect(find.byType(TextField), findsOneWidget);
 
     await pressCtrlWithKey(LogicalKeyboardKey.digit4);
     expect(find.text('执行'), findsOneWidget);
@@ -63,6 +71,62 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('设置'), findsOneWidget);
-    expect(find.text('关闭'), findsOneWidget);
+    expect(find.text('主题'), findsOneWidget);
+    expect(find.text('保存'), findsOneWidget);
+  });
+
+  testWidgets('宽窗口使用侧边工作台导航', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const VibekitsApp());
+
+    expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
+    expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
+    expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
+  });
+
+  testWidgets('1024 宽窗口自动使用紧凑顶部导航', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1024, 700);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const VibekitsApp());
+
+    expect(find.byKey(const Key('primary-navigation')), findsNothing);
+    expect(find.byKey(const Key('primary-navigation-compact')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('深色主题可渲染完整主界面', (WidgetTester tester) async {
+    final AppSettingsController settings = AppSettingsController();
+    settings.value = const AppSettings(themeMode: ThemeMode.dark);
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(VibekitsApp(settingsController: settings));
+
+    final BuildContext context = tester.element(find.byType(MainShell));
+    expect(Theme.of(context).brightness, Brightness.dark);
+    expect(find.text('系统就绪'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('系统打开文档时自动路由到文档模块', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync('vk_open');
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final File source = File(
+      '${sandbox.path}${Platform.pathSeparator}startup.dart',
+    )..writeAsStringSync('void startupRouteWorks() {}');
+
+    await tester.pumpWidget(VibekitsApp(initialFilePath: source.path));
+    await tester.pumpAndSettle();
+
+    expect(find.text('文档阅读'), findsWidgets);
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
+      source.path,
+    );
+    expect(find.text('打开压缩包'), findsNothing);
   });
 }

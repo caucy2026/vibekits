@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/supported_file_types.dart';
 import '../domain/csv_table.dart';
 import '../domain/epub_reader.dart';
 import '../domain/file_line_index.dart';
@@ -29,7 +30,16 @@ const int _kMaxHexBytes = 256 * 1024 * 1024;
 ///
 /// 对标 Notepad++ / VS Code / 010 Editor 的操作习惯（docs/08 §5）。
 class DocumentsTab extends StatefulWidget {
-  const DocumentsTab({super.key});
+  const DocumentsTab({
+    super.key,
+    this.initialPath,
+    this.openRequest,
+    this.findRequest,
+  });
+
+  final String? initialPath;
+  final ValueListenable<int>? openRequest;
+  final ValueListenable<int>? findRequest;
 
   @override
   State<DocumentsTab> createState() => _DocumentsTabState();
@@ -53,6 +63,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
   bool _showInfo = true;
   bool _searchOpen = false;
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   String _query = '';
   final List<int> _matchLines = <int>[];
   int _activeMatch = -1;
@@ -68,42 +79,55 @@ class _DocumentsTabState extends State<DocumentsTab> {
   final List<String> _recent = <String>[];
 
   @override
+  void initState() {
+    super.initState();
+    final String? initialPath = widget.initialPath;
+    if (initialPath != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _loadPath(initialPath),
+      );
+    }
+    widget.openRequest?.addListener(_handleOpenRequest);
+    widget.findRequest?.addListener(_handleFindRequest);
+  }
+
+  void _handleOpenRequest() => _openFile();
+
+  void _handleFindRequest() {
+    if (_mode == DocViewMode.hex || _streamIndex != null) return;
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant DocumentsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.openRequest != widget.openRequest) {
+      oldWidget.openRequest?.removeListener(_handleOpenRequest);
+      widget.openRequest?.addListener(_handleOpenRequest);
+    }
+    if (oldWidget.findRequest != widget.findRequest) {
+      oldWidget.findRequest?.removeListener(_handleFindRequest);
+      widget.findRequest?.addListener(_handleFindRequest);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.openRequest?.removeListener(_handleOpenRequest);
+    widget.findRequest?.removeListener(_handleFindRequest);
     _scrollController.dispose();
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   Future<void> _openFile() async {
     const XTypeGroup group = XTypeGroup(
       label: '文档',
-      extensions: <String>[
-        'txt',
-        'log',
-        'md',
-        'markdown',
-        'ini',
-        'cfg',
-        'conf',
-        'properties',
-        'yaml',
-        'yml',
-        'toml',
-        'diff',
-        'patch',
-        'tex',
-        'latex',
-        'csv',
-        'tsv',
-        'json',
-        'xml',
-        'html',
-        'htm',
-        'epub',
-        'svg',
-        'svgz',
-        'bin',
-      ],
+      extensions: SupportedFileTypes.documentExtensions,
     );
     final XFile? file = await openFile(acceptedTypeGroups: <XTypeGroup>[group]);
     if (file != null) {
@@ -339,26 +363,23 @@ class _DocumentsTabState extends State<DocumentsTab> {
               label: const Text('打开文件'),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(12, 8, 12, 4),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: Text(
               '最近文件',
               style: TextStyle(
                 fontSize: 12,
-                color: VibekitsColors.textSecondary,
+                color: context.vibe.muted,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
           Expanded(
             child: _recent.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       '暂无记录',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: VibekitsColors.textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 12, color: context.vibe.muted),
                     ),
                   )
                 : ListView.builder(
@@ -380,14 +401,11 @@ class _DocumentsTabState extends State<DocumentsTab> {
                     },
                   ),
           ),
-          const Padding(
-            padding: EdgeInsets.all(12),
+          Padding(
+            padding: const EdgeInsets.all(12),
             child: Text(
               '支持：txt/log/md/配置/Diff/Bin\nCSV/JSON/HTML/EPUB 等将在 M3 支持',
-              style: TextStyle(
-                fontSize: 11,
-                color: VibekitsColors.textSecondary,
-              ),
+              style: TextStyle(fontSize: 11, color: context.vibe.muted),
             ),
           ),
         ],
@@ -415,10 +433,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
           Expanded(
             child: Text(
               _name.isEmpty ? '未打开文档' : _name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: VibekitsColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -447,12 +465,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
             const SizedBox(width: 8),
             Row(
               children: <Widget>[
-                const Text(
+                Text(
                   '换行',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: VibekitsColors.textSecondary,
-                  ),
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
                 ),
                 Switch(
                   value: _wrap,
@@ -509,7 +524,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
           IconButton(
             tooltip: '查找 (Ctrl+F)',
             icon: const Icon(Icons.search, size: 18),
-            color: VibekitsColors.textSecondary,
+            color: context.vibe.muted,
             onPressed: _mode == DocViewMode.hex || _streamIndex != null
                 ? null
                 : () => setState(() => _searchOpen = !_searchOpen),
@@ -519,9 +534,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
             icon: Icon(
               _showInfo ? Icons.info : Icons.info_outline,
               size: 18,
-              color: _showInfo
-                  ? VibekitsColors.primary
-                  : VibekitsColors.textSecondary,
+              color: _showInfo ? VibekitsColors.primary : context.vibe.muted,
             ),
             onPressed: () => setState(() => _showInfo = !_showInfo),
           ),
@@ -534,13 +547,13 @@ class _DocumentsTabState extends State<DocumentsTab> {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      color: VibekitsColors.surface,
+      color: context.vibe.panelRaised,
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: 240,
+          Expanded(
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocus,
               decoration: const InputDecoration(
                 hintText: '查找',
                 isDense: true,
@@ -555,10 +568,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
             _query.isEmpty
                 ? '0 / 0'
                 : '${_activeMatch + 1} / ${_matchLines.length}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: VibekitsColors.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, color: context.vibe.muted),
           ),
           IconButton(
             icon: const Icon(Icons.chevron_left),
@@ -584,11 +594,11 @@ class _DocumentsTabState extends State<DocumentsTab> {
     }
     switch (_mode) {
       case DocViewMode.empty:
-        return const Center(
+        return Center(
           child: Text(
             '打开一个文档开始阅读\n支持文本、日志、Markdown、配置、Diff 与二进制',
             textAlign: TextAlign.center,
-            style: TextStyle(color: VibekitsColors.textSecondary),
+            style: TextStyle(color: context.vibe.muted),
           ),
         );
       case DocViewMode.text:
@@ -662,9 +672,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   children: <Widget>[
                     Text(
                       '${index + 1}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: VibekitsColors.textSecondary,
+                        color: context.vibe.muted,
                         fontFamily: 'Cascadia Mono',
                       ),
                     ),
@@ -674,9 +684,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
                         line.isEmpty ? ' ' : line,
                         maxLines: _wrap ? null : 1,
                         softWrap: _wrap,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: VibekitsColors.textPrimary,
+                          color: Theme.of(context).colorScheme.onSurface,
                           fontFamily: 'Cascadia Mono',
                         ),
                       ),
@@ -701,8 +711,8 @@ class _DocumentsTabState extends State<DocumentsTab> {
         final Color color = switch (level) {
           LogLevel.error => const Color(0xFFB42318),
           LogLevel.warn => const Color(0xFFB54708),
-          LogLevel.debug => VibekitsColors.textSecondary,
-          _ => VibekitsColors.textPrimary,
+          LogLevel.debug => context.vibe.muted,
+          _ => Theme.of(context).colorScheme.onSurface,
         };
         final bool active =
             index == _activeMatch ||
@@ -719,9 +729,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
             children: <Widget>[
               Text(
                 '${index + 1}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: VibekitsColors.textSecondary,
+                  color: context.vibe.muted,
                   fontFamily: 'Cascadia Mono',
                 ),
               ),
@@ -756,7 +766,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
           p: const TextStyle(fontSize: 14, height: 1.6),
           code: const TextStyle(fontFamily: 'Cascadia Mono', fontSize: 13),
           codeblockDecoration: BoxDecoration(
-            color: VibekitsColors.appBackground,
+            color: context.vibe.canvas,
             borderRadius: BorderRadius.circular(6),
           ),
         ),
@@ -783,10 +793,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
             line,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Cascadia Mono',
               fontSize: 13,
-              color: VibekitsColors.textPrimary,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
         );
@@ -859,16 +869,16 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   Icon(
                     row.expanded ? Icons.expand_more : Icons.chevron_right,
                     size: 16,
-                    color: VibekitsColors.textSecondary,
+                    color: context.vibe.muted,
                   )
                 else
                   const SizedBox(width: 16),
                 const SizedBox(width: 4),
                 Text(
                   row.node.label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: VibekitsColors.textPrimary,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -878,10 +888,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
                     child: Text(
                       row.node.value!,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: VibekitsColors.textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 12, color: context.vibe.muted),
                     ),
                   ),
                 ],
@@ -947,17 +954,19 @@ class _DocumentsTabState extends State<DocumentsTab> {
 
   Widget _csvRow(List<String> cells, {required bool header}) {
     return Container(
-      color: header ? const Color(0xFFE8F1FF) : null,
+      color: header
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+          : null,
       child: Row(
         children: cells
             .map(
               (String cell) => Container(
                 width: 140,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   border: Border(
-                    right: BorderSide(color: VibekitsColors.divider),
-                    bottom: BorderSide(color: VibekitsColors.divider),
+                    right: BorderSide(color: context.vibe.border),
+                    bottom: BorderSide(color: context.vibe.border),
                   ),
                 ),
                 child: Text(
@@ -967,7 +976,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: header ? FontWeight.w600 : FontWeight.w400,
-                    color: VibekitsColors.textPrimary,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ),
@@ -1023,12 +1032,12 @@ class _DocumentsTabState extends State<DocumentsTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text(
+            Text(
               '文件信息',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: VibekitsColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -1093,18 +1102,15 @@ class _InfoRow extends StatelessWidget {
             width: 48,
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 12,
-                color: VibekitsColors.textSecondary,
-              ),
+              style: TextStyle(fontSize: 12, color: context.vibe.muted),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: VibekitsColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),

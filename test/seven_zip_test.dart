@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/archive/domain/archive_service.dart';
 import 'package:vibekits/features/archive/domain/seven_zip.dart';
 
 void main() {
@@ -31,6 +32,17 @@ void main() {
       final String out = '${tmp.path}/out';
       await SevenZip.extract('${tmp.path}/t.7z', out);
       expect(File('$out/a.txt').readAsStringSync(), 'hello 7z');
+
+      final ArchiveCancellationToken token = ArchiveCancellationToken()
+        ..cancel();
+      final String cancelledOut = '${tmp.path}/cancelled';
+      final ExtractResult cancelled = await SevenZip.extractCancellable(
+        '${tmp.path}/t.7z',
+        cancelledOut,
+        cancellationToken: token,
+      );
+      expect(cancelled.cancelled, isTrue);
+      expect(Directory(cancelledOut).existsSync(), isFalse);
     } finally {
       tmp.deleteSync(recursive: true);
     }

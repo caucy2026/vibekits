@@ -22,13 +22,51 @@ void main() {
       expect(info.capability, '未知');
       expect(info.sha256.length, 64);
 
-      final List<ModelInfo> installed = ModelStore.list(dir.path);
+      final List<ModelInfo> installed = await ModelStore.list(dir.path);
       expect(installed.length, 1);
+      expect(installed.single.integrity, ModelIntegrity.verified);
+      source.writeAsStringSync('changed');
+      File('${dir.path}/model.onnx').writeAsStringSync('changed');
+      final List<ModelInfo> changed = await ModelStore.list(dir.path);
+      expect(changed.single.integrity, ModelIntegrity.modified);
       expect(ModelStore.delete('${dir.path}/model.onnx'), isTrue);
-      expect(ModelStore.list(dir.path), isEmpty);
+      expect(await ModelStore.list(dir.path), isEmpty);
     } finally {
       dir.deleteSync(recursive: true);
       src.deleteSync(recursive: true);
+    }
+  });
+
+  test('导入拒绝超过大小上限且不留下半成品', () async {
+    final Directory dir = Directory.systemTemp.createTempSync('vk_model_limit');
+    final File source = File('${dir.path}/large.onnx')
+      ..writeAsBytesSync(<int>[1, 2, 3, 4]);
+    final Directory models = Directory('${dir.path}/models');
+    try {
+      expect(
+        () => ModelStore.import(source.path, models.path, maxBytes: 3),
+        throwsFormatException,
+      );
+      expect(models.existsSync(), isFalse);
+    } finally {
+      dir.deleteSync(recursive: true);
+    }
+  });
+
+  test('模型清单损坏时安全降级为未登记', () async {
+    final Directory dir = Directory.systemTemp.createTempSync(
+      'vk_model_manifest_bad',
+    );
+    try {
+      File('${dir.path}/ocr.onnx').writeAsStringSync('model');
+      File('${dir.path}/.vibekits-models.json').writeAsStringSync('{bad');
+
+      final List<ModelInfo> models = await ModelStore.list(dir.path);
+
+      expect(models.single.fileName, 'ocr.onnx');
+      expect(models.single.integrity, ModelIntegrity.untracked);
+    } finally {
+      dir.deleteSync(recursive: true);
     }
   });
 }

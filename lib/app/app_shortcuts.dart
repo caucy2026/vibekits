@@ -9,6 +9,8 @@ abstract final class AppShortcuts {
   static Map<ShortcutActivator, VoidCallback> forShell({
     required void Function(int index) onSelectTab,
     required VoidCallback onOpenSettings,
+    required VoidCallback onOpen,
+    required VoidCallback onFind,
   }) {
     return <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
@@ -23,6 +25,8 @@ abstract final class AppShortcuts {
           onSelectTab(4),
       const SingleActivator(LogicalKeyboardKey.comma, control: true):
           onOpenSettings,
+      const SingleActivator(LogicalKeyboardKey.keyO, control: true): onOpen,
+      const SingleActivator(LogicalKeyboardKey.keyF, control: true): onFind,
     };
   }
 }

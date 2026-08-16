@@ -1,14 +1,37 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
 import '../domain/cleanup_deleter.dart';
+import '../domain/cleanup_report.dart';
 import '../domain/cleanup_scanner.dart';
+import '../domain/cleanup_task.dart';
+import '../domain/cleanup_targets.dart';
+import '../domain/cleanup_whitelist.dart';
+
+typedef CleanupScanRunner = Future<CleanupScanResult> Function({
+  required CleanupCancellationToken cancellationToken,
+  required void Function(CleanupScanProgress progress) onProgress,
+});
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
-  const CleanerTab({super.key});
+  const CleanerTab({
+    super.key,
+    this.scanRunner,
+    this.initialWhitelist = const <String>[],
+    this.initialTargetIds = const <String>[],
+    this.onWhitelistChanged,
+    this.onTargetIdsChanged,
+  });
+
+  final CleanupScanRunner? scanRunner;
+  final List<String> initialWhitelist;
+  final List<String> initialTargetIds;
+  final Future<void> Function(List<String> whitelist)? onWhitelistChanged;
+  final Future<void> Function(List<String> targetIds)? onTargetIdsChanged;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -17,9 +40,61 @@ class CleanerTab extends StatefulWidget {
 class _CleanerTabState extends State<CleanerTab> {
   List<CleanupCandidate> _candidates = const <CleanupCandidate>[];
   final Set<String> _selected = <String>{};
-  final Set<String> _whitelist = <String>{};
+  late Set<String> _whitelist = CleanupWhitelist.sanitize(
+    widget.initialWhitelist,
+  ).toSet();
+  late final List<CleanupScanTarget> _availableTargets =
+      CleanupTargetDiscovery.discover();
+  late Set<String> _enabledTargetIds = _initialTargetIds();
   bool _scanning = false;
+  bool _cleaning = false;
+  CleanupCancellationToken? _taskToken;
+  CleanupScanProgress? _scanProgress;
+  CleanupDeleteProgress? _deleteProgress;
+  CleanupDeleteResult? _lastResult;
+  File? _lastReport;
   String _message = '';
+
+  @override
+  void dispose() {
+    _taskToken?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(CleanerTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final Set<String> incoming = CleanupWhitelist.sanitize(
+      widget.initialWhitelist,
+    ).toSet();
+    if (!_samePaths(_whitelist, incoming)) {
+      _whitelist = incoming;
+      _candidates = _candidates
+          .where(
+            (CleanupCandidate candidate) => !incoming.any(
+              (String root) => CleanupWhitelist.contains(root, candidate.path),
+            ),
+          )
+          .toList();
+      _selected.removeWhere(
+        (String path) => incoming.any(
+          (String root) => CleanupWhitelist.contains(root, path),
+        ),
+      );
+    }
+    if (widget.initialTargetIds.isNotEmpty) {
+      final Set<String> available = _availableTargets
+          .map((CleanupScanTarget target) => target.id)
+          .toSet();
+      final Set<String> incomingTargets = widget.initialTargetIds
+          .where(available.contains)
+          .toSet();
+      if (incomingTargets.isNotEmpty &&
+          !_samePaths(_enabledTargetIds, incomingTargets)) {
+        _enabledTargetIds = incomingTargets;
+      }
+    }
+  }
 
   Future<void> _scan() async {
     setState(() {
@@ -27,19 +102,52 @@ class _CleanerTabState extends State<CleanerTab> {
       _message = '';
       _candidates = const <CleanupCandidate>[];
       _selected.clear();
+      _scanProgress = null;
+      _lastResult = null;
     });
+    final CleanupCancellationToken token = CleanupCancellationToken();
+    _taskToken = token;
     try {
-      final List<CleanupCandidate> all = await CleanupScanner.scanUserTemp();
-      final List<CleanupCandidate> filtered = all
+      void onProgress(CleanupScanProgress progress) {
+        if (mounted) setState(() => _scanProgress = progress);
+      }
+
+      final CleanupScanResult result = widget.scanRunner == null
+          ? await CleanupScanner.scanTargets(
+              _availableTargets
+                  .where(
+                    (CleanupScanTarget target) =>
+                        _enabledTargetIds.contains(target.id),
+                  )
+                  .toList(growable: false),
+              cancellationToken: token,
+              onProgress: onProgress,
+            )
+          : await widget.scanRunner!(
+              cancellationToken: token,
+              onProgress: onProgress,
+            );
+      final List<CleanupCandidate> filtered = result.candidates
           .where(
-            (CleanupCandidate c) =>
-                !_whitelist.any((String w) => c.path.startsWith(w)),
+            (CleanupCandidate candidate) => !_whitelist.any(
+              (String root) => CleanupWhitelist.contains(root, candidate.path),
+            ),
           )
           .toList();
       if (mounted) {
         setState(() {
           _candidates = filtered;
+          _selected.addAll(
+            filtered
+                .where(
+                  (CleanupCandidate candidate) => candidate.defaultSelected,
+                )
+                .map((CleanupCandidate candidate) => candidate.path),
+          );
           _scanning = false;
+          _message = result.cancelled
+              ? '扫描已取消；保留取消前发现的 ${filtered.length} 项，扫描未删除任何内容'
+              : '扫描完成：${filtered.length} 项；无法读取 ${result.unreadablePaths} 个位置';
         });
       }
     } catch (e) {
@@ -49,6 +157,8 @@ class _CleanerTabState extends State<CleanerTab> {
           _message = '扫描失败：$e';
         });
       }
+    } finally {
+      if (identical(_taskToken, token)) _taskToken = null;
     }
   }
 
@@ -68,16 +178,29 @@ class _CleanerTabState extends State<CleanerTab> {
       .fold<int>(0, (int sum, CleanupCandidate c) => sum + c.size);
 
   Future<void> _clean() async {
-    final List<String> targets = _candidates
-        .where((CleanupCandidate c) => _selected.contains(c.path))
-        .map((CleanupCandidate c) => c.path)
-        .toList();
-    if (targets.isEmpty) return;
+    final List<CleanupCandidate> plan = _candidates
+        .where(
+          (CleanupCandidate candidate) =>
+              _selected.contains(candidate.path) &&
+              !_whitelist.any(
+                (String root) =>
+                    CleanupWhitelist.contains(root, candidate.path),
+              ),
+        )
+        .toList(growable: false);
+    if (plan.isEmpty) return;
+    final int planSize = plan.fold<int>(
+      0,
+      (int total, CleanupCandidate candidate) => total + candidate.size,
+    );
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
         title: const Text('确认清理'),
-        content: Text('将 ${targets.length} 个项目移入回收站，是否继续？'),
+        content: Text(
+          '将 ${plan.length} 个项目（${_formatSize(planSize)}）移入回收站。'
+          '项目可从回收站恢复，是否继续？',
+        ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -92,41 +215,239 @@ class _CleanerTabState extends State<CleanerTab> {
     );
     if (confirm != true) return;
 
-    final bool ok = CleanupDeleter.sendToRecycleBin(targets);
+    final CleanupCancellationToken token = CleanupCancellationToken();
+    final DateTime startedAt = DateTime.now();
     setState(() {
-      _message = ok ? '已请求将 ${targets.length} 个项目移入回收站' : '移入回收站失败，请手动处理';
-      _candidates = _candidates
-          .where((CleanupCandidate c) => !_selected.contains(c.path))
-          .toList();
-      _selected.clear();
+      _cleaning = true;
+      _taskToken = token;
+      _deleteProgress = CleanupDeleteProgress(completed: 0, total: plan.length);
+      _message = '';
     });
+    try {
+      final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
+        plan,
+        cancellationToken: token,
+        onProgress: (CleanupDeleteProgress progress) {
+          if (mounted) setState(() => _deleteProgress = progress);
+        },
+      );
+      File? report;
+      Object? reportError;
+      try {
+        report = await CleanupReportWriter.write(
+          result,
+          startedAt: startedAt,
+          finishedAt: DateTime.now(),
+        );
+      } catch (error) {
+        reportError = error;
+      }
+      if (!mounted) return;
+      final Set<String> succeededPaths = result.items
+          .where(
+            (CleanupItemResult item) =>
+                item.status == CleanupItemStatus.succeeded,
+          )
+          .map((CleanupItemResult item) => item.candidate.path)
+          .toSet();
+      setState(() {
+        _cleaning = false;
+        _lastResult = result;
+        _lastReport = report;
+        _candidates = _candidates
+            .where(
+              (CleanupCandidate candidate) =>
+                  !succeededPaths.contains(candidate.path),
+            )
+            .toList();
+        _selected.removeAll(succeededPaths);
+        _message = reportError != null
+            ? '${result.cancelled ? '清理已取消' : '清理完成'}，但报告保存失败：${reportError.runtimeType}'
+            : result.cancelled
+            ? '清理已取消，已完成部分见报告'
+            : '清理完成';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _cleaning = false;
+          _message = '清理失败：$error';
+        });
+      }
+    } finally {
+      if (identical(_taskToken, token)) _taskToken = null;
+    }
   }
 
   Future<void> _manageWhitelist() async {
-    final TextEditingController controller = TextEditingController();
-    final String? dir = await showDialog<String>(
+    final Set<String>? updated = await showDialog<Set<String>>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('添加白名单目录'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: '目录路径'),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('添加'),
-          ),
-        ],
-      ),
+      builder: (BuildContext dialogContext) {
+        final Set<String> draft = <String>{..._whitelist};
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) =>
+              AlertDialog(
+                title: const Text('白名单目录'),
+                content: SizedBox(
+                  width: 560,
+                  height: 320,
+                  child: Column(
+                    children: <Widget>[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final String? selected = await getDirectoryPath();
+                            final String? normalized = selected == null
+                                ? null
+                                : CleanupWhitelist.normalize(selected);
+                            if (normalized != null) {
+                              setDialogState(() => draft.add(normalized));
+                            }
+                          },
+                          icon: const Icon(Icons.create_new_folder_outlined),
+                          label: const Text('选择目录'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: draft.isEmpty
+                            ? const Center(child: Text('尚未添加白名单目录'))
+                            : ListView(
+                                children: <Widget>[
+                                  for (final String path in draft)
+                                    ListTile(
+                                      dense: true,
+                                      title: Text(
+                                        path,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      trailing: IconButton(
+                                        tooltip: '移除',
+                                        onPressed: () => setDialogState(
+                                          () => draft.remove(path),
+                                        ),
+                                        icon: const Icon(Icons.close),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: draft.isEmpty
+                        ? null
+                        : () => Navigator.of(context).pop(draft),
+                    child: const Text('保存'),
+                  ),
+                ],
+              ),
+        );
+      },
     );
-    if (dir != null && dir.isNotEmpty && Directory(dir).existsSync()) {
-      setState(() => _whitelist.add(dir));
+    if (updated == null) return;
+    final Set<String> sanitized = CleanupWhitelist.sanitize(updated).toSet();
+    setState(() {
+      _whitelist = sanitized;
+      _candidates = _candidates
+          .where(
+            (CleanupCandidate candidate) => !sanitized.any(
+              (String root) => CleanupWhitelist.contains(root, candidate.path),
+            ),
+          )
+          .toList();
+      _selected.removeWhere(
+        (String path) => sanitized.any(
+          (String root) => CleanupWhitelist.contains(root, path),
+        ),
+      );
+    });
+    await widget.onWhitelistChanged?.call(sanitized.toList()..sort());
+  }
+
+  Future<void> _manageScanTargets() async {
+    final Set<String>? updated = await showDialog<Set<String>>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        final Set<String> draft = <String>{..._enabledTargetIds};
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) =>
+              AlertDialog(
+                title: const Text('扫描范围'),
+                content: SizedBox(
+                  width: 620,
+                  height: 420,
+                  child: _availableTargets.isEmpty
+                      ? const Center(child: Text('当前环境没有可用扫描范围'))
+                      : ListView(
+                          children: <Widget>[
+                            for (final CleanupScanTarget target
+                                in _availableTargets)
+                              CheckboxListTile(
+                                dense: true,
+                                value: draft.contains(target.id),
+                                title: Text(
+                                  '${target.label}${target.highRisk ? '（高风险）' : ''}',
+                                ),
+                                subtitle: Text(
+                                  target.path,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onChanged: (bool? enabled) =>
+                                    setDialogState(() {
+                                      if (enabled == true) {
+                                        draft.add(target.id);
+                                      } else {
+                                        draft.remove(target.id);
+                                      }
+                                    }),
+                              ),
+                          ],
+                        ),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(draft),
+                    child: const Text('应用'),
+                  ),
+                ],
+              ),
+        );
+      },
+    );
+    if (updated != null) {
+      setState(() => _enabledTargetIds = updated);
+      await widget.onTargetIdsChanged?.call(updated.toList()..sort());
     }
+  }
+
+  bool _samePaths(Set<String> left, Set<String> right) =>
+      left.length == right.length && left.containsAll(right);
+
+  Set<String> _initialTargetIds() {
+    final Set<String> available = _availableTargets
+        .map((CleanupScanTarget target) => target.id)
+        .toSet();
+    final Set<String> configured = widget.initialTargetIds
+        .where(available.contains)
+        .toSet();
+    if (configured.isNotEmpty) return configured;
+    return _availableTargets
+        .where((CleanupScanTarget target) => target.defaultEnabled)
+        .map((CleanupScanTarget target) => target.id)
+        .toSet();
   }
 
   @override
@@ -141,12 +462,13 @@ class _CleanerTabState extends State<CleanerTab> {
             padding: const EdgeInsets.all(8),
             child: Text(
               _message,
-              style: const TextStyle(
-                color: VibekitsColors.textPrimary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 12,
               ),
             ),
           ),
+        if (_lastResult != null) _buildResultSummary(_lastResult!),
         Expanded(child: _buildBody()),
       ],
     );
@@ -159,7 +481,7 @@ class _CleanerTabState extends State<CleanerTab> {
       child: Row(
         children: <Widget>[
           ElevatedButton.icon(
-            onPressed: _scanning ? null : _scan,
+            onPressed: _scanning || _cleaning ? null : _scan,
             icon: _scanning
                 ? const SizedBox(
                     width: 16,
@@ -169,24 +491,37 @@ class _CleanerTabState extends State<CleanerTab> {
                 : const Icon(Icons.search, size: 18),
             label: Text(_scanning ? '扫描中…' : '开始扫描'),
           ),
+          if (_scanning || _cleaning) ...<Widget>[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: () => _taskToken?.cancel(),
+              icon: const Icon(Icons.stop_circle_outlined, size: 18),
+              label: const Text('取消'),
+            ),
+          ],
           const SizedBox(width: 8),
           OutlinedButton.icon(
             onPressed: _manageWhitelist,
             icon: const Icon(Icons.block, size: 18),
             label: Text('白名单（${_whitelist.length}）'),
           ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _scanning || _cleaning ? null : _manageScanTargets,
+            icon: const Icon(Icons.tune, size: 18),
+            label: Text('范围（${_enabledTargetIds.length}）'),
+          ),
           const Spacer(),
           Text(
             '已选择 ${_formatSize(_selectedSize)}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: VibekitsColors.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, color: context.vibe.muted),
           ),
           const SizedBox(width: 8),
           ElevatedButton(
-            onPressed: _selected.isEmpty ? null : _clean,
-            child: Text('清理 ${_selected.length} 项'),
+            onPressed: _selected.isEmpty || _scanning || _cleaning
+                ? null
+                : _clean,
+            child: Text(_cleaning ? '清理中…' : '清理 ${_selected.length} 项'),
           ),
         ],
       ),
@@ -195,14 +530,60 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Widget _buildBody() {
     if (_scanning) {
-      return const Center(child: CircularProgressIndicator());
+      final CleanupScanProgress? progress = _scanProgress;
+      return Center(
+        child: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const LinearProgressIndicator(),
+              const SizedBox(height: 12),
+              Text(
+                progress == null
+                    ? '正在准备扫描…'
+                    : '已检查 ${progress.visitedEntries} 项，发现 ${progress.candidateCount} 项（${_formatSize(progress.candidateBytes)}）',
+              ),
+              if (progress != null)
+                Text(
+                  progress.currentPath,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_cleaning) {
+      final CleanupDeleteProgress progress =
+          _deleteProgress ??
+          const CleanupDeleteProgress(completed: 0, total: 0);
+      final double? value = progress.total == 0
+          ? null
+          : progress.completed / progress.total;
+      return Center(
+        child: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              LinearProgressIndicator(value: value),
+              const SizedBox(height: 12),
+              Text('正在清理 ${progress.completed}/${progress.total}'),
+              const Text('已完成项目不会因取消而回滚', style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+      );
     }
     if (_candidates.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           '点击“开始扫描”查找可清理的临时文件\n扫描不会删除任何内容',
           textAlign: TextAlign.center,
-          style: TextStyle(color: VibekitsColors.textSecondary),
+          style: TextStyle(color: context.vibe.muted),
         ),
       );
     }
@@ -212,6 +593,71 @@ class _CleanerTabState extends State<CleanerTab> {
             in _grouped.entries)
           _buildCategory(entry.key, entry.value),
       ],
+    );
+  }
+
+  Widget _buildResultSummary(CleanupDeleteResult result) {
+    return Container(
+      width: double.infinity,
+      color: context.vibe.panelRaised,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: <Widget>[
+          Text(
+            '${result.cancelled ? '已取消' : '已完成'} · 成功 ${result.succeeded} · 跳过 ${result.skipped} · 失败 ${result.failed} · 实际释放 ${_formatSize(result.releasedBytes)}',
+            style: const TextStyle(fontSize: 12),
+          ),
+          const Spacer(),
+          TextButton(onPressed: _showReport, child: const Text('查看报告')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showReport() async {
+    final CleanupDeleteResult? result = _lastResult;
+    if (result == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('清理报告'),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                '成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}',
+              ),
+              Text('实际释放 ${_formatSize(result.releasedBytes)}'),
+              if (_lastReport != null)
+                SelectableText(
+                  '报告文件：${_lastReport!.path}',
+                  style: const TextStyle(fontSize: 11),
+                ),
+              const SizedBox(height: 8),
+              ...result.items
+                  .where(
+                    (CleanupItemResult item) =>
+                        item.status != CleanupItemStatus.succeeded,
+                  )
+                  .map(
+                    (CleanupItemResult item) => Text(
+                      '${item.status.name}: ${item.reason}',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -228,60 +674,91 @@ class _CleanerTabState extends State<CleanerTab> {
       0,
       (int sum, CleanupCandidate c) => sum + c.size,
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        ListTile(
-          dense: true,
-          title: Text(
-            '${category.label}  ${_formatSize(totalSize)}'
-            '${category.highRisk ? '（需确认）' : ''}',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: category.highRisk
-                  ? VibekitsColors.warning
-                  : VibekitsColors.textPrimary,
-            ),
-          ),
-          leading: Checkbox(
-            tristate: true,
-            value: all ? true : (partial ? null : false),
-            onChanged: (bool? v) => setState(() {
-              for (final CleanupCandidate c in items) {
-                if (v == true) {
-                  _selected.add(c.path);
-                } else {
-                  _selected.remove(c.path);
-                }
-              }
-            }),
-          ),
+    return ExpansionTile(
+      initiallyExpanded: true,
+      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+      childrenPadding: const EdgeInsets.only(left: 12, bottom: 6),
+      leading: Checkbox(
+        tristate: true,
+        value: all ? true : (partial ? null : false),
+        onChanged: (bool? v) => setState(() {
+          for (final CleanupCandidate candidate in items) {
+            if (v == true) {
+              _selected.add(candidate.path);
+            } else {
+              _selected.remove(candidate.path);
+            }
+          }
+        }),
+      ),
+      title: Text(
+        '${category.label}${category.highRisk ? '（需确认）' : ''}',
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: category.highRisk
+              ? VibekitsColors.warning
+              : Theme.of(context).colorScheme.onSurface,
         ),
+      ),
+      subtitle: Text(
+        '${items.length} 项 · ${_formatSize(totalSize)} · 已选 $selectedCount 项',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      children: <Widget>[
         for (final CleanupCandidate candidate in items)
-          CheckboxListTile(
-            dense: true,
-            controlAffinity: ListTileControlAffinity.leading,
-            value: _selected.contains(candidate.path),
-            title: Text(
-              candidate.path,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
+          Tooltip(
+            message: candidate.path,
+            child: CheckboxListTile(
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _selected.contains(candidate.path),
+              title: Text(
+                _fileName(candidate.path),
+                style: const TextStyle(fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '${candidate.reason} · ${_formatSize(candidate.size)}'
+                    '${candidate.modified == null ? '' : ' · ${_formatDate(candidate.modified!)}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  Text(
+                    candidate.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ],
+              ),
+              onChanged: (bool? v) => setState(() {
+                if (v == true) {
+                  _selected.add(candidate.path);
+                } else {
+                  _selected.remove(candidate.path);
+                }
+              }),
             ),
-            subtitle: Text(
-              '${_formatSize(candidate.size)} · ${candidate.reason}',
-              style: const TextStyle(fontSize: 11),
-            ),
-            onChanged: (bool? v) => setState(() {
-              if (v == true) {
-                _selected.add(candidate.path);
-              } else {
-                _selected.remove(candidate.path);
-              }
-            }),
           ),
       ],
     );
+  }
+
+  String _fileName(String path) => path
+      .replaceAll('/', Platform.pathSeparator)
+      .split(Platform.pathSeparator)
+      .where((String part) => part.isNotEmpty)
+      .last;
+
+  String _formatDate(DateTime value) {
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${value.year}-${two(value.month)}-${two(value.day)} '
+        '${two(value.hour)}:${two(value.minute)}';
   }
 
   String _formatSize(int bytes) {

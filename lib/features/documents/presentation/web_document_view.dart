@@ -89,9 +89,9 @@ class _WebDocumentViewState extends State<WebDocumentView> {
     return Container(
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        color: VibekitsColors.surface,
-        border: Border(top: BorderSide(color: VibekitsColors.divider)),
+      decoration: BoxDecoration(
+        color: context.vibe.panelRaised,
+        border: Border(top: BorderSide(color: context.vibe.border)),
       ),
       child: Row(
         children: <Widget>[
@@ -101,10 +101,7 @@ class _WebDocumentViewState extends State<WebDocumentView> {
           ),
           Text(
             '${widget.chapterIndex + 1} / ${widget.chapterCount}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: VibekitsColors.textSecondary,
-            ),
+            style: TextStyle(fontSize: 12, color: context.vibe.muted),
           ),
           IconButton(
             icon: const Icon(Icons.chevron_right),
