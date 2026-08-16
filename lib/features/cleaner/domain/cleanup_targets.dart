@@ -3,6 +3,12 @@ import 'dart:io';
 import 'cleanup_scanner.dart';
 import 'cleanup_whitelist.dart';
 
+enum CleanupTargetStrategy {
+  directoryContents,
+  downloadSuggestions,
+  staleVsCodeExtensions,
+}
+
 class CleanupScanTarget {
   const CleanupScanTarget({
     required this.id,
@@ -10,6 +16,7 @@ class CleanupScanTarget {
     required this.path,
     required this.category,
     required this.defaultEnabled,
+    this.strategy = CleanupTargetStrategy.directoryContents,
   });
 
   final String id;
@@ -17,11 +24,14 @@ class CleanupScanTarget {
   final String path;
   final CleanupCategory category;
   final bool defaultEnabled;
+  final CleanupTargetStrategy strategy;
 
   bool get highRisk => category.highRisk;
 }
 
 abstract final class CleanupTargetDiscovery {
+  static const int catalogVersion = 3;
+
   static List<CleanupScanTarget> discover({Map<String, String>? environment}) {
     final Map<String, String> env = environment ?? Platform.environment;
     final List<CleanupScanTarget> targets = <CleanupScanTarget>[];
@@ -41,6 +51,7 @@ abstract final class CleanupTargetDiscovery {
           defaultEnabled: true,
         ),
       );
+      _addDebugTempDirectories(targets, temp);
     }
     if (roaming != null && roaming.trim().isNotEmpty) {
       for (final (String id, String product, String folder)
@@ -52,6 +63,7 @@ abstract final class CleanupTargetDiscovery {
           'Cache',
           'Code Cache',
           'GPUCache',
+          'CachedData',
         ]) {
           _addExisting(
             targets,
@@ -63,6 +75,28 @@ abstract final class CleanupTargetDiscovery {
           );
         }
       }
+      for (final (String id, String label, String folder)
+          in <(String, String, String)>[
+            (
+              'vscode-extension-download-cache',
+              'VS Code 插件下载缓存',
+              'CachedExtensionVSIXs',
+            ),
+            (
+              'vscode-extension-metadata-cache',
+              'VS Code 插件元数据缓存',
+              'CachedExtensions',
+            ),
+          ]) {
+        _addExisting(
+          targets,
+          id: id,
+          label: label,
+          path: _join(roaming, <String>['Code', folder]),
+          category: CleanupCategory.pluginCache,
+          defaultEnabled: true,
+        );
+      }
     }
     if (userProfile != null && userProfile.trim().isNotEmpty) {
       _addExisting(
@@ -71,7 +105,50 @@ abstract final class CleanupTargetDiscovery {
         label: 'Gradle 构建缓存',
         path: _join(userProfile, <String>['.gradle', 'caches']),
         category: CleanupCategory.devCache,
-        defaultEnabled: false,
+        defaultEnabled: true,
+      );
+      for (final (String id, String label, List<String> parts)
+          in <(String, String, List<String>)>[
+            ('nuget-cache', 'NuGet 下载与包缓存', <String>['.nuget', 'packages']),
+            ('maven-cache', 'Maven 本地仓库缓存', <String>['.m2', 'repository']),
+            (
+              'cargo-registry-cache',
+              'Rust Cargo 下载缓存',
+              <String>['.cargo', 'registry', 'cache'],
+            ),
+            (
+              'go-module-download-cache',
+              'Go 模块下载缓存',
+              <String>['go', 'pkg', 'mod', 'cache', 'download'],
+            ),
+            ('android-cache', 'Android 工具缓存', <String>['.android', 'cache']),
+          ]) {
+        _addExisting(
+          targets,
+          id: id,
+          label: label,
+          path: _join(userProfile, parts),
+          category: CleanupCategory.devCache,
+          defaultEnabled: true,
+        );
+      }
+      _addExisting(
+        targets,
+        id: 'vscode-stale-extensions',
+        label: 'VS Code 旧版本插件',
+        path: _join(userProfile, <String>['.vscode', 'extensions']),
+        category: CleanupCategory.pluginResidual,
+        defaultEnabled: true,
+        strategy: CleanupTargetStrategy.staleVsCodeExtensions,
+      );
+      _addExisting(
+        targets,
+        id: 'downloads-suggestions',
+        label: '下载目录清理建议',
+        path: _join(userProfile, <String>['Downloads']),
+        category: CleanupCategory.downloads,
+        defaultEnabled: true,
+        strategy: CleanupTargetStrategy.downloadSuggestions,
       );
     }
     if (windows != null && windows.trim().isNotEmpty) {
@@ -106,9 +183,9 @@ abstract final class CleanupTargetDiscovery {
         targets,
         id: 'npm-cache',
         label: 'npm 下载缓存',
-        path: _join(local, <String>['npm-cache', '_cacache']),
+        path: _join(local, <String>['npm-cache']),
         category: CleanupCategory.devCache,
-        defaultEnabled: false,
+        defaultEnabled: true,
       );
       _addExisting(
         targets,
@@ -116,7 +193,31 @@ abstract final class CleanupTargetDiscovery {
         label: 'Python pip 下载缓存',
         path: _join(local, <String>['pip', 'Cache']),
         category: CleanupCategory.devCache,
-        defaultEnabled: false,
+        defaultEnabled: true,
+      );
+      _addExisting(
+        targets,
+        id: 'pub-cache',
+        label: 'Dart / Flutter Pub 下载缓存',
+        path: _join(local, <String>['Pub', 'Cache']),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
+      );
+      _addExisting(
+        targets,
+        id: 'yarn-cache',
+        label: 'Yarn 下载缓存',
+        path: _join(local, <String>['Yarn', 'Cache']),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
+      );
+      _addExisting(
+        targets,
+        id: 'pnpm-cache',
+        label: 'pnpm 下载缓存',
+        path: _join(local, <String>['pnpm']),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
       );
       _addChromiumProfiles(
         targets,
@@ -228,6 +329,46 @@ abstract final class CleanupTargetDiscovery {
   static String _nested(List<String> parts) =>
       parts.join(Platform.pathSeparator);
 
+  static void _addDebugTempDirectories(
+    List<CleanupScanTarget> targets,
+    String temp,
+  ) {
+    final Directory root = Directory(temp);
+    if (!root.existsSync()) return;
+    final DateTime cutoff = DateTime.now().subtract(const Duration(hours: 24));
+    try {
+      for (final FileSystemEntity entity in root.listSync(followLinks: false)) {
+        if (FileSystemEntity.typeSync(entity.path, followLinks: false) !=
+            FileSystemEntityType.directory) {
+          continue;
+        }
+        final String name = _baseName(entity.path);
+        final String lower = name.toLowerCase();
+        final bool knownDebugTemp =
+            lower.startsWith('flutter_') ||
+            lower.startsWith('dart_') ||
+            lower.startsWith('pub_') ||
+            lower.startsWith('gradle') ||
+            lower.startsWith('vscode-') ||
+            lower.startsWith('scoped_dir');
+        if (!knownDebugTemp ||
+            Directory(entity.path).statSync().modified.isAfter(cutoff)) {
+          continue;
+        }
+        _addExisting(
+          targets,
+          id: 'debug-temp-${lower.hashCode.abs()}',
+          label: '过期调试临时目录 $name',
+          path: entity.path,
+          category: CleanupCategory.debugArtifacts,
+          defaultEnabled: true,
+        );
+      }
+    } on FileSystemException {
+      return;
+    }
+  }
+
   static void _addExisting(
     List<CleanupScanTarget> targets, {
     required String id,
@@ -235,6 +376,7 @@ abstract final class CleanupTargetDiscovery {
     required String path,
     required CleanupCategory category,
     required bool defaultEnabled,
+    CleanupTargetStrategy strategy = CleanupTargetStrategy.directoryContents,
   }) {
     if (!Directory(path).existsSync()) return;
     targets.add(
@@ -244,6 +386,7 @@ abstract final class CleanupTargetDiscovery {
         path: path,
         category: category,
         defaultEnabled: defaultEnabled,
+        strategy: strategy,
       ),
     );
   }

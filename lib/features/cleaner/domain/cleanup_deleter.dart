@@ -80,6 +80,25 @@ final class _ShFileOpStruct extends Struct {
 
 typedef _ShFileOperationWNative = Int32 Function(Pointer<_ShFileOpStruct>);
 typedef _ShFileOperationWDart = int Function(Pointer<_ShFileOpStruct>);
+typedef _GetFileAttributesWNative = Uint32 Function(Pointer<Utf16> path);
+typedef _GetFileAttributesWDart = int Function(Pointer<Utf16> path);
+typedef _SetFileAttributesWNative = Int32 Function(
+  Pointer<Utf16> path,
+  Uint32 attributes,
+);
+typedef _SetFileAttributesWDart = int Function(
+  Pointer<Utf16> path,
+  int attributes,
+);
+
+class _RecycleResult {
+  const _RecycleResult({required this.code, required this.aborted});
+
+  final int code;
+  final bool aborted;
+
+  bool get succeeded => code == 0 && !aborted;
+}
 
 /// 删除器：回收站优先，永久删除需单独确认（docs/00 §4.2，CLN-006）。
 abstract final class CleanupDeleter {
@@ -90,8 +109,11 @@ abstract final class CleanupDeleter {
   static const int _fofNoErrorUi = 0x0400;
 
   /// 将文件移入回收站；返回 true 表示成功。
-  static bool sendToRecycleBin(List<String> paths) {
-    if (paths.isEmpty) return true;
+  static bool sendToRecycleBin(List<String> paths) =>
+      _sendToRecycleBin(paths).succeeded;
+
+  static _RecycleResult _sendToRecycleBin(List<String> paths) {
+    if (paths.isEmpty) return const _RecycleResult(code: 0, aborted: false);
     final DynamicLibrary lib = DynamicLibrary.open('shell32.dll');
     final _ShFileOperationWDart fn = lib
         .lookupFunction<_ShFileOperationWNative, _ShFileOperationWDart>(
@@ -113,7 +135,10 @@ abstract final class CleanupDeleter {
       struct.ref.hNameMappings = nullptr;
       struct.ref.lpszProgressTitle = nullptr;
       final int result = fn(struct);
-      return result == 0;
+      return _RecycleResult(
+        code: result,
+        aborted: struct.ref.fAnyOperationsAborted != 0,
+      );
     } finally {
       malloc.free(pFrom);
       calloc.free(struct);
@@ -122,14 +147,19 @@ abstract final class CleanupDeleter {
 
   /// 永久删除单个路径（不进入回收站）。
   static bool deletePermanently(String path) {
-    final FileSystemEntityType type = FileSystemEntity.typeSync(path);
     try {
+      _clearReadOnlyTree(path);
+      final FileSystemEntityType type = FileSystemEntity.typeSync(
+        path,
+        followLinks: false,
+      );
       if (type == FileSystemEntityType.directory) {
         Directory(path).deleteSync(recursive: true);
-      } else {
+      } else if (type == FileSystemEntityType.file) {
         File(path).deleteSync();
       }
-      return true;
+      return FileSystemEntity.typeSync(path, followLinks: false) ==
+          FileSystemEntityType.notFound;
     } catch (_) {
       return false;
     }
@@ -140,11 +170,10 @@ abstract final class CleanupDeleter {
     CleanupCancellationToken? cancellationToken,
     void Function(CleanupDeleteProgress progress)? onProgress,
     bool Function(String path)? recycle,
+    bool permanentFallback = false,
   }) async {
     final CleanupCancellationToken token =
         cancellationToken ?? CleanupCancellationToken();
-    final bool Function(String path) recyclePath =
-        recycle ?? (String path) => sendToRecycleBin(<String>[path]);
     final List<CleanupItemResult> items = <CleanupItemResult>[];
     int releasedBytes = 0;
 
@@ -172,10 +201,12 @@ abstract final class CleanupDeleter {
         );
       } else {
         try {
-          final bool accepted = recyclePath(candidate.path);
-          final bool removed =
-              FileSystemEntity.typeSync(candidate.path, followLinks: false) ==
-              FileSystemEntityType.notFound;
+          final _RecycleResult? shellResult = recycle == null
+              ? _sendToRecycleBin(<String>[candidate.path])
+              : null;
+          final bool accepted =
+              shellResult?.succeeded ?? recycle!(candidate.path);
+          bool removed = await _waitUntilRemoved(candidate.path);
           if (accepted && removed) {
             releasedBytes += candidate.size;
             items.add(
@@ -185,12 +216,33 @@ abstract final class CleanupDeleter {
                 reason: '已移入回收站',
               ),
             );
+          } else if (permanentFallback &&
+              candidate.allowsPermanentFallback &&
+              deletePermanently(candidate.path)) {
+            removed = await _waitUntilRemoved(candidate.path);
+            if (removed) {
+              releasedBytes += candidate.size;
+              items.add(
+                CleanupItemResult(
+                  candidate: candidate,
+                  status: CleanupItemStatus.succeeded,
+                  reason: '回收站操作失败后，已永久删除可再生成缓存',
+                ),
+              );
+            }
           } else {
+            final String shellReason = shellResult == null
+                ? (accepted ? '测试删除器未移除项目' : '删除器拒绝操作')
+                : shellResult.aborted
+                ? '用户或系统中止了回收站操作'
+                : shellResult.code == 0
+                ? 'Windows Shell 未移除项目'
+                : 'Windows Shell 错误 ${shellResult.code}';
             items.add(
               CleanupItemResult(
                 candidate: candidate,
                 status: CleanupItemStatus.failed,
-                reason: accepted ? 'Shell 未移除项目' : 'Shell 拒绝操作',
+                reason: '$shellReason；文件可能正被程序占用或权限不足，请关闭来源应用后重试',
               ),
             );
           }
@@ -218,6 +270,58 @@ abstract final class CleanupDeleter {
       cancelled: token.isCancelled,
       releasedBytes: releasedBytes,
     );
+  }
+
+  static Future<bool> _waitUntilRemoved(String path) async {
+    for (int attempt = 0; attempt < 5; attempt++) {
+      if (FileSystemEntity.typeSync(path, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    return false;
+  }
+
+  static void _clearReadOnlyTree(String path) {
+    if (!Platform.isWindows) return;
+    final FileSystemEntityType type = FileSystemEntity.typeSync(
+      path,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.directory) {
+      try {
+        for (final FileSystemEntity entity in Directory(
+          path,
+        ).listSync(recursive: true, followLinks: false)) {
+          _clearReadOnly(entity.path);
+        }
+      } on FileSystemException {
+        // 继续尝试清理已能访问的项目，最终删除结果会给出失败状态。
+      }
+    }
+    _clearReadOnly(path);
+  }
+
+  static void _clearReadOnly(String path) {
+    final DynamicLibrary kernel = DynamicLibrary.open('kernel32.dll');
+    final _GetFileAttributesWDart getAttributes = kernel
+        .lookupFunction<_GetFileAttributesWNative, _GetFileAttributesWDart>(
+          'GetFileAttributesW',
+        );
+    final _SetFileAttributesWDart setAttributes = kernel
+        .lookupFunction<_SetFileAttributesWNative, _SetFileAttributesWDart>(
+          'SetFileAttributesW',
+        );
+    final Pointer<Utf16> nativePath = path.toNativeUtf16();
+    try {
+      final int attributes = getAttributes(nativePath);
+      if (attributes != 0xFFFFFFFF && attributes & 0x1 != 0) {
+        setAttributes(nativePath, attributes & ~0x1);
+      }
+    } finally {
+      malloc.free(nativePath);
+    }
   }
 
   static bool _unchanged(

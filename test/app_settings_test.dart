@@ -24,6 +24,7 @@ void main() {
       archiveMaxFileMb: 4096,
       cleanupWhitelist: <String>[r'D:\Keep'],
       cleanupScanTargets: <String>['user-temp', 'crash-dumps'],
+      cleanupTargetCatalogVersion: 2,
     );
 
     await store.save(expected);

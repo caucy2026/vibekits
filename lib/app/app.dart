@@ -6,10 +6,16 @@ import 'main_shell.dart';
 
 /// Vibekits 应用根组件。
 class VibekitsApp extends StatefulWidget {
-  const VibekitsApp({super.key, this.settingsController, this.initialFilePath});
+  const VibekitsApp({
+    super.key,
+    this.settingsController,
+    this.initialFilePath,
+    this.droppedFiles,
+  });
 
   final AppSettingsController? settingsController;
   final String? initialFilePath;
+  final Stream<List<String>>? droppedFiles;
 
   @override
   State<VibekitsApp> createState() => _VibekitsAppState();
@@ -46,6 +52,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       home: MainShell(
         settingsController: _settings,
         initialFilePath: widget.initialFilePath,
+        droppedFiles: widget.droppedFiles,
       ),
     );
   }

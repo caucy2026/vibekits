@@ -111,4 +111,44 @@ void main() {
     expect(result.failed, 0);
     expect(result.items, isEmpty);
   });
+
+  test('回收站失败时只永久清理可再生成缓存', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_fallback',
+    );
+    addTearDown(() {
+      if (sandbox.existsSync()) sandbox.deleteSync(recursive: true);
+    });
+    final File cache = File('${sandbox.path}/cache.bin')
+      ..writeAsStringSync('cache');
+    final File download = File('${sandbox.path}/download.zip')
+      ..writeAsStringSync('download');
+
+    final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
+      <CleanupCandidate>[
+        CleanupCandidate(
+          path: cache.path,
+          size: cache.lengthSync(),
+          modified: cache.lastModifiedSync(),
+          category: CleanupCategory.devCache,
+          reason: '包缓存',
+        ),
+        CleanupCandidate(
+          path: download.path,
+          size: download.lengthSync(),
+          modified: download.lastModifiedSync(),
+          category: CleanupCategory.downloads,
+          reason: '旧安装包',
+        ),
+      ],
+      recycle: (String _) => false,
+      permanentFallback: true,
+    );
+
+    expect(cache.existsSync(), isFalse);
+    expect(download.existsSync(), isTrue);
+    expect(result.succeeded, 1);
+    expect(result.failed, 1);
+    expect(result.items.first.reason, contains('永久删除'));
+  });
 }

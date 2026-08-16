@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
@@ -8,7 +11,9 @@ import '../features/local_models/presentation/local_models_tab.dart';
 import 'app_shortcuts.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
+import 'app_version.dart';
 import 'supported_file_types.dart';
+import 'windows_file_drop.dart';
 
 /// 应用主窗口：侧边导航 + 模块标题栏 + 内容区 + 状态栏。
 class MainShell extends StatefulWidget {
@@ -16,10 +21,12 @@ class MainShell extends StatefulWidget {
     super.key,
     required this.settingsController,
     this.initialFilePath,
+    this.droppedFiles,
   });
 
   final AppSettingsController settingsController;
   final String? initialFilePath;
+  final Stream<List<String>>? droppedFiles;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -53,6 +60,11 @@ class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
   final ValueNotifier<int> _openRequest = ValueNotifier<int>(0);
   final ValueNotifier<int> _findRequest = ValueNotifier<int>(0);
+  String? _archiveDropPath;
+  String? _documentDropPath;
+  int _archiveDropSerial = 0;
+  int _documentDropSerial = 0;
+  StreamSubscription<List<String>>? _dropSubscription;
 
   @override
   void initState() {
@@ -68,6 +80,9 @@ class _MainShellState extends State<MainShell> {
         settings.restoreLastTab ? settings.lastTab : 0,
     };
     widget.settingsController.addListener(_applySettings);
+    if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
+    _dropSubscription = (widget.droppedFiles ?? WindowsFileDrop.instance.files)
+        .listen(_handleDroppedFiles);
   }
 
   void _applySettings() {
@@ -83,6 +98,7 @@ class _MainShellState extends State<MainShell> {
     widget.settingsController.removeListener(_applySettings);
     _openRequest.dispose();
     _findRequest.dispose();
+    _dropSubscription?.cancel();
     super.dispose();
   }
 
@@ -108,44 +124,92 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
+  void _handleDroppedFiles(List<String> paths) {
+    if (!mounted) return;
+    final String? path = SupportedFileTypes.bestSupportedPath(
+      paths,
+      fileExists: (String path) => File(path).existsSync(),
+    );
+    if (path == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('没有可打开的受支持文件；文件夹和未知格式不会被误处理')),
+        );
+      return;
+    }
+    final VibekitsFileKind kind = SupportedFileTypes.kindForPath(path);
+    _selectTab(kind == VibekitsFileKind.archive ? 0 : 2);
+    setState(() {
+      if (kind == VibekitsFileKind.archive) {
+        _archiveDropPath = path;
+        _archiveDropSerial++;
+      } else {
+        _documentDropPath = path;
+        _documentDropSerial++;
+      }
+    });
+    final int ignored = paths.length - 1;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            ignored > 0
+                ? '已用最佳工具打开 ${_fileName(path)}；其余 $ignored 项未自动处理'
+                : '已用${kind == VibekitsFileKind.archive ? '解压缩' : '文档阅读'}打开 ${_fileName(path)}',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  String _fileName(String path) => path.replaceAll('\\', '/').split('/').last;
+
   @override
   Widget build(BuildContext context) {
     final AppSettings settings = widget.settingsController.value;
     final List<Widget> tabPages = <Widget>[
       ArchiveTab(
+        key: ValueKey<String>('archive-drop-$_archiveDropSerial'),
         openRequest: _openRequest,
         initialPath:
-            SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
-                VibekitsFileKind.archive
-            ? widget.initialFilePath
-            : null,
+            _archiveDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.archive
+                ? widget.initialFilePath
+                : null),
         maxEntries: settings.archiveMaxEntries,
         maxSingleExpandedBytes: settings.archiveMaxFileMb * 1024 * 1024,
       ),
       CleanerTab(
         initialWhitelist: settings.cleanupWhitelist,
         initialTargetIds: settings.cleanupScanTargets,
+        initialTargetCatalogVersion: settings.cleanupTargetCatalogVersion,
         onWhitelistChanged: (List<String> whitelist) =>
             widget.settingsController.update(
               widget.settingsController.value.copyWith(
                 cleanupWhitelist: whitelist,
               ),
             ),
-        onTargetIdsChanged: (List<String> targetIds) =>
+        onTargetIdsChanged: (List<String> targetIds, int catalogVersion) =>
             widget.settingsController.update(
               widget.settingsController.value.copyWith(
                 cleanupScanTargets: targetIds,
+                cleanupTargetCatalogVersion: catalogVersion,
               ),
             ),
       ),
       DocumentsTab(
+        key: ValueKey<String>('document-drop-$_documentDropSerial'),
         openRequest: _openRequest,
         findRequest: _findRequest,
         initialPath:
-            SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
-                VibekitsFileKind.document
-            ? widget.initialFilePath
-            : null,
+            _documentDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.document
+                ? widget.initialFilePath
+                : null),
       ),
       const DevToolsTab(),
       LocalModelsTab(
@@ -466,7 +530,7 @@ class _MainShellState extends State<MainShell> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
-              'VIBEKITS  ·  v0.1.0',
+              'VIBEKITS  ·  ${AppVersion.display}',
               style: Theme.of(context).textTheme.labelSmall
                   ?.copyWith(color: context.vibe.muted, letterSpacing: 0.5),
             ),
@@ -486,12 +550,9 @@ class _MainShellState extends State<MainShell> {
           const SizedBox(width: 7),
           Text('系统就绪', style: Theme.of(context).textTheme.bodySmall),
           const Spacer(),
-          Tooltip(
-            message: '资源监控将在后续里程碑接入',
-            child: Text(
-              'CPU --% · 内存 --',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+          Text(
+            '${AppVersion.display} · 本地模式',
+            style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
       ),

@@ -18,6 +18,7 @@ class AppSettings {
     this.archiveMaxFileMb = 2048,
     this.cleanupWhitelist = const <String>[],
     this.cleanupScanTargets = const <String>[],
+    this.cleanupTargetCatalogVersion = 0,
   });
 
   final ThemeMode themeMode;
@@ -30,6 +31,7 @@ class AppSettings {
   final int archiveMaxFileMb;
   final List<String> cleanupWhitelist;
   final List<String> cleanupScanTargets;
+  final int cleanupTargetCatalogVersion;
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -42,6 +44,7 @@ class AppSettings {
     int? archiveMaxFileMb,
     List<String>? cleanupWhitelist,
     List<String>? cleanupScanTargets,
+    int? cleanupTargetCatalogVersion,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
@@ -53,6 +56,8 @@ class AppSettings {
     archiveMaxFileMb: archiveMaxFileMb ?? this.archiveMaxFileMb,
     cleanupWhitelist: cleanupWhitelist ?? this.cleanupWhitelist,
     cleanupScanTargets: cleanupScanTargets ?? this.cleanupScanTargets,
+    cleanupTargetCatalogVersion:
+        cleanupTargetCatalogVersion ?? this.cleanupTargetCatalogVersion,
   );
 
   Map<String, Object> toJson() => <String, Object>{
@@ -66,6 +71,7 @@ class AppSettings {
     'archiveMaxFileMb': archiveMaxFileMb,
     'cleanupWhitelist': cleanupWhitelist,
     'cleanupScanTargets': cleanupScanTargets,
+    'cleanupTargetCatalogVersion': cleanupTargetCatalogVersion,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -110,6 +116,12 @@ class AppSettings {
                 .take(100)
                 .toList(growable: false)
           : const <String>[],
+      cleanupTargetCatalogVersion: boundedInt(
+        'cleanupTargetCatalogVersion',
+        0,
+        0,
+        100,
+      ),
     );
   }
 }

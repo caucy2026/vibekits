@@ -31,7 +31,6 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       : widget.directory.trim();
   List<ModelInfo> _models = const <ModelInfo>[];
   String _message = '';
-  String _workspace = 'OCR';
 
   @override
   void initState() {
@@ -47,7 +46,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   Future<void> _import() async {
     const XTypeGroup group = XTypeGroup(
       label: '模型文件',
-      extensions: <String>['onnx', 'bin', 'gguf', 'model', '*'],
+      extensions: <String>['onnx', 'bin', 'gguf', 'model'],
     );
     final XFile? file = await openFile(acceptedTypeGroups: <XTypeGroup>[group]);
     if (file == null) return;
@@ -63,6 +62,27 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   }
 
   Future<void> _delete(ModelInfo model) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('删除本地模型？'),
+        content: Text(
+          '将永久删除 ${model.fileName}（${_formatSize(model.size)}）。'
+          '此操作不会进入回收站。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     final bool ok = ModelStore.delete(
       '$_directory${Platform.pathSeparator}${model.fileName}',
     );
@@ -73,15 +93,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Expanded(child: _buildList()),
-        const VerticalDivider(width: 1),
-        Expanded(child: _buildWorkspace()),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _buildList();
 
   Widget _buildList() {
     return Column(
@@ -94,7 +106,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
             children: <Widget>[
               ElevatedButton.icon(
                 onPressed: _import,
-                icon: const Icon(Icons.download, size: 18),
+                icon: const Icon(Icons.add, size: 18),
                 label: const Text('导入模型'),
               ),
               const SizedBox(width: 8),
@@ -104,6 +116,11 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                 label: const Text('刷新'),
               ),
               const Spacer(),
+              Text(
+                '仅管理本地文件 · 单个上限 100MB',
+                style: TextStyle(fontSize: 11, color: context.vibe.muted),
+              ),
+              const SizedBox(width: 12),
               const Icon(Icons.folder_open, size: 16),
               const SizedBox(width: 4),
               Expanded(
@@ -171,38 +188,6 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                 ),
         ),
       ],
-    );
-  }
-
-  Widget _buildWorkspace() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          SegmentedButton<String>(
-            segments: const <ButtonSegment<String>>[
-              ButtonSegment(value: 'OCR', label: Text('OCR')),
-              ButtonSegment(value: 'ASR', label: Text('ASR')),
-              ButtonSegment(value: 'TTS', label: Text('TTS')),
-            ],
-            selected: <String>{_workspace},
-            onSelectionChanged: (Set<String> s) =>
-                setState(() => _workspace = s.first),
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Center(
-              child: Text(
-                '$_workspace 工作区\n\n推理运行时（ONNX Runtime / sherpa-onnx）待接入，\n'
-                '模型管理、导入、校验已就绪。',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.vibe.muted),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

@@ -113,4 +113,50 @@ void main() {
     expect(find.text(similar), findsOneWidget);
     expect(find.text('白名单（1）'), findsOneWidget);
   });
+
+  testWidgets('大量候选按分类折叠并分批显示', (WidgetTester tester) async {
+    final List<CleanupCandidate> candidates = List<CleanupCandidate>.generate(
+      150,
+      (int index) => CleanupCandidate(
+        path: 'C:\\Cache\\item_$index.bin',
+        size: 150 - index,
+        category: CleanupCategory.pluginCache,
+        reason: '插件下载缓存',
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            scanRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(CleanupScanProgress progress)
+                  onProgress,
+                }) async => CleanupScanResult(
+                  candidates: candidates,
+                  cancelled: false,
+                  unreadablePaths: 0,
+                ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('开始扫描'));
+    await tester.pumpAndSettle();
+    expect(find.text('插件下载缓存'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNothing);
+
+    await tester.tap(find.text('插件下载缓存'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckboxListTile), findsNWidgets(100));
+    expect(find.textContaining('剩余 50 项'), findsOneWidget);
+
+    await tester.ensureVisible(find.textContaining('剩余 50 项'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('剩余 50 项'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckboxListTile), findsNWidgets(150));
+  });
 }

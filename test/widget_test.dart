@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:vibekits/app/app.dart';
 import 'package:vibekits/app/app_settings.dart';
 import 'package:vibekits/app/main_shell.dart';
 import 'package:vibekits/features/documents/presentation/documents_tab.dart';
+import 'package:vibekits/features/local_models/presentation/local_models_tab.dart';
 
 void main() {
   testWidgets('启动后显示五个 Tab 与第一个页面', (WidgetTester tester) async {
@@ -128,5 +130,56 @@ void main() {
       source.path,
     );
     expect(find.text('打开压缩包'), findsNothing);
+  });
+
+  testWidgets('拖入文件后自动选择文档工具并立即打开', (WidgetTester tester) async {
+    final StreamController<List<String>> drops =
+        StreamController<List<String>>.broadcast();
+    addTearDown(() async {
+      await drops.close();
+    });
+    final File source = File('pubspec.yaml').absolute;
+
+    await tester.pumpWidget(VibekitsApp(droppedFiles: drops.stream));
+    drops.add(<String>[source.path]);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('文档阅读'), findsWidgets);
+    expect(find.textContaining('已用文档阅读打开 pubspec.yaml'), findsOneWidget);
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
+      source.path,
+    );
+    final Key? firstRequestKey = tester
+        .widget<DocumentsTab>(find.byType(DocumentsTab))
+        .key;
+    drops.add(<String>[source.path]);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).key,
+      isNot(firstRequestKey),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('本地模型页只展示已实现的管理能力', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_models_ui',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+
+    await tester.pumpWidget(
+      MaterialApp(home: LocalModelsTab(directory: sandbox.path)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('导入模型'), findsOneWidget);
+    expect(find.text('刷新'), findsOneWidget);
+    expect(find.textContaining('仅管理本地文件'), findsOneWidget);
+    expect(find.byType(SegmentedButton<String>), findsNothing);
+    expect(find.textContaining('待接入'), findsNothing);
   });
 }

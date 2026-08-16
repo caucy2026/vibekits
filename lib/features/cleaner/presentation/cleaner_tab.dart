@@ -23,6 +23,7 @@ class CleanerTab extends StatefulWidget {
     this.scanRunner,
     this.initialWhitelist = const <String>[],
     this.initialTargetIds = const <String>[],
+    this.initialTargetCatalogVersion = 0,
     this.onWhitelistChanged,
     this.onTargetIdsChanged,
   });
@@ -30,8 +31,10 @@ class CleanerTab extends StatefulWidget {
   final CleanupScanRunner? scanRunner;
   final List<String> initialWhitelist;
   final List<String> initialTargetIds;
+  final int initialTargetCatalogVersion;
   final Future<void> Function(List<String> whitelist)? onWhitelistChanged;
-  final Future<void> Function(List<String> targetIds)? onTargetIdsChanged;
+  final Future<void> Function(List<String> targetIds, int catalogVersion)?
+  onTargetIdsChanged;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -54,6 +57,21 @@ class _CleanerTabState extends State<CleanerTab> {
   CleanupDeleteResult? _lastResult;
   File? _lastReport;
   String _message = '';
+  final Map<CleanupCategory, int> _visibleItemLimits = <CleanupCategory, int>{};
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialTargetCatalogVersion <
+        CleanupTargetDiscovery.catalogVersion) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onTargetIdsChanged?.call(
+          _enabledTargetIds.toList()..sort(),
+          CleanupTargetDiscovery.catalogVersion,
+        );
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -134,9 +152,16 @@ class _CleanerTabState extends State<CleanerTab> {
             ),
           )
           .toList();
+      filtered.sort((CleanupCandidate left, CleanupCandidate right) {
+        final int category = left.category.index.compareTo(
+          right.category.index,
+        );
+        return category != 0 ? category : right.size.compareTo(left.size);
+      });
       if (mounted) {
         setState(() {
           _candidates = filtered;
+          _visibleItemLimits.clear();
           _selected.addAll(
             filtered
                 .where(
@@ -193,24 +218,59 @@ class _CleanerTabState extends State<CleanerTab> {
       0,
       (int total, CleanupCandidate candidate) => total + candidate.size,
     );
+    bool permanentFallback = true;
+    final bool hasRegenerableCache = plan.any(
+      (CleanupCandidate candidate) => candidate.allowsPermanentFallback,
+    );
     final bool? confirm = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('确认清理'),
-        content: Text(
-          '将 ${plan.length} 个项目（${_formatSize(planSize)}）移入回收站。'
-          '项目可从回收站恢复，是否继续？',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('清理'),
-          ),
-        ],
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setDialogState) =>
+            AlertDialog(
+              title: const Text('确认清理'),
+              content: SizedBox(
+                width: 520,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '将 ${plan.length} 个项目（${_formatSize(planSize)}）优先移入回收站。',
+                    ),
+                    if (hasRegenerableCache) ...<Widget>[
+                      const SizedBox(height: 12),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: permanentFallback,
+                        title: const Text('强力清理可再生成缓存'),
+                        subtitle: const Text(
+                          '回收站拒绝时永久删除浏览器、应用、开发、插件下载及调试缓存；不用于下载目录和旧插件。',
+                        ),
+                        onChanged: (bool? value) => setDialogState(
+                          () => permanentFallback = value ?? false,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    const Text(
+                      '正在被浏览器、编辑器或包管理器占用的文件仍需关闭对应程序后重试。',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('清理'),
+                ),
+              ],
+            ),
       ),
     );
     if (confirm != true) return;
@@ -227,6 +287,7 @@ class _CleanerTabState extends State<CleanerTab> {
       final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
         plan,
         cancellationToken: token,
+        permanentFallback: permanentFallback,
         onProgress: (CleanupDeleteProgress progress) {
           if (mounted) setState(() => _deleteProgress = progress);
         },
@@ -386,30 +447,106 @@ class _CleanerTabState extends State<CleanerTab> {
                   height: 420,
                   child: _availableTargets.isEmpty
                       ? const Center(child: Text('当前环境没有可用扫描范围'))
-                      : ListView(
+                      : Column(
                           children: <Widget>[
-                            for (final CleanupScanTarget target
-                                in _availableTargets)
-                              CheckboxListTile(
-                                dense: true,
-                                value: draft.contains(target.id),
-                                title: Text(
-                                  '${target.label}${target.highRisk ? '（高风险）' : ''}',
+                            Wrap(
+                              spacing: 8,
+                              children: <Widget>[
+                                TextButton.icon(
+                                  onPressed: () => setDialogState(() {
+                                    draft
+                                      ..clear()
+                                      ..addAll(
+                                        _availableTargets
+                                            .where(
+                                              (CleanupScanTarget target) =>
+                                                  target.defaultEnabled,
+                                            )
+                                            .map(
+                                              (CleanupScanTarget target) =>
+                                                  target.id,
+                                            ),
+                                      );
+                                  }),
+                                  icon: const Icon(
+                                    Icons.auto_awesome,
+                                    size: 16,
+                                  ),
+                                  label: const Text('推荐范围'),
                                 ),
-                                subtitle: Text(
-                                  target.path,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                TextButton(
+                                  onPressed: () => setDialogState(() {
+                                    draft
+                                      ..clear()
+                                      ..addAll(
+                                        _availableTargets.map(
+                                          (CleanupScanTarget target) =>
+                                              target.id,
+                                        ),
+                                      );
+                                  }),
+                                  child: const Text('全部'),
                                 ),
-                                onChanged: (bool? enabled) =>
-                                    setDialogState(() {
-                                      if (enabled == true) {
-                                        draft.add(target.id);
-                                      } else {
-                                        draft.remove(target.id);
-                                      }
-                                    }),
+                                TextButton(
+                                  onPressed: () => setDialogState(draft.clear),
+                                  child: const Text('清空'),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 1),
+                            Expanded(
+                              child: ListView(
+                                children: <Widget>[
+                                  for (final CleanupCategory category
+                                      in CleanupCategory.values)
+                                    if (_availableTargets.any(
+                                      (CleanupScanTarget target) =>
+                                          target.category == category,
+                                    )) ...<Widget>[
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          16,
+                                          12,
+                                          16,
+                                          4,
+                                        ),
+                                        child: Text(
+                                          '${category.label}${category.highRisk ? ' · 默认不选择清理项' : ''}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: category.highRisk
+                                                ? VibekitsColors.warning
+                                                : context.vibe.muted,
+                                          ),
+                                        ),
+                                      ),
+                                      for (final CleanupScanTarget target
+                                          in _availableTargets.where(
+                                            (CleanupScanTarget target) =>
+                                                target.category == category,
+                                          ))
+                                        CheckboxListTile(
+                                          dense: true,
+                                          value: draft.contains(target.id),
+                                          title: Text(target.label),
+                                          subtitle: Text(
+                                            target.path,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          onChanged: (bool? enabled) =>
+                                              setDialogState(() {
+                                                if (enabled == true) {
+                                                  draft.add(target.id);
+                                                } else {
+                                                  draft.remove(target.id);
+                                                }
+                                              }),
+                                        ),
+                                    ],
+                                ],
                               ),
+                            ),
                           ],
                         ),
                 ),
@@ -429,7 +566,10 @@ class _CleanerTabState extends State<CleanerTab> {
     );
     if (updated != null) {
       setState(() => _enabledTargetIds = updated);
-      await widget.onTargetIdsChanged?.call(updated.toList()..sort());
+      await widget.onTargetIdsChanged?.call(
+        updated.toList()..sort(),
+        CleanupTargetDiscovery.catalogVersion,
+      );
     }
   }
 
@@ -443,11 +583,16 @@ class _CleanerTabState extends State<CleanerTab> {
     final Set<String> configured = widget.initialTargetIds
         .where(available.contains)
         .toSet();
-    if (configured.isNotEmpty) return configured;
-    return _availableTargets
+    final Set<String> defaults = _availableTargets
         .where((CleanupScanTarget target) => target.defaultEnabled)
         .map((CleanupScanTarget target) => target.id)
         .toSet();
+    if (configured.isEmpty) return defaults;
+    if (widget.initialTargetCatalogVersion <
+        CleanupTargetDiscovery.catalogVersion) {
+      configured.addAll(defaults);
+    }
+    return configured;
   }
 
   @override
@@ -674,8 +819,12 @@ class _CleanerTabState extends State<CleanerTab> {
       0,
       (int sum, CleanupCandidate c) => sum + c.size,
     );
+    final int visibleLimit = _visibleItemLimits[category] ?? 100;
+    final List<CleanupCandidate> visibleItems = items
+        .take(visibleLimit)
+        .toList(growable: false);
     return ExpansionTile(
-      initiallyExpanded: true,
+      initiallyExpanded: items.length <= 100,
       tilePadding: const EdgeInsets.symmetric(horizontal: 12),
       childrenPadding: const EdgeInsets.only(left: 12, bottom: 6),
       leading: Checkbox(
@@ -706,7 +855,7 @@ class _CleanerTabState extends State<CleanerTab> {
         style: Theme.of(context).textTheme.bodySmall,
       ),
       children: <Widget>[
-        for (final CleanupCandidate candidate in items)
+        for (final CleanupCandidate candidate in visibleItems)
           Tooltip(
             message: candidate.path,
             child: CheckboxListTile(
@@ -743,6 +892,20 @@ class _CleanerTabState extends State<CleanerTab> {
                   _selected.remove(candidate.path);
                 }
               }),
+            ),
+          ),
+        if (visibleItems.length < items.length)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                _visibleItemLimits[category] = visibleLimit + 200;
+              }),
+              icon: const Icon(Icons.expand_more),
+              label: Text(
+                '再显示 ${items.length - visibleItems.length > 200 ? 200 : items.length - visibleItems.length} 项'
+                '（剩余 ${items.length - visibleItems.length} 项）',
+              ),
             ),
           ),
       ],

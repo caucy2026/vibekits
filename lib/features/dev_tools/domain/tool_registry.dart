@@ -258,9 +258,9 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'batch_rename',
-    name: '批量重命名预览',
+    name: '批量重命名',
     group: ToolGroups.file,
-    description: '生成重命名计划，参数为“查找|替换”，输入为目录。',
+    description: '选择文件夹，预览并安全执行查找替换、前后缀、大小写和序号规则。',
     paramLabel: '查找|替换',
     run: (String input, String params) {
       final List<String> parts = params.split('|');

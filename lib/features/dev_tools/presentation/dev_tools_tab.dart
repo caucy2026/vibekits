@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import '../domain/tool_result.dart';
+import 'batch_rename_workspace.dart';
 
 /// T4 开发工具 Tab。
 ///
@@ -243,6 +244,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
 
   Widget _buildWorkArea() {
     final ToolSpec tool = _selected;
+    if (tool.id == 'batch_rename') {
+      return const BatchRenameWorkspace();
+    }
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(

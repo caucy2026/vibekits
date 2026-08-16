@@ -45,4 +45,18 @@ void main() {
       SupportedFileTypes.allExtensions.length,
     );
   });
+
+  test('拖入多个项目时跳过目录和未知格式并选择首个可用工具', () {
+    final String? selected = SupportedFileTypes.bestSupportedPath(
+      <String>['folder', 'unknown.xyz', 'source.dart', 'archive.zip'],
+      fileExists: (String path) =>
+          path == 'source.dart' || path == 'archive.zip',
+    );
+
+    expect(selected, 'source.dart');
+    expect(
+      SupportedFileTypes.kindForPath(selected!),
+      VibekitsFileKind.document,
+    );
+  });
 }

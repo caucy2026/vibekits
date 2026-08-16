@@ -433,6 +433,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
           Expanded(
             child: Text(
               _name.isEmpty ? '未打开文档' : _name,
+              key: const Key('document-current-name'),
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,

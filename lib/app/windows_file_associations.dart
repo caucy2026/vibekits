@@ -183,6 +183,20 @@ abstract final class WindowsFileAssociations {
       write('$appBase\\SupportedTypes', dotted, '');
       write('Software\\Classes\\$dotted\\OpenWithProgids', progId, '');
       write('$capabilities\\FileAssociations', dotted, progId);
+      final String contextMenu =
+          'Software\\Classes\\SystemFileAssociations\\$dotted\\shell\\Vibekits';
+      final bool archive = SupportedFileTypes.archiveExtensions.contains(
+        extension,
+      );
+      write(
+        contextMenu,
+        'MUIVerb',
+        archive ? '用 Vibekits 解压或查看' : '用 Vibekits 查看或解码',
+      );
+      write(contextMenu, 'Icon', '$executable,0');
+      write(contextMenu, 'Position', 'Top');
+      write(contextMenu, 'MultiSelectModel', 'Single');
+      write('$contextMenu\\command', null, command);
     }
 
     final DynamicLibrary shell32 = DynamicLibrary.open('shell32.dll');

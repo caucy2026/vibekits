@@ -103,6 +103,21 @@ abstract final class SupportedFileTypes {
     return VibekitsFileKind.unsupported;
   }
 
+  static String? bestSupportedPath(
+    Iterable<String> paths, {
+    bool Function(String path)? fileExists,
+  }) {
+    for (final String path in paths) {
+      final String trimmed = path.trim();
+      if (trimmed.isEmpty ||
+          kindForPath(trimmed) == VibekitsFileKind.unsupported) {
+        continue;
+      }
+      if (fileExists == null || fileExists(trimmed)) return trimmed;
+    }
+    return null;
+  }
+
   static String? _extensionOf(String name) {
     // Extension-like filenames commonly used by developer tools.
     if (name == 'dockerfile') return 'dockerfile';
