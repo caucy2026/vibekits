@@ -41,4 +41,4 @@
 
 EXE 文件/产品版本均为 `1.8.0+10`。正式目录为 `release/Vibekits-1.8.0-windows-x64`，ZIP 为 `release/Vibekits-1.8.0-windows-x64.zip`。ZIP 已核对包含 EXE、`libserialport_plus.dll`、7-Zip、OCR 模型和发布说明。
 
-ZIP 与 EXE 的最终校验值写入 `release/SHA256SUMS.txt`，避免发布说明自身进入 ZIP 后产生循环哈希。Git 提交与 `v1.8.0` 标签须同步到 `backup` 和 `cloud` 后才完成本批。
+ZIP 与 EXE 的最终校验值写入 `release/SHA256SUMS.txt`，避免发布说明自身进入 ZIP 后产生循环哈希。实现提交为 `f76cbdf`；最终发布记录提交和 `v1.8.0` 标签同步到本地 `backup` 与 GitHub `cloud`。
