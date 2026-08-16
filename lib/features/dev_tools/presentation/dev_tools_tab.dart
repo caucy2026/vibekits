@@ -7,6 +7,7 @@ import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import '../domain/tool_result.dart';
 import 'batch_rename_workspace.dart';
+import 'duplicate_files_workspace.dart';
 
 /// T4 开发工具 Tab。
 ///
@@ -246,6 +247,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
     final ToolSpec tool = _selected;
     if (tool.id == 'batch_rename') {
       return const BatchRenameWorkspace();
+    }
+    if (tool.id == 'duplicate_files') {
+      return const DuplicateFilesWorkspace();
     }
     return Padding(
       padding: const EdgeInsets.all(16),

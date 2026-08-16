@@ -18,6 +18,7 @@ enum CleanupCategory {
   logs('日志/崩溃转储', false),
   emptyDirs('空目录', true),
   downloads('下载建议', true),
+  duplicateFiles('重复文件', true),
   recycleBin('回收站', true);
 
   const CleanupCategory(this.label, this.highRisk);

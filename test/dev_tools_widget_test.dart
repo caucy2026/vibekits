@@ -58,4 +58,21 @@ void main() {
     await tester.pump();
     expect(find.text('SGVsbG8='), findsNothing);
   });
+
+  testWidgets('重复文件入口打开专用扫描工作区', (WidgetTester tester) async {
+    await pumpTools(tester);
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '重复文件');
+    await tester.pump();
+    final Finder entry = find.widgetWithText(ListTile, '重复文件');
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('duplicates-pick-directory')), findsOneWidget);
+    expect(find.text('开始扫描'), findsOneWidget);
+    expect(find.text('执行'), findsNothing);
+  });
 }

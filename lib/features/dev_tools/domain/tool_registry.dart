@@ -271,4 +271,10 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
       );
     },
   ),
+  const ToolSpec(
+    id: 'duplicate_files',
+    name: '重复文件',
+    group: ToolGroups.file,
+    description: '按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。',
+  ),
 ];
