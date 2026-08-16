@@ -159,4 +159,119 @@ void main() {
     );
     expect(passwordField.controller?.text, 'secret');
   });
+
+  testWidgets('MySQL 使用默认端口连接并保存可复用记录', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1100, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    List<String> savedProfiles = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DatabaseWorkspace(
+            remoteInspect:
+                (RemoteDatabaseProfile profile, String password) async =>
+                    RemoteDatabaseSnapshot(
+                      profile: profile,
+                      serverVersion: '9.test',
+                      objects: const <RemoteDatabaseObject>[
+                        RemoteDatabaseObject(schema: 'mysql', name: 'users'),
+                      ],
+                      initialPage: const SqliteResultPage(
+                        columns: <String>['status'],
+                        rows: <List<String>>[
+                          <String>['connected'],
+                        ],
+                        offset: 0,
+                        hasMore: false,
+                        label: 'users',
+                      ),
+                    ),
+            passwordWriter: (String id, String password) async {},
+            onRemoteProfilesChanged: (List<String> profiles) async {
+              savedProfiles = profiles;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('database-connect-remote')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('remote-database-engine')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MySQL').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('remote-database-host')),
+      'mysql.example.com',
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-database-password')),
+      'secret',
+    );
+    await tester.tap(find.byKey(const Key('remote-database-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('MySQL · 远程只读'), findsOneWidget);
+    expect(
+      find.textContaining('root@mysql.example.com:3306/mysql'),
+      findsOneWidget,
+    );
+    expect(find.text('connected'), findsOneWidget);
+    expect(savedProfiles, hasLength(1));
+    final RemoteDatabaseProfile saved = RemoteDatabaseProfile.decode(
+      savedProfiles.single,
+    )!;
+    expect(saved.engine, RemoteDatabaseEngine.mysql);
+    expect(saved.port, 3306);
+  });
+
+  testWidgets('最近连接可删除并同时删除系统保存密码', (WidgetTester tester) async {
+    const RemoteDatabaseProfile profile = RemoteDatabaseProfile(
+      id: 'mysql-history',
+      name: '测试 MySQL',
+      host: 'db.example.com',
+      port: 3306,
+      database: 'app',
+      username: 'dev',
+      useTls: true,
+      engine: RemoteDatabaseEngine.mysql,
+    );
+    String? deletedCredential;
+    List<String>? savedProfiles;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DatabaseWorkspace(
+            initialRemoteProfiles: <String>[profile.encode()],
+            passwordReader: (String id) async => 'saved-secret',
+            passwordDeleter: (String id) async => deletedCredential = id,
+            onRemoteProfilesChanged: (List<String> profiles) async {
+              savedProfiles = profiles;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('database-connect-remote')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remote-database-history')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('remote-database-delete-profile')));
+    await tester.pumpAndSettle();
+
+    expect(deletedCredential, profile.id);
+    expect(savedProfiles, isEmpty);
+    expect(find.byKey(const Key('remote-database-history')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-database-password')))
+          .controller
+          ?.text,
+      isEmpty,
+    );
+  });
 }

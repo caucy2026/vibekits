@@ -50,6 +50,7 @@ class DatabaseWorkspace extends StatefulWidget {
     this.remoteRunQuery,
     this.passwordReader,
     this.passwordWriter,
+    this.passwordDeleter,
   });
 
   final String? initialPath;
@@ -65,6 +66,7 @@ class DatabaseWorkspace extends StatefulWidget {
   final Future<String?> Function(String profileId)? passwordReader;
   final Future<void> Function(String profileId, String password)?
   passwordWriter;
+  final Future<void> Function(String profileId)? passwordDeleter;
 
   @override
   State<DatabaseWorkspace> createState() => _DatabaseWorkspaceState();
@@ -85,6 +87,7 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
   RemoteDatabaseSnapshot? _remoteSnapshot;
   RemoteDatabaseObject? _selectedRemoteObject;
   String _remotePassword = '';
+  RemoteDatabaseCancellation? _remoteCancellation;
   String? _error;
   bool _busy = false;
   int _mode = 0;
@@ -100,8 +103,17 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
 
   @override
   void dispose() {
+    _remoteCancellation?.cancel();
+    _remotePassword = '';
     _queryController.dispose();
     super.dispose();
+  }
+
+  void _cancelRemoteOperation() {
+    final RemoteDatabaseCancellation? cancellation = _remoteCancellation;
+    if (cancellation == null) return;
+    cancellation.cancel();
+    setState(() => _error = '正在停止远程数据库操作…');
   }
 
   Future<void> _pickAndOpen() async {
@@ -172,10 +184,13 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
   Future<void> _runQuery() async {
     final RemoteDatabaseSnapshot? remote = _remoteSnapshot;
     if (remote != null) {
+      final RemoteDatabaseCancellation cancellation =
+          RemoteDatabaseCancellation();
       setState(() {
         _busy = true;
         _error = null;
         _mode = 1;
+        _remoteCancellation = cancellation;
       });
       try {
         final SqliteResultPage page = widget.remoteRunQuery != null
@@ -188,12 +203,21 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                 remote.profile,
                 _remotePassword,
                 _queryController.text,
+                cancellation: cancellation,
               );
+        if (cancellation.isCancelled) {
+          throw const RemoteDatabaseCancelledException();
+        }
         if (mounted) setState(() => _page = page);
       } catch (error) {
         if (mounted) setState(() => _error = _errorMessage(error));
       } finally {
-        if (mounted) setState(() => _busy = false);
+        if (mounted && identical(_remoteCancellation, cancellation)) {
+          setState(() {
+            _busy = false;
+            _remoteCancellation = null;
+          });
+        }
       }
       return;
     }
@@ -230,12 +254,16 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
             profiles: List<RemoteDatabaseProfile>.unmodifiable(_remoteProfiles),
             passwordReader:
                 widget.passwordReader ?? RemoteDatabaseCredentials.read,
+            onDeleteProfile: _deleteRemoteProfile,
           ),
         );
     if (request == null) return;
+    final RemoteDatabaseCancellation cancellation =
+        RemoteDatabaseCancellation();
     setState(() {
       _busy = true;
       _error = null;
+      _remoteCancellation = cancellation;
     });
     try {
       final RemoteDatabaseSnapshot snapshot = widget.remoteInspect != null
@@ -243,7 +271,11 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
           : await RemoteDatabaseService.inspect(
               request.profile,
               request.password,
+              cancellation: cancellation,
             );
+      if (cancellation.isCancelled) {
+        throw const RemoteDatabaseCancelledException();
+      }
       if (request.rememberPassword) {
         await (widget.passwordWriter ?? RemoteDatabaseCredentials.write)(
           request.profile.id,
@@ -271,14 +303,30 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
         _page = snapshot.initialPage;
         _mode = 0;
         _busy = false;
+        _remoteCancellation = null;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
+        _remoteCancellation = null;
         _error = _errorMessage(error);
       });
     }
+  }
+
+  Future<void> _deleteRemoteProfile(RemoteDatabaseProfile profile) async {
+    await (widget.passwordDeleter ?? RemoteDatabaseCredentials.delete)(
+      profile.id,
+    );
+    _remoteProfiles.removeWhere(
+      (RemoteDatabaseProfile item) => item.id == profile.id,
+    );
+    await widget.onRemoteProfilesChanged?.call(
+      _remoteProfiles
+          .map((RemoteDatabaseProfile item) => item.encode())
+          .toList(growable: false),
+    );
   }
 
   Future<void> _selectRemoteObject(
@@ -287,11 +335,14 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
   }) async {
     final RemoteDatabaseSnapshot? snapshot = _remoteSnapshot;
     if (snapshot == null) return;
+    final RemoteDatabaseCancellation cancellation =
+        RemoteDatabaseCancellation();
     setState(() {
       _busy = true;
       _error = null;
       _selectedRemoteObject = object;
       _mode = 0;
+      _remoteCancellation = cancellation;
     });
     try {
       final SqliteResultPage page = widget.remoteLoadPage != null
@@ -306,16 +357,22 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
               _remotePassword,
               object,
               offset: offset,
+              cancellation: cancellation,
             );
+      if (cancellation.isCancelled) {
+        throw const RemoteDatabaseCancelledException();
+      }
       if (!mounted || _selectedRemoteObject?.label != object.label) return;
       setState(() {
         _page = page;
         _busy = false;
+        _remoteCancellation = null;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _busy = false;
+        _remoteCancellation = null;
         _error = _errorMessage(error);
       });
     }
@@ -341,7 +398,9 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
               _Badge(
-                text: remote == null ? 'SQLite · 本地只读' : 'PostgreSQL · 远程只读',
+                text: remote == null
+                    ? 'SQLite · 本地只读'
+                    : '${remote.profile.engine.label} · 远程只读',
                 color: context.vibe.success,
               ),
               if (snapshot != null)
@@ -357,7 +416,7 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 360),
                   child: Text(
-                    '${remote.profile.endpointLabel} · PostgreSQL ${remote.serverVersion}',
+                    '${remote.profile.endpointLabel} · ${remote.profile.engine.label} ${remote.serverVersion}',
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11, color: context.vibe.muted),
                   ),
@@ -368,6 +427,13 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                 icon: const Icon(Icons.folder_open_outlined, size: 17),
                 label: Text(snapshot == null ? '打开数据库' : '更换'),
               ),
+              if (_remoteCancellation != null)
+                TextButton.icon(
+                  key: const Key('database-cancel-remote'),
+                  onPressed: _cancelRemoteOperation,
+                  icon: const Icon(Icons.stop_circle_outlined, size: 17),
+                  label: const Text('停止'),
+                ),
               OutlinedButton.icon(
                 key: const Key('database-connect-remote'),
                 onPressed: _busy ? null : _connectRemote,
@@ -743,7 +809,7 @@ class _EmptyDatabase extends StatelessWidget {
         children: <Widget>[
           Icon(Icons.storage_outlined, size: 42, color: context.vibe.muted),
           const SizedBox(height: 12),
-          const Text('拖入 SQLite 数据库，自动显示第一张表'),
+          const Text('拖入 SQLite，或连接 PostgreSQL / MySQL / MariaDB'),
           const SizedBox(height: 5),
           Text(
             '.db / .sqlite / .sqlite3 · 默认只读，不修改源文件',
@@ -777,10 +843,12 @@ class _RemoteConnectionDialog extends StatefulWidget {
   const _RemoteConnectionDialog({
     required this.profiles,
     required this.passwordReader,
+    required this.onDeleteProfile,
   });
 
   final List<RemoteDatabaseProfile> profiles;
   final Future<String?> Function(String profileId) passwordReader;
+  final Future<void> Function(RemoteDatabaseProfile profile) onDeleteProfile;
 
   @override
   State<_RemoteConnectionDialog> createState() =>
@@ -788,6 +856,8 @@ class _RemoteConnectionDialog extends StatefulWidget {
 }
 
 class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
+  late final List<RemoteDatabaseProfile> _profiles =
+      List<RemoteDatabaseProfile>.from(widget.profiles);
   final TextEditingController _name = TextEditingController();
   final TextEditingController _host = TextEditingController();
   final TextEditingController _port = TextEditingController(text: '5432');
@@ -802,15 +872,17 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
   bool _remember = true;
   bool _showPassword = false;
   bool _loadingPassword = false;
+  bool _deletingProfile = false;
+  RemoteDatabaseEngine _engine = RemoteDatabaseEngine.postgresql;
   String? _selectedId;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    if (widget.profiles.isNotEmpty) {
+    if (_profiles.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _selectProfile(widget.profiles.first),
+        (_) => _selectProfile(_profiles.first),
       );
     }
   }
@@ -829,6 +901,7 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
   Future<void> _selectProfile(RemoteDatabaseProfile profile) async {
     setState(() {
       _selectedId = profile.id;
+      _engine = profile.engine;
       _name.text = profile.name;
       _host.text = profile.host;
       _port.text = '${profile.port}';
@@ -853,6 +926,60 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
     }
   }
 
+  void _selectEngine(RemoteDatabaseEngine engine) {
+    final RemoteDatabaseEngine previous = _engine;
+    setState(() {
+      _engine = engine;
+      if (_port.text.trim() == '${previous.defaultPort}') {
+        _port.text = '${engine.defaultPort}';
+      }
+      if (_database.text.trim() == previous.defaultDatabase) {
+        _database.text = engine.defaultDatabase;
+      }
+      if (_username.text.trim() == previous.defaultUsername) {
+        _username.text = engine.defaultUsername;
+      }
+      _selectedId = null;
+      _error = null;
+    });
+  }
+
+  void _newProfile() {
+    setState(() {
+      _selectedId = null;
+      _name.clear();
+      _host.clear();
+      _port.text = '${_engine.defaultPort}';
+      _database.text = _engine.defaultDatabase;
+      _username.text = _engine.defaultUsername;
+      _password.clear();
+      _error = null;
+    });
+  }
+
+  Future<void> _deleteSelectedProfile() async {
+    final RemoteDatabaseProfile? profile = _profiles
+        .where((RemoteDatabaseProfile item) => item.id == _selectedId)
+        .firstOrNull;
+    if (profile == null || _deletingProfile) return;
+    setState(() {
+      _deletingProfile = true;
+      _error = null;
+    });
+    try {
+      await widget.onDeleteProfile(profile);
+      if (!mounted) return;
+      _profiles.removeWhere(
+        (RemoteDatabaseProfile item) => item.id == profile.id,
+      );
+      _newProfile();
+    } catch (error) {
+      if (mounted) setState(() => _error = '删除连接记录失败：$error');
+    } finally {
+      if (mounted) setState(() => _deletingProfile = false);
+    }
+  }
+
   void _submit() {
     final int? port = int.tryParse(_port.text.trim());
     if (_host.text.trim().isEmpty ||
@@ -869,6 +996,7 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
       port: port,
       database: _database.text.trim(),
       username: _username.text.trim(),
+      engine: _engine,
     );
     Navigator.of(context).pop(
       _RemoteConnectRequest(
@@ -882,6 +1010,7 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
           database: _database.text.trim(),
           username: _username.text.trim(),
           useTls: _tls,
+          engine: _engine,
         ),
         password: _password.text,
         rememberPassword: _remember,
@@ -892,42 +1021,105 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('连接 PostgreSQL'),
+      title: const Text('连接远程数据库'),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              if (widget.profiles.isNotEmpty)
-                DropdownButtonFormField<String>(
-                  key: const Key('remote-database-history'),
-                  initialValue: _selectedId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: '最近使用',
-                    prefixIcon: Icon(Icons.history),
-                  ),
-                  items: widget.profiles
-                      .map(
-                        (RemoteDatabaseProfile profile) =>
-                            DropdownMenuItem<String>(
-                              value: profile.id,
-                              child: Text(
-                                '${profile.name} · ${profile.endpointLabel}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                      )
-                      .toList(growable: false),
-                  onChanged: (String? id) {
-                    final RemoteDatabaseProfile? profile = widget.profiles
-                        .where((RemoteDatabaseProfile item) => item.id == id)
-                        .firstOrNull;
-                    if (profile != null) _selectProfile(profile);
-                  },
+              if (_profiles.isNotEmpty)
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: InputDecorator(
+                        key: const Key('remote-database-history'),
+                        decoration: const InputDecoration(
+                          labelText: '最近使用',
+                          prefixIcon: Icon(Icons.history),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedId,
+                            isExpanded: true,
+                            isDense: true,
+                            items: _profiles
+                                .map(
+                                  (
+                                    RemoteDatabaseProfile profile,
+                                  ) => DropdownMenuItem<String>(
+                                    value: profile.id,
+                                    child: Text(
+                                      '${profile.engine.label} · ${profile.name} · ${profile.endpointLabel}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: _loadingPassword || _deletingProfile
+                                ? null
+                                : (String? id) {
+                                    final RemoteDatabaseProfile? profile =
+                                        _profiles
+                                            .where(
+                                              (RemoteDatabaseProfile item) =>
+                                                  item.id == id,
+                                            )
+                                            .firstOrNull;
+                                    if (profile != null) {
+                                      _selectProfile(profile);
+                                    }
+                                  },
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      key: const Key('remote-database-new-profile'),
+                      tooltip: '新建连接',
+                      onPressed: _loadingPassword || _deletingProfile
+                          ? null
+                          : _newProfile,
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                    IconButton(
+                      key: const Key('remote-database-delete-profile'),
+                      tooltip: '删除当前记录和已保存密码',
+                      onPressed: _selectedId == null || _deletingProfile
+                          ? null
+                          : _deleteSelectedProfile,
+                      icon: const Icon(Icons.delete_outline),
+                    ),
+                  ],
                 ),
+              const SizedBox(height: 10),
+              InputDecorator(
+                key: const Key('remote-database-engine'),
+                decoration: const InputDecoration(
+                  labelText: '数据库类型',
+                  prefixIcon: Icon(Icons.dns_outlined),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<RemoteDatabaseEngine>(
+                    value: _engine,
+                    isDense: true,
+                    isExpanded: true,
+                    items: RemoteDatabaseEngine.values
+                        .map(
+                          (RemoteDatabaseEngine engine) =>
+                              DropdownMenuItem<RemoteDatabaseEngine>(
+                                value: engine,
+                                child: Text(engine.label),
+                              ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (RemoteDatabaseEngine? engine) {
+                      if (engine != null) _selectEngine(engine);
+                    },
+                  ),
+                ),
+              ),
               const SizedBox(height: 10),
               TextField(
                 key: const Key('remote-database-name'),
@@ -973,6 +1165,9 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
                 key: const Key('remote-database-password'),
                 controller: _password,
                 obscureText: !_showPassword,
+                onSubmitted: (_) {
+                  if (!_loadingPassword) _submit();
+                },
                 decoration: InputDecoration(
                   labelText: _loadingPassword ? '正在读取已保存密码…' : '密码',
                   suffixIcon: IconButton(
@@ -991,7 +1186,8 @@ class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
                 value: _tls,
                 onChanged: (bool? value) =>
                     setState(() => _tls = value ?? true),
-                title: const Text('使用 TLS'),
+                title: Text('使用 TLS（${_engine.label} 推荐）'),
+                subtitle: const Text('关闭后密码和查询内容可能以明文经过网络'),
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1074,6 +1270,7 @@ String _formatBytes(int bytes) {
 }
 
 String _errorMessage(Object error) {
+  if (error is RemoteDatabaseCancelledException) return '数据库操作已取消';
   if (error is FormatException) return error.message;
   if (error is TimeoutException) return error.message ?? '数据库操作超时';
   if (error is FileSystemException) return error.message;

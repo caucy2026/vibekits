@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/features/dev_tools/domain/file_hash_service.dart';
+import 'package:vibekits/features/dev_tools/domain/serial_port_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 
 void main() {
@@ -111,6 +112,31 @@ void main() {
 
     expect(find.byKey(const Key('duplicates-pick-directory')), findsOneWidget);
     expect(find.text('开始扫描'), findsOneWidget);
+    expect(find.text('执行'), findsNothing);
+  });
+
+  testWidgets('串口入口从统一工具列表打开完整工作区', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsTab(
+            serialPortLister: () async => <SerialPortDescriptor>[],
+          ),
+        ),
+      ),
+    );
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '串口');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '串口调试'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('serial-port-name')), findsOneWidget);
+    expect(find.byKey(const Key('serial-baud-rate')), findsOneWidget);
+    expect(find.byKey(const Key('serial-open')), findsOneWidget);
     expect(find.text('执行'), findsNothing);
   });
 

@@ -23,6 +23,7 @@ class AppSettings {
     this.cleanupCompletedRuns = 0,
     this.recentDocumentPaths = const <String>[],
     this.remoteDatabaseProfiles = const <String>[],
+    this.serialPortSettings = '',
     this.deepSeekHarnessWorkspace = '',
   });
 
@@ -41,6 +42,7 @@ class AppSettings {
   final int cleanupCompletedRuns;
   final List<String> recentDocumentPaths;
   final List<String> remoteDatabaseProfiles;
+  final String serialPortSettings;
   final String deepSeekHarnessWorkspace;
 
   AppSettings copyWith({
@@ -59,6 +61,7 @@ class AppSettings {
     int? cleanupCompletedRuns,
     List<String>? recentDocumentPaths,
     List<String>? remoteDatabaseProfiles,
+    String? serialPortSettings,
     String? deepSeekHarnessWorkspace,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
@@ -79,6 +82,7 @@ class AppSettings {
     recentDocumentPaths: recentDocumentPaths ?? this.recentDocumentPaths,
     remoteDatabaseProfiles:
         remoteDatabaseProfiles ?? this.remoteDatabaseProfiles,
+    serialPortSettings: serialPortSettings ?? this.serialPortSettings,
     deepSeekHarnessWorkspace:
         deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
   );
@@ -99,6 +103,7 @@ class AppSettings {
     'cleanupCompletedRuns': cleanupCompletedRuns,
     'recentDocumentPaths': recentDocumentPaths,
     'remoteDatabaseProfiles': remoteDatabaseProfiles,
+    'serialPortSettings': serialPortSettings,
     'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
   };
 
@@ -185,6 +190,12 @@ class AppSettings {
                 .take(20)
                 .toList(growable: false)
           : const <String>[],
+      serialPortSettings:
+          json['serialPortSettings'] is String &&
+              (json['serialPortSettings']! as String).length <= 4096 &&
+              !(json['serialPortSettings']! as String).contains('\u0000')
+          ? json['serialPortSettings']! as String
+          : '',
       deepSeekHarnessWorkspace:
           json['deepSeekHarnessWorkspace'] is String &&
               (json['deepSeekHarnessWorkspace']! as String).length <= 32768 &&

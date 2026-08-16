@@ -1,14 +1,14 @@
 # Vibekits 当前实现状态与未完成清单
 
-更新日期：2026-08-16
+更新日期：2026-08-17
 
-当前版本：`1.7.0+9`
+当前版本：`1.8.0+10`
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批新增极简文件搜索，并把清理范围发现、文件搜索、文件哈希、重复文件、批量重命名和纯 Dart 压缩读写等重磁盘任务迁出 UI Isolate。进度消息限频，切页/销毁会转发取消，避免扫描期间窗口拖动和关闭失去响应。`flutter analyze` 无问题，258/258 自动测试通过，Windows Release 构建与真实启动纳入本版发布验收。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批补齐 MySQL/MariaDB 远程只读数据库，并新增独立后台串口终端。数据库连接/查询和串口枚举/打开/收发均不占 UI Isolate；关闭或停止会终止工作 Isolate 并释放资源。`flutter analyze` 无问题，271/271 自动测试通过；Windows Release 构建与真实启动纳入本版发布验收。macOS 工程、Open With 文件事件、串口权限和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 与真实设备验证写成完成。
 
 ## 2. 五个主工作区
 
@@ -17,7 +17,7 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 解压缩 | 官方 7-Zip 26.02 + Dart 后端；RAR/RAR5、ZIP/ZIPX、7z、TAR、GZ/BZ2/XZ/ZST、CAB、ISO/WIM/DMG 等列表/解压；路径、链接、空间、大小、压缩比、冲突、暂存、取消保护 | Windows 主路径完成 |
 | 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
 | 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
-| 开发工具 | 左侧只保留计算器、数据库、远程、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | Windows 主路径完成；MySQL/远程融合增强待做 |
+| 开发工具 | 左侧只保留计算器、数据库、串口、远程、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | SQLite/PostgreSQL/MySQL/MariaDB 与串口主路径完成；远程融合增强待做 |
 | 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体支持持久会话、上下文追问、Markdown、复制、新任务、进度和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
 
 ## 3. 文件融合与系统入口
@@ -35,20 +35,26 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 
 支持十/十六/八/二进制字面量，括号、算术、按位、移位，8/16/32/64/128 位和有符号/无符号解释；输入后直接得到多进制结果。
 
-### 4.2 SQLite 与 PostgreSQL 数据库管理器
+### 4.2 SQLite 与远程数据库管理器
 
 按 SQLite Magic 和常见扩展路由；默认只读，`query_only`、`trusted_schema=OFF`、DQS 关闭；表/视图、100 行分页、最多 500 行查询结果、BLOB/NULL 显示。每个请求使用短生命周期 Isolate，8 秒超时可终止；预编译语句确认只读后才执行。
 
-PostgreSQL 已接入 TLS/非 TLS 连接、对象列表、100 行分页和最多 500 行只读查询；连接资料自动进入最近记录，密码直接写入 Windows Credential Manager/macOS Keychain，普通设置不含密码。Windows 已执行临时凭据写入、读取和删除真实闭环。MySQL/MariaDB 尚未接入，不显示伪入口。
+PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100 行分页和最多 500 行只读查询；数据库类型切换会给出主流默认端口/用户/数据库。连接资料自动进入最近记录，密码直接写入 Windows Credential Manager/macOS Keychain，普通设置不含密码；记录可一键删除并同时删除系统凭据。每次远程操作在短生命周期 Isolate 中运行，15 秒超时，可停止并立即杀掉工作 Isolate/网络连接。Windows 已执行临时凭据写入、读取和删除真实闭环；本机没有可用 MySQL/MariaDB 服务，因此成功连接仍待真实服务器补证，当前以驱动参数、真实 TCP 握手阻塞/取消和 Widget 会话覆盖。
 
-### 4.3 源码、远程、API 与 Git
+### 4.3 串口调试
+
+串口工作区按“端口、波特率、打开”三项完成首屏主操作，数据位、校验位、停止位和流控折叠在高级设置。支持可编辑波特率、文本/HEX 收发、CR/LF/CRLF、发送历史、带方向时间戳的 RX/TX 日志、清空和后台保存；参数跨重启保留但不会静默打开设备。
+
+端口枚举和完整会话由独立 Isolate 持有 `libserialport` 原生句柄，UI 以 100ms 批次接收数据，日志限制为 2MiB/2000 条。关闭先立即恢复界面，再在后台释放句柄；原生枚举、无效端口失败、UI 计时器响应、收发/关闭和工作区销毁均有自动测试。本机没有枚举到物理 COM 设备，因此真实 USB 串口回环仍待硬件补证。
+
+### 4.4 源码、远程、API 与 Git
 
 - 常用源码、Shell、配置、特殊文件名和 shebang 自动识别；保留 BOM/编码，保存前复核外部修改并原子替换。
 - SSH/SFTP 使用系统 OpenSSH，参数数组直传且不经过 Shell；严格主机密钥询问、密钥/Agent 认证、不保存密码；端口转发只绑定 `127.0.0.1`。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
 
-### 4.4 微工具融合与 DeepSeek 智能体
+### 4.5 微工具融合与 DeepSeek 智能体
 
 Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
 
@@ -56,11 +62,11 @@ DeepSeek 从开发工具左侧迁入模型页，界面采用 Codex 风格的工�
 
 参数合同、流式输出、完成恢复和取消适配的模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后增加可续接会话和结构化审批。
 
-### 4.5 文件搜索与线程隔离
+### 4.6 文件搜索与线程隔离
 
 文件搜索默认只显示目录、关键词、文件名/内容和一个搜索按钮；类型、最小大小、修改时间、隐藏项和递归选项收进“筛选”。内容搜索单文件最多读取 8 MiB，不跟随符号链接，最多返回 500 项。结果可直接在文件管理器定位、复制路径，或一键进入文件哈希并自动计算 SHA-256。
 
-清理目标发现、清理扫描/删除、文件搜索、文件哈希、重复文件枚举/哈希/删除、批量重命名规划/执行、纯 Dart 压缩包读取/解码/创建均在独立 Isolate 或独立原生进程运行。UI 只接收约 100 ms 一次的进度快照；工作区销毁立即转发取消，不等待磁盘任务才能释放界面。数据库查询、图片解码、OCR/VAD 原本已使用短生命周期 Isolate，7-Zip、Git、SSH、DeepSeek 使用独立进程。
+清理目标发现、清理扫描/删除、文件搜索、文件哈希、重复文件枚举/哈希/删除、批量重命名规划/执行、纯 Dart 压缩包读取/解码/创建均在独立 Isolate 或独立原生进程运行。UI 只接收约 100 ms 一次的进度快照；工作区销毁立即转发取消，不等待磁盘任务才能释放界面。SQLite/远程数据库、串口会话、图片解码、OCR/VAD 使用短生命周期 Isolate，7-Zip、Git、SSH、DeepSeek 使用独立进程。
 
 ## 5. 图片、OCR 与二进制
 
@@ -85,11 +91,11 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 
 - `dart format lib test`：已执行。
 - `flutter analyze`：`No issues found`。
-- `flutter test --reporter expanded`：258/258 通过。
-- `flutter build windows --release`：成功。
-- EXE 文件/产品版本：`1.7.0+9`。
+- `flutter test --reporter expanded`：271/271 通过。
+- `flutter build windows --release`：成功（78.8 秒）。
+- EXE 文件/产品版本：`1.8.0+10`。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
-- Release 产物：`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 和 5 项内置模型资源均存在。
+- Release 产物：`libserialport_plus.dll`、`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 与内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。
 - 注册表实查：文档/压缩/图片/SQLite ProgID、任意文件右键、`.rar`、`.sqlite` 专用命令均指向本次 Release EXE。
 
@@ -98,7 +104,8 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 1. macOS 需要在 Apple Silicon/Intel 机器运行 `flutter build macos --release`，验证 Swift 编译、Open With、废纸篓、系统菜单、图片、压缩和 SQLite。
 2. macOS PP-OCRv6 的 ONNX Runtime 动态桥接和 arm64/x64 原生库尚未完成。
 3. HEIF/AVIF/JXL/RAW 的一致内置解码、ICC 色彩管理和动画播放仍需专门后端。
-4. MySQL/MariaDB、数据库写会话、API 历史脱敏持久化、Git 写操作辅助尚未进入本版。
-5. DeepSeek Harness 官方 npm 包在当前网络未完成真实下载和启动；macOS 实启、ACP 原生会话均待验证。
-6. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
-7. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
+4. MySQL/MariaDB 成功连接尚缺本机真实服务证据；数据库写会话、API 历史脱敏持久化、Git 写操作辅助尚未进入本版。
+5. 串口原生资产与失败路径已验证，但当前机器没有物理 COM 设备；Windows/macOS 真实 USB 串口回环仍未完成。
+6. DeepSeek Harness 官方 npm 包在当前网络未完成真实下载和启动；macOS 实启、ACP 原生会话均待验证。
+7. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
+8. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。

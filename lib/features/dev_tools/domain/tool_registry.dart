@@ -65,6 +65,12 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     description: '使用系统 OpenSSH 连接终端、传输文件和建立本地端口转发。',
   ),
   const ToolSpec(
+    id: 'serial_port',
+    name: '串口调试',
+    group: ToolGroups.remote,
+    description: '打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。',
+  ),
+  const ToolSpec(
     id: 'api_workspace',
     name: 'API 调试',
     group: ToolGroups.network,
@@ -323,6 +329,7 @@ const Set<String> _standaloneToolIds = <String>{
   'programmer_calculator',
   'database_manager',
   'remote_workspace',
+  'serial_port',
   'api_workspace',
   'git_workspace',
   'github_diagnostics',

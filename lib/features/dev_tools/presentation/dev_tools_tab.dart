@@ -12,6 +12,7 @@ import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
 import 'programmer_calculator_workspace.dart';
 import 'remote_workspace.dart';
+import 'serial_port_workspace.dart';
 import 'utility_collection_workspace.dart';
 
 /// T4 开发工具 Tab。
@@ -34,6 +35,10 @@ class DevToolsTab extends StatefulWidget {
     this.initialRemoteDatabaseProfiles = const <String>[],
     this.onRemoteDatabaseProfilesChanged,
     this.remoteStartSession,
+    this.initialSerialPortSettings,
+    this.onSerialPortSettingsChanged,
+    this.serialPortLister,
+    this.serialPortOpener,
     this.apiExecute,
     this.gitInspect,
     this.gitPickDirectory,
@@ -54,6 +59,10 @@ class DevToolsTab extends StatefulWidget {
   final Future<void> Function(List<String> profiles)?
   onRemoteDatabaseProfilesChanged;
   final RemoteSessionStarter? remoteStartSession;
+  final String? initialSerialPortSettings;
+  final Future<void> Function(String settings)? onSerialPortSettingsChanged;
+  final SerialPortLister? serialPortLister;
+  final SerialPortOpener? serialPortOpener;
   final ApiExecutor? apiExecute;
   final GitInspector? gitInspect;
   final GitDirectoryPicker? gitPickDirectory;
@@ -229,6 +238,14 @@ class _DevToolsTabState extends State<DevToolsTab> {
     }
     if (tool.id == 'remote_workspace') {
       return RemoteWorkspace(startSession: widget.remoteStartSession);
+    }
+    if (tool.id == 'serial_port') {
+      return SerialPortWorkspace(
+        initialSettings: widget.initialSerialPortSettings,
+        onSettingsChanged: widget.onSerialPortSettingsChanged,
+        listPorts: widget.serialPortLister,
+        openSession: widget.serialPortOpener,
+      );
     }
     if (tool.id == 'api_workspace') {
       return ApiWorkspace(execute: widget.apiExecute);

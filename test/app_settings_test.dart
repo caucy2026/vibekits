@@ -29,6 +29,7 @@ void main() {
       cleanupCompletedRuns: 7,
       recentDocumentPaths: <String>[r'D:\Docs\one.md', r'D:\Docs\two.log'],
       remoteDatabaseProfiles: <String>['{"id":"postgres-1"}'],
+      serialPortSettings: '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
       deepSeekHarnessWorkspace: r'D:\Work\demo',
     );
 

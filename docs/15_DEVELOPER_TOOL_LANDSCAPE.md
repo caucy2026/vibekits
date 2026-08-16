@@ -1,7 +1,7 @@
 # 程序员工具版图与移植决策
 
-版本：0.2
-更新日期：2026-08-16
+版本：0.3
+更新日期：2026-08-17
 
 ## 1. 信息架构决策
 
@@ -11,6 +11,7 @@
 |---|---|---|---|---|
 | 计算 | 程序员计算器 | 进制、位宽、位运算、多进制结果 | Windows Calculator Programmer mode | 自研解析器和测试，不移植 UI |
 | 数据库 | 数据库管理器 | SQLite 表/视图、分页、SQL、导入导出 | SQLite、DB Browser for SQLite、Outerbase Studio | 使用 SQLite 兼容库；只借鉴任务流，不复制 GPL UI/代码 |
+| 硬件 | 串口调试 | 端口、完整帧参数、文本/HEX 收发、日志 | PuTTY/Arduino Serial Monitor 的通用操作习惯、libserialport | 使用跨平台原生库；会话放工作 Isolate，不复制整套第三方 UI |
 | 源码 | 轻量源码工作区 | 常用语言、Shell、配置、查找、编辑、原子保存 | Zed、Geany、EditorConfig、语言标准 | 自研轻量编辑体验；不试图复制完整 IDE |
 | 远程 | 远程连接 | SSH、SFTP、端口转发、会话资料 | OpenSSH、Tabby | 优先调用系统 OpenSSH；不自行实现密码学协议 |
 | API | API 调试 | HTTP 方法、头、体、认证、响应查看 | HTTP 标准、Bruno/HTTPie | 自研有界客户端；本地保存且敏感值脱敏 |
@@ -47,12 +48,13 @@
 | 批次 | 内容 | 状态 |
 |---|---|---|
 | D1 | Windows 风格程序员计算器 | 主路径与 Widget 测试已闭环 |
-| D2 | SQLite + PostgreSQL 数据库管理器 | PostgreSQL 已实现；MySQL/写会话待接入 |
+| D2 | SQLite + PostgreSQL/MySQL/MariaDB 数据库管理器 | 四类只读主路径已实现；MySQL/MariaDB 真实服务与写会话待补 |
 | D3 | 常用语言/Shell 路由与轻量源码工作区 | 主路径已实现 |
 | D4 | SSH/SFTP/端口转发 | 基础主路径已实现，统一会话体验待增强 |
 | D5 | HTTP/API、Git、GitHub 网络诊断 | 主路径已实现 |
 | D6 | 编码/格式/时间/正则/网络微工具收敛 | “转换与检查”右侧分类 Tab 与搜索定位已实现 |
 | D7 | DeepSeek Harness 官方适配 | 模型页应用内持续会话、有界上下文、环境检查、Markdown/复制、新任务、跨 OCR 保留、流式结果和停止已实现；npm 实启待网络恢复 |
 | D8 | 文件搜索与响应性 | 文件名/内容/类型/大小/时间搜索，默认极简、筛选折叠；定位/复制/哈希融合；磁盘扫描和哈希迁到独立 Isolate |
+| D9 | 串口调试 | 极简打开流程、完整帧格式、文本/HEX、发送历史、日志保存；原生会话独立 Isolate；真实设备回环待补 |
 
 每个批次完成后更新本文件的固定上游、许可证和实际采用/拒绝原因，并在 `09_DEVELOPMENT_LOG.md` 记录验证命令与结果。

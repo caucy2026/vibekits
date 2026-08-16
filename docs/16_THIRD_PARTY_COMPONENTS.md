@@ -1,8 +1,8 @@
 # 第三方组件、模型与供应链记录
 
-更新日期：2026-08-16
+更新日期：2026-08-17
 
-适用版本：`1.7.0+9`
+适用版本：`1.8.0+10`
 
 ## 发布时直接使用的关键组件
 
@@ -14,8 +14,10 @@
 | `sqlite3` | 3.5.1 | SQLite 只读数据库管理和 Windows/macOS 原生资产 | MIT | pub.dev 锁文件 SHA-256 `64b2c63c...478a`；使用 Dart native-asset hooks |
 | `image` | 4.9.1 | 图片格式探测、首帧解码、方向固化和 PNG 预览 | MIT | pub.dev 锁文件 SHA-256 `6300175e...c52` |
 | `postgres` | 3.5.12 | PostgreSQL TLS 连接、对象浏览、分页和只读查询 | BSD-3-Clause | pub.dev SHA-256 `123de5cb...299b`；普通设置只保存脱敏连接资料 |
+| `mysql_dart` | 3.0.0 | MySQL/MariaDB TLS、对象浏览、分页和只读查询 | MIT | pub.dev 锁文件 SHA-256 `7796f958...464ba`；每次操作在可终止 Isolate 中建立短连接 |
+| `libserialport_plus` | 1.0.1 | Windows/macOS 串口枚举、帧参数、读写和关闭 | Dart 封装 MIT；原生 `libserialport` LGPL-3.0-or-later | pub.dev 锁文件 SHA-256 `b6e55f52...31902`；原生动态库由 native-assets 构建并随 Release 分发 |
 
-数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。
+数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。串口封装使用 MIT 许可证，但发布 NOTICE 必须同时保留底层 `libserialport` 的 LGPL-3.0-or-later 声明和对应源代码获取方式。
 
 完整 Dart/Flutter 直接与传递依赖版本、来源和包哈希以 `pubspec.lock` 为准；发布前不得绕过锁文件临时升级。
 
