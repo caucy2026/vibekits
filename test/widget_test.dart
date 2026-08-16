@@ -23,7 +23,7 @@ void main() {
 
     for (final String title in <String>[
       '解压缩',
-      'Windows 清理',
+      '系统清理',
       '文档阅读',
       '开发工具',
       '本地模型',
@@ -41,7 +41,7 @@ void main() {
   testWidgets('点击 Tab 切换页面', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
-    await tester.tap(find.text('Windows 清理'));
+    await tester.tap(find.text('系统清理'));
     await tester.pumpAndSettle();
 
     expect(find.text('开始扫描'), findsOneWidget);
@@ -96,6 +96,8 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
     expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
     expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
+    expect(find.textContaining('v1.6.1+8'), findsWidgets);
+    expect(find.text('任务 0'), findsNothing);
   });
 
   testWidgets('1024 宽窗口自动使用紧凑顶部导航', (WidgetTester tester) async {
@@ -108,6 +110,25 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsNothing);
     expect(find.byKey(const Key('primary-navigation-compact')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('最小窗口逐项切换五个工作区不溢出', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1024, 700);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const VibekitsApp());
+
+    for (final String title in <String>[
+      '系统清理',
+      '文档阅读',
+      '开发工具',
+      '本地模型',
+      '解压缩',
+    ]) {
+      await tester.tap(find.text(title).first);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: '$title 在最小窗口应可操作');
+    }
   });
 
   testWidgets('深色主题可渲染完整主界面', (WidgetTester tester) async {
@@ -388,6 +409,47 @@ void main() {
     expect(find.byKey(const Key('agent-pick-workspace')), findsOneWidget);
   });
 
+  testWidgets('智能体切换到 OCR 再返回时保留当前会话', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_agent_keepalive',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final _PersistentAgentHandle handle = _PersistentAgentHandle();
+    addTearDown(handle.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LocalModelsTab(
+          directory: sandbox.path,
+          initialHarnessWorkspace: sandbox.path,
+          modelLister: (_) async => const <ModelInfo>[],
+          harnessCheckEnvironment: () async => const HarnessEnvironmentReport(
+            ready: true,
+            nodeVersion: 'v24.18.0',
+            npxVersion: '11.16.0',
+            message: '运行环境已就绪',
+          ),
+          harnessRunAgent: (_) async => handle,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek 智能体'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-composer')), '审查项目');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    handle.add('会话结果会保留');
+    await tester.pump();
+    await handle.complete();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('截图 OCR'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek 智能体'));
+    await tester.pumpAndSettle();
+    expect(find.text('会话结果会保留'), findsOneWidget);
+  });
+
   testWidgets('拖入图片直接进入本地 OCR 工作区并显示预览', (WidgetTester tester) async {
     final StreamController<List<String>> drops =
         StreamController<List<String>>.broadcast();
@@ -555,4 +617,32 @@ void main() {
     expect(find.text('截图自动识别成功'), findsOneWidget);
     expect(find.byKey(const Key('ocr-image-preview')), findsOneWidget);
   });
+}
+
+class _PersistentAgentHandle implements HarnessAgentHandle {
+  final StreamController<String> _output = StreamController<String>();
+  final Completer<int> _exitCode = Completer<int>();
+  bool _running = true;
+
+  void add(String value) => _output.add(value);
+
+  Future<void> complete() async {
+    if (!_running) return;
+    _running = false;
+    _exitCode.complete(0);
+  }
+
+  Future<void> dispose() => _output.close();
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  Stream<String> get output => _output.stream;
+
+  @override
+  bool get running => _running;
+
+  @override
+  Future<void> stop() => complete();
 }

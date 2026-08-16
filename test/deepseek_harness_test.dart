@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
@@ -43,9 +44,16 @@ void main() {
       'vibekits_agent_ui_',
     );
     addTearDown(() => workspace.deleteSync(recursive: true));
-    final _FakeAgentHandle handle = _FakeAgentHandle();
-    addTearDown(handle.dispose);
-    HarnessAgentRequest? launched;
+    final List<_FakeAgentHandle> handles = <_FakeAgentHandle>[
+      _FakeAgentHandle(),
+      _FakeAgentHandle(),
+    ];
+    addTearDown(() async {
+      for (final _FakeAgentHandle handle in handles) {
+        await handle.dispose();
+      }
+    });
+    final List<HarnessAgentRequest> launched = <HarnessAgentRequest>[];
     String? savedWorkspace;
     await tester.pumpWidget(
       MaterialApp(
@@ -59,8 +67,8 @@ void main() {
             ),
             pickDirectory: () async => workspace.path,
             runAgent: (HarnessAgentRequest request) async {
-              launched = request;
-              return handle;
+              launched.add(request);
+              return handles[launched.length - 1];
             },
             onWorkspaceChanged: (String path) async {
               savedWorkspace = path;
@@ -76,15 +84,70 @@ void main() {
     await tester.enterText(find.byKey(const Key('agent-composer')), '修复失败的测试');
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
-    expect(launched?.workspace, workspace.path);
-    expect(launched?.prompt, '修复失败的测试');
+    expect(launched.single.workspace, workspace.path);
+    expect(launched.single.prompt, '修复失败的测试');
     expect(find.byKey(const Key('agent-stop')), findsOneWidget);
-    handle.add('已定位并修复测试。');
+    handles.first.add('已定位并修复测试。');
     await tester.pump();
     expect(find.text('已定位并修复测试。'), findsOneWidget);
-    await handle.complete(0);
+    await handles.first.complete(0);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agent-send')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '再检查一次改动');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(launched, hasLength(2));
+    expect(launched.last.prompt, contains('修复失败的测试'));
+    expect(launched.last.prompt, contains('已定位并修复测试'));
+    expect(launched.last.prompt, contains('再检查一次改动'));
+    handles.last.add('## 复查结果\n\n全部通过。');
+    await tester.pump();
+    expect(find.text('复查结果'), findsOneWidget);
+    await handles.last.complete(0);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('agent-new-task')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '新任务'));
+    await tester.pumpAndSettle();
+    expect(find.text('把结果交给 DeepSeek'), findsOneWidget);
+    expect(find.text('已定位并修复测试。'), findsNothing);
+  });
+
+  testWidgets('智能体运行中可停止并回到可输入状态', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_agent_stop_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final _FakeAgentHandle handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '运行环境已就绪',
+            ),
+            runAgent: (_) async => handle,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-composer')), '执行长任务');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    expect(find.byKey(const Key('agent-progress')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-stop')));
+    await tester.pumpAndSettle();
+    expect(handle.running, isFalse);
+    expect(find.text('任务已停止。'), findsOneWidget);
+    expect(find.byKey(const Key('agent-progress')), findsNothing);
   });
 }
 

@@ -214,3 +214,10 @@
 - DeepSeek Harness 从浏览器控制台入口升级为应用内 Codex 风格任务流：固定官方 RC5 headless profile，选择并持久化项目目录，底部输入任务，stdout/stderr 流式展示，进程结束立即恢复输入，运行中可停止完整进程树。API 密钥仍由 Harness 官方配置管理。
 - 版本升级为 `1.6.0+7`。核心 Widget 回归覆盖左侧收敛/搜索定位、截图一次即 OCR、智能体参数/流式输出/结束恢复；Analyze 无问题，235/235 全量测试通过，Windows Release 构建成功，EXE 携带 README 隐藏启动 5 秒保持运行。双远端备份结果见本版验收记录。
 - 实现提交 `593e6a9` 已同步本地 `backup` 与 GitHub `cloud`；最终发布记录提交和 `v1.6.0` 标签在同一批次继续同步。
+
+## 2026-08-16 · v1.6.1 全界面复核与 Codex 风格持续会话
+
+- 逐项复核解压缩、系统清理、文档阅读、开发工具和本地模型五个工作区，补充 1024×700 最小窗口逐页切换回归；移除没有真实任务价值的“任务 0”入口，统一“系统清理”命名，并把状态文案改为“文件默认本机处理”，避免把联网 API/智能体误写为全离线。
+- DeepSeek 智能体按成熟桌面代理习惯升级为持续会话：空状态任务建议、工作区和环境状态、新任务、`Enter` 发送/`Shift+Enter` 换行、流式进度、停止、Markdown 回复、复制和耗时/退出状态。后续任务携带有界历史上下文，切换到 OCR 再返回仍保留会话和运行状态。
+- 压缩空状态同步真实后端能力，明确展示 RAR、ZIP、7z、TAR、ISO、WIM、DMG；修复应用内版本显示与 `pubspec.yaml` 脱节，正式版本更新为 `1.6.1+8`。
+- `flutter analyze` 无问题；DeepSeek/主界面定向回归 22/22 通过；全量 `flutter test --reporter expanded` 238/238 通过。Windows 正式 Release、真实启动、产物哈希和 Git 双远端结果见 `acceptance/V1_6_1_UI_REVIEW_CODEX_RELEASE_2026-08-16.md`。

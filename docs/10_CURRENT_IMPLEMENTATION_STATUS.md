@@ -2,13 +2,13 @@
 
 更新日期：2026-08-16
 
-当前版本：`1.6.0+7`
+当前版本：`1.6.1+8`
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批把碎片化微工具收进右侧分类 Tab，并把模型页收敛为“截图 OCR / DeepSeek 智能体”。`flutter analyze` 无问题，235/235 自动测试通过，Windows Release 构建与 5 秒真实启动通过。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批完成五个主工作区的操作界面复核，并把 DeepSeek 智能体升级为可持续追问的 Codex 风格会话工作区。`flutter analyze` 无问题，238/238 自动测试通过，Windows Release 构建与真实启动纳入本版发布验收。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
 
 ## 2. 五个主工作区
 
@@ -18,7 +18,7 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
 | 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
 | 开发工具 | 左侧只保留计算器、数据库、远程、API、Git、文件哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | Windows 主路径完成；MySQL/远程融合增强待做 |
-| 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体在应用内选择工作区、输入任务、流式输出和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
+| 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体支持持久会话、上下文追问、Markdown、复制、新任务、进度和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
 
 ## 3. 文件融合与系统入口
 
@@ -52,7 +52,7 @@ PostgreSQL 已接入 TLS/非 TLS 连接、对象列表、100 行分页和最多 
 
 Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
 
-DeepSeek 从开发工具左侧迁入模型页，界面采用类似 Codex 的工作区 + 对话流 + 底部任务输入。固定官方 `@deepseek-ai/dsh@0.1.0-rc.5 --profile headless`，实时合并 stdout/stderr，完成后恢复输入，运行中可终止完整进程树；工作区跨重启保存。API 密钥沿用 Harness 官方配置，不进入 Vibekits。
+DeepSeek 从开发工具左侧迁入模型页，界面采用 Codex 风格的工作区、持续对话和底部任务输入。首轮直接发送任务，后续自动携带有界会话上下文；回复支持 Markdown 与复制。运行进度固定在输入框上方，任务期间仍可编辑下一条要求，可随时停止或开始新任务；切换 OCR 后返回不会丢失当前会话。`Enter` 发送、`Shift+Enter` 换行。固定官方 `@deepseek-ai/dsh@0.1.0-rc.5 --profile headless`，实时合并 stdout/stderr，工作区跨重启保存。API 密钥沿用 Harness 官方配置，不进入 Vibekits。
 
 参数合同、流式输出、完成恢复和取消适配的模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后增加可续接会话和结构化审批。
 
@@ -79,9 +79,9 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 
 - `dart format lib test`：已执行。
 - `flutter analyze`：`No issues found`。
-- `flutter test --reporter expanded`：235/235 通过。
+- `flutter test --reporter expanded`：238/238 通过。
 - `flutter build windows --release`：成功。
-- EXE 文件/产品版本：`1.6.0+7`。
+- EXE 文件/产品版本：`1.6.1+8`。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
 - Release 产物：`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 和 5 项内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。

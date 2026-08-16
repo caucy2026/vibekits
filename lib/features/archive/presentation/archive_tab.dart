@@ -601,7 +601,7 @@ class _ArchiveTabState extends State<ArchiveTab> {
     if (listing == null) {
       return Center(
         child: Text(
-          '打开一个压缩包查看内容\n支持 zip / tar / tar.gz / gz / bz2 / xz / 7z',
+          '拖入或打开压缩包即可查看内容\n支持 RAR / ZIP / 7z / TAR / ISO / WIM / DMG 等常用格式',
           textAlign: TextAlign.center,
           style: TextStyle(color: context.vibe.muted),
         ),

@@ -102,6 +102,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   PpOcrResult? _ocrResult;
   bool _runningOcr = false;
   bool _capturingScreenshot = false;
+  bool _agentOpened = false;
+  bool _agentRunning = false;
   bool _autoOcrStarted = false;
   Uint8List? _portablePreview;
   bool _loadingPortablePreview = false;
@@ -559,21 +561,34 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
               SegmentedButton<_ModelWorkspace>(
                 key: const Key('model-workspace-tabs'),
                 showSelectedIcon: false,
-                segments: const <ButtonSegment<_ModelWorkspace>>[
-                  ButtonSegment<_ModelWorkspace>(
+                segments: <ButtonSegment<_ModelWorkspace>>[
+                  const ButtonSegment<_ModelWorkspace>(
                     value: _ModelWorkspace.ocr,
                     icon: Icon(Icons.document_scanner_outlined, size: 17),
                     label: Text('截图 OCR'),
                   ),
                   ButtonSegment<_ModelWorkspace>(
                     value: _ModelWorkspace.agent,
-                    icon: Icon(Icons.terminal, size: 17),
-                    label: Text('DeepSeek 智能体'),
+                    icon: const Icon(Icons.terminal, size: 17),
+                    label: Badge(
+                      isLabelVisible: _agentRunning,
+                      smallSize: 7,
+                      child: const Padding(
+                        padding: EdgeInsets.only(right: 3),
+                        child: Text('DeepSeek 智能体'),
+                      ),
+                    ),
                   ),
                 ],
                 selected: <_ModelWorkspace>{_workspace},
-                onSelectionChanged: (Set<_ModelWorkspace> selected) =>
-                    setState(() => _workspace = selected.first),
+                onSelectionChanged: (Set<_ModelWorkspace> selected) {
+                  setState(() {
+                    _workspace = selected.first;
+                    if (_workspace == _ModelWorkspace.agent) {
+                      _agentOpened = true;
+                    }
+                  });
+                },
               ),
               const Spacer(),
               if (_workspace == _ModelWorkspace.ocr)
@@ -606,15 +621,25 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
           ),
         const Divider(height: 1),
         Expanded(
-          child: _workspace == _ModelWorkspace.ocr
-              ? _buildOcrWorkspace()
-              : DeepSeekAgentWorkspace(
+          child: IndexedStack(
+            index: _workspace == _ModelWorkspace.ocr ? 0 : 1,
+            children: <Widget>[
+              _buildOcrWorkspace(),
+              if (_agentOpened)
+                DeepSeekAgentWorkspace(
                   initialWorkspace: widget.initialHarnessWorkspace,
                   onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
+                  onRunningChanged: (bool running) {
+                    if (mounted) setState(() => _agentRunning = running);
+                  },
                   checkEnvironment: widget.harnessCheckEnvironment,
                   runAgent: widget.harnessRunAgent,
                   pickDirectory: widget.harnessPickDirectory,
-                ),
+                )
+              else
+                const SizedBox.shrink(),
+            ],
+          ),
         ),
       ],
     );

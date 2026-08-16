@@ -40,7 +40,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   static const List<String> _tabTitles = <String>[
     '解压缩',
-    'Windows 清理',
+    '系统清理',
     '文档阅读',
     '开发工具',
     '本地模型',
@@ -58,8 +58,8 @@ class _MainShellState extends State<MainShell> {
     '安全查看、创建与提取压缩文件',
     '扫描可清理空间并生成可核对报告',
     '快速查看文本、结构化数据与二进制文件',
-    '常用编码、格式化和开发辅助能力',
-    '管理离线模型、校验文件完整性',
+    '独立开发工作区与转换检查工具',
+    '截图 OCR 与 DeepSeek 智能体',
   ];
 
   int _selectedIndex = 0;
@@ -453,7 +453,6 @@ class _MainShellState extends State<MainShell> {
               },
             ),
           ),
-          endDrawer: _buildTaskPanel(context),
         ),
       ),
     );
@@ -533,7 +532,7 @@ class _MainShellState extends State<MainShell> {
           if (!compact) ...<Widget>[
             _StatusPill(
               icon: Icons.shield_outlined,
-              label: '本地运行',
+              label: '隐私优先',
               color: context.vibe.success,
             ),
             const SizedBox(width: 8),
@@ -550,14 +549,6 @@ class _MainShellState extends State<MainShell> {
             ),
             const SizedBox(width: 4),
           ],
-          Builder(
-            builder: (BuildContext drawerContext) => OutlinedButton.icon(
-              onPressed: () => Scaffold.of(drawerContext).openEndDrawer(),
-              icon: const Icon(Icons.task_alt_outlined, size: 17),
-              label: const Text('任务 0'),
-            ),
-          ),
-          const SizedBox(width: 6),
           IconButton(
             tooltip: '设置 (Ctrl+,)',
             onPressed: _openSettings,
@@ -758,67 +749,10 @@ class _MainShellState extends State<MainShell> {
           Text('系统就绪', style: Theme.of(context).textTheme.bodySmall),
           const Spacer(),
           Text(
-            '${AppVersion.display} · 本地模式',
+            '${AppVersion.display} · 文件默认本机处理',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildTaskPanel(BuildContext context) {
-    return Drawer(
-      width: 360,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(
-                    Icons.task_alt_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Text('后台任务', style: Theme.of(context).textTheme.titleLarge),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '长时间任务会集中显示在这里',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 20),
-              Divider(color: context.vibe.border),
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(
-                        Icons.inbox_outlined,
-                        size: 36,
-                        color: context.vibe.muted,
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '暂无任务',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '开始操作后，可在此查看进度',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
