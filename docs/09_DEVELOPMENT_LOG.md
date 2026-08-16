@@ -213,3 +213,4 @@
 - 新增 Windows/macOS 原生区域截图适配。Windows 清空剪贴板后打开系统区域截图并等待新图片，macOS 使用 `screencapture -i`；完成后自动预览并立即进入现有 PP-OCRv6 tiny 推理，取消不复用旧截图。
 - DeepSeek Harness 从浏览器控制台入口升级为应用内 Codex 风格任务流：固定官方 RC5 headless profile，选择并持久化项目目录，底部输入任务，stdout/stderr 流式展示，进程结束立即恢复输入，运行中可停止完整进程树。API 密钥仍由 Harness 官方配置管理。
 - 版本升级为 `1.6.0+7`。核心 Widget 回归覆盖左侧收敛/搜索定位、截图一次即 OCR、智能体参数/流式输出/结束恢复；Analyze 无问题，235/235 全量测试通过，Windows Release 构建成功，EXE 携带 README 隐藏启动 5 秒保持运行。双远端备份结果见本版验收记录。
+- 实现提交 `593e6a9` 已同步本地 `backup` 与 GitHub `cloud`；最终发布记录提交和 `v1.6.0` 标签在同一批次继续同步。

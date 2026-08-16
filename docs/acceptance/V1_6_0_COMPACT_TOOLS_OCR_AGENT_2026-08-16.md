@@ -32,4 +32,5 @@
 
 ## 备份
 
-- Git 提交、`v1.6.0` 标签、本地 `backup` 与 GitHub `cloud` 远端同步：提交后补记。
+- 实现提交：`593e6a9`（`feat: compact tools and add OCR agent workspaces`）。
+- `main` 已同步到本地 `backup` 和 GitHub `cloud`；本验收记录更新后创建 `v1.6.0` 标签，并再次同步最终发布提交与标签。
