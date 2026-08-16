@@ -2,7 +2,7 @@
 
 更新日期：2026-08-16
 
-适用版本：`1.4.0+5`
+适用版本：`1.5.0+6`
 
 ## 发布时直接使用的关键组件
 
@@ -13,6 +13,9 @@
 | `sherpa_onnx` | 1.13.5 | Silero VAD 与 Windows ONNX Runtime 分发 | Apache-2.0 | pub.dev 锁文件 SHA-256 `94f9fc85...d31b` |
 | `sqlite3` | 3.5.1 | SQLite 只读数据库管理和 Windows/macOS 原生资产 | MIT | pub.dev 锁文件 SHA-256 `64b2c63c...478a`；使用 Dart native-asset hooks |
 | `image` | 4.9.1 | 图片格式探测、首帧解码、方向固化和 PNG 预览 | MIT | pub.dev 锁文件 SHA-256 `6300175e...c52` |
+| `postgres` | 3.5.12 | PostgreSQL TLS 连接、对象浏览、分页和只读查询 | BSD-3-Clause | pub.dev SHA-256 `123de5cb...299b`；普通设置只保存脱敏连接资料 |
+
+数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。
 
 完整 Dart/Flutter 直接与传递依赖版本、来源和包哈希以 `pubspec.lock` 为准；发布前不得绕过锁文件临时升级。
 
@@ -26,7 +29,15 @@
 | `ppocrv6_tiny_rec.onnx` | 4,462,639 | `9ef676d6ed3c88256a2d92c640c44f25b0c40947e111b14b8be8f594091563e6` |
 | `ppocrv6_tiny_rec.yml` | 55,571 | `66170210bad538e83fff3c4a3867e547d6bf20b50d64b20347c4b913f3034ea1` |
 
-下载写入临时文件；三项全部满足大小和 SHA-256 后才事务安装，任一失败不替换现有可用包。
+三项作为应用内置资源由用户主动安装；安装服务写入隔离临时目录，逐项核对完整 SHA-256，全部通过后才事务替换，任一失败清理暂存且不替换现有可用包。
+
+## DeepSeek Harness 可选运行时
+
+- 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；当前官方 CLI 版本：`@deepseek-ai/dsh@0.1.0-rc.5`。
+- 状态：官方明确标注 Developer Preview，存在破坏性变更风险；Vibekits 只保留可替换进程适配层，不把其源码或依赖打入安装包。
+- 首次使用由用户显式启动 `npx --yes @deepseek-ai/dsh@0.1.0-rc.5 web --port 3080`；需要 Node.js 22.19+ 或 24+。工作目录限定为用户选定项目，控制台绑定 `127.0.0.1`。
+- DeepSeek/API 及自定义供应商密钥由 Harness 官方控制台管理，Vibekits 不读取、不复制、不写日志。代理具备文件与命令能力，启动页明确要求 Git 备份和逐项审批。
+- 当前机器的官方包帮助探测在下载阶段超过 2 分钟无输出后人工取消；这不是已通过的实启证据。发布前还需记录 npm 包完整性、Windows/macOS 真启动和停止后无残留进程。
 
 ## 开源借鉴边界
 

@@ -4,12 +4,14 @@ class CuratedModelArtifact {
     required this.sourceUrl,
     required this.sha256,
     required this.downloadBytes,
+    this.bundleAssetPath,
   });
 
   final String fileName;
   final String sourceUrl;
   final String sha256;
   final int downloadBytes;
+  final String? bundleAssetPath;
 }
 
 class CuratedModelBundle {
@@ -57,6 +59,7 @@ const CuratedModelBundle ppOcrV6TinyBundle = CuratedModelBundle(
       sha256:
           '193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8',
       downloadBytes: 1780590,
+      bundleAssetPath: 'test_data/models/ppocrv6_tiny/det.onnx',
     ),
     CuratedModelArtifact(
       fileName: 'ppocrv6_tiny_rec.onnx',
@@ -66,6 +69,7 @@ const CuratedModelBundle ppOcrV6TinyBundle = CuratedModelBundle(
       sha256:
           '9ef676d6ed3c88256a2d92c640c44f25b0c40947e111b14b8be8f594091563e6',
       downloadBytes: 4462639,
+      bundleAssetPath: 'test_data/models/ppocrv6_tiny/rec.onnx',
     ),
     CuratedModelArtifact(
       fileName: 'ppocrv6_tiny_rec.yml',
@@ -75,6 +79,7 @@ const CuratedModelBundle ppOcrV6TinyBundle = CuratedModelBundle(
       sha256:
           '66170210bad538e83fff3c4a3867e547d6bf20b50d64b20347c4b913f3034ea1',
       downloadBytes: 55571,
+      bundleAssetPath: 'test_data/models/ppocrv6_tiny/rec.yml',
     ),
   ],
 );

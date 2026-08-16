@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/archive/domain/disk_space.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
@@ -158,5 +160,90 @@ void main() {
     await tester.tap(find.textContaining('剩余 50 项'));
     await tester.pumpAndSettle();
     expect(find.byType(CheckboxListTile), findsNWidgets(150));
+  });
+
+  testWidgets('清理完成展示本次累计与系统盘容量总结', (WidgetTester tester) async {
+    const CleanupCandidate candidate = CleanupCandidate(
+      path: r'C:\Cache\package.tmp',
+      size: 2048,
+      category: CleanupCategory.pluginCache,
+      reason: '插件下载缓存',
+    );
+    int diskReads = 0;
+    int? persistedTotal;
+    int? persistedRuns;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            initialTotalReleasedBytes: 1024,
+            initialCompletedRuns: 2,
+            scanRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(CleanupScanProgress progress)
+                  onProgress,
+                }) async => const CleanupScanResult(
+                  candidates: <CleanupCandidate>[candidate],
+                  cancelled: false,
+                  unreadablePaths: 0,
+                ),
+            deleteRunner:
+                ({
+                  required List<CleanupCandidate> candidates,
+                  required CleanupCancellationToken cancellationToken,
+                  required bool permanentFallback,
+                  required void Function(CleanupDeleteProgress progress)
+                  onProgress,
+                }) async {
+                  onProgress(
+                    const CleanupDeleteProgress(completed: 1, total: 1),
+                  );
+                  return const CleanupDeleteResult(
+                    items: <CleanupItemResult>[
+                      CleanupItemResult(
+                        candidate: candidate,
+                        status: CleanupItemStatus.succeeded,
+                        reason: '测试清理完成',
+                      ),
+                    ],
+                    cancelled: false,
+                    releasedBytes: 2048,
+                  );
+                },
+            diskSnapshotReader: (String path) {
+              diskReads++;
+              return DiskSpaceSnapshot(
+                path: path,
+                availableBytes: diskReads == 1 ? 5000 : 7000,
+                totalBytes: 10000,
+                freeBytes: diskReads == 1 ? 5000 : 7000,
+              );
+            },
+            onCleanupStatsChanged: (int total, int runs) async {
+              persistedTotal = total;
+              persistedRuns = runs;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('开始扫描'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清理 1 项'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, '清理'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('本次清理'), findsOneWidget);
+    expect(find.text('累计清理'), findsOneWidget);
+    expect(find.text('系统盘总容量'), findsOneWidget);
+    expect(find.text('当前可用'), findsOneWidget);
+    expect(find.text('当前已用'), findsOneWidget);
+    expect(find.text('2.0 KB'), findsOneWidget);
+    expect(find.text('3.0 KB'), findsOneWidget);
+    expect(persistedTotal, 3072);
+    expect(persistedRuns, 3);
   });
 }

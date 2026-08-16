@@ -9,6 +9,7 @@ import 'tool_result.dart';
 /// 工具组（按 docs/06 §6.1 分组）。
 abstract final class ToolGroups {
   static const String calculate = '计算调试';
+  static const String ai = '智能开发';
   static const String database = '数据库';
   static const String remote = '远程连接';
   static const String sourceControl = '版本控制';
@@ -50,6 +51,13 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
     name: '程序员计算器',
     group: ToolGroups.calculate,
     description: '整数表达式、进制转换、位运算和有符号/无符号解释。',
+  ),
+  const ToolSpec(
+    id: 'deepseek_harness',
+    name: 'DeepSeek Harness',
+    group: ToolGroups.ai,
+    description: '在选定项目中启动 DeepSeek 官方智能开发代理与审批控制台。',
+    offline: false,
   ),
   const ToolSpec(
     id: 'database_manager',

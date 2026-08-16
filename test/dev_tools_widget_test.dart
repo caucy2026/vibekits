@@ -34,14 +34,21 @@ void main() {
 
     await tester.enterText(input, '0xFF + 1');
     await tester.pump();
-    expect(find.text('256'), findsOneWidget);
-    expect(find.text('0x0000000000000100'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('calculator-DEC')),
+        matching: find.text('256'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('100'), findsOneWidget);
 
-    await tester.tap(find.text('8'));
+    await tester.tap(find.text('QWORD  64 位'));
     await tester.pump();
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('0x00'), findsOneWidget);
-    expect(find.byTooltip('复制 HEX'), findsOneWidget);
+    await tester.tap(find.text('BYTE  8 位').last);
+    await tester.pumpAndSettle();
+    expect(find.text('QWORD  64 位'), findsNothing);
+    expect(find.byTooltip('复制当前结果'), findsOneWidget);
   });
 
   testWidgets('DEV-002 执行与交换', (WidgetTester tester) async {

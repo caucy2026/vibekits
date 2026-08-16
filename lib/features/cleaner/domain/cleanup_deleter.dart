@@ -308,7 +308,8 @@ abstract final class CleanupDeleter {
           total: candidates.length,
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      // Leave short I/O gaps so cleanup does not monopolize a busy disk.
+      await Future<void>.delayed(const Duration(milliseconds: 4));
     }
 
     return CleanupDeleteResult(

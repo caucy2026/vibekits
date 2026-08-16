@@ -19,6 +19,11 @@ class AppSettings {
     this.cleanupWhitelist = const <String>[],
     this.cleanupScanTargets = const <String>[],
     this.cleanupTargetCatalogVersion = 0,
+    this.cleanupTotalReleasedBytes = 0,
+    this.cleanupCompletedRuns = 0,
+    this.recentDocumentPaths = const <String>[],
+    this.remoteDatabaseProfiles = const <String>[],
+    this.deepSeekHarnessWorkspace = '',
   });
 
   final ThemeMode themeMode;
@@ -32,6 +37,11 @@ class AppSettings {
   final List<String> cleanupWhitelist;
   final List<String> cleanupScanTargets;
   final int cleanupTargetCatalogVersion;
+  final int cleanupTotalReleasedBytes;
+  final int cleanupCompletedRuns;
+  final List<String> recentDocumentPaths;
+  final List<String> remoteDatabaseProfiles;
+  final String deepSeekHarnessWorkspace;
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -45,6 +55,11 @@ class AppSettings {
     List<String>? cleanupWhitelist,
     List<String>? cleanupScanTargets,
     int? cleanupTargetCatalogVersion,
+    int? cleanupTotalReleasedBytes,
+    int? cleanupCompletedRuns,
+    List<String>? recentDocumentPaths,
+    List<String>? remoteDatabaseProfiles,
+    String? deepSeekHarnessWorkspace,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
@@ -58,6 +73,14 @@ class AppSettings {
     cleanupScanTargets: cleanupScanTargets ?? this.cleanupScanTargets,
     cleanupTargetCatalogVersion:
         cleanupTargetCatalogVersion ?? this.cleanupTargetCatalogVersion,
+    cleanupTotalReleasedBytes:
+        cleanupTotalReleasedBytes ?? this.cleanupTotalReleasedBytes,
+    cleanupCompletedRuns: cleanupCompletedRuns ?? this.cleanupCompletedRuns,
+    recentDocumentPaths: recentDocumentPaths ?? this.recentDocumentPaths,
+    remoteDatabaseProfiles:
+        remoteDatabaseProfiles ?? this.remoteDatabaseProfiles,
+    deepSeekHarnessWorkspace:
+        deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
   );
 
   Map<String, Object> toJson() => <String, Object>{
@@ -72,6 +95,11 @@ class AppSettings {
     'cleanupWhitelist': cleanupWhitelist,
     'cleanupScanTargets': cleanupScanTargets,
     'cleanupTargetCatalogVersion': cleanupTargetCatalogVersion,
+    'cleanupTotalReleasedBytes': cleanupTotalReleasedBytes,
+    'cleanupCompletedRuns': cleanupCompletedRuns,
+    'recentDocumentPaths': recentDocumentPaths,
+    'remoteDatabaseProfiles': remoteDatabaseProfiles,
+    'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -122,6 +150,47 @@ class AppSettings {
         0,
         100,
       ),
+      cleanupTotalReleasedBytes: boundedInt(
+        'cleanupTotalReleasedBytes',
+        0,
+        0,
+        9000000000000000000,
+      ),
+      cleanupCompletedRuns: boundedInt(
+        'cleanupCompletedRuns',
+        0,
+        0,
+        1000000000,
+      ),
+      recentDocumentPaths: json['recentDocumentPaths'] is List<Object?>
+          ? (json['recentDocumentPaths']! as List<Object?>)
+                .whereType<String>()
+                .where(
+                  (String path) =>
+                      path.isNotEmpty &&
+                      path.length <= 32768 &&
+                      !path.contains('\u0000'),
+                )
+                .toSet()
+                .take(20)
+                .toList(growable: false)
+          : const <String>[],
+      remoteDatabaseProfiles: json['remoteDatabaseProfiles'] is List<Object?>
+          ? (json['remoteDatabaseProfiles']! as List<Object?>)
+                .whereType<String>()
+                .where(
+                  (String profile) =>
+                      profile.isNotEmpty && profile.length <= 4096,
+                )
+                .take(20)
+                .toList(growable: false)
+          : const <String>[],
+      deepSeekHarnessWorkspace:
+          json['deepSeekHarnessWorkspace'] is String &&
+              (json['deepSeekHarnessWorkspace']! as String).length <= 32768 &&
+              !(json['deepSeekHarnessWorkspace']! as String).contains('\u0000')
+          ? json['deepSeekHarnessWorkspace']! as String
+          : '',
     );
   }
 }

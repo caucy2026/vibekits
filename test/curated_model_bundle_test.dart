@@ -25,8 +25,8 @@ void main() {
       expect(await File(path).length(), artifact.downloadBytes);
       expect(await ModelStore.sha256OfFile(path), artifact.sha256);
       expect(
-        artifact.sourceUrl,
-        startsWith('https://huggingface.co/PaddlePaddle/'),
+        artifact.bundleAssetPath,
+        startsWith('test_data/models/ppocrv6_tiny/'),
       );
     }
   });

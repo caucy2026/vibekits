@@ -324,6 +324,8 @@ class _MainShellState extends State<MainShell> {
         initialWhitelist: settings.cleanupWhitelist,
         initialTargetIds: settings.cleanupScanTargets,
         initialTargetCatalogVersion: settings.cleanupTargetCatalogVersion,
+        initialTotalReleasedBytes: settings.cleanupTotalReleasedBytes,
+        initialCompletedRuns: settings.cleanupCompletedRuns,
         onWhitelistChanged: (List<String> whitelist) =>
             widget.settingsController.update(
               widget.settingsController.value.copyWith(
@@ -335,6 +337,13 @@ class _MainShellState extends State<MainShell> {
               widget.settingsController.value.copyWith(
                 cleanupScanTargets: targetIds,
                 cleanupTargetCatalogVersion: catalogVersion,
+              ),
+            ),
+        onCleanupStatsChanged: (int totalReleasedBytes, int completedRuns) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                cleanupTotalReleasedBytes: totalReleasedBytes,
+                cleanupCompletedRuns: completedRuns,
               ),
             ),
       ),
@@ -350,6 +359,13 @@ class _MainShellState extends State<MainShell> {
                 ? widget.initialFilePath
                 : null),
         initialMode: _documentDropPath == null ? null : _documentDropMode,
+        initialRecentPaths: settings.recentDocumentPaths,
+        onRecentPathsChanged: (List<String> paths) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                recentDocumentPaths: paths,
+              ),
+            ),
       ),
       DevToolsTab(
         key: ValueKey<String>('database-drop-$_databaseDropSerial'),
@@ -359,6 +375,20 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.database
                 ? widget.initialFilePath
                 : null),
+        initialRemoteDatabaseProfiles: settings.remoteDatabaseProfiles,
+        onRemoteDatabaseProfilesChanged: (List<String> profiles) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                remoteDatabaseProfiles: profiles,
+              ),
+            ),
+        initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
+        onHarnessWorkspaceChanged: (String workspace) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                deepSeekHarnessWorkspace: workspace,
+              ),
+            ),
       ),
       LocalModelsTab(
         key: ValueKey<String>(

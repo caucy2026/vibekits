@@ -2,23 +2,23 @@
 
 更新日期：2026-08-16
 
-当前版本：`1.4.0+5`
+当前版本：`1.5.0+6`
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。`flutter analyze` 无问题，226/226 自动测试通过，Windows Release 构建与 5 秒真实启动通过。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。`flutter analyze` 无问题，234/234 自动测试通过，Windows Release 构建与 5 秒真实启动通过。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
 
 ## 2. 五个主工作区
 
 | 工作区 | 当前能力 | 状态 |
 |---|---|---|
 | 解压缩 | 官方 7-Zip 26.02 + Dart 后端；RAR/RAR5、ZIP/ZIPX、7z、TAR、GZ/BZ2/XZ/ZST、CAB、ISO/WIM/DMG 等列表/解压；路径、链接、空间、大小、压缩比、冲突、暂存、取消保护 | Windows 主路径完成 |
-| 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；下载残留与旧安装包建议；VS Code/Cursor/Windsurf 可证明旧版本插件；白名单、竞态身份、废纸篓优先、报告 | Windows 完成主路径；macOS 待实机 |
-| 文档阅读 | Markdown 默认预览；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本索引；大 BIN 固定 1MiB 窗口、64 位偏移和跨块搜索 | Windows 主路径完成 |
-| 开发工具 | 程序员计算器、SQLite 只读管理、API、SSH/SFTP/端口转发、Git、GitHub 网络诊断、文件哈希、重复文件、批量重命名及编码/格式工具 | 首批主工作区完成 |
-| 本地模型 | 固定清单、SHA-256、事务安装、Silero VAD；官方 PP-OCRv6 tiny 检测+识别 ONNX 真推理、图片预览、自动 OCR、复制/保存 | Windows 完成主路径；macOS ONNX 待适配 |
+| 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
+| 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
+| 开发工具 | Windows 风格程序员计算器；SQLite + PostgreSQL 只读管理和安全连接历史；DeepSeek Harness 可选入口；API、SSH/SFTP/转发、Git、网络诊断、文件工具 | 本批主路径完成；MySQL/远程融合增强待做 |
+| 本地模型 | 固定清单、应用内置资源、逐文件 SHA-256 与事务安装、Silero VAD；官方 PP-OCRv6 tiny 真推理、图片预览、自动 OCR、复制/保存 | Windows 完成主路径；macOS ONNX 待适配 |
 
 ## 3. 文件融合与系统入口
 
@@ -35,11 +35,11 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 
 支持十/十六/八/二进制字面量，括号、算术、按位、移位，8/16/32/64/128 位和有符号/无符号解释；输入后直接得到多进制结果。
 
-### 4.2 SQLite 数据库管理器
+### 4.2 SQLite 与 PostgreSQL 数据库管理器
 
 按 SQLite Magic 和常见扩展路由；默认只读，`query_only`、`trusted_schema=OFF`、DQS 关闭；表/视图、100 行分页、最多 500 行查询结果、BLOB/NULL 显示。每个请求使用短生命周期 Isolate，8 秒超时可终止；预编译语句确认只读后才执行。
 
-PostgreSQL/MySQL 未伪装成已实现入口；后续复用当前工作区外壳增加连接适配层。
+PostgreSQL 已接入 TLS/非 TLS 连接、对象列表、100 行分页和最多 500 行只读查询；连接资料自动进入最近记录，密码直接写入 Windows Credential Manager/macOS Keychain，普通设置不含密码。Windows 已执行临时凭据写入、读取和删除真实闭环。MySQL/MariaDB 尚未接入，不显示伪入口。
 
 ### 4.3 源码、远程、API 与 Git
 
@@ -47,6 +47,12 @@ PostgreSQL/MySQL 未伪装成已实现入口；后续复用当前工作区外壳
 - SSH/SFTP 使用系统 OpenSSH，参数数组直传且不经过 Shell；严格主机密钥询问、密钥/Agent 认证、不保存密码；端口转发只绑定 `127.0.0.1`。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
+
+### 4.4 DeepSeek Harness
+
+开发工具页新增一个“智能开发”入口：保存用户选择的项目目录，检查 Node.js/npx，使用固定官方 `@deepseek-ai/dsh@0.1.0-rc.5` 启动本机 Web 控制台，识别就绪地址后打开浏览器，显示有界日志并支持停止进程树。API 密钥只在 Harness 控制台中配置。
+
+适配层和模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后复用同一入口深化集成。
 
 ## 5. 图片、OCR 与二进制
 
@@ -70,11 +76,12 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 
 - `dart format lib test`：已执行。
 - `flutter analyze`：`No issues found`。
-- `flutter test --reporter expanded`：226/226 通过。
+- `flutter test --reporter expanded`：234/234 通过。
 - `flutter build windows --release`：成功。
-- EXE 文件/产品版本：`1.4.0+5`。
+- EXE 文件/产品版本：`1.5.0+6`。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
-- Release 产物：`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 均存在。
+- Release 产物：`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 和 5 项内置模型资源均存在。
+- Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。
 - 注册表实查：文档/压缩/图片/SQLite ProgID、任意文件右键、`.rar`、`.sqlite` 专用命令均指向本次 Release EXE。
 
 ## 8. 明确未完成
@@ -82,6 +89,7 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 1. macOS 需要在 Apple Silicon/Intel 机器运行 `flutter build macos --release`，验证 Swift 编译、Open With、废纸篓、系统菜单、图片、压缩和 SQLite。
 2. macOS PP-OCRv6 的 ONNX Runtime 动态桥接和 arm64/x64 原生库尚未完成。
 3. HEIF/AVIF/JXL/RAW 的一致内置解码、ICC 色彩管理和动画播放仍需专门后端。
-4. PostgreSQL/MySQL 连接适配、API 历史脱敏持久化、Git 写操作辅助尚未进入本版。
-5. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
-6. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
+4. MySQL/MariaDB、数据库写会话、API 历史脱敏持久化、Git 写操作辅助尚未进入本版。
+5. DeepSeek Harness 官方 npm 包在当前网络未完成真实下载和启动；macOS 实启、ACP 原生会话均待验证。
+6. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
+7. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。

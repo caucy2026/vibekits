@@ -35,14 +35,24 @@ class ProgrammerCalculation {
 abstract final class ProgrammerCalculator {
   static const Set<int> supportedWidths = <int>{8, 16, 32, 64, 128};
 
-  static ProgrammerCalculation calculate(String expression, {int width = 64}) {
+  static ProgrammerCalculation calculate(
+    String expression, {
+    int width = 64,
+    int inputRadix = 10,
+  }) {
     final String source = expression.trim();
     if (source.isEmpty) throw const FormatException('请输入表达式');
     if (source.length > 4096) throw const FormatException('表达式过长');
     if (!supportedWidths.contains(width)) {
       throw const FormatException('位宽必须为 8、16、32、64 或 128');
     }
-    final BigInt raw = _ExpressionParser(source).parse();
+    if (!const <int>{2, 8, 10, 16}.contains(inputRadix)) {
+      throw const FormatException('输入进制必须为 2、8、10 或 16');
+    }
+    final BigInt raw = _ExpressionParser(
+      source,
+      defaultRadix: inputRadix,
+    ).parse();
     final BigInt modulus = BigInt.one << width;
     final BigInt mask = modulus - BigInt.one;
     final BigInt unsigned = raw & mask;
@@ -61,9 +71,10 @@ abstract final class ProgrammerCalculator {
 }
 
 class _ExpressionParser {
-  _ExpressionParser(this.source);
+  _ExpressionParser(this.source, {required this.defaultRadix});
 
   final String source;
+  final int defaultRadix;
   int position = 0;
 
   static const Map<String, int> _precedence = <String, int>{
@@ -126,7 +137,7 @@ class _ExpressionParser {
   BigInt _parseNumber() {
     _skipWhitespace();
     final int start = position;
-    int radix = 10;
+    int radix = defaultRadix;
     if (_peekPrefix('0x') || _peekPrefix('0X')) {
       radix = 16;
       position += 2;

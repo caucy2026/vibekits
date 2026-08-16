@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -50,6 +51,8 @@ class DocumentsTab extends StatefulWidget {
     this.findRequest,
     this.saveRequest,
     this.saveFile,
+    this.initialRecentPaths = const <String>[],
+    this.onRecentPathsChanged,
   });
 
   final String? initialPath;
@@ -59,6 +62,8 @@ class DocumentsTab extends StatefulWidget {
   final ValueListenable<int>? findRequest;
   final ValueListenable<int>? saveRequest;
   final DocumentFileSaver? saveFile;
+  final List<String> initialRecentPaths;
+  final Future<void> Function(List<String> paths)? onRecentPathsChanged;
 
   @override
   State<DocumentsTab> createState() => _DocumentsTabState();
@@ -115,6 +120,17 @@ class _DocumentsTabState extends State<DocumentsTab> {
   @override
   void initState() {
     super.initState();
+    _recent.addAll(
+      widget.initialRecentPaths
+          .where(
+            (String path) =>
+                path.isNotEmpty &&
+                path.length <= 32768 &&
+                !path.contains('\u0000'),
+          )
+          .toSet()
+          .take(20),
+    );
     final String? initialPath = widget.initialPath;
     if (initialPath != null) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -254,11 +270,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
         _hexWindowOffset = 0;
         _hexFileSize = mode == DocViewMode.hex ? size : 0;
         _markdownPreview = mode == DocViewMode.markdown;
-        _recent.remove(path);
-        _recent.insert(0, path);
-        if (_recent.length > 20) {
-          _recent.removeLast();
-        }
+        _rememberRecent(path);
 
         if (mode == DocViewMode.text || mode == DocViewMode.markdown) {
           _encoding = TextCodecs.detect(bytes);
@@ -341,9 +353,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
       _loadedModified = file.lastModifiedSync();
       _hexWindowOffset = window.offset;
       _hexFileSize = window.fileSize;
-      _recent.remove(path);
-      _recent.insert(0, path);
-      if (_recent.length > 20) _recent.removeLast();
+      _rememberRecent(path);
     });
   }
 
@@ -540,9 +550,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
       _epubBook = null;
       _epubChapter = 0;
       _svgText = '';
-      _recent.remove(path);
-      _recent.insert(0, path);
-      if (_recent.length > 20) _recent.removeLast();
+      _rememberRecent(path);
     });
   }
 
@@ -729,6 +737,39 @@ class _DocumentsTabState extends State<DocumentsTab> {
     );
   }
 
+  void _rememberRecent(String path) {
+    _recent.remove(path);
+    _recent.insert(0, path);
+    if (_recent.length > 20) _recent.removeLast();
+    final Future<void> Function(List<String> paths)? callback =
+        widget.onRecentPathsChanged;
+    if (callback == null) return;
+    final List<String> snapshot = List<String>.unmodifiable(_recent);
+    scheduleMicrotask(
+      () => unawaited(
+        callback(snapshot).catchError((Object error) {
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('打开记录未能保存，本次阅读不受影响')));
+          }
+        }),
+      ),
+    );
+  }
+
+  Future<void> _clearRecent() async {
+    setState(_recent.clear);
+    try {
+      await widget.onRecentPathsChanged?.call(const <String>[]);
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('记录已从界面清空，但设置文件保存失败')));
+      }
+    }
+  }
+
   Widget _buildSidebar() {
     return SizedBox(
       width: 220,
@@ -744,14 +785,27 @@ class _DocumentsTabState extends State<DocumentsTab> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(
-              '最近文件',
-              style: TextStyle(
-                fontSize: 12,
-                color: context.vibe.muted,
-                fontWeight: FontWeight.w600,
-              ),
+            padding: const EdgeInsets.fromLTRB(12, 4, 4, 2),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '最近文件',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.vibe.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '清空打开记录',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 17,
+                  onPressed: _recent.isEmpty ? null : _clearRecent,
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                ),
+              ],
             ),
           ),
           Expanded(

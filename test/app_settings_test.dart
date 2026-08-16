@@ -25,6 +25,11 @@ void main() {
       cleanupWhitelist: <String>[r'D:\Keep'],
       cleanupScanTargets: <String>['user-temp', 'crash-dumps'],
       cleanupTargetCatalogVersion: 2,
+      cleanupTotalReleasedBytes: 123456789,
+      cleanupCompletedRuns: 7,
+      recentDocumentPaths: <String>[r'D:\Docs\one.md', r'D:\Docs\two.log'],
+      remoteDatabaseProfiles: <String>['{"id":"postgres-1"}'],
+      deepSeekHarnessWorkspace: r'D:\Work\demo',
     );
 
     await store.save(expected);

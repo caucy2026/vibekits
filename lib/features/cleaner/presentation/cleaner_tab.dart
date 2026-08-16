@@ -4,6 +4,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../archive/domain/disk_space.dart';
+import '../domain/cleanup_background_runner.dart';
 import '../domain/cleanup_deleter.dart';
 import '../domain/cleanup_report.dart';
 import '../domain/cleanup_scanner.dart';
@@ -15,26 +17,44 @@ typedef CleanupScanRunner = Future<CleanupScanResult> Function({
   required CleanupCancellationToken cancellationToken,
   required void Function(CleanupScanProgress progress) onProgress,
 });
+typedef CleanupDeleteRunner = Future<CleanupDeleteResult> Function({
+  required List<CleanupCandidate> candidates,
+  required CleanupCancellationToken cancellationToken,
+  required bool permanentFallback,
+  required void Function(CleanupDeleteProgress progress) onProgress,
+});
+typedef CleanupDiskSnapshotReader = DiskSpaceSnapshot? Function(String path);
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
   const CleanerTab({
     super.key,
     this.scanRunner,
+    this.deleteRunner,
+    this.diskSnapshotReader,
     this.initialWhitelist = const <String>[],
     this.initialTargetIds = const <String>[],
     this.initialTargetCatalogVersion = 0,
     this.onWhitelistChanged,
     this.onTargetIdsChanged,
+    this.initialTotalReleasedBytes = 0,
+    this.initialCompletedRuns = 0,
+    this.onCleanupStatsChanged,
   });
 
   final CleanupScanRunner? scanRunner;
+  final CleanupDeleteRunner? deleteRunner;
+  final CleanupDiskSnapshotReader? diskSnapshotReader;
   final List<String> initialWhitelist;
   final List<String> initialTargetIds;
   final int initialTargetCatalogVersion;
   final Future<void> Function(List<String> whitelist)? onWhitelistChanged;
   final Future<void> Function(List<String> targetIds, int catalogVersion)?
   onTargetIdsChanged;
+  final int initialTotalReleasedBytes;
+  final int initialCompletedRuns;
+  final Future<void> Function(int totalReleasedBytes, int completedRuns)?
+  onCleanupStatsChanged;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -56,6 +76,10 @@ class _CleanerTabState extends State<CleanerTab> {
   CleanupDeleteProgress? _deleteProgress;
   CleanupDeleteResult? _lastResult;
   File? _lastReport;
+  DiskSpaceSnapshot? _diskBefore;
+  DiskSpaceSnapshot? _diskAfter;
+  late int _totalReleasedBytes = widget.initialTotalReleasedBytes;
+  late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
   final Map<CleanupCategory, int> _visibleItemLimits = <CleanupCategory, int>{};
 
@@ -82,6 +106,10 @@ class _CleanerTabState extends State<CleanerTab> {
   @override
   void didUpdateWidget(CleanerTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!_cleaning) {
+      _totalReleasedBytes = widget.initialTotalReleasedBytes;
+      _completedRuns = widget.initialCompletedRuns;
+    }
     final Set<String> incoming = CleanupWhitelist.sanitize(
       widget.initialWhitelist,
     ).toSet();
@@ -131,7 +159,7 @@ class _CleanerTabState extends State<CleanerTab> {
       }
 
       final CleanupScanResult result = widget.scanRunner == null
-          ? await CleanupScanner.scanTargets(
+          ? await CleanupBackgroundRunner.scanTargets(
               _availableTargets
                   .where(
                     (CleanupScanTarget target) =>
@@ -277,33 +305,40 @@ class _CleanerTabState extends State<CleanerTab> {
 
     final CleanupCancellationToken token = CleanupCancellationToken();
     final DateTime startedAt = DateTime.now();
+    final CleanupDiskSnapshotReader diskReader =
+        widget.diskSnapshotReader ?? DiskSpace.snapshot;
+    final String systemDiskPath = _systemDiskPath();
+    final DiskSpaceSnapshot? diskBefore = diskReader(systemDiskPath);
     setState(() {
       _cleaning = true;
       _taskToken = token;
       _deleteProgress = CleanupDeleteProgress(completed: 0, total: plan.length);
       _message = '';
+      _diskBefore = diskBefore;
+      _diskAfter = null;
     });
     try {
-      final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
-        plan,
-        cancellationToken: token,
-        permanentFallback: permanentFallback,
-        onProgress: (CleanupDeleteProgress progress) {
-          if (mounted) setState(() => _deleteProgress = progress);
-        },
-      );
-      File? report;
-      Object? reportError;
-      try {
-        report = await CleanupReportWriter.write(
-          result,
-          startedAt: startedAt,
-          finishedAt: DateTime.now(),
-        );
-      } catch (error) {
-        reportError = error;
-      }
+      final CleanupDeleteResult result = widget.deleteRunner == null
+          ? await CleanupBackgroundRunner.deleteCandidates(
+              plan,
+              cancellationToken: token,
+              permanentFallback: permanentFallback,
+              onProgress: (CleanupDeleteProgress progress) {
+                if (mounted) setState(() => _deleteProgress = progress);
+              },
+            )
+          : await widget.deleteRunner!(
+              candidates: plan,
+              cancellationToken: token,
+              permanentFallback: permanentFallback,
+              onProgress: (CleanupDeleteProgress progress) {
+                if (mounted) setState(() => _deleteProgress = progress);
+              },
+            );
+      final DiskSpaceSnapshot? diskAfter = diskReader(systemDiskPath);
       if (!mounted) return;
+      final int nextTotal = _totalReleasedBytes + result.releasedBytes;
+      final int nextRuns = _completedRuns + (result.items.isEmpty ? 0 : 1);
       final Set<String> succeededPaths = result.items
           .where(
             (CleanupItemResult item) =>
@@ -314,7 +349,10 @@ class _CleanerTabState extends State<CleanerTab> {
       setState(() {
         _cleaning = false;
         _lastResult = result;
-        _lastReport = report;
+        _lastReport = null;
+        _diskAfter = diskAfter;
+        _totalReleasedBytes = nextTotal;
+        _completedRuns = nextRuns;
         _candidates = _candidates
             .where(
               (CleanupCandidate candidate) =>
@@ -322,12 +360,27 @@ class _CleanerTabState extends State<CleanerTab> {
             )
             .toList();
         _selected.removeAll(succeededPaths);
-        _message = reportError != null
-            ? '${result.cancelled ? '清理已取消' : '清理完成'}，但报告保存失败：${reportError.runtimeType}'
-            : result.cancelled
-            ? '清理已取消，已完成部分见报告'
-            : '清理完成';
+        _message = result.cancelled ? '清理已取消，已完成部分见报告' : '清理完成';
       });
+      try {
+        await widget.onCleanupStatsChanged?.call(nextTotal, nextRuns);
+      } catch (error) {
+        if (mounted) {
+          setState(() => _message = '$_message；累计数据保存失败：${error.runtimeType}');
+        }
+      }
+      try {
+        final File report = await CleanupReportWriter.write(
+          result,
+          startedAt: startedAt,
+          finishedAt: DateTime.now(),
+        );
+        if (mounted) setState(() => _lastReport = report);
+      } catch (error) {
+        if (mounted) {
+          setState(() => _message = '$_message，但报告保存失败：${error.runtimeType}');
+        }
+      }
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -338,6 +391,20 @@ class _CleanerTabState extends State<CleanerTab> {
     } finally {
       if (identical(_taskToken, token)) _taskToken = null;
     }
+  }
+
+  String _systemDiskPath() {
+    final String? systemDrive = Platform.environment['SystemDrive'];
+    if (systemDrive != null && systemDrive.trim().isNotEmpty) {
+      return systemDrive.endsWith(Platform.pathSeparator)
+          ? systemDrive
+          : '$systemDrive${Platform.pathSeparator}';
+    }
+    final String? windowsDirectory = Platform.environment['WINDIR'];
+    if (windowsDirectory != null && windowsDirectory.length >= 3) {
+      return windowsDirectory.substring(0, 3);
+    }
+    return Directory.current.path;
   }
 
   Future<void> _manageWhitelist() async {
@@ -620,52 +687,73 @@ class _CleanerTabState extends State<CleanerTab> {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: <Widget>[
-          ElevatedButton.icon(
-            onPressed: _scanning || _cleaning ? null : _scan,
-            icon: _scanning
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.search, size: 18),
-            label: Text(_scanning ? '扫描中…' : '开始扫描'),
-          ),
-          if (_scanning || _cleaning) ...<Widget>[
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: () => _taskToken?.cancel(),
-              icon: const Icon(Icons.stop_circle_outlined, size: 18),
-              label: const Text('取消'),
-            ),
-          ],
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: _manageWhitelist,
-            icon: const Icon(Icons.block, size: 18),
-            label: Text('白名单（${_whitelist.length}）'),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: _scanning || _cleaning ? null : _manageScanTargets,
-            icon: const Icon(Icons.tune, size: 18),
-            label: Text('范围（${_enabledTargetIds.length}）'),
-          ),
-          const Spacer(),
-          Text(
-            '已选择 ${_formatSize(_selectedSize)}',
-            style: TextStyle(fontSize: 12, color: context.vibe.muted),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: _selected.isEmpty || _scanning || _cleaning
-                ? null
-                : _clean,
-            child: Text(_cleaning ? '清理中…' : '清理 ${_selected.length} 项'),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool veryCompact = constraints.maxWidth < 680;
+          return Row(
+            children: <Widget>[
+              ElevatedButton.icon(
+                onPressed: _scanning || _cleaning ? null : _scan,
+                icon: _scanning
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search, size: 18),
+                label: Text(_scanning ? '扫描中…' : '开始扫描'),
+              ),
+              if (_scanning || _cleaning) ...<Widget>[
+                const SizedBox(width: 6),
+                OutlinedButton.icon(
+                  onPressed: () => _taskToken?.cancel(),
+                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                  label: const Text('取消'),
+                ),
+              ],
+              const SizedBox(width: 6),
+              if (veryCompact)
+                IconButton(
+                  tooltip: '白名单（${_whitelist.length}）',
+                  onPressed: _manageWhitelist,
+                  icon: const Icon(Icons.block, size: 18),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _manageWhitelist,
+                  icon: const Icon(Icons.block, size: 18),
+                  label: Text('白名单（${_whitelist.length}）'),
+                ),
+              const SizedBox(width: 6),
+              if (veryCompact)
+                IconButton(
+                  tooltip: '范围（${_enabledTargetIds.length}）',
+                  onPressed: _scanning || _cleaning ? null : _manageScanTargets,
+                  icon: const Icon(Icons.tune, size: 18),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _scanning || _cleaning ? null : _manageScanTargets,
+                  icon: const Icon(Icons.tune, size: 18),
+                  label: Text('范围（${_enabledTargetIds.length}）'),
+                ),
+              const Spacer(),
+              if (!veryCompact) ...<Widget>[
+                Text(
+                  '已选择 ${_formatSize(_selectedSize)}',
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                ),
+                const SizedBox(width: 6),
+              ],
+              ElevatedButton(
+                onPressed: _selected.isEmpty || _scanning || _cleaning
+                    ? null
+                    : _clean,
+                child: Text(_cleaning ? '清理中…' : '清理 ${_selected.length} 项'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -739,18 +827,74 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Widget _buildResultSummary(CleanupDeleteResult result) {
+    final DiskSpaceSnapshot? disk = _diskAfter ?? _diskBefore;
+    final int? availableChange = _diskBefore == null || _diskAfter == null
+        ? null
+        : _diskAfter!.availableBytes - _diskBefore!.availableBytes;
     return Container(
       width: double.infinity,
       color: context.vibe.panelRaised,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            '${result.cancelled ? '已取消' : '已完成'} · 成功 ${result.succeeded} · 跳过 ${result.skipped} · 失败 ${result.failed} · 实际释放 ${_formatSize(result.releasedBytes)}',
-            style: const TextStyle(fontSize: 12),
+          Row(
+            children: <Widget>[
+              Icon(
+                result.cancelled
+                    ? Icons.pause_circle_outline
+                    : Icons.check_circle_outline,
+                size: 18,
+                color: result.cancelled
+                    ? VibekitsColors.warning
+                    : context.vibe.success,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                result.cancelled ? '清理已取消，已完成部分已计入' : '清理完成',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              TextButton(onPressed: _showReport, child: const Text('查看报告')),
+            ],
           ),
-          const Spacer(),
-          TextButton(onPressed: _showReport, child: const Text('查看报告')),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              _SummaryMetric(
+                label: '本次清理',
+                value: _formatSize(result.releasedBytes),
+              ),
+              _SummaryMetric(
+                label: '累计清理',
+                value: _formatSize(_totalReleasedBytes),
+                detail: '$_completedRuns 次',
+              ),
+              if (disk != null) ...<Widget>[
+                _SummaryMetric(
+                  label: '系统盘总容量',
+                  value: _formatSize(disk.totalBytes),
+                ),
+                _SummaryMetric(
+                  label: '当前可用',
+                  value: _formatSize(disk.availableBytes),
+                  detail: availableChange == null || availableChange == 0
+                      ? null
+                      : '${availableChange > 0 ? '+' : ''}${_formatSize(availableChange.abs())}',
+                ),
+                _SummaryMetric(
+                  label: '当前已用',
+                  value: _formatSize(disk.usedBytes),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '成功 ${result.succeeded} · 跳过 ${result.skipped} · 失败 ${result.failed} · 后台低占用执行',
+            style: TextStyle(fontSize: 11, color: context.vibe.muted),
+          ),
         ],
       ),
     );
@@ -772,7 +916,16 @@ class _CleanerTabState extends State<CleanerTab> {
               Text(
                 '成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}',
               ),
-              Text('实际释放 ${_formatSize(result.releasedBytes)}'),
+              Text('本次清理 ${_formatSize(result.releasedBytes)}'),
+              Text(
+                '历史累计 ${_formatSize(_totalReleasedBytes)}（$_completedRuns 次）',
+              ),
+              if (_diskAfter != null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text('系统盘总容量 ${_formatSize(_diskAfter!.totalBytes)}'),
+                Text('当前可用 ${_formatSize(_diskAfter!.availableBytes)}'),
+                Text('当前已用 ${_formatSize(_diskAfter!.usedBytes)}'),
+              ],
               if (_lastReport != null)
                 SelectableText(
                   '报告文件：${_lastReport!.path}',
@@ -928,5 +1081,55 @@ class _CleanerTabState extends State<CleanerTab> {
       return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
     }
     return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({required this.label, required this.value, this.detail});
+
+  final String label;
+  final String value;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 132),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.vibe.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: context.vibe.muted),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (detail != null) ...<Widget>[
+                const SizedBox(width: 5),
+                Text(
+                  detail!,
+                  style: TextStyle(fontSize: 10, color: context.vibe.muted),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }

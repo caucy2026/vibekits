@@ -16,8 +16,24 @@ typedef _GetDiskFreeSpaceExWDart = int Function(
   Pointer<Uint64>,
 );
 
+class DiskSpaceSnapshot {
+  const DiskSpaceSnapshot({
+    required this.path,
+    required this.availableBytes,
+    required this.totalBytes,
+    required this.freeBytes,
+  });
+
+  final String path;
+  final int availableBytes;
+  final int totalBytes;
+  final int freeBytes;
+
+  int get usedBytes => (totalBytes - freeBytes).clamp(0, totalBytes);
+}
+
 abstract final class DiskSpace {
-  static int? availableBytes(String path) {
+  static DiskSpaceSnapshot? snapshot(String path) {
     if (!Platform.isWindows) return null;
     final DynamicLibrary kernel = DynamicLibrary.open('kernel32.dll');
     final _GetDiskFreeSpaceExWDart getDiskFreeSpace = kernel
@@ -32,7 +48,12 @@ abstract final class DiskSpace {
       if (getDiskFreeSpace(nativePath, available, total, free) == 0) {
         return null;
       }
-      return available.value;
+      return DiskSpaceSnapshot(
+        path: path,
+        availableBytes: available.value,
+        totalBytes: total.value,
+        freeBytes: free.value,
+      );
     } finally {
       malloc.free(nativePath);
       calloc.free(available);
@@ -40,4 +61,6 @@ abstract final class DiskSpace {
       calloc.free(free);
     }
   }
+
+  static int? availableBytes(String path) => snapshot(path)?.availableBytes;
 }

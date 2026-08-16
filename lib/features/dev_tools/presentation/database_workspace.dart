@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../domain/remote_database_service.dart';
 import '../domain/sqlite_database_service.dart';
 
 typedef SqliteFilePicker = Future<String?> Function();
@@ -18,6 +19,21 @@ typedef SqliteQueryRunner = Future<SqliteResultPage> Function(
   String path,
   String sql,
 );
+typedef RemoteDatabaseInspector = Future<RemoteDatabaseSnapshot> Function(
+  RemoteDatabaseProfile profile,
+  String password,
+);
+typedef RemoteDatabasePageLoader = Future<SqliteResultPage> Function(
+  RemoteDatabaseProfile profile,
+  String password,
+  RemoteDatabaseObject object,
+  int offset,
+);
+typedef RemoteDatabaseQueryRunner = Future<SqliteResultPage> Function(
+  RemoteDatabaseProfile profile,
+  String password,
+  String sql,
+);
 
 class DatabaseWorkspace extends StatefulWidget {
   const DatabaseWorkspace({
@@ -27,6 +43,13 @@ class DatabaseWorkspace extends StatefulWidget {
     this.inspect,
     this.loadPage,
     this.runQuery,
+    this.initialRemoteProfiles = const <String>[],
+    this.onRemoteProfilesChanged,
+    this.remoteInspect,
+    this.remoteLoadPage,
+    this.remoteRunQuery,
+    this.passwordReader,
+    this.passwordWriter,
   });
 
   final String? initialPath;
@@ -34,6 +57,14 @@ class DatabaseWorkspace extends StatefulWidget {
   final SqliteInspector? inspect;
   final SqlitePageLoader? loadPage;
   final SqliteQueryRunner? runQuery;
+  final List<String> initialRemoteProfiles;
+  final Future<void> Function(List<String> profiles)? onRemoteProfilesChanged;
+  final RemoteDatabaseInspector? remoteInspect;
+  final RemoteDatabasePageLoader? remoteLoadPage;
+  final RemoteDatabaseQueryRunner? remoteRunQuery;
+  final Future<String?> Function(String profileId)? passwordReader;
+  final Future<void> Function(String profileId, String password)?
+  passwordWriter;
 
   @override
   State<DatabaseWorkspace> createState() => _DatabaseWorkspaceState();
@@ -46,6 +77,14 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
   SqliteDatabaseSnapshot? _snapshot;
   SqliteObjectInfo? _selectedObject;
   SqliteResultPage? _page;
+  late final List<RemoteDatabaseProfile> _remoteProfiles = widget
+      .initialRemoteProfiles
+      .map(RemoteDatabaseProfile.decode)
+      .whereType<RemoteDatabaseProfile>()
+      .toList();
+  RemoteDatabaseSnapshot? _remoteSnapshot;
+  RemoteDatabaseObject? _selectedRemoteObject;
+  String _remotePassword = '';
   String? _error;
   bool _busy = false;
   int _mode = 0;
@@ -84,6 +123,7 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
+        _remoteSnapshot = null;
         _selectedObject = snapshot.objects.firstOrNull;
         _page = snapshot.initialPage;
         _busy = false;
@@ -130,6 +170,33 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
   }
 
   Future<void> _runQuery() async {
+    final RemoteDatabaseSnapshot? remote = _remoteSnapshot;
+    if (remote != null) {
+      setState(() {
+        _busy = true;
+        _error = null;
+        _mode = 1;
+      });
+      try {
+        final SqliteResultPage page = widget.remoteRunQuery != null
+            ? await widget.remoteRunQuery!(
+                remote.profile,
+                _remotePassword,
+                _queryController.text,
+              )
+            : await RemoteDatabaseService.query(
+                remote.profile,
+                _remotePassword,
+                _queryController.text,
+              );
+        if (mounted) setState(() => _page = page);
+      } catch (error) {
+        if (mounted) setState(() => _error = _errorMessage(error));
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      return;
+    }
     final SqliteDatabaseSnapshot? snapshot = _snapshot;
     if (snapshot == null) return;
     setState(() {
@@ -155,9 +222,109 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
     }
   }
 
+  Future<void> _connectRemote() async {
+    final _RemoteConnectRequest? request =
+        await showDialog<_RemoteConnectRequest>(
+          context: context,
+          builder: (BuildContext context) => _RemoteConnectionDialog(
+            profiles: List<RemoteDatabaseProfile>.unmodifiable(_remoteProfiles),
+            passwordReader:
+                widget.passwordReader ?? RemoteDatabaseCredentials.read,
+          ),
+        );
+    if (request == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final RemoteDatabaseSnapshot snapshot = widget.remoteInspect != null
+          ? await widget.remoteInspect!(request.profile, request.password)
+          : await RemoteDatabaseService.inspect(
+              request.profile,
+              request.password,
+            );
+      if (request.rememberPassword) {
+        await (widget.passwordWriter ?? RemoteDatabaseCredentials.write)(
+          request.profile.id,
+          request.password,
+        );
+      }
+      _remoteProfiles.removeWhere(
+        (RemoteDatabaseProfile profile) => profile.id == request.profile.id,
+      );
+      _remoteProfiles.insert(0, request.profile);
+      if (_remoteProfiles.length > 20) _remoteProfiles.removeLast();
+      await widget.onRemoteProfilesChanged?.call(
+        _remoteProfiles
+            .map((RemoteDatabaseProfile profile) => profile.encode())
+            .toList(growable: false),
+      );
+      if (!mounted) return;
+      _queryController.text = 'SELECT version();';
+      setState(() {
+        _remoteSnapshot = snapshot;
+        _remotePassword = request.password;
+        _selectedRemoteObject = snapshot.objects.firstOrNull;
+        _snapshot = null;
+        _selectedObject = null;
+        _page = snapshot.initialPage;
+        _mode = 0;
+        _busy = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _errorMessage(error);
+      });
+    }
+  }
+
+  Future<void> _selectRemoteObject(
+    RemoteDatabaseObject object, {
+    int offset = 0,
+  }) async {
+    final RemoteDatabaseSnapshot? snapshot = _remoteSnapshot;
+    if (snapshot == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _selectedRemoteObject = object;
+      _mode = 0;
+    });
+    try {
+      final SqliteResultPage page = widget.remoteLoadPage != null
+          ? await widget.remoteLoadPage!(
+              snapshot.profile,
+              _remotePassword,
+              object,
+              offset,
+            )
+          : await RemoteDatabaseService.loadTable(
+              snapshot.profile,
+              _remotePassword,
+              object,
+              offset: offset,
+            );
+      if (!mounted || _selectedRemoteObject?.label != object.label) return;
+      setState(() {
+        _page = page;
+        _busy = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = _errorMessage(error);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final SqliteDatabaseSnapshot? snapshot = _snapshot;
+    final RemoteDatabaseSnapshot? remote = _remoteSnapshot;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -173,7 +340,10 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                 '数据库管理器',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
-              _Badge(text: 'SQLite · 只读', color: context.vibe.success),
+              _Badge(
+                text: remote == null ? 'SQLite · 本地只读' : 'PostgreSQL · 远程只读',
+                color: context.vibe.success,
+              ),
               if (snapshot != null)
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 360),
@@ -183,11 +353,28 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                     style: TextStyle(fontSize: 11, color: context.vibe.muted),
                   ),
                 ),
+              if (remote != null)
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: Text(
+                    '${remote.profile.endpointLabel} · PostgreSQL ${remote.serverVersion}',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                  ),
+                ),
               OutlinedButton.icon(
                 key: const Key('database-open'),
                 onPressed: _busy ? null : _pickAndOpen,
                 icon: const Icon(Icons.folder_open_outlined, size: 17),
                 label: Text(snapshot == null ? '打开数据库' : '更换'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('database-connect-remote'),
+                onPressed: _busy ? null : _connectRemote,
+                icon: const Icon(Icons.cloud_outlined, size: 17),
+                label: Text(
+                  remote == null ? '连接远程' : '更换远程（${_remoteProfiles.length}）',
+                ),
               ),
             ],
           ),
@@ -208,11 +395,19 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
             child: Text(_error!, style: const TextStyle(fontSize: 12)),
           ),
         Expanded(
-          child: snapshot == null
+          child: snapshot == null && remote == null
               ? _EmptyDatabase(onOpen: _busy ? null : _pickAndOpen)
+              : remote != null
+              ? Row(
+                  children: <Widget>[
+                    _buildRemoteObjectList(remote),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: _buildMainArea()),
+                  ],
+                )
               : Row(
                   children: <Widget>[
-                    _buildObjectList(snapshot),
+                    _buildObjectList(snapshot!),
                     const VerticalDivider(width: 1),
                     Expanded(child: _buildMainArea()),
                   ],
@@ -276,6 +471,62 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
                           ),
                           onTap: _busy ? null : () => _selectObject(object),
                         ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRemoteObjectList(RemoteDatabaseSnapshot snapshot) {
+    return SizedBox(
+      width: 210,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+            child: Text(
+              '远程对象 · ${snapshot.objects.length}',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: context.vibe.muted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: snapshot.objects.isEmpty
+                ? Center(
+                    child: Text(
+                      '没有可访问的表或视图',
+                      style: TextStyle(color: context.vibe.muted),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: snapshot.objects.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final RemoteDatabaseObject object =
+                          snapshot.objects[index];
+                      return ListTile(
+                        key: ValueKey<String>(
+                          'remote-database-object-${object.label}',
+                        ),
+                        dense: true,
+                        selected: _selectedRemoteObject?.label == object.label,
+                        leading: const Icon(
+                          Icons.table_chart_outlined,
+                          size: 17,
+                        ),
+                        title: Text(
+                          object.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        onTap: _busy ? null : () => _selectRemoteObject(object),
                       );
                     },
                   ),
@@ -366,26 +617,48 @@ class _DatabaseWorkspaceState extends State<DatabaseWorkspace> {
             if (_mode == 0) ...<Widget>[
               IconButton(
                 tooltip: '上一页',
-                onPressed: _busy || page.offset == 0 || _selectedObject == null
+                onPressed:
+                    _busy ||
+                        page.offset == 0 ||
+                        (_selectedObject == null &&
+                            _selectedRemoteObject == null)
                     ? null
-                    : () => _selectObject(
-                        _selectedObject!,
-                        offset:
+                    : () {
+                        final int offset =
                             (page.offset -
                                     SqliteDatabaseService.defaultPageSize)
-                                .clamp(0, 1 << 62),
-                      ),
+                                .clamp(0, 1 << 62);
+                        if (_remoteSnapshot != null) {
+                          _selectRemoteObject(
+                            _selectedRemoteObject!,
+                            offset: offset,
+                          );
+                        } else {
+                          _selectObject(_selectedObject!, offset: offset);
+                        }
+                      },
                 icon: const Icon(Icons.chevron_left),
               ),
               IconButton(
                 tooltip: '下一页',
-                onPressed: _busy || !page.hasMore || _selectedObject == null
+                onPressed:
+                    _busy ||
+                        !page.hasMore ||
+                        (_selectedObject == null &&
+                            _selectedRemoteObject == null)
                     ? null
-                    : () => _selectObject(
-                        _selectedObject!,
-                        offset:
-                            page.offset + SqliteDatabaseService.defaultPageSize,
-                      ),
+                    : () {
+                        final int offset =
+                            page.offset + SqliteDatabaseService.defaultPageSize;
+                        if (_remoteSnapshot != null) {
+                          _selectRemoteObject(
+                            _selectedRemoteObject!,
+                            offset: offset,
+                          );
+                        } else {
+                          _selectObject(_selectedObject!, offset: offset);
+                        }
+                      },
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
@@ -484,6 +757,278 @@ class _EmptyDatabase extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RemoteConnectRequest {
+  const _RemoteConnectRequest({
+    required this.profile,
+    required this.password,
+    required this.rememberPassword,
+  });
+
+  final RemoteDatabaseProfile profile;
+  final String password;
+  final bool rememberPassword;
+}
+
+class _RemoteConnectionDialog extends StatefulWidget {
+  const _RemoteConnectionDialog({
+    required this.profiles,
+    required this.passwordReader,
+  });
+
+  final List<RemoteDatabaseProfile> profiles;
+  final Future<String?> Function(String profileId) passwordReader;
+
+  @override
+  State<_RemoteConnectionDialog> createState() =>
+      _RemoteConnectionDialogState();
+}
+
+class _RemoteConnectionDialogState extends State<_RemoteConnectionDialog> {
+  final TextEditingController _name = TextEditingController();
+  final TextEditingController _host = TextEditingController();
+  final TextEditingController _port = TextEditingController(text: '5432');
+  final TextEditingController _database = TextEditingController(
+    text: 'postgres',
+  );
+  final TextEditingController _username = TextEditingController(
+    text: 'postgres',
+  );
+  final TextEditingController _password = TextEditingController();
+  bool _tls = true;
+  bool _remember = true;
+  bool _showPassword = false;
+  bool _loadingPassword = false;
+  String? _selectedId;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.profiles.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _selectProfile(widget.profiles.first),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _host.dispose();
+    _port.dispose();
+    _database.dispose();
+    _username.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectProfile(RemoteDatabaseProfile profile) async {
+    setState(() {
+      _selectedId = profile.id;
+      _name.text = profile.name;
+      _host.text = profile.host;
+      _port.text = '${profile.port}';
+      _database.text = profile.database;
+      _username.text = profile.username;
+      _tls = profile.useTls;
+      _password.clear();
+      _loadingPassword = true;
+      _error = null;
+    });
+    try {
+      final String? saved = await widget.passwordReader(profile.id);
+      if (mounted && _selectedId == profile.id && saved != null) {
+        _password.text = saved;
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = '无法读取系统保存的密码，请重新输入');
+    } finally {
+      if (mounted && _selectedId == profile.id) {
+        setState(() => _loadingPassword = false);
+      }
+    }
+  }
+
+  void _submit() {
+    final int? port = int.tryParse(_port.text.trim());
+    if (_host.text.trim().isEmpty ||
+        _database.text.trim().isEmpty ||
+        _username.text.trim().isEmpty ||
+        port == null ||
+        port < 1 ||
+        port > 65535) {
+      setState(() => _error = '请填写有效的主机、端口、数据库和用户名');
+      return;
+    }
+    final String id = RemoteDatabaseProfile.createId(
+      host: _host.text.trim(),
+      port: port,
+      database: _database.text.trim(),
+      username: _username.text.trim(),
+    );
+    Navigator.of(context).pop(
+      _RemoteConnectRequest(
+        profile: RemoteDatabaseProfile(
+          id: id,
+          name: _name.text.trim().isEmpty
+              ? '${_host.text.trim()}/${_database.text.trim()}'
+              : _name.text.trim(),
+          host: _host.text.trim(),
+          port: port,
+          database: _database.text.trim(),
+          username: _username.text.trim(),
+          useTls: _tls,
+        ),
+        password: _password.text,
+        rememberPassword: _remember,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('连接 PostgreSQL'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (widget.profiles.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  key: const Key('remote-database-history'),
+                  initialValue: _selectedId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: '最近使用',
+                    prefixIcon: Icon(Icons.history),
+                  ),
+                  items: widget.profiles
+                      .map(
+                        (RemoteDatabaseProfile profile) =>
+                            DropdownMenuItem<String>(
+                              value: profile.id,
+                              child: Text(
+                                '${profile.name} · ${profile.endpointLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                      )
+                      .toList(growable: false),
+                  onChanged: (String? id) {
+                    final RemoteDatabaseProfile? profile = widget.profiles
+                        .where((RemoteDatabaseProfile item) => item.id == id)
+                        .firstOrNull;
+                    if (profile != null) _selectProfile(profile);
+                  },
+                ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('remote-database-name'),
+                controller: _name,
+                decoration: const InputDecoration(labelText: '连接名称（可选）'),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      key: const Key('remote-database-host'),
+                      controller: _host,
+                      decoration: const InputDecoration(labelText: '主机'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('remote-database-port'),
+                      controller: _port,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: '端口'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('remote-database-database'),
+                controller: _database,
+                decoration: const InputDecoration(labelText: '数据库'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('remote-database-user'),
+                controller: _username,
+                decoration: const InputDecoration(labelText: '用户名'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                key: const Key('remote-database-password'),
+                controller: _password,
+                obscureText: !_showPassword,
+                decoration: InputDecoration(
+                  labelText: _loadingPassword ? '正在读取已保存密码…' : '密码',
+                  suffixIcon: IconButton(
+                    tooltip: _showPassword ? '隐藏密码' : '显示密码',
+                    onPressed: () =>
+                        setState(() => _showPassword = !_showPassword),
+                    icon: Icon(
+                      _showPassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                  ),
+                ),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: _tls,
+                onChanged: (bool? value) =>
+                    setState(() => _tls = value ?? true),
+                title: const Text('使用 TLS'),
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: _remember,
+                onChanged: (bool? value) =>
+                    setState(() => _remember = value ?? true),
+                title: const Text('记住密码'),
+                subtitle: const Text('密码保存在 Windows 凭据管理器或 macOS 钥匙串'),
+              ),
+              if (_error != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: VibekitsColors.danger,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          key: const Key('remote-database-submit'),
+          onPressed: _loadingPassword ? null : _submit,
+          icon: const Icon(Icons.link),
+          label: const Text('连接'),
+        ),
+      ],
     );
   }
 }

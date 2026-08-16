@@ -10,6 +10,13 @@ void main() {
     final int? available = DiskSpace.availableBytes(Directory.systemTemp.path);
     expect(available, isNotNull);
     expect(available, greaterThan(0));
+    final DiskSpaceSnapshot? snapshot = DiskSpace.snapshot(
+      Directory.systemTemp.path,
+    );
+    expect(snapshot, isNotNull);
+    expect(snapshot!.totalBytes, greaterThan(0));
+    expect(snapshot.freeBytes, greaterThanOrEqualTo(snapshot.availableBytes));
+    expect(snapshot.usedBytes + snapshot.freeBytes, snapshot.totalBytes);
   });
 
   test('解压前空间不足时不创建输出', () async {

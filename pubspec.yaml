@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.4.0+5
+version: 1.5.0+6
 
 environment:
   sdk: ^3.13.0
@@ -50,6 +50,7 @@ dependencies:
   # SQLite 3.x uses Dart native-asset hooks and bundles official SQLite builds
   # for Windows and macOS; no legacy sqlite3_flutter_libs package is required.
   sqlite3: ^3.5.0
+  postgres: ^3.5.12
 
 dev_dependencies:
   flutter_test:
@@ -72,6 +73,12 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - test_data/models/silero_vad.onnx
+    - test_data/models/silero_vad_v6.onnx
+    - test_data/models/ppocrv6_tiny/det.onnx
+    - test_data/models/ppocrv6_tiny/rec.onnx
+    - test_data/models/ppocrv6_tiny/rec.yml
 
   # To add assets to your application, add an assets section, like this:
   # assets:

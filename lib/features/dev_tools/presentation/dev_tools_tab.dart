@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import '../domain/tool_result.dart';
+import '../domain/deepseek_harness_service.dart';
 import 'batch_rename_workspace.dart';
 import 'api_workspace.dart';
 import 'database_workspace.dart';
+import 'deepseek_harness_workspace.dart';
 import 'duplicate_files_workspace.dart';
 import 'file_hash_workspace.dart';
 import 'git_workspace.dart';
@@ -30,11 +32,19 @@ class DevToolsTab extends StatefulWidget {
     this.databaseInspect,
     this.databaseLoadPage,
     this.databaseRunQuery,
+    this.initialRemoteDatabaseProfiles = const <String>[],
+    this.onRemoteDatabaseProfilesChanged,
     this.remoteStartSession,
     this.apiExecute,
     this.gitInspect,
     this.gitPickDirectory,
     this.githubDiagnostics,
+    this.initialHarnessWorkspace = '',
+    this.onHarnessWorkspaceChanged,
+    this.harnessCheckEnvironment = DeepSeekHarnessService.checkEnvironment,
+    this.harnessStartSession = DeepSeekHarnessService.start,
+    this.harnessOpenBrowser = DeepSeekHarnessService.openBrowser,
+    this.harnessPickDirectory,
   });
 
   final FileHashPicker? fileHashPickFiles;
@@ -44,11 +54,20 @@ class DevToolsTab extends StatefulWidget {
   final SqliteInspector? databaseInspect;
   final SqlitePageLoader? databaseLoadPage;
   final SqliteQueryRunner? databaseRunQuery;
+  final List<String> initialRemoteDatabaseProfiles;
+  final Future<void> Function(List<String> profiles)?
+  onRemoteDatabaseProfilesChanged;
   final RemoteSessionStarter? remoteStartSession;
   final ApiExecutor? apiExecute;
   final GitInspector? gitInspect;
   final GitDirectoryPicker? gitPickDirectory;
   final GithubDiagnosticsRunner? githubDiagnostics;
+  final String initialHarnessWorkspace;
+  final Future<void> Function(String workspace)? onHarnessWorkspaceChanged;
+  final HarnessEnvironmentChecker harnessCheckEnvironment;
+  final HarnessSessionStarter harnessStartSession;
+  final HarnessBrowserOpener harnessOpenBrowser;
+  final HarnessDirectoryPicker? harnessPickDirectory;
 
   @override
   State<DevToolsTab> createState() => _DevToolsTabState();
@@ -292,6 +311,16 @@ class _DevToolsTabState extends State<DevToolsTab> {
     if (tool.id == 'programmer_calculator') {
       return const ProgrammerCalculatorWorkspace();
     }
+    if (tool.id == 'deepseek_harness') {
+      return DeepSeekHarnessWorkspace(
+        initialWorkspace: widget.initialHarnessWorkspace,
+        onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
+        checkEnvironment: widget.harnessCheckEnvironment,
+        startSession: widget.harnessStartSession,
+        openBrowser: widget.harnessOpenBrowser,
+        pickDirectory: widget.harnessPickDirectory,
+      );
+    }
     if (tool.id == 'database_manager') {
       return DatabaseWorkspace(
         initialPath: widget.initialDatabasePath,
@@ -299,6 +328,8 @@ class _DevToolsTabState extends State<DevToolsTab> {
         inspect: widget.databaseInspect,
         loadPage: widget.databaseLoadPage,
         runQuery: widget.databaseRunQuery,
+        initialRemoteProfiles: widget.initialRemoteDatabaseProfiles,
+        onRemoteProfilesChanged: widget.onRemoteDatabaseProfilesChanged,
       );
     }
     if (tool.id == 'remote_workspace') {

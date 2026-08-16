@@ -195,3 +195,13 @@
 - 创建 macOS Flutter 工程，加入 `public.data` Open With、Swift 文件事件排队/Dart 就绪握手、macOS 模型目录、`~/.Trash` 可恢复移动和 Command 主快捷键。因当前为 Windows 主机，Xcode/arm64 Release 与 macOS ONNX 仍明确待实机。
 - 最终 `flutter analyze` 无问题，226/226 全量测试通过；Windows Release 构建成功并携带 Markdown 启动 5 秒保持运行。发布目录核对 ONNX 桥、ONNX Runtime、SQLite 和 7-Zip 完整，当前用户文件关联/右键命令实查通过。
 - 供应链和验收细节见 `16_THIRD_PARTY_COMPONENTS.md` 与 `acceptance/V1_4_0_FUSION_TOOLS_2026-08-16.md`。本节取代上文旧里程碑中“RAR/OCR 尚未接入”的历史限制描述。
+
+## 2026-08-16 · v1.5.0 体验、清理、远程数据库与 Harness
+
+- 统一需求重新收敛为“极简融合入口 + 高频主工作区 + 搜索/上下文微工具”，明确清理、计算器、数据库、远程、网络、文件搜索、截图、本地模型和 DeepSeek Harness 的唯一入口与完成定义。
+- 清理扫描和删除移入独立 Isolate，I/O 主动让出；扫描/清理均可取消。完成后立即显示本次、累计次数/容量、系统盘总容量/可用/已用及成功/跳过/失败，报告异步写入不再阻塞价值反馈。
+- 文档最近打开记录跨重启保存，侧栏一键清空；保存失败只提示，不影响本次阅读。程序员计算器重做为 Windows Programmer 操作模型，支持进制行、位宽、A～F 启停、位运算/移位/循环移位及键盘输入。
+- 数据库工作区接入 PostgreSQL TLS、对象列表、100 行分页、500 行查询上限和只读 SQL；连接资料持久化，密码直接进入 Windows Credential Manager/macOS Keychain。因第三方安全存储插件要求额外 ATL，改为轻量系统适配；Windows 真凭据写入/读取/删除通过。
+- PP-OCRv6 tiny 与两款 Silero 模型成为 Release 内置安装资源。OCR 安装抽成纯离线服务：隔离暂存、逐文件 SHA-256、全部通过后原子导入，断网不影响首次演示。
+- 接入 DeepSeek 官方 Harness 开发者预览：固定 `@deepseek-ai/dsh@0.1.0-rc.5`，提供 Node/npx 环境检查、项目选择、启动、就绪地址识别、自动打开控制台、日志和停止进程树。当前网络下载探测超过 2 分钟无输出后取消，因此仍标记“适配完成、官方包实启待证据”。
+- 首次 Release 构建发现 `flutter_secure_storage_windows` 缺 ATL；移除后第二次构建被旧 EXE 进程锁定；确认并结束本项目测试实例后第三次构建成功。最终版本 `1.5.0+6`，Analyze 无问题，234/234 测试通过，Release 携带 `README.md` 隐藏启动 5 秒未提前退出，内置模型/ONNX/SQLite/7-Zip 产物核对完整。

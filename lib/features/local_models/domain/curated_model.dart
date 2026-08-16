@@ -12,6 +12,7 @@ class CuratedModel {
     required this.downloadBytes,
     required this.runtime,
     required this.statusNote,
+    this.bundleAssetPath,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class CuratedModel {
   final int downloadBytes;
   final String runtime;
   final String statusNote;
+  final String? bundleAssetPath;
 }
 
 const List<CuratedModel> curatedModels = <CuratedModel>[
@@ -42,6 +44,7 @@ const List<CuratedModel> curatedModels = <CuratedModel>[
     downloadBytes: 643854,
     runtime: 'sherpa-onnx 1.13.x / CPU',
     statusNote: '已完成 Windows x64 真实 WAV 推理验证',
+    bundleAssetPath: 'test_data/models/silero_vad.onnx',
   ),
   CuratedModel(
     id: 'silero-vad-v6',
@@ -56,5 +59,6 @@ const List<CuratedModel> curatedModels = <CuratedModel>[
     downloadBytes: 2327524,
     runtime: 'ONNX Runtime / CPU',
     statusNote: '已完成 Windows x64 真实 WAV 推理验证',
+    bundleAssetPath: 'test_data/models/silero_vad_v6.onnx',
   ),
 ];

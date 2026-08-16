@@ -6,12 +6,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../domain/bundled_model_installer.dart';
 import '../domain/curated_model.dart';
 import '../domain/curated_model_bundle.dart';
 import '../domain/image_preview.dart';
 import '../domain/model_store.dart';
 import '../domain/pp_ocr_v6.dart';
 import '../domain/vad_inference.dart';
+
+Future<List<int>> loadBundledModelAsset(String path) async {
+  final ByteData bundled = await rootBundle.load(path);
+  return bundled.buffer.asUint8List(
+    bundled.offsetInBytes,
+    bundled.lengthInBytes,
+  );
+}
 
 /// 模型目录默认位置（docs/02 §7）。
 String defaultModelDirectory() {
@@ -42,6 +51,8 @@ class LocalModelsTab extends StatefulWidget {
     this.ocrRunner = runPpOcr,
     this.modelLister = ModelStore.list,
     this.nativeDirectory,
+    this.assetLoader = loadBundledModelAsset,
+    this.ocrBundleInstaller = BundledModelInstaller.installPpOcrV6Tiny,
   });
 
   final String directory;
@@ -50,6 +61,13 @@ class LocalModelsTab extends StatefulWidget {
   final Future<PpOcrResult> Function(PpOcrRequest request) ocrRunner;
   final Future<List<ModelInfo>> Function(String directory) modelLister;
   final String? nativeDirectory;
+  final BundledModelAssetLoader assetLoader;
+  final Future<List<ModelInfo>> Function(
+    String directory,
+    BundledModelAssetLoader loadAsset,
+    BundledModelInstallProgress onProgress,
+  )
+  ocrBundleInstaller;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -131,37 +149,48 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     final File downloaded = File(
       '${temp.path}${Platform.pathSeparator}${model.fileName}',
     );
-    final HttpClient client = HttpClient();
-    _downloadClient = client;
+    HttpClient? client;
     setState(() {
       _downloadingId = model.id;
       _downloadProgress = null;
-      _message = '正在下载 ${model.name}…';
+      _message = model.bundleAssetPath == null
+          ? '正在下载 ${model.name}…'
+          : '正在安装内置 ${model.name}…';
     });
     try {
-      final HttpClientRequest request = await client.getUrl(
-        Uri.parse(model.sourceUrl),
-      );
-      final HttpClientResponse response = await request.close();
-      if (response.statusCode != HttpStatus.ok) {
-        throw HttpException('HTTP ${response.statusCode}');
-      }
-      final IOSink sink = downloaded.openWrite();
-      int received = 0;
-      try {
-        await for (final List<int> chunk in response) {
-          sink.add(chunk);
-          received += chunk.length;
-          if (mounted) {
-            setState(() {
-              _downloadProgress = response.contentLength <= 0
-                  ? null
-                  : received / response.contentLength;
-            });
-          }
+      if (model.bundleAssetPath != null) {
+        final List<int> bundled = await widget.assetLoader(
+          model.bundleAssetPath!,
+        );
+        await downloaded.writeAsBytes(bundled, flush: true);
+        if (mounted) setState(() => _downloadProgress = 1);
+      } else {
+        client = HttpClient();
+        _downloadClient = client;
+        final HttpClientRequest request = await client.getUrl(
+          Uri.parse(model.sourceUrl),
+        );
+        final HttpClientResponse response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          throw HttpException('HTTP ${response.statusCode}');
         }
-      } finally {
-        await sink.close();
+        final IOSink sink = downloaded.openWrite();
+        int received = 0;
+        try {
+          await for (final List<int> chunk in response) {
+            sink.add(chunk);
+            received += chunk.length;
+            if (mounted) {
+              setState(() {
+                _downloadProgress = response.contentLength <= 0
+                    ? null
+                    : received / response.contentLength;
+              });
+            }
+          }
+        } finally {
+          await sink.close();
+        }
       }
       final String digest =
           (await crypto.sha256.bind(downloaded.openRead()).first).toString();
@@ -178,7 +207,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     } catch (error) {
       if (mounted) setState(() => _message = '模型安装失败：$error');
     } finally {
-      client.close(force: true);
+      client?.close(force: true);
       _downloadClient = null;
       if (temp.existsSync()) temp.deleteSync(recursive: true);
       if (mounted) {
@@ -192,67 +221,24 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
 
   Future<void> _downloadOcrBundle() async {
     if (_downloadingId != null) return;
-    final Directory temp = Directory.systemTemp.createTempSync(
-      'vibekits_ocr_model',
-    );
-    final HttpClient client = HttpClient();
-    _downloadClient = client;
-    int completedBytes = 0;
     setState(() {
       _downloadingId = ppOcrV6TinyBundle.id;
       _downloadProgress = 0;
       _message = '正在安装 PP-OCRv6 tiny（3 个经过校验的文件）…';
     });
     try {
-      final List<String> downloadedPaths = <String>[];
-      for (final CuratedModelArtifact artifact in ppOcrV6TinyBundle.artifacts) {
-        final File downloaded = File(
-          '${temp.path}${Platform.pathSeparator}${artifact.fileName}',
-        );
-        final HttpClientRequest request = await client.getUrl(
-          Uri.parse(artifact.sourceUrl),
-        );
-        final HttpClientResponse response = await request.close();
-        if (response.statusCode != HttpStatus.ok) {
-          throw HttpException(
-            '${artifact.fileName}：HTTP ${response.statusCode}',
-          );
-        }
-        final IOSink sink = downloaded.openWrite();
-        int fileBytes = 0;
-        try {
-          await for (final List<int> chunk in response) {
-            sink.add(chunk);
-            fileBytes += chunk.length;
-            if (mounted) {
-              setState(() {
-                _downloadProgress =
-                    (completedBytes + fileBytes) /
-                    ppOcrV6TinyBundle.downloadBytes;
-              });
-            }
-          }
-        } finally {
-          await sink.close();
-        }
-        final String digest =
-            (await crypto.sha256.bind(downloaded.openRead()).first).toString();
-        if (digest != artifact.sha256) {
-          throw FormatException('${artifact.fileName} SHA-256 校验失败');
-        }
-        downloadedPaths.add(downloaded.path);
-        completedBytes += fileBytes;
-      }
-      await ModelStore.importBundle(downloadedPaths, _directory);
+      await widget.ocrBundleInstaller(_directory, widget.assetLoader, (
+        double progress,
+      ) {
+        if (mounted) setState(() => _downloadProgress = progress);
+      });
       if (!mounted) return;
       setState(() => _message = 'PP-OCRv6 tiny 已安装并完成逐文件校验');
       await _refresh();
     } catch (error) {
       if (mounted) setState(() => _message = 'OCR 模型安装失败：$error');
     } finally {
-      client.close(force: true);
       _downloadClient = null;
-      if (temp.existsSync()) temp.deleteSync(recursive: true);
       if (mounted) {
         setState(() {
           _downloadingId = null;

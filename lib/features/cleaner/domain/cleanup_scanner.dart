@@ -189,8 +189,8 @@ abstract final class CleanupScanner {
           currentPath = entity.path;
           visited++;
           report();
-          if (visited % 32 == 0) {
-            await Future<void>.delayed(Duration.zero);
+          if (visited % 8 == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 2));
           }
           final FileSystemEntityType type = FileSystemEntity.typeSync(
             entity.path,
@@ -396,6 +396,9 @@ abstract final class CleanupScanner {
         )) {
           if (cancellationToken.isCancelled || visited >= _maxEntries) return;
           visited++;
+          if (visited % 8 == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 2));
+          }
           final FileSystemEntityType type = FileSystemEntity.typeSync(
             entity.path,
             followLinks: false,
