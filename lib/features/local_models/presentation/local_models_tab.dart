@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../domain/bundled_model_installer.dart';
 import '../domain/curated_model.dart';
 import '../domain/curated_model_bundle.dart';
 import '../domain/image_preview.dart';
 import '../domain/model_store.dart';
 import '../domain/pp_ocr_v6.dart';
+import '../domain/screenshot_capture.dart';
 import '../domain/vad_inference.dart';
+import 'deepseek_agent_workspace.dart';
 
 Future<List<int>> loadBundledModelAsset(String path) async {
   final ByteData bundled = await rootBundle.load(path);
@@ -53,6 +56,12 @@ class LocalModelsTab extends StatefulWidget {
     this.nativeDirectory,
     this.assetLoader = loadBundledModelAsset,
     this.ocrBundleInstaller = BundledModelInstaller.installPpOcrV6Tiny,
+    this.screenshotCapture = SystemScreenshotCapture.captureRegion,
+    this.initialHarnessWorkspace = '',
+    this.onHarnessWorkspaceChanged,
+    this.harnessCheckEnvironment = DeepSeekHarnessService.checkEnvironment,
+    this.harnessRunAgent = DeepSeekHarnessService.startAgent,
+    this.harnessPickDirectory,
   });
 
   final String directory;
@@ -68,6 +77,12 @@ class LocalModelsTab extends StatefulWidget {
     BundledModelInstallProgress onProgress,
   )
   ocrBundleInstaller;
+  final ScreenshotCapture screenshotCapture;
+  final String initialHarnessWorkspace;
+  final Future<void> Function(String workspace)? onHarnessWorkspaceChanged;
+  final HarnessEnvironmentChecker harnessCheckEnvironment;
+  final HarnessAgentRunner harnessRunAgent;
+  final AgentDirectoryPicker? harnessPickDirectory;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -86,6 +101,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   String? _imagePath;
   PpOcrResult? _ocrResult;
   bool _runningOcr = false;
+  bool _capturingScreenshot = false;
   bool _autoOcrStarted = false;
   Uint8List? _portablePreview;
   bool _loadingPortablePreview = false;
@@ -307,6 +323,39 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     if (_ocrBundleInstalled) await _runOcr();
   }
 
+  Future<void> _captureScreenshot() async {
+    if (_capturingScreenshot || _runningOcr) return;
+    setState(() {
+      _capturingScreenshot = true;
+      _message = '框选屏幕区域，完成后会立即识别…';
+    });
+    try {
+      final String? path = await widget.screenshotCapture();
+      if (!mounted) return;
+      if (path == null) {
+        setState(() => _message = '已取消截图');
+        return;
+      }
+      setState(() {
+        _imagePath = path;
+        _ocrResult = null;
+        _autoOcrStarted = true;
+        _portablePreview = null;
+        _portablePreviewAttempted = false;
+        _portablePreviewError = null;
+      });
+      if (_ocrBundleInstalled) {
+        await _runOcr();
+      } else {
+        setState(() => _message = '截图已保存，安装 PP-OCRv6 tiny 后即可识别');
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '截图失败：$error');
+    } finally {
+      if (mounted) setState(() => _capturingScreenshot = false);
+    }
+  }
+
   Future<void> _runOcr() async {
     final String? imagePath = _imagePath;
     if (!_ocrBundleInstalled || imagePath == null || _runningOcr) return;
@@ -467,6 +516,27 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     _refresh();
   }
 
+  Future<void> _showModelManager() async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('本地模型管理'),
+        content: SizedBox(width: 620, height: 500, child: _buildModelPanel()),
+        actions: <Widget>[
+          TextButton.icon(
+            onPressed: _import,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('导入模型'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('完成'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _downloadClient?.close(force: true);
@@ -482,36 +552,44 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Container(
-          height: 48,
+          height: 52,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: <Widget>[
-              ElevatedButton.icon(
-                onPressed: _import,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('导入模型'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('刷新'),
+              SegmentedButton<_ModelWorkspace>(
+                key: const Key('model-workspace-tabs'),
+                showSelectedIcon: false,
+                segments: const <ButtonSegment<_ModelWorkspace>>[
+                  ButtonSegment<_ModelWorkspace>(
+                    value: _ModelWorkspace.ocr,
+                    icon: Icon(Icons.document_scanner_outlined, size: 17),
+                    label: Text('截图 OCR'),
+                  ),
+                  ButtonSegment<_ModelWorkspace>(
+                    value: _ModelWorkspace.agent,
+                    icon: Icon(Icons.terminal, size: 17),
+                    label: Text('DeepSeek 智能体'),
+                  ),
+                ],
+                selected: <_ModelWorkspace>{_workspace},
+                onSelectionChanged: (Set<_ModelWorkspace> selected) =>
+                    setState(() => _workspace = selected.first),
               ),
               const Spacer(),
-              Text(
-                '推理全离线 · 单个模型上限 100MB',
-                style: TextStyle(fontSize: 11, color: context.vibe.muted),
-              ),
-              const SizedBox(width: 12),
-              const Icon(Icons.folder_open, size: 16),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  _directory,
-                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
-                  overflow: TextOverflow.ellipsis,
+              if (_workspace == _ModelWorkspace.ocr)
+                TextButton(
+                  key: const Key('ocr-install'),
+                  onPressed: _ocrBundleInstalled || _downloadingId != null
+                      ? null
+                      : _downloadOcrBundle,
+                  child: Text(_ocrBundleInstalled ? '已安装' : '安装模型'),
                 ),
-              ),
+              if (_workspace == _ModelWorkspace.ocr)
+                IconButton(
+                  tooltip: '管理本地模型',
+                  onPressed: _showModelManager,
+                  icon: const Icon(Icons.settings_outlined, size: 19),
+                ),
             ],
           ),
         ),
@@ -528,41 +606,15 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
           ),
         const Divider(height: 1),
         Expanded(
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              final bool compact = constraints.maxWidth < 780;
-              final Widget models = _buildModelPanel();
-              final Widget workspace = _buildWorkspace();
-              if (compact) {
-                return DefaultTabController(
-                  length: 2,
-                  initialIndex: widget.initialImagePath == null ? 0 : 1,
-                  child: Column(
-                    children: <Widget>[
-                      const TabBar(
-                        tabs: <Widget>[
-                          Tab(text: '模型'),
-                          Tab(text: '运行'),
-                        ],
-                      ),
-                      Expanded(
-                        child: TabBarView(
-                          children: <Widget>[models, workspace],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return Row(
-                children: <Widget>[
-                  SizedBox(width: 380, child: models),
-                  const VerticalDivider(width: 1),
-                  Expanded(child: workspace),
-                ],
-              );
-            },
-          ),
+          child: _workspace == _ModelWorkspace.ocr
+              ? _buildOcrWorkspace()
+              : DeepSeekAgentWorkspace(
+                  initialWorkspace: widget.initialHarnessWorkspace,
+                  onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
+                  checkEnvironment: widget.harnessCheckEnvironment,
+                  runAgent: widget.harnessRunAgent,
+                  pickDirectory: widget.harnessPickDirectory,
+                ),
         ),
       ],
     );
@@ -722,6 +774,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     );
   }
 
+  // VAD 运行时仍保留给已安装用户，入口将在统一音频工具落地后迁入。
+  // ignore: unused_element
   Widget _buildWorkspace() {
     return Column(
       children: <Widget>[
@@ -879,6 +933,15 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   style: TextStyle(fontSize: 12, color: context.vibe.muted),
                 ),
               ),
+              OutlinedButton.icon(
+                key: const Key('ocr-screenshot'),
+                onPressed: _capturingScreenshot || _runningOcr
+                    ? null
+                    : _captureScreenshot,
+                icon: const Icon(Icons.crop_free, size: 18),
+                label: Text(_capturingScreenshot ? '等待截图…' : '截图识别'),
+              ),
+              const SizedBox(width: 8),
               OutlinedButton.icon(
                 key: const Key('ocr-pick-image'),
                 onPressed: _runningOcr ? null : _chooseImage,
@@ -1082,4 +1145,4 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   }
 }
 
-enum _ModelWorkspace { ocr, vad }
+enum _ModelWorkspace { ocr, agent, vad }

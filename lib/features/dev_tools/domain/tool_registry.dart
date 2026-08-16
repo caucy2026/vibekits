@@ -44,20 +44,13 @@ class ToolSpec {
   final Future<ToolResult> Function(String input, String params)? runAsync;
 }
 
-/// 开发工具注册表（M1 离线工具 + M6 网络/文件工具）。
-final List<ToolSpec> devToolRegistry = <ToolSpec>[
+/// 完整能力清单。左侧导航只展示独立工作区，微工具由集合工作区消费。
+final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   const ToolSpec(
     id: 'programmer_calculator',
     name: '程序员计算器',
     group: ToolGroups.calculate,
     description: '整数表达式、进制转换、位运算和有符号/无符号解释。',
-  ),
-  const ToolSpec(
-    id: 'deepseek_harness',
-    name: 'DeepSeek Harness',
-    group: ToolGroups.ai,
-    description: '在选定项目中启动 DeepSeek 官方智能开发代理与审批控制台。',
-    offline: false,
   ),
   const ToolSpec(
     id: 'database_manager',
@@ -318,4 +311,36 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
     group: ToolGroups.file,
     description: '按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。',
   ),
+];
+
+const Set<String> _standaloneToolIds = <String>{
+  'programmer_calculator',
+  'database_manager',
+  'remote_workspace',
+  'api_workspace',
+  'git_workspace',
+  'github_diagnostics',
+  'file_hash',
+  'batch_rename',
+  'duplicate_files',
+};
+
+const ToolSpec utilityCollectionTool = ToolSpec(
+  id: 'utility_collection',
+  name: '转换与检查',
+  group: ToolGroups.format,
+  description: '编码、哈希、格式化、时间、正则和网络小工具集中在右侧 Tab。',
+);
+
+/// 左侧只保留具有独立任务流的工作区。
+final List<ToolSpec> devToolRegistry = <ToolSpec>[
+  for (final ToolSpec tool in allDevToolRegistry)
+    if (_standaloneToolIds.contains(tool.id)) tool,
+  utilityCollectionTool,
+];
+
+/// 小而同构的输入/输出工具，不再占用左侧导航。
+final List<ToolSpec> utilityToolRegistry = <ToolSpec>[
+  for (final ToolSpec tool in allDevToolRegistry)
+    if (!_standaloneToolIds.contains(tool.id)) tool,
 ];

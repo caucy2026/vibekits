@@ -17,11 +17,11 @@ void main() {
     );
     await tester.enterText(search, 'Base64');
     await tester.pump();
-    await tester.tap(find.text('Base64 编码'));
-    await tester.pump();
-    return find.byWidgetPredicate(
-      (Widget w) => w is TextField && w.decoration?.hintText == '输入',
-    );
+    expect(find.text('Base64 编码'), findsNothing);
+    await tester.tap(find.text('转换与检查'));
+    await tester.pumpAndSettle();
+    expect(find.text('Base64 编码'), findsOneWidget);
+    return find.byKey(const Key('utility-input'));
   }
 
   testWidgets('程序员计算器默认打开且输入即算', (WidgetTester tester) async {
@@ -51,7 +51,7 @@ void main() {
     expect(find.byTooltip('复制当前结果'), findsOneWidget);
   });
 
-  testWidgets('DEV-002 执行与交换', (WidgetTester tester) async {
+  testWidgets('DEV-002 执行并将结果继续作为输入', (WidgetTester tester) async {
     final Finder input = await pumpTools(tester);
 
     await tester.enterText(input, 'Hello');
@@ -61,7 +61,7 @@ void main() {
     // 输出区显示 Base64 结果。
     expect(find.text('SGVsbG8='), findsOneWidget);
 
-    await tester.tap(find.text('交换'));
+    await tester.tap(find.text('结果作为输入'));
     await tester.pump();
 
     // 交换后原输出进入输入框，输出区被清空。
@@ -92,7 +92,7 @@ void main() {
     await tester.pump();
     expect(find.text('SGVsbG8='), findsOneWidget);
 
-    await tester.tap(find.text('清空'));
+    await tester.tap(find.byTooltip('清空'));
     await tester.pump();
     expect(find.text('SGVsbG8='), findsNothing);
   });

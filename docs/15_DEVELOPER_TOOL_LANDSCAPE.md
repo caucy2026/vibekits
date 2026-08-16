@@ -19,8 +19,8 @@
 | 转换/检查 | 通用转换 | 编码、格式、哈希、JWT/证书、二维码 | DevToys、CyberChef、IETF/RFC | 采用标准/许可清晰算法；按输入自动推荐 |
 | 文件 | 文件工作区 | 哈希、重复、重命名、二进制、元数据 | 系统文件管理器惯例 | 复用统一文件身份和任务协议 |
 | 压缩 | 压缩工作区 | 列表、测试、解压、创建 | 7-Zip/libarchive | 后端组合，统一安全和 UI 合同 |
-| 本地智能 | 本地智能 | OCR、VAD/ASR/TTS | PaddleOCR、sherpa-onnx/ONNX Runtime | 固定模型和哈希，用户主动安装，无上传 |
-| 智能代理 | DeepSeek Harness | 项目选择、环境诊断、启动/停止、Web 控制台，后续 ACP | DeepSeek Harness 官方仓库/CLI | 固定官方 RC；进程适配，不复制快速变化的整仓源码 |
+| 本地智能 | 模型 | 截图 OCR | PaddleOCR、ONNX Runtime、Windows/macOS 系统截图 | 首屏只保留截图 OCR；固定模型和哈希，用户主动安装，无上传 |
+| 智能代理 | 模型 | 项目选择、任务输入、流式结果、停止，后续 ACP | DeepSeek Harness 官方仓库/CLI | 固定官方 RC headless profile；Codex 风格应用内任务流，不复制快速变化的整仓源码 |
 | 清理 | 清理工作区 | 开发/调试/下载/插件/应用缓存 | Windows/macOS 官方目录约定 | 自研白名单和快照；不使用激进“一键清理”规则 |
 
 ## 2. 移植边界
@@ -48,10 +48,10 @@
 |---|---|---|
 | D1 | Windows 风格程序员计算器 | 主路径与 Widget 测试已闭环 |
 | D2 | SQLite + PostgreSQL 数据库管理器 | PostgreSQL 已实现；MySQL/写会话待接入 |
-| D3 | 常用语言/Shell 路由与轻量源码工作区 | 待实现 |
-| D4 | SSH/SFTP/端口转发 | 待实现 |
-| D5 | HTTP/API、Git、GitHub 网络诊断 | 待实现 |
-| D6 | JWT/证书/二维码等上下文工具收敛 | 待实现 |
-| D7 | DeepSeek Harness 官方适配 | 环境检查、工作区、启动/打开/停止/日志已实现；npm 实启待网络恢复 |
+| D3 | 常用语言/Shell 路由与轻量源码工作区 | 主路径已实现 |
+| D4 | SSH/SFTP/端口转发 | 基础主路径已实现，统一会话体验待增强 |
+| D5 | HTTP/API、Git、GitHub 网络诊断 | 主路径已实现 |
+| D6 | 编码/格式/时间/正则/网络微工具收敛 | “转换与检查”右侧分类 Tab 与搜索定位已实现 |
+| D7 | DeepSeek Harness 官方适配 | 模型页应用内 headless 任务流、环境检查、流式结果和停止已实现；npm 实启待网络恢复 |
 
 每个批次完成后更新本文件的固定上游、许可证和实际采用/拒绝原因，并在 `09_DEVELOPMENT_LOG.md` 记录验证命令与结果。

@@ -2,7 +2,7 @@
 
 更新日期：2026-08-16
 
-适用版本：`1.5.0+6`
+适用版本：`1.6.0+7`
 
 ## 发布时直接使用的关键组件
 
@@ -35,7 +35,7 @@
 
 - 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；当前官方 CLI 版本：`@deepseek-ai/dsh@0.1.0-rc.5`。
 - 状态：官方明确标注 Developer Preview，存在破坏性变更风险；Vibekits 只保留可替换进程适配层，不把其源码或依赖打入安装包。
-- 首次使用由用户显式启动 `npx --yes @deepseek-ai/dsh@0.1.0-rc.5 web --port 3080`；需要 Node.js 22.19+ 或 24+。工作目录限定为用户选定项目，控制台绑定 `127.0.0.1`。
+- 用户在模型页选择工作区并提交任务后，Vibekits 以参数数组启动 `npx --yes @deepseek-ai/dsh@0.1.0-rc.5 --profile headless <任务>`；需要 Node.js 22.19+ 或 24+。工作目录限定为用户选定项目，输出仅在当前应用会话流式显示。
 - DeepSeek/API 及自定义供应商密钥由 Harness 官方控制台管理，Vibekits 不读取、不复制、不写日志。代理具备文件与命令能力，启动页明确要求 Git 备份和逐项审批。
 - 当前机器的官方包帮助探测在下载阶段超过 2 分钟无输出后人工取消；这不是已通过的实启证据。发布前还需记录 npm 包完整性、Windows/macOS 真启动和停止后无残留进程。
 

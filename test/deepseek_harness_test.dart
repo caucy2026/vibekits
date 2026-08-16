@@ -4,98 +4,104 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
-import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
+import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
-  test('Harness 启动参数固定使用官方包和本机端口', () async {
+  test('Harness Web 与智能体参数固定使用官方包', () async {
     final Directory workspace = await Directory.systemTemp.createTemp(
       'vibekits_harness_',
     );
     addTearDown(() => workspace.delete(recursive: true));
-    final HarnessLaunchSpec spec = HarnessLaunchSpec(
+    final HarnessLaunchSpec web = HarnessLaunchSpec(
       workspace: workspace.path,
       port: 3080,
     );
-
-    spec.validate();
-
-    expect(spec.arguments, <String>[
+    final HarnessAgentRequest agent = HarnessAgentRequest(
+      workspace: workspace.path,
+      prompt: '检查失败的测试',
+    );
+    web.validate();
+    agent.validate();
+    expect(web.arguments, <String>[
       '--yes',
       '@deepseek-ai/dsh@0.1.0-rc.5',
       'web',
       '--port',
       '3080',
     ]);
-    expect(spec.url, Uri.parse('http://127.0.0.1:3080'));
+    expect(agent.arguments, <String>[
+      '--yes',
+      '@deepseek-ai/dsh@0.1.0-rc.5',
+      '--profile',
+      'headless',
+      '检查失败的测试',
+    ]);
   });
 
-  testWidgets('选择工作区后一键启动并在就绪时打开控制台', (WidgetTester tester) async {
+  testWidgets('智能体选择工作区后在应用内流式运行任务', (WidgetTester tester) async {
     final Directory workspace = Directory.systemTemp.createTempSync(
-      'vibekits_harness_ui_',
+      'vibekits_agent_ui_',
     );
     addTearDown(() => workspace.deleteSync(recursive: true));
-    final _FakeHarnessSession session = _FakeHarnessSession();
-    HarnessLaunchSpec? launched;
-    Uri? opened;
+    final _FakeAgentHandle handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    HarnessAgentRequest? launched;
     String? savedWorkspace;
-
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: DevToolsTab(
-            harnessCheckEnvironment: () async => const HarnessEnvironmentReport(
+          body: DeepSeekAgentWorkspace(
+            checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.18.0',
               npxVersion: '11.16.0',
               message: '运行环境已就绪',
             ),
-            harnessPickDirectory: () async => workspace.path,
-            harnessStartSession: (HarnessLaunchSpec spec) async {
-              launched = spec;
-              return session;
+            pickDirectory: () async => workspace.path,
+            runAgent: (HarnessAgentRequest request) async {
+              launched = request;
+              return handle;
             },
-            harnessOpenBrowser: (Uri url) async => opened = url,
-            onHarnessWorkspaceChanged: (String path) async {
+            onWorkspaceChanged: (String path) async {
               savedWorkspace = path;
             },
           ),
         ),
       ),
     );
-    final Finder search = find.byWidgetPredicate(
-      (Widget widget) =>
-          widget is TextField && widget.decoration?.hintText == '搜索工具',
-    );
-    await tester.enterText(search, 'DeepSeek');
-    await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'DeepSeek Harness'));
     await tester.pumpAndSettle();
-
-    expect(find.text('开发者预览 · MIT'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('harness-pick-workspace')));
+    await tester.tap(find.byKey(const Key('agent-pick-workspace')));
     await tester.pumpAndSettle();
     expect(savedWorkspace, workspace.path);
-
-    await tester.tap(find.byKey(const Key('harness-primary-action')));
+    await tester.enterText(find.byKey(const Key('agent-composer')), '修复失败的测试');
+    await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(launched?.workspace, workspace.path);
-    session.add('Web UI: http://127.0.0.1:3080\n');
+    expect(launched?.prompt, '修复失败的测试');
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+    handle.add('已定位并修复测试。');
     await tester.pump();
-    expect(opened, Uri.parse('http://127.0.0.1:3080'));
-    expect(find.text('控制台已就绪'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('harness-stop')));
+    expect(find.text('已定位并修复测试。'), findsOneWidget);
+    await handle.complete(0);
     await tester.pumpAndSettle();
-    expect(session.running, isFalse);
+    expect(find.byKey(const Key('agent-send')), findsOneWidget);
   });
 }
 
-class _FakeHarnessSession implements HarnessSessionHandle {
+class _FakeAgentHandle implements HarnessAgentHandle {
   final StreamController<String> _output = StreamController<String>();
   final Completer<int> _exit = Completer<int>();
   bool _running = true;
 
   void add(String value) => _output.add(value);
+
+  Future<void> complete(int code) async {
+    if (!_running) return;
+    _running = false;
+    _exit.complete(code);
+  }
+
+  Future<void> dispose() => _output.close();
 
   @override
   Future<int> get exitCode => _exit.future;
@@ -107,13 +113,5 @@ class _FakeHarnessSession implements HarnessSessionHandle {
   bool get running => _running;
 
   @override
-  Uri get url => Uri.parse('http://127.0.0.1:3080');
-
-  @override
-  Future<void> stop() async {
-    if (!_running) return;
-    _running = false;
-    if (!_exit.isCompleted) _exit.complete(0);
-    await _output.close();
-  }
+  Future<void> stop() async => complete(0);
 }

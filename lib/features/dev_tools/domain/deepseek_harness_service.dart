@@ -48,6 +48,34 @@ class HarnessLaunchSpec {
   }
 }
 
+class HarnessAgentRequest {
+  const HarnessAgentRequest({required this.workspace, required this.prompt});
+
+  final String workspace;
+  final String prompt;
+
+  List<String> get arguments => <String>[
+    '--yes',
+    HarnessLaunchSpec.packageSpec,
+    '--profile',
+    'headless',
+    prompt.trim(),
+  ];
+
+  void validate() {
+    final Directory directory = Directory(workspace.trim());
+    if (workspace.trim().isEmpty || !directory.isAbsolute) {
+      throw const FormatException('请选择绝对路径的工作区');
+    }
+    if (!directory.existsSync()) {
+      throw const FormatException('工作区不存在或无法访问');
+    }
+    if (prompt.trim().isEmpty) {
+      throw const FormatException('请输入要交给智能体的任务');
+    }
+  }
+}
+
 abstract interface class HarnessSessionHandle {
   Stream<String> get output;
   Future<int> get exitCode;
@@ -61,6 +89,17 @@ typedef HarnessSessionStarter = Future<HarnessSessionHandle> Function(
   HarnessLaunchSpec spec,
 );
 typedef HarnessBrowserOpener = Future<void> Function(Uri url);
+
+abstract interface class HarnessAgentHandle {
+  Stream<String> get output;
+  Future<int> get exitCode;
+  bool get running;
+  Future<void> stop();
+}
+
+typedef HarnessAgentRunner = Future<HarnessAgentHandle> Function(
+  HarnessAgentRequest request,
+);
 
 abstract final class DeepSeekHarnessService {
   static String get npxExecutable => Platform.isWindows ? 'npx.cmd' : 'npx';
@@ -137,6 +176,24 @@ abstract final class DeepSeekHarnessService {
     }
   }
 
+  static Future<HarnessAgentHandle> startAgent(
+    HarnessAgentRequest request,
+  ) async {
+    request.validate();
+    try {
+      final Process process = await Process.start(
+        npxExecutable,
+        request.arguments,
+        workingDirectory: request.workspace.trim(),
+        runInShell: false,
+        mode: ProcessStartMode.normal,
+      );
+      return _ProcessHarnessAgent(process);
+    } on ProcessException catch (error) {
+      throw StateError('无法启动 DeepSeek 智能体：${error.message}');
+    }
+  }
+
   static Future<void> openBrowser(Uri url) async {
     if (url.scheme != 'http' ||
         (url.host != '127.0.0.1' && url.host != 'localhost')) {
@@ -168,6 +225,48 @@ abstract final class DeepSeekHarnessService {
     final int major = int.parse(match.group(1)!);
     final int minor = int.parse(match.group(2)!);
     return (major == 22 && minor >= 19) || major >= 24;
+  }
+}
+
+class _ProcessHarnessAgent implements HarnessAgentHandle {
+  _ProcessHarnessAgent(this._process) {
+    _stdout = _process.stdout
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(_controller.add);
+    _stderr = _process.stderr
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(_controller.add);
+    _exitCode = _process.exitCode.then((int code) async {
+      _running = false;
+      await _stdout.cancel();
+      await _stderr.cancel();
+      await _controller.close();
+      return code;
+    });
+  }
+
+  final Process _process;
+  final StreamController<String> _controller = StreamController<String>();
+  late final StreamSubscription<String> _stdout;
+  late final StreamSubscription<String> _stderr;
+  late final Future<int> _exitCode;
+  bool _running = true;
+
+  @override
+  Stream<String> get output => _controller.stream;
+
+  @override
+  Future<int> get exitCode => _exitCode;
+
+  @override
+  bool get running => _running;
+
+  @override
+  Future<void> stop() async {
+    if (!_running) return;
+    _running = false;
+    await _stopProcessTree(_process);
+    await _exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
   }
 }
 
@@ -211,19 +310,23 @@ class _ProcessHarnessSession implements HarnessSessionHandle {
   Future<void> stop() async {
     if (!_running) return;
     _running = false;
-    if (Platform.isWindows) {
-      await Process.run('taskkill.exe', <String>[
-        '/PID',
-        '${_process.pid}',
-        '/T',
-        '/F',
-      ], runInShell: false).timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => ProcessResult(0, -1, '', ''),
-      );
-    } else {
-      _process.kill(ProcessSignal.sigterm);
-    }
+    await _stopProcessTree(_process);
     await _exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
+  }
+}
+
+Future<void> _stopProcessTree(Process process) async {
+  if (Platform.isWindows) {
+    await Process.run('taskkill.exe', <String>[
+      '/PID',
+      '${process.pid}',
+      '/T',
+      '/F',
+    ], runInShell: false).timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => ProcessResult(0, -1, '', ''),
+    );
+  } else {
+    process.kill(ProcessSignal.sigterm);
   }
 }

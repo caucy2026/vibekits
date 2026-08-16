@@ -382,13 +382,6 @@ class _MainShellState extends State<MainShell> {
                 remoteDatabaseProfiles: profiles,
               ),
             ),
-        initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
-        onHarnessWorkspaceChanged: (String workspace) =>
-            widget.settingsController.update(
-              widget.settingsController.value.copyWith(
-                deepSeekHarnessWorkspace: workspace,
-              ),
-            ),
       ),
       LocalModelsTab(
         key: ValueKey<String>(
@@ -407,6 +400,13 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.image
                 ? widget.initialFilePath
                 : null),
+        initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
+        onHarnessWorkspaceChanged: (String workspace) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                deepSeekHarnessWorkspace: workspace,
+              ),
+            ),
       ),
     ];
     final Map<ShortcutActivator, VoidCallback> shortcuts =

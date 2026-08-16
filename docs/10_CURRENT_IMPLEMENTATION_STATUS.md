@@ -2,13 +2,13 @@
 
 更新日期：2026-08-16
 
-当前版本：`1.5.0+6`
+当前版本：`1.6.0+7`
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。`flutter analyze` 无问题，234/234 自动测试通过，Windows Release 构建与 5 秒真实启动通过。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批把碎片化微工具收进右侧分类 Tab，并把模型页收敛为“截图 OCR / DeepSeek 智能体”。`flutter analyze` 无问题，235/235 自动测试通过，Windows Release 构建与 5 秒真实启动通过。macOS 工程、Open With 文件事件和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 实机验证写成完成。
 
 ## 2. 五个主工作区
 
@@ -17,8 +17,8 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 解压缩 | 官方 7-Zip 26.02 + Dart 后端；RAR/RAR5、ZIP/ZIPX、7z、TAR、GZ/BZ2/XZ/ZST、CAB、ISO/WIM/DMG 等列表/解压；路径、链接、空间、大小、压缩比、冲突、暂存、取消保护 | Windows 主路径完成 |
 | 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
 | 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
-| 开发工具 | Windows 风格程序员计算器；SQLite + PostgreSQL 只读管理和安全连接历史；DeepSeek Harness 可选入口；API、SSH/SFTP/转发、Git、网络诊断、文件工具 | 本批主路径完成；MySQL/远程融合增强待做 |
-| 本地模型 | 固定清单、应用内置资源、逐文件 SHA-256 与事务安装、Silero VAD；官方 PP-OCRv6 tiny 真推理、图片预览、自动 OCR、复制/保存 | Windows 完成主路径；macOS ONNX 待适配 |
+| 开发工具 | 左侧只保留计算器、数据库、远程、API、Git、文件哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | Windows 主路径完成；MySQL/远程融合增强待做 |
+| 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体在应用内选择工作区、输入任务、流式输出和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
 
 ## 3. 文件融合与系统入口
 
@@ -48,17 +48,20 @@ PostgreSQL 已接入 TLS/非 TLS 连接、对象列表、100 行分页和最多 
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
 
-### 4.4 DeepSeek Harness
+### 4.4 微工具融合与 DeepSeek 智能体
 
-开发工具页新增一个“智能开发”入口：保存用户选择的项目目录，检查 Node.js/npx，使用固定官方 `@deepseek-ai/dsh@0.1.0-rc.5` 启动本机 Web 控制台，识别就绪地址后打开浏览器，显示有界日志并支持停止进程树。API 密钥只在 Harness 控制台中配置。
+Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
 
-适配层和模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后复用同一入口深化集成。
+DeepSeek 从开发工具左侧迁入模型页，界面采用类似 Codex 的工作区 + 对话流 + 底部任务输入。固定官方 `@deepseek-ai/dsh@0.1.0-rc.5 --profile headless`，实时合并 stdout/stderr，完成后恢复输入，运行中可终止完整进程树；工作区跨重启保存。API 密钥沿用 Harness 官方配置，不进入 Vibekits。
+
+参数合同、流式输出、完成恢复和取消适配的模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后增加可续接会话和结构化审批。
 
 ## 5. 图片、OCR 与二进制
 
 - 内置图片解码矩阵已真实测试 PNG、JPEG、WebP、GIF、BMP、TIFF、ICO、TGA；同一后端还路由 PSD、EXR、PNM 和 PVR。
 - 图片在 Isolate 中转换为统一 PNG 预览；限制 256MiB 编码文件和 1 亿像素，动画/多页格式只解码首帧，EXIF 方向在输出前固化。
 - PP-OCRv6 tiny 使用固定官方检测/识别/字典资产，完整 SHA-256 通过后一次安装；官方登机牌样图得到包含坐标和置信度的真实文本。
+- Windows“截图识别”调用系统区域截图，macOS 调用 `screencapture -i`；完成后立即送入同一 OCR 管线，取消截图不产生旧剪贴板误识别。自动测试确认一次截图只触发一次推理。
 - 大于 256MiB 的 BIN 不再拒绝或整体读入内存：固定 1MiB 窗口、64 位偏移、十进制/Hex 跳转、文本/字节搜索并保留跨块重叠。2GB+ 稀疏文件已验证。
 
 HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把扩展名路由写成真解码支持。平台可解码时可继续使用系统预览，失败时界面明确说明并保留 Hex/哈希方向。
@@ -76,9 +79,9 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 
 - `dart format lib test`：已执行。
 - `flutter analyze`：`No issues found`。
-- `flutter test --reporter expanded`：234/234 通过。
+- `flutter test --reporter expanded`：235/235 通过。
 - `flutter build windows --release`：成功。
-- EXE 文件/产品版本：`1.5.0+6`。
+- EXE 文件/产品版本：`1.6.0+7`。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
 - Release 产物：`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 和 5 项内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。
