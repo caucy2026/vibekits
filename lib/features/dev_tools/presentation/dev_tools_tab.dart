@@ -8,13 +8,21 @@ import '../domain/tool_registry.dart';
 import '../domain/tool_result.dart';
 import 'batch_rename_workspace.dart';
 import 'duplicate_files_workspace.dart';
+import 'file_hash_workspace.dart';
 
 /// T4 开发工具 Tab。
 ///
 /// 左侧为工具分组与搜索，右侧为通用输入/输出工作区。
 /// M1 提供离线工具（DEV-001～DEV-003），网络与文件工具在 M6 补齐。
 class DevToolsTab extends StatefulWidget {
-  const DevToolsTab({super.key});
+  const DevToolsTab({
+    super.key,
+    this.fileHashPickFiles,
+    this.fileHashCalculator,
+  });
+
+  final FileHashPicker? fileHashPickFiles;
+  final FileHashCalculator? fileHashCalculator;
 
   @override
   State<DevToolsTab> createState() => _DevToolsTabState();
@@ -250,6 +258,12 @@ class _DevToolsTabState extends State<DevToolsTab> {
     }
     if (tool.id == 'duplicate_files') {
       return const DuplicateFilesWorkspace();
+    }
+    if (tool.id == 'file_hash') {
+      return FileHashWorkspace(
+        pickFiles: widget.fileHashPickFiles,
+        calculate: widget.fileHashCalculator,
+      );
     }
     return Padding(
       padding: const EdgeInsets.all(16),

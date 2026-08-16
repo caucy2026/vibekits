@@ -11,6 +11,8 @@ class WindowsFileDrop {
   static const MethodChannel _channel = MethodChannel('vibekits/file_drop');
   final StreamController<List<String>> _controller =
       StreamController<List<String>>.broadcast();
+  final List<String> _pendingPaths = <String>[];
+  Timer? _flushTimer;
   bool _started = false;
 
   Stream<List<String>> get files => _controller.stream;
@@ -23,7 +25,20 @@ class WindowsFileDrop {
       final List<String> paths = (call.arguments as List<Object?>? ?? const [])
           .whereType<String>()
           .toList(growable: false);
-      if (paths.isNotEmpty) _controller.add(paths);
+      if (paths.isNotEmpty) _enqueue(paths);
+    });
+  }
+
+  void _enqueue(List<String> paths) {
+    for (final String path in paths) {
+      if (!_pendingPaths.contains(path)) _pendingPaths.add(path);
+    }
+    _flushTimer?.cancel();
+    _flushTimer = Timer(const Duration(milliseconds: 120), () {
+      if (_pendingPaths.isEmpty) return;
+      final List<String> batch = List<String>.of(_pendingPaths);
+      _pendingPaths.clear();
+      _controller.add(batch);
     });
   }
 }

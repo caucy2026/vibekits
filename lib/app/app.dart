@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'app_settings.dart';
+import 'dropped_file_router.dart';
 import 'main_shell.dart';
 
 /// Vibekits 应用根组件。
@@ -10,12 +11,16 @@ class VibekitsApp extends StatefulWidget {
     super.key,
     this.settingsController,
     this.initialFilePath,
+    this.initialFilePaths = const <String>[],
     this.droppedFiles,
+    this.dropClassifier,
   });
 
   final AppSettingsController? settingsController;
   final String? initialFilePath;
+  final List<String> initialFilePaths;
   final Stream<List<String>>? droppedFiles;
+  final Future<DroppedFileRoute> Function(String path)? dropClassifier;
 
   @override
   State<VibekitsApp> createState() => _VibekitsAppState();
@@ -52,7 +57,9 @@ class _VibekitsAppState extends State<VibekitsApp> {
       home: MainShell(
         settingsController: _settings,
         initialFilePath: widget.initialFilePath,
+        initialFilePaths: widget.initialFilePaths,
         droppedFiles: widget.droppedFiles,
+        dropClassifier: widget.dropClassifier,
       ),
     );
   }

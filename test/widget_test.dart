@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/app/app.dart';
 import 'package:vibekits/app/app_settings.dart';
+import 'package:vibekits/app/dropped_file_router.dart';
 import 'package:vibekits/app/main_shell.dart';
+import 'package:vibekits/features/documents/domain/format_router.dart';
 import 'package:vibekits/features/documents/presentation/documents_tab.dart';
 import 'package:vibekits/features/local_models/presentation/local_models_tab.dart';
 
@@ -132,6 +135,40 @@ void main() {
     expect(find.text('打开压缩包'), findsNothing);
   });
 
+  testWidgets('Markdown 默认渲染可读预览且可切换源码', (WidgetTester tester) async {
+    final Uint8List source = Uint8List.fromList(
+      utf8.encode('# 使用说明\n\n拖入文件后自动处理。\n\n```dart\nvoid main() {}\n```'),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DocumentsTab(
+            initialPath: 'readme.md',
+            bytesReader: (_) async => source,
+          ),
+        ),
+      ),
+    );
+    for (
+      int attempt = 0;
+      attempt < 100 &&
+          find.byKey(const Key('markdown-preview')).evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+
+    expect(find.byKey(const Key('markdown-preview')), findsOneWidget);
+    expect(find.text('使用说明'), findsOneWidget);
+    expect(find.text('拖入文件后自动处理。'), findsOneWidget);
+
+    await tester.tap(find.text('源码'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('markdown-preview')), findsNothing);
+    expect(find.textContaining('# 使用说明'), findsOneWidget);
+  });
+
   testWidgets('拖入文件后自动选择文档工具并立即打开', (WidgetTester tester) async {
     final StreamController<List<String>> drops =
         StreamController<List<String>>.broadcast();
@@ -140,13 +177,22 @@ void main() {
     });
     final File source = File('pubspec.yaml').absolute;
 
-    await tester.pumpWidget(VibekitsApp(droppedFiles: drops.stream));
+    await tester.pumpWidget(
+      VibekitsApp(
+        droppedFiles: drops.stream,
+        dropClassifier: (String path) async => DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.document,
+          detail: '按扩展名交给文档阅读处理',
+        ),
+      ),
+    );
     drops.add(<String>[source.path]);
     await tester.pump();
     await tester.pumpAndSettle();
 
     expect(find.text('文档阅读'), findsWidgets);
-    expect(find.textContaining('已用文档阅读打开 pubspec.yaml'), findsOneWidget);
+    expect(find.textContaining('按扩展名交给文档阅读处理：pubspec.yaml'), findsOneWidget);
     expect(
       tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
       source.path,
@@ -165,7 +211,137 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('本地模型页只展示已实现的管理能力', (WidgetTester tester) async {
+  testWidgets('系统传入多个文件时逐项路由而不是只处理第一个', (WidgetTester tester) async {
+    final List<String> paths = <String>['first.md', 'second.unknown'];
+    await tester.pumpWidget(
+      VibekitsApp(
+        initialFilePaths: paths,
+        dropClassifier: (String path) async => DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.document,
+          detail: '已自动识别',
+          documentMode: path.endsWith('.md')
+              ? DocViewMode.markdown
+              : DocViewMode.text,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('drop-batch-button')), findsOneWidget);
+    expect(find.textContaining('已逐项识别 2 个项目'), findsOneWidget);
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
+      'first.md',
+    );
+  });
+
+  testWidgets('拖入 ONNX 自动切换模型仓库并提交导入', (WidgetTester tester) async {
+    final StreamController<List<String>> drops =
+        StreamController<List<String>>.broadcast();
+    addTearDown(drops.close);
+    const String modelPath = 'D:\\models\\tiny.onnx';
+    await tester.pumpWidget(
+      VibekitsApp(
+        droppedFiles: drops.stream,
+        dropClassifier: (String path) async => const DroppedFileRoute(
+          path: modelPath,
+          kind: DroppedFileRouteKind.model,
+          detail: '已识别为本地模型',
+        ),
+      ),
+    );
+    drops.add(const <String>[modelPath]);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('本地模型'), findsWidgets);
+    expect(
+      tester
+          .widget<LocalModelsTab>(find.byType(LocalModelsTab))
+          .initialImportPath,
+      modelPath,
+    );
+    expect(find.textContaining('已识别为本地模型'), findsOneWidget);
+  });
+
+  testWidgets('多文件拖入逐项识别且未知文件自动选择查看方式', (WidgetTester tester) async {
+    final StreamController<List<String>> drops =
+        StreamController<List<String>>.broadcast();
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_drop_batch',
+    );
+    final File text = File('${sandbox.path}/notes.unknown')
+      ..writeAsStringSync('automatic text route');
+    final File binary = File('${sandbox.path}/payload.unknown')
+      ..writeAsBytesSync(<int>[0x00, 0x01, 0x02, 0xff]);
+    addTearDown(() async {
+      await drops.close();
+      sandbox.deleteSync(recursive: true);
+    });
+
+    await tester.pumpWidget(
+      VibekitsApp(
+        droppedFiles: drops.stream,
+        dropClassifier: (String path) async {
+          if (path == sandbox.path) {
+            return DroppedFileRoute(
+              path: path,
+              kind: DroppedFileRouteKind.rejected,
+              detail: '这是文件夹；请在对应工具中选择该目录',
+            );
+          }
+          return DroppedFileRoute(
+            path: path,
+            kind: DroppedFileRouteKind.document,
+            detail: path == text.path
+                ? '未知扩展名，已按内容自动选择文本查看'
+                : '未知扩展名，已按内容自动选择 Hex 查看',
+            documentMode: path == text.path
+                ? DocViewMode.text
+                : DocViewMode.hex,
+          );
+        },
+      ),
+    );
+    drops.add(<String>[text.path, binary.path, sandbox.path]);
+    for (
+      int attempt = 0;
+      attempt < 100 &&
+          find.byKey(const Key('drop-batch-button')).evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+
+    expect(find.byKey(const Key('drop-batch-button')), findsOneWidget);
+    expect(find.textContaining('已逐项识别 3 个项目'), findsOneWidget);
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
+      text.path,
+    );
+
+    await tester.tap(find.byKey(const Key('drop-batch-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('本次拖入 · 3 项'), findsOneWidget);
+    expect(find.text('notes.unknown'), findsOneWidget);
+    expect(find.text('payload.unknown'), findsOneWidget);
+    expect(find.textContaining('这是文件夹'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ListTile, 'payload.unknown'));
+    await tester.pump();
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialPath,
+      binary.path,
+    );
+    expect(
+      tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialMode,
+      DocViewMode.hex,
+    );
+  });
+
+  testWidgets('本地模型页展示真实精选模型与离线推理入口', (WidgetTester tester) async {
     final Directory sandbox = Directory.systemTemp.createTempSync(
       'vk_models_ui',
     );
@@ -178,8 +354,15 @@ void main() {
 
     expect(find.text('导入模型'), findsOneWidget);
     expect(find.text('刷新'), findsOneWidget);
-    expect(find.textContaining('仅管理本地文件'), findsOneWidget);
-    expect(find.byType(SegmentedButton<String>), findsNothing);
-    expect(find.textContaining('待接入'), findsNothing);
+    expect(find.textContaining('推理全离线'), findsOneWidget);
+    expect(find.text('精选小模型'), findsOneWidget);
+    expect(find.text('Silero VAD · Sherpa 兼容版'), findsOneWidget);
+    expect(find.text('语音片段检测'), findsOneWidget);
+    expect(find.byKey(const Key('vad-pick-wav')), findsOneWidget);
+    expect(find.byKey(const Key('vad-run')), findsOneWidget);
+    expect(
+      tester.widget<FilledButton>(find.byKey(const Key('vad-run'))).onPressed,
+      isNull,
+    );
   });
 }

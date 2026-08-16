@@ -1,17 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
 import '../features/cleaner/presentation/cleaner_tab.dart';
 import '../features/documents/presentation/documents_tab.dart';
+import '../features/documents/domain/format_router.dart';
 import '../features/dev_tools/presentation/dev_tools_tab.dart';
 import '../features/local_models/presentation/local_models_tab.dart';
 import 'app_shortcuts.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'app_version.dart';
+import 'dropped_file_router.dart';
 import 'supported_file_types.dart';
 import 'windows_file_drop.dart';
 
@@ -21,12 +22,16 @@ class MainShell extends StatefulWidget {
     super.key,
     required this.settingsController,
     this.initialFilePath,
+    this.initialFilePaths = const <String>[],
     this.droppedFiles,
+    this.dropClassifier,
   });
 
   final AppSettingsController settingsController;
   final String? initialFilePath;
+  final List<String> initialFilePaths;
   final Stream<List<String>>? droppedFiles;
+  final Future<DroppedFileRoute> Function(String path)? dropClassifier;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -62,8 +67,13 @@ class _MainShellState extends State<MainShell> {
   final ValueNotifier<int> _findRequest = ValueNotifier<int>(0);
   String? _archiveDropPath;
   String? _documentDropPath;
+  DocViewMode? _documentDropMode;
+  String? _modelDropPath;
   int _archiveDropSerial = 0;
   int _documentDropSerial = 0;
+  int _modelDropSerial = 0;
+  int _dropGeneration = 0;
+  List<DroppedFileRoute> _dropBatch = const <DroppedFileRoute>[];
   StreamSubscription<List<String>>? _dropSubscription;
 
   @override
@@ -76,6 +86,7 @@ class _MainShellState extends State<MainShell> {
     _selectedIndex = switch (startupKind) {
       VibekitsFileKind.archive => 0,
       VibekitsFileKind.document => 2,
+      VibekitsFileKind.model => 4,
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? settings.lastTab : 0,
     };
@@ -83,10 +94,23 @@ class _MainShellState extends State<MainShell> {
     if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
     _dropSubscription = (widget.droppedFiles ?? WindowsFileDrop.instance.files)
         .listen(_handleDroppedFiles);
+    if (widget.initialFilePath != null &&
+        startupKind == VibekitsFileKind.unsupported) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _handleDroppedFiles(<String>[widget.initialFilePath!]),
+      );
+    }
+    if (widget.initialFilePaths.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _handleDroppedFiles(widget.initialFilePaths),
+      );
+    }
   }
 
   void _applySettings() {
-    if (widget.initialFilePath != null) return;
+    if (widget.initialFilePath != null || widget.initialFilePaths.isNotEmpty) {
+      return;
+    }
     final AppSettings settings = widget.settingsController.value;
     if (settings.restoreLastTab && settings.lastTab != _selectedIndex) {
       setState(() => _selectedIndex = settings.lastTab);
@@ -124,44 +148,134 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  void _handleDroppedFiles(List<String> paths) {
+  Future<void> _handleDroppedFiles(List<String> paths) async {
     if (!mounted) return;
-    final String? path = SupportedFileTypes.bestSupportedPath(
-      paths,
-      fileExists: (String path) => File(path).existsSync(),
+    final int generation = ++_dropGeneration;
+    final Future<DroppedFileRoute> Function(String path) classifier =
+        widget.dropClassifier ?? DroppedFileRouter.classify;
+    final List<DroppedFileRoute> routes = await Future.wait(
+      paths.map(classifier),
     );
-    if (path == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('没有可打开的受支持文件；文件夹和未知格式不会被误处理')),
-        );
-      return;
-    }
-    final VibekitsFileKind kind = SupportedFileTypes.kindForPath(path);
-    _selectTab(kind == VibekitsFileKind.archive ? 0 : 2);
+    if (!mounted || generation != _dropGeneration) return;
+    final DroppedFileRoute? first = routes
+        .where((DroppedFileRoute route) => route.canOpen)
+        .firstOrNull;
     setState(() {
-      if (kind == VibekitsFileKind.archive) {
-        _archiveDropPath = path;
-        _archiveDropSerial++;
-      } else {
-        _documentDropPath = path;
-        _documentDropSerial++;
-      }
+      _dropBatch = routes;
     });
-    final int ignored = paths.length - 1;
+    if (first != null) _openDroppedRoute(first);
+    final int rejected = routes
+        .where((DroppedFileRoute route) => !route.canOpen)
+        .length;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           content: Text(
-            ignored > 0
-                ? '已用最佳工具打开 ${_fileName(path)}；其余 $ignored 项未自动处理'
-                : '已用${kind == VibekitsFileKind.archive ? '解压缩' : '文档阅读'}打开 ${_fileName(path)}',
+            routes.isEmpty
+                ? '没有收到可处理的路径'
+                : routes.length == 1
+                ? first == null
+                      ? routes.single.detail
+                      : '${routes.single.detail}：${_fileName(routes.single.path)}'
+                : '已逐项识别 ${routes.length} 个项目，可打开 ${routes.length - rejected} 个${rejected == 0 ? '' : '，$rejected 个需注意'}；当前显示 ${first == null ? '处理清单' : _fileName(first.path)}',
           ),
-          duration: const Duration(seconds: 2),
+          action: routes.length > 1 || rejected > 0
+              ? SnackBarAction(label: '查看清单', onPressed: _showDropBatch)
+              : null,
+          duration: const Duration(seconds: 4),
         ),
       );
+  }
+
+  void _openDroppedRoute(DroppedFileRoute route) {
+    if (!route.canOpen) return;
+    final bool archive = route.kind == DroppedFileRouteKind.archive;
+    final bool model = route.kind == DroppedFileRouteKind.model;
+    _selectTab(
+      archive
+          ? 0
+          : model
+          ? 4
+          : 2,
+    );
+    setState(() {
+      if (archive) {
+        _archiveDropPath = route.path;
+        _archiveDropSerial++;
+      } else if (model) {
+        _modelDropPath = route.path;
+        _modelDropSerial++;
+      } else {
+        _documentDropPath = route.path;
+        _documentDropMode = route.documentMode;
+        _documentDropSerial++;
+      }
+    });
+  }
+
+  Future<void> _showDropBatch() async {
+    if (!mounted || _dropBatch.isEmpty) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('本次拖入 · ${_dropBatch.length} 项'),
+        content: SizedBox(
+          width: 620,
+          height: (MediaQuery.sizeOf(dialogContext).height * 0.58).clamp(
+            260,
+            520,
+          ),
+          child: ListView.separated(
+            itemCount: _dropBatch.length,
+            separatorBuilder: (BuildContext context, int index) =>
+                const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final DroppedFileRoute route = _dropBatch[index];
+              final bool archive = route.kind == DroppedFileRouteKind.archive;
+              final bool model = route.kind == DroppedFileRouteKind.model;
+              return ListTile(
+                key: ValueKey<String>('drop-route-${route.path}'),
+                enabled: route.canOpen,
+                leading: Icon(
+                  route.canOpen
+                      ? archive
+                            ? Icons.folder_zip_outlined
+                            : model
+                            ? Icons.memory_outlined
+                            : Icons.description_outlined
+                      : Icons.warning_amber_outlined,
+                ),
+                title: Text(
+                  route.path.isEmpty ? '空路径' : _fileName(route.path),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  route.detail,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: route.canOpen
+                    ? const Icon(Icons.open_in_new, size: 17)
+                    : null,
+                onTap: route.canOpen
+                    ? () {
+                        Navigator.of(dialogContext).pop();
+                        _openDroppedRoute(route);
+                      }
+                    : null,
+              );
+            },
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _fileName(String path) => path.replaceAll('\\', '/').split('/').last;
@@ -210,11 +324,18 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.document
                 ? widget.initialFilePath
                 : null),
+        initialMode: _documentDropPath == null ? null : _documentDropMode,
       ),
       const DevToolsTab(),
       LocalModelsTab(
-        key: ValueKey<String>(settings.modelDirectory),
+        key: ValueKey<String>('${settings.modelDirectory}|$_modelDropSerial'),
         directory: settings.modelDirectory,
+        initialImportPath:
+            _modelDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.model
+                ? widget.initialFilePath
+                : null),
       ),
     ];
     final Map<ShortcutActivator, VoidCallback> shortcuts =
@@ -342,6 +463,18 @@ class _MainShellState extends State<MainShell> {
               color: context.vibe.success,
             ),
             const SizedBox(width: 8),
+          ],
+          if (_dropBatch.length > 1) ...<Widget>[
+            IconButton(
+              key: const Key('drop-batch-button'),
+              tooltip: '查看本次拖入的 ${_dropBatch.length} 个项目',
+              onPressed: _showDropBatch,
+              icon: Badge(
+                label: Text('${_dropBatch.length}'),
+                child: const Icon(Icons.file_copy_outlined),
+              ),
+            ),
+            const SizedBox(width: 4),
           ],
           Builder(
             builder: (BuildContext drawerContext) => OutlinedButton.icon(

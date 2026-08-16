@@ -1,4 +1,4 @@
-enum VibekitsFileKind { archive, document, unsupported }
+enum VibekitsFileKind { archive, document, model, unsupported }
 
 /// File types that Vibekits can actually open today.
 abstract final class SupportedFileTypes {
@@ -82,9 +82,18 @@ abstract final class SupportedFileTypes {
     'dockerfile',
   ];
 
+  static const List<String> modelExtensions = <String>[
+    'onnx',
+    'ort',
+    'tflite',
+    'gguf',
+    'model',
+  ];
+
   static const List<String> allExtensions = <String>[
     ...archiveExtensions,
     ...documentExtensions,
+    ...modelExtensions,
   ];
 
   static VibekitsFileKind kindForPath(String path) {
@@ -100,22 +109,10 @@ abstract final class SupportedFileTypes {
     if (extension != null && documentExtensions.contains(extension)) {
       return VibekitsFileKind.document;
     }
-    return VibekitsFileKind.unsupported;
-  }
-
-  static String? bestSupportedPath(
-    Iterable<String> paths, {
-    bool Function(String path)? fileExists,
-  }) {
-    for (final String path in paths) {
-      final String trimmed = path.trim();
-      if (trimmed.isEmpty ||
-          kindForPath(trimmed) == VibekitsFileKind.unsupported) {
-        continue;
-      }
-      if (fileExists == null || fileExists(trimmed)) return trimmed;
+    if (extension != null && modelExtensions.contains(extension)) {
+      return VibekitsFileKind.model;
     }
-    return null;
+    return VibekitsFileKind.unsupported;
   }
 
   static String? _extensionOf(String name) {

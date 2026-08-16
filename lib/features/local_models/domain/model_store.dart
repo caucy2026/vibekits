@@ -81,6 +81,7 @@ abstract final class ModelStore {
 
   static String _capabilityFor(String name) {
     final String lower = name.toLowerCase();
+    if (lower.contains('vad') || lower.contains('silero')) return 'VAD';
     if (lower.contains('ocr')) return 'OCR';
     if (lower.contains('asr') || lower.contains('vosk')) return 'ASR';
     if (lower.contains('tts') || lower.contains('piper')) return 'TTS';

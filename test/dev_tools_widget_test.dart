@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:vibekits/features/dev_tools/domain/file_hash_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 
 void main() {
@@ -74,5 +77,59 @@ void main() {
     expect(find.byKey(const Key('duplicates-pick-directory')), findsOneWidget);
     expect(find.text('开始扫描'), findsOneWidget);
     expect(find.text('执行'), findsNothing);
+  });
+
+  testWidgets('文件哈希选择后自动计算并显示 SHA-256', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync('vk_hash_ui');
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final File source = File('${sandbox.path}${Platform.pathSeparator}abc.txt')
+      ..writeAsStringSync('abc');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsTab(
+            fileHashPickFiles: () async => <String>[source.path],
+            fileHashCalculator:
+                (
+                  String path,
+                  FileHashAlgorithm algorithm,
+                  FileHashCancellation cancellation,
+                  FileHashProgress onProgress,
+                ) async {
+                  onProgress(3, 3);
+                  return FileHashResult(
+                    path: path,
+                    algorithm: algorithm,
+                    totalBytes: 3,
+                    digest: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+                  );
+                },
+          ),
+        ),
+      ),
+    );
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '文件哈希');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '文件哈希'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('hash-pick-files')), findsOneWidget);
+    expect(find.text('SHA-256'), findsOneWidget);
+    expect(find.text('执行'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('hash-pick-files')));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('abc.txt'), findsOneWidget);
+    expect(
+      find.text(
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      ),
+      findsOneWidget,
+    );
   });
 }

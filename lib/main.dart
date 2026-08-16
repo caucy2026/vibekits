@@ -4,18 +4,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
-import 'app/supported_file_types.dart';
 import 'app/windows_file_associations.dart';
 
 void main(List<String> arguments) {
-  final String? initialFilePath = arguments
+  final List<String> initialFilePaths = arguments
       .where((String argument) => File(argument).existsSync())
-      .where(
-        (String argument) =>
-            SupportedFileTypes.kindForPath(argument) !=
-            VibekitsFileKind.unsupported,
-      )
-      .firstOrNull;
+      .toList(growable: false);
   unawaited(WindowsFileAssociations.registerCurrentExecutable());
-  runApp(VibekitsApp(initialFilePath: initialFilePath));
+  runApp(VibekitsApp(initialFilePaths: initialFilePaths));
 }

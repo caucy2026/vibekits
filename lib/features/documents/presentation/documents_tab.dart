@@ -22,6 +22,8 @@ import '../domain/xml_tree.dart';
 import 'svg_document_view.dart';
 import 'web_document_view.dart';
 
+typedef DocumentBytesReader = Future<Uint8List> Function(String path);
+
 /// 文本文件完整读取上限（大文件流式读取属后续迭代，DOC-102 索引结构已就绪）。
 const int _kMaxTextBytes = 64 * 1024 * 1024;
 const int _kMaxHexBytes = 256 * 1024 * 1024;
@@ -33,11 +35,15 @@ class DocumentsTab extends StatefulWidget {
   const DocumentsTab({
     super.key,
     this.initialPath,
+    this.initialMode,
+    this.bytesReader,
     this.openRequest,
     this.findRequest,
   });
 
   final String? initialPath;
+  final DocViewMode? initialMode;
+  final DocumentBytesReader? bytesReader;
   final ValueListenable<int>? openRequest;
   final ValueListenable<int>? findRequest;
 
@@ -84,7 +90,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
     final String? initialPath = widget.initialPath;
     if (initialPath != null) {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _loadPath(initialPath),
+        (_) => _loadPath(initialPath, preferredMode: widget.initialMode),
       );
     }
     widget.openRequest?.addListener(_handleOpenRequest);
@@ -135,11 +141,30 @@ class _DocumentsTabState extends State<DocumentsTab> {
     }
   }
 
-  Future<void> _loadPath(String path) async {
+  Future<void> _loadPath(String path, {DocViewMode? preferredMode}) async {
     try {
       final File file = File(path);
-      final int size = await file.length();
-      final DocViewMode mode = documentModeForPath(path);
+      final Uint8List? suppliedBytes = widget.bytesReader == null
+          ? null
+          : await widget.bytesReader!(path);
+      final int size = suppliedBytes?.length ?? await file.length();
+      DocViewMode mode = preferredMode ?? documentModeForPath(path);
+      if (mode == DocViewMode.unsupported) {
+        if (suppliedBytes != null) {
+          mode = documentModeForUnknownBytes(
+            Uint8List.sublistView(suppliedBytes, 0, size.clamp(0, 64 * 1024)),
+          );
+        } else {
+          final RandomAccessFile reader = await file.open();
+          try {
+            mode = documentModeForUnknownBytes(
+              await reader.read(size.clamp(0, 64 * 1024)),
+            );
+          } finally {
+            await reader.close();
+          }
+        }
+      }
 
       // 大文本走流式索引，不把整个文件读入内存（DOC-102）。
       if ((mode == DocViewMode.text || mode == DocViewMode.markdown) &&
@@ -148,16 +173,17 @@ class _DocumentsTabState extends State<DocumentsTab> {
         return;
       }
 
-      final Uint8List bytes = await file.readAsBytes();
-      if (mode == DocViewMode.hex) {
-        if (size > _kMaxHexBytes) {
-          setState(() {
-            _mode = DocViewMode.empty;
-            _error = '文件过大（$size 字节），十六进制查看上限为 $_kMaxHexBytes 字节';
-          });
-          return;
-        }
+      if (mode == DocViewMode.hex && size > _kMaxHexBytes) {
+        setState(() {
+          _path = path;
+          _name = file.uri.pathSegments.last;
+          _mode = DocViewMode.empty;
+          _error = '文件过大（$size 字节），十六进制查看上限为 $_kMaxHexBytes 字节';
+        });
+        return;
       }
+
+      final Uint8List bytes = suppliedBytes ?? await file.readAsBytes();
 
       setState(() {
         _path = path;
@@ -177,6 +203,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
         _epubChapter = 0;
         _svgText = '';
         _streamIndex = null;
+        _markdownPreview = mode == DocViewMode.markdown;
         _recent.remove(path);
         _recent.insert(0, path);
         if (_recent.length > 20) {
@@ -252,6 +279,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
       _name = file.uri.pathSegments.last;
       _bytes = null;
       _mode = mode;
+      // Rendering a very large Markdown document would require loading its
+      // entire source. Keep the file usable by opening the indexed source
+      // viewer instead of presenting an empty Markdown preview.
+      _markdownPreview = false;
       _encoding = encoding;
       _streamIndex = index;
       _lines = const <String>[];
@@ -428,118 +459,127 @@ class _DocumentsTabState extends State<DocumentsTab> {
     return Container(
       height: 44,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Text(
-              _name.isEmpty ? '未打开文档' : _name,
-              key: const Key('document-current-name'),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Theme.of(context).colorScheme.onSurface,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool compact = constraints.maxWidth < 560;
+          return Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  _name.isEmpty ? '未打开文档' : _name,
+                  key: const Key('document-current-name'),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (_mode == DocViewMode.text || _mode == DocViewMode.markdown) ...[
-            DropdownButton<DocEncoding>(
-              value: _encoding,
-              underline: const SizedBox.shrink(),
-              items: DocEncoding.values
-                  .map(
-                    (DocEncoding e) => DropdownMenuItem<DocEncoding>(
-                      value: e,
-                      child: Text(
-                        e.label,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (DocEncoding? e) {
-                if (e != null) {
-                  _switchEncoding(e);
-                }
-              },
-            ),
-            const SizedBox(width: 8),
-            Row(
-              children: <Widget>[
-                Text(
-                  '换行',
-                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+              if (!compact &&
+                  (_mode == DocViewMode.text ||
+                      _mode == DocViewMode.markdown)) ...[
+                DropdownButton<DocEncoding>(
+                  value: _encoding,
+                  underline: const SizedBox.shrink(),
+                  items: DocEncoding.values
+                      .map(
+                        (DocEncoding e) => DropdownMenuItem<DocEncoding>(
+                          value: e,
+                          child: Text(
+                            e.label,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (DocEncoding? e) {
+                    if (e != null) {
+                      _switchEncoding(e);
+                    }
+                  },
                 ),
-                Switch(
-                  value: _wrap,
-                  onChanged: (bool v) => setState(() => _wrap = v),
+                const SizedBox(width: 8),
+                Row(
+                  children: <Widget>[
+                    Text(
+                      '换行',
+                      style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                    ),
+                    Switch(
+                      value: _wrap,
+                      onChanged: (bool v) => setState(() => _wrap = v),
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
-          if (_mode == DocViewMode.markdown)
-            SegmentedButton<bool>(
-              segments: const <ButtonSegment<bool>>[
-                ButtonSegment<bool>(value: true, label: Text('预览')),
-                ButtonSegment<bool>(value: false, label: Text('源码')),
-              ],
-              selected: <bool>{_markdownPreview},
-              onSelectionChanged: (Set<bool> s) =>
-                  setState(() => _markdownPreview = s.first),
-            ),
-          if (_mode == DocViewMode.structured)
-            SegmentedButton<bool>(
-              segments: const <ButtonSegment<bool>>[
-                ButtonSegment<bool>(value: false, label: Text('树/表格')),
-                ButtonSegment<bool>(value: true, label: Text('源码')),
-              ],
-              selected: <bool>{_structuredSource},
-              onSelectionChanged: (Set<bool> s) => setState(() {
-                _structuredSource = s.first;
-                if (_structuredSource) {
-                  _lines = _sourceText().split('\n');
-                }
-              }),
-            ),
-          if (_mode == DocViewMode.hex)
-            DropdownButton<int>(
-              value: _bytesPerLine,
-              underline: const SizedBox.shrink(),
-              items: const <int>[8, 16, 32]
-                  .map(
-                    (int n) => DropdownMenuItem<int>(
-                      value: n,
-                      child: Text(
-                        '$n 字节',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (int? n) {
-                if (n != null) {
-                  setState(() => _bytesPerLine = n);
-                }
-              },
-            ),
-          IconButton(
-            tooltip: '查找 (Ctrl+F)',
-            icon: const Icon(Icons.search, size: 18),
-            color: context.vibe.muted,
-            onPressed: _mode == DocViewMode.hex || _streamIndex != null
-                ? null
-                : () => setState(() => _searchOpen = !_searchOpen),
-          ),
-          IconButton(
-            tooltip: _showInfo ? '隐藏信息' : '显示信息',
-            icon: Icon(
-              _showInfo ? Icons.info : Icons.info_outline,
-              size: 18,
-              color: _showInfo ? VibekitsColors.primary : context.vibe.muted,
-            ),
-            onPressed: () => setState(() => _showInfo = !_showInfo),
-          ),
-        ],
+              if (_mode == DocViewMode.markdown)
+                SegmentedButton<bool>(
+                  segments: const <ButtonSegment<bool>>[
+                    ButtonSegment<bool>(value: true, label: Text('预览')),
+                    ButtonSegment<bool>(value: false, label: Text('源码')),
+                  ],
+                  selected: <bool>{_markdownPreview},
+                  onSelectionChanged: (Set<bool> s) =>
+                      setState(() => _markdownPreview = s.first),
+                ),
+              if (_mode == DocViewMode.structured)
+                SegmentedButton<bool>(
+                  segments: const <ButtonSegment<bool>>[
+                    ButtonSegment<bool>(value: false, label: Text('树/表格')),
+                    ButtonSegment<bool>(value: true, label: Text('源码')),
+                  ],
+                  selected: <bool>{_structuredSource},
+                  onSelectionChanged: (Set<bool> s) => setState(() {
+                    _structuredSource = s.first;
+                    if (_structuredSource) {
+                      _lines = _sourceText().split('\n');
+                    }
+                  }),
+                ),
+              if (_mode == DocViewMode.hex)
+                DropdownButton<int>(
+                  value: _bytesPerLine,
+                  underline: const SizedBox.shrink(),
+                  items: const <int>[8, 16, 32]
+                      .map(
+                        (int n) => DropdownMenuItem<int>(
+                          value: n,
+                          child: Text(
+                            '$n 字节',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (int? n) {
+                    if (n != null) {
+                      setState(() => _bytesPerLine = n);
+                    }
+                  },
+                ),
+              IconButton(
+                tooltip: '查找 (Ctrl+F)',
+                icon: const Icon(Icons.search, size: 18),
+                color: context.vibe.muted,
+                onPressed: _mode == DocViewMode.hex || _streamIndex != null
+                    ? null
+                    : () => setState(() => _searchOpen = !_searchOpen),
+              ),
+              IconButton(
+                tooltip: _showInfo ? '隐藏信息' : '显示信息',
+                icon: Icon(
+                  _showInfo ? Icons.info : Icons.info_outline,
+                  size: 18,
+                  color: _showInfo
+                      ? VibekitsColors.primary
+                      : context.vibe.muted,
+                ),
+                onPressed: () => setState(() => _showInfo = !_showInfo),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -758,17 +798,27 @@ class _DocumentsTabState extends State<DocumentsTab> {
   }
 
   Widget _buildMarkdownPreview() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Markdown(
-        data: _text,
-        selectable: true,
-        styleSheet: MarkdownStyleSheet(
-          p: const TextStyle(fontSize: 14, height: 1.6),
-          code: const TextStyle(fontFamily: 'Cascadia Mono', fontSize: 13),
-          codeblockDecoration: BoxDecoration(
-            color: context.vibe.canvas,
-            borderRadius: BorderRadius.circular(6),
+    return SelectionArea(
+      child: Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          key: const Key('markdown-preview'),
+          controller: _scrollController,
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 48),
+          child: MarkdownBody(
+            data: _text,
+            selectable: false,
+            styleSheet: MarkdownStyleSheet(
+              p: const TextStyle(fontSize: 14, height: 1.6),
+              code: const TextStyle(fontFamily: 'Cascadia Mono', fontSize: 13),
+              codeblockPadding: const EdgeInsets.all(12),
+              codeblockDecoration: BoxDecoration(
+                color: context.vibe.canvas,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: context.vibe.border),
+              ),
+            ),
           ),
         ),
       ),

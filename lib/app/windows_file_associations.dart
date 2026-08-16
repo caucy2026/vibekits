@@ -65,6 +65,7 @@ typedef _ShChangeNotifyDart = void Function(
 abstract final class WindowsFileAssociations {
   static const String documentProgId = 'Vibekits.Document';
   static const String archiveProgId = 'Vibekits.Archive';
+  static const String modelProgId = 'Vibekits.Model';
 
   static bool shouldRegisterExecutable(String executable) {
     if (!Platform.isWindows) return false;
@@ -165,6 +166,7 @@ abstract final class WindowsFileAssociations {
 
     progId(documentProgId, 'Vibekits 文档');
     progId(archiveProgId, 'Vibekits 压缩文件');
+    progId(modelProgId, 'Vibekits 本地模型');
     const String appBase = 'Software\\Classes\\Applications\\vibekits.exe';
     write(appBase, 'FriendlyAppName', 'Vibekits');
     write('$appBase\\shell\\open\\command', null, command);
@@ -179,6 +181,8 @@ abstract final class WindowsFileAssociations {
       final String progId =
           SupportedFileTypes.archiveExtensions.contains(extension)
           ? archiveProgId
+          : SupportedFileTypes.modelExtensions.contains(extension)
+          ? modelProgId
           : documentProgId;
       write('$appBase\\SupportedTypes', dotted, '');
       write('Software\\Classes\\$dotted\\OpenWithProgids', progId, '');
@@ -188,16 +192,29 @@ abstract final class WindowsFileAssociations {
       final bool archive = SupportedFileTypes.archiveExtensions.contains(
         extension,
       );
+      final bool model = SupportedFileTypes.modelExtensions.contains(extension);
       write(
         contextMenu,
         'MUIVerb',
-        archive ? '用 Vibekits 解压或查看' : '用 Vibekits 查看或解码',
+        archive
+            ? '用 Vibekits 解压或查看'
+            : model
+            ? '导入到 Vibekits 本地模型'
+            : '用 Vibekits 查看或解码',
       );
       write(contextMenu, 'Icon', '$executable,0');
       write(contextMenu, 'Position', 'Top');
-      write(contextMenu, 'MultiSelectModel', 'Single');
+      write(contextMenu, 'MultiSelectModel', 'Player');
       write('$contextMenu\\command', null, command);
     }
+
+    // 任意文件都有“自动处理”入口；已知扩展名仍保留更具体的动作名称。
+    const String allFilesMenu = 'Software\\Classes\\*\\shell\\Vibekits';
+    write(allFilesMenu, 'MUIVerb', '用 Vibekits 自动处理');
+    write(allFilesMenu, 'Icon', '$executable,0');
+    write(allFilesMenu, 'Position', 'Top');
+    write(allFilesMenu, 'MultiSelectModel', 'Player');
+    write('$allFilesMenu\\command', null, command);
 
     final DynamicLibrary shell32 = DynamicLibrary.open('shell32.dll');
     shell32.lookupFunction<_ShChangeNotifyNative, _ShChangeNotifyDart>(

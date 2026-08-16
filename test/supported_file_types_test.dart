@@ -46,17 +46,25 @@ void main() {
     );
   });
 
-  test('拖入多个项目时跳过目录和未知格式并选择首个可用工具', () {
-    final String? selected = SupportedFileTypes.bestSupportedPath(
-      <String>['folder', 'unknown.xyz', 'source.dart', 'archive.zip'],
-      fileExists: (String path) =>
-          path == 'source.dart' || path == 'archive.zip',
-    );
-
-    expect(selected, 'source.dart');
+  test('未知扩展名留给内容路由层处理', () {
     expect(
-      SupportedFileTypes.kindForPath(selected!),
-      VibekitsFileKind.document,
+      SupportedFileTypes.kindForPath('unknown.xyz'),
+      VibekitsFileKind.unsupported,
     );
+  });
+
+  test('常见本地模型格式路由到模型仓库', () {
+    for (final String extension in <String>[
+      'onnx',
+      'ort',
+      'tflite',
+      'gguf',
+      'model',
+    ]) {
+      expect(
+        SupportedFileTypes.kindForPath('model.$extension'),
+        VibekitsFileKind.model,
+      );
+    }
   });
 }

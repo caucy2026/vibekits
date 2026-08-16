@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/documents/domain/format_router.dart';
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 void main() {
   test('后缀路由', () {
     expect(documentModeForPath('a.txt'), DocViewMode.text);
@@ -21,5 +24,28 @@ void main() {
 
   test('无后缀视为未知', () {
     expect(documentModeForPath('noext'), DocViewMode.unsupported);
+  });
+
+  test('未知文件按内容自动选择文本或 Hex', () {
+    expect(
+      documentModeForUnknownBytes(Uint8List.fromList(utf8.encode('hello\n世界'))),
+      DocViewMode.text,
+    );
+    expect(
+      documentModeForUnknownBytes(Uint8List.fromList(<int>[0x00, 0x01, 0xff])),
+      DocViewMode.hex,
+    );
+    expect(
+      documentModeForUnknownBytes(
+        Uint8List.fromList(<int>[0x25, 0x50, 0x44, 0x46, 0x2d]),
+      ),
+      DocViewMode.hex,
+    );
+    expect(
+      documentModeForUnknownBytes(
+        Uint8List.fromList(<int>[0xff, 0xfe, 0x41, 0x00]),
+      ),
+      DocViewMode.text,
+    );
   });
 }
