@@ -184,3 +184,14 @@
 
 - 每次里程碑结束更新本文档与 `docs/acceptance/M<n>_<date>.md`，并同步 `04/07` 验收矩阵状态。
 - 遇到技术卡点记录到“已解决问题”，不静默绕过。
+
+## 2026-08-16 · v1.4.0 文件融合与程序员工作区
+
+- 版本升级为 `1.4.0+5`。程序员计算器、SQLite 只读数据库管理、源码编辑、SSH/SFTP/端口转发、完整 API 请求、Git 只读工作区和 GitHub 安全诊断均进入统一开发工具页，不增加首页一级模块。
+- Markdown 默认渲染预览；源码保留 BOM/编码并用外部修改复核和原子替换保存。`.bin` 超过 256MiB 时切换到固定 1MiB 窗口，支持 64 位偏移、十进制/Hex 跳转和跨块文本/字节搜索，2GB+ 稀疏文件通过。
+- 接入官方 PP-OCRv6 tiny 检测/识别/字典模型，三资产完整校验后事务安装；官方登机牌样图真推理得到文本块、坐标和置信度。图片预览补齐八种 P0 编码矩阵、首帧解码、EXIF 方向、256MiB/1 亿像素预算和明确失败回退。
+- 压缩后端升级为官方 7-Zip 26.02 `7z.exe + 7z.dll`，RAR5/ISO/ZSTD 等真实夹具通过；不提供 RAR 创建，不绕过统一路径、链接、展开规模、空间、冲突和暂存安全合同。
+- 清理补齐 Visual Studio、JetBrains/Android Studio、Cursor/Windsurf、Xcode/SwiftPM/Homebrew/CocoaPods 已知缓存；pnpm 范围从整个根目录收紧到 store。下载与可证明旧插件保持高风险默认不选，不扫描项目依赖或源码目录。
+- 创建 macOS Flutter 工程，加入 `public.data` Open With、Swift 文件事件排队/Dart 就绪握手、macOS 模型目录、`~/.Trash` 可恢复移动和 Command 主快捷键。因当前为 Windows 主机，Xcode/arm64 Release 与 macOS ONNX 仍明确待实机。
+- 最终 `flutter analyze` 无问题，226/226 全量测试通过；Windows Release 构建成功并携带 Markdown 启动 5 秒保持运行。发布目录核对 ONNX 桥、ONNX Runtime、SQLite 和 7-Zip 完整，当前用户文件关联/右键命令实查通过。
+- 供应链和验收细节见 `16_THIRD_PARTY_COMPONENTS.md` 与 `acceptance/V1_4_0_FUSION_TOOLS_2026-08-16.md`。本节取代上文旧里程碑中“RAR/OCR 尚未接入”的历史限制描述。

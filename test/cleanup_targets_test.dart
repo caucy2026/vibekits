@@ -265,4 +265,112 @@ void main() {
       isTrue,
     );
   });
+
+  test('开发工具缓存范围精确且不会把 pnpm 根目录当缓存', () {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_smart_dev_targets',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final String local = '${sandbox.path}${Platform.pathSeparator}Local';
+    final String profile = '${sandbox.path}${Platform.pathSeparator}Profile';
+    final String pnpmRoot = <String>[
+      local,
+      'pnpm',
+    ].join(Platform.pathSeparator);
+    final String pnpmStore = <String>[
+      pnpmRoot,
+      'store',
+    ].join(Platform.pathSeparator);
+    final String visualStudioCache = <String>[
+      local,
+      'Microsoft',
+      'VisualStudio',
+      '17.0_test',
+      'ComponentModelCache',
+    ].join(Platform.pathSeparator);
+    final String jetBrainsCache = <String>[
+      local,
+      'JetBrains',
+      'IntelliJIdea2026.1',
+      'caches',
+    ].join(Platform.pathSeparator);
+    final String cursorExtensions = <String>[
+      profile,
+      '.cursor',
+      'extensions',
+    ].join(Platform.pathSeparator);
+    for (final String path in <String>[
+      pnpmStore,
+      visualStudioCache,
+      jetBrainsCache,
+      cursorExtensions,
+    ]) {
+      Directory(path).createSync(recursive: true);
+    }
+
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: <String, String>{
+        'LOCALAPPDATA': local,
+        'USERPROFILE': profile,
+      },
+    );
+
+    expect(
+      targets.singleWhere((target) => target.id == 'pnpm-cache').path,
+      pnpmStore,
+    );
+    expect(
+      targets.map((target) => target.id),
+      contains('cursor-stale-extensions'),
+    );
+    expect(
+      targets.map((target) => target.path),
+      containsAll(<String>[visualStudioCache, jetBrainsCache]),
+    );
+    expect(
+      targets.every(
+        (target) => target.path != pnpmRoot || target.id != 'pnpm-cache',
+      ),
+      isTrue,
+    );
+  });
+
+  test('macOS 开发缓存与下载建议只发现已存在的明确目录', () {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_mac_targets',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final String derivedData = <String>[
+      sandbox.path,
+      'Library',
+      'Developer',
+      'Xcode',
+      'DerivedData',
+    ].join(Platform.pathSeparator);
+    final String downloads = <String>[
+      sandbox.path,
+      'Downloads',
+    ].join(Platform.pathSeparator);
+    Directory(derivedData).createSync(recursive: true);
+    Directory(downloads).createSync(recursive: true);
+
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: <String, String>{'HOME': sandbox.path},
+    );
+
+    expect(
+      targets.map((target) => target.id),
+      contains('mac-xcode-derived-data'),
+    );
+    expect(
+      targets.map((target) => target.id),
+      contains('mac-downloads-suggestions'),
+    );
+    expect(
+      targets
+          .singleWhere((target) => target.id == 'mac-downloads-suggestions')
+          .safetyNote,
+      contains('永不默认勾选'),
+    );
+  });
 }

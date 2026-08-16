@@ -10,6 +10,9 @@ enum DocViewMode { empty, text, markdown, hex, structured, web, unsupported }
 /// 纯函数，便于单元测试。结构化与 Web 格式在 M3 实现，首片返回对应模式供占位。
 DocViewMode documentModeForPath(String path) {
   final String lower = path.toLowerCase();
+  if (SupportedFileTypes.isSpecialDocumentPath(path)) {
+    return DocViewMode.text;
+  }
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) {
     return DocViewMode.markdown;
   }

@@ -21,6 +21,20 @@ enum DocEncoding {
 
 /// 编码探测与解码（BOM → 严格 UTF-8 → GBK 兜底）。
 abstract final class TextCodecs {
+  static bool hasBom(Uint8List bytes, DocEncoding encoding) =>
+      switch (encoding) {
+        DocEncoding.utf8 =>
+          bytes.length >= 3 &&
+              bytes[0] == 0xef &&
+              bytes[1] == 0xbb &&
+              bytes[2] == 0xbf,
+        DocEncoding.utf16le =>
+          bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe,
+        DocEncoding.utf16be =>
+          bytes.length >= 2 && bytes[0] == 0xfe && bytes[1] == 0xff,
+        _ => false,
+      };
+
   /// 探测编码：优先 BOM，其次严格 UTF-8，否则按常见中文文本回退 GBK。
   static DocEncoding detect(Uint8List bytes) {
     if (bytes.length >= 3 &&
@@ -92,6 +106,41 @@ abstract final class TextCodecs {
         return NativeCodec.decodeGb18030(bytes);
       case DocEncoding.big5:
         return NativeCodec.decodeBig5(bytes);
+    }
+  }
+
+  static Uint8List encode(
+    String text,
+    DocEncoding encoding, {
+    bool includeBom = false,
+  }) {
+    switch (encoding) {
+      case DocEncoding.utf8:
+        return Uint8List.fromList(<int>[
+          if (includeBom) ...<int>[0xef, 0xbb, 0xbf],
+          ...utf8.encode(text),
+        ]);
+      case DocEncoding.utf16le:
+      case DocEncoding.utf16be:
+        final bool little = encoding == DocEncoding.utf16le;
+        final ByteData data = ByteData(text.codeUnits.length * 2);
+        for (int index = 0; index < text.codeUnits.length; index++) {
+          data.setUint16(
+            index * 2,
+            text.codeUnits[index],
+            little ? Endian.little : Endian.big,
+          );
+        }
+        return Uint8List.fromList(<int>[
+          if (includeBom) ...(little ? <int>[0xff, 0xfe] : <int>[0xfe, 0xff]),
+          ...data.buffer.asUint8List(),
+        ]);
+      case DocEncoding.gbk:
+        return Uint8List.fromList(gbk.encode(text));
+      case DocEncoding.gb18030:
+        return NativeCodec.encodeGb18030(text);
+      case DocEncoding.big5:
+        return NativeCodec.encodeBig5(text);
     }
   }
 

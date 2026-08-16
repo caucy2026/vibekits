@@ -12,9 +12,12 @@ import '../domain/csv_table.dart';
 import '../domain/epub_reader.dart';
 import '../domain/file_line_index.dart';
 import '../domain/format_router.dart';
+import '../domain/hex_file_reader.dart';
 import '../domain/hex_view.dart';
 import '../domain/json_tree.dart';
 import '../domain/log_level.dart';
+import '../domain/source_language.dart';
+import '../domain/source_file_saver.dart';
 import '../domain/structured_node.dart';
 import '../domain/svg_source.dart';
 import '../domain/text_encoding.dart';
@@ -23,6 +26,12 @@ import 'svg_document_view.dart';
 import 'web_document_view.dart';
 
 typedef DocumentBytesReader = Future<Uint8List> Function(String path);
+typedef DocumentFileSaver = Future<SourceSaveResult> Function(
+  String path,
+  Uint8List bytes,
+  int expectedSize,
+  DateTime? expectedModified,
+);
 
 /// 文本文件完整读取上限（大文件流式读取属后续迭代，DOC-102 索引结构已就绪）。
 const int _kMaxTextBytes = 64 * 1024 * 1024;
@@ -39,6 +48,8 @@ class DocumentsTab extends StatefulWidget {
     this.bytesReader,
     this.openRequest,
     this.findRequest,
+    this.saveRequest,
+    this.saveFile,
   });
 
   final String? initialPath;
@@ -46,6 +57,8 @@ class DocumentsTab extends StatefulWidget {
   final DocumentBytesReader? bytesReader;
   final ValueListenable<int>? openRequest;
   final ValueListenable<int>? findRequest;
+  final ValueListenable<int>? saveRequest;
+  final DocumentFileSaver? saveFile;
 
   @override
   State<DocumentsTab> createState() => _DocumentsTabState();
@@ -53,6 +66,7 @@ class DocumentsTab extends StatefulWidget {
 
 class _DocumentsTabState extends State<DocumentsTab> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _editorController = TextEditingController();
 
   String? _path;
   String _name = '';
@@ -83,6 +97,20 @@ class _DocumentsTabState extends State<DocumentsTab> {
   String _svgText = '';
   FileLineIndex? _streamIndex;
   final List<String> _recent = <String>[];
+  SourceLanguageInfo? _language;
+  String _savedText = '';
+  bool _editing = false;
+  bool _dirty = false;
+  bool _saving = false;
+  bool _hadBom = false;
+  int _loadedSize = 0;
+  DateTime? _loadedModified;
+  int _hexWindowOffset = 0;
+  int _hexFileSize = 0;
+  bool _hexBusy = false;
+
+  bool get _isWindowedHex =>
+      _mode == DocViewMode.hex && _hexFileSize > _bytes!.length;
 
   @override
   void initState() {
@@ -95,6 +123,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
     }
     widget.openRequest?.addListener(_handleOpenRequest);
     widget.findRequest?.addListener(_handleFindRequest);
+    widget.saveRequest?.addListener(_handleSaveRequest);
   }
 
   void _handleOpenRequest() => _openFile();
@@ -105,6 +134,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _searchFocus.requestFocus();
     });
+  }
+
+  void _handleSaveRequest() {
+    if (_editing && _dirty && !_saving) _saveEdits();
   }
 
   @override
@@ -118,13 +151,19 @@ class _DocumentsTabState extends State<DocumentsTab> {
       oldWidget.findRequest?.removeListener(_handleFindRequest);
       widget.findRequest?.addListener(_handleFindRequest);
     }
+    if (oldWidget.saveRequest != widget.saveRequest) {
+      oldWidget.saveRequest?.removeListener(_handleSaveRequest);
+      widget.saveRequest?.addListener(_handleSaveRequest);
+    }
   }
 
   @override
   void dispose() {
     widget.openRequest?.removeListener(_handleOpenRequest);
     widget.findRequest?.removeListener(_handleFindRequest);
+    widget.saveRequest?.removeListener(_handleSaveRequest);
     _scrollController.dispose();
+    _editorController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -142,6 +181,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
   }
 
   Future<void> _loadPath(String path, {DocViewMode? preferredMode}) async {
+    if (_editing && _dirty && path != _path) {
+      final bool discard = await _confirmDiscardEdits();
+      if (!discard) return;
+    }
     try {
       final File file = File(path);
       final Uint8List? suppliedBytes = widget.bytesReader == null
@@ -174,16 +217,14 @@ class _DocumentsTabState extends State<DocumentsTab> {
       }
 
       if (mode == DocViewMode.hex && size > _kMaxHexBytes) {
-        setState(() {
-          _path = path;
-          _name = file.uri.pathSegments.last;
-          _mode = DocViewMode.empty;
-          _error = '文件过大（$size 字节），十六进制查看上限为 $_kMaxHexBytes 字节';
-        });
+        await _loadLargeHex(path, file);
         return;
       }
 
       final Uint8List bytes = suppliedBytes ?? await file.readAsBytes();
+      final DateTime? modified = file.existsSync()
+          ? file.lastModifiedSync()
+          : null;
 
       setState(() {
         _path = path;
@@ -203,6 +244,15 @@ class _DocumentsTabState extends State<DocumentsTab> {
         _epubChapter = 0;
         _svgText = '';
         _streamIndex = null;
+        _language = null;
+        _hadBom = false;
+        _editing = false;
+        _dirty = false;
+        _saving = false;
+        _loadedSize = size;
+        _loadedModified = modified;
+        _hexWindowOffset = 0;
+        _hexFileSize = mode == DocViewMode.hex ? size : 0;
         _markdownPreview = mode == DocViewMode.markdown;
         _recent.remove(path);
         _recent.insert(0, path);
@@ -212,12 +262,18 @@ class _DocumentsTabState extends State<DocumentsTab> {
 
         if (mode == DocViewMode.text || mode == DocViewMode.markdown) {
           _encoding = TextCodecs.detect(bytes);
+          _hadBom = TextCodecs.hasBom(bytes, _encoding);
           _text = TextCodecs.decode(bytes, _encoding);
           _lines = _text.split('\n');
+          _savedText = _text;
+          _editorController.text = _text;
+          _language = SourceLanguageCatalog.identify(path, head: _text);
         } else if (mode == DocViewMode.structured) {
           _encoding = TextCodecs.detect(bytes);
           _text = TextCodecs.decode(bytes, _encoding);
           _lines = _text.split('\n');
+          _savedText = _text;
+          _language = SourceLanguageCatalog.identify(path, head: _text);
           final String lower = path.toLowerCase();
           try {
             if (lower.endsWith('.json')) {
@@ -236,6 +292,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
             _error = '结构解析失败，已回退源码：$e';
           }
         } else if (mode == DocViewMode.web) {
+          _language = SourceLanguageCatalog.identify(path);
           final String lower = path.toLowerCase();
           try {
             if (lower.endsWith('.epub')) {
@@ -264,6 +321,177 @@ class _DocumentsTabState extends State<DocumentsTab> {
     }
   }
 
+  Future<void> _loadLargeHex(String path, File file) async {
+    final HexFileWindow window = await HexFileReader.readWindow(
+      path,
+      offset: 0,
+    );
+    if (!mounted) return;
+    setState(() {
+      _path = path;
+      _name = file.uri.pathSegments.last;
+      _bytes = window.bytes;
+      _mode = DocViewMode.hex;
+      _error = '';
+      _streamIndex = null;
+      _language = null;
+      _editing = false;
+      _dirty = false;
+      _loadedSize = window.fileSize;
+      _loadedModified = file.lastModifiedSync();
+      _hexWindowOffset = window.offset;
+      _hexFileSize = window.fileSize;
+      _recent.remove(path);
+      _recent.insert(0, path);
+      if (_recent.length > 20) _recent.removeLast();
+    });
+  }
+
+  Future<void> _loadHexWindow(int requestedOffset) async {
+    final String? path = _path;
+    if (path == null || _hexBusy) return;
+    setState(() => _hexBusy = true);
+    try {
+      final int lastStart = (_hexFileSize - HexFileReader.defaultWindowBytes)
+          .clamp(0, _hexFileSize);
+      final HexFileWindow window = await HexFileReader.readWindow(
+        path,
+        offset: requestedOffset.clamp(0, lastStart),
+      );
+      if (!mounted) return;
+      setState(() {
+        _bytes = window.bytes;
+        _hexWindowOffset = window.offset;
+        _error = '';
+      });
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    } catch (error) {
+      if (mounted) setState(() => _error = '读取二进制窗口失败：$error');
+    } finally {
+      if (mounted) setState(() => _hexBusy = false);
+    }
+  }
+
+  Future<void> _showHexJumpDialog() async {
+    final TextEditingController controller = TextEditingController(
+      text: '0x${_hexWindowOffset.toRadixString(16).toUpperCase()}',
+    );
+    final String? value = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('跳转到偏移'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '支持十进制或 0x 十六进制',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (String value) => Navigator.of(context).pop(value),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('跳转'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+    final String input = value.trim();
+    final int? offset = input.toLowerCase().startsWith('0x')
+        ? int.tryParse(input.substring(2), radix: 16)
+        : int.tryParse(input);
+    if (offset == null || offset < 0 || offset >= _hexFileSize) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('偏移无效或超出文件范围')));
+      }
+      return;
+    }
+    await _loadHexWindow(offset);
+  }
+
+  Future<void> _showHexSearchDialog() async {
+    final TextEditingController controller = TextEditingController();
+    final String? value = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('搜索二进制'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '文本，或 hex: DE AD BE EF',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (String value) => Navigator.of(context).pop(value),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('查找'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value.trim().isEmpty || _path == null) return;
+    Uint8List pattern;
+    try {
+      final String input = value.trim();
+      if (input.toLowerCase().startsWith('hex:')) {
+        final String hex = input.substring(4).replaceAll(RegExp(r'[\s,]'), '');
+        if (hex.isEmpty ||
+            hex.length.isOdd ||
+            !RegExp(r'^[0-9a-fA-F]+$').hasMatch(hex)) {
+          throw const FormatException('Hex 必须由完整的两位字节组成');
+        }
+        pattern = Uint8List.fromList(<int>[
+          for (int index = 0; index < hex.length; index += 2)
+            int.parse(hex.substring(index, index + 2), radix: 16),
+        ]);
+      } else {
+        pattern = Uint8List.fromList(utf8.encode(input));
+      }
+      setState(() => _hexBusy = true);
+      final int firstStart = (_hexWindowOffset + 1).clamp(0, _hexFileSize);
+      int? found = await HexFileReader.findFirst(
+        _path!,
+        pattern,
+        start: firstStart,
+      );
+      if (found == null && firstStart > 0) {
+        found = await HexFileReader.findFirst(_path!, pattern);
+      }
+      if (found == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('未找到，已搜索完整文件')));
+        }
+      } else {
+        if (mounted) setState(() => _hexBusy = false);
+        await _loadHexWindow(found);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('搜索失败：$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _hexBusy = false);
+    }
+  }
+
   Future<void> _loadStreaming(String path, File file, DocViewMode mode) async {
     final RandomAccessFile raf = file.openSync();
     final int fileLen = file.lengthSync();
@@ -273,6 +501,13 @@ class _DocumentsTabState extends State<DocumentsTab> {
     raf.closeSync();
     final DocEncoding encoding = TextCodecs.detect(head);
     final FileLineIndex index = await FileLineIndex.build(path);
+    String headText = '';
+    try {
+      headText = TextCodecs.decode(head, encoding);
+    } on FormatException {
+      // A bounded head may end inside a multi-byte character. Extension and
+      // filename detection remain available in that case.
+    }
     if (!mounted) return;
     setState(() {
       _path = path;
@@ -285,6 +520,12 @@ class _DocumentsTabState extends State<DocumentsTab> {
       _markdownPreview = false;
       _encoding = encoding;
       _streamIndex = index;
+      _language = SourceLanguageCatalog.identify(path, head: headText);
+      _editing = false;
+      _dirty = false;
+      _saving = false;
+      _loadedSize = fileLen;
+      _loadedModified = file.lastModifiedSync();
       _lines = const <String>[];
       _text = '';
       _error = '';
@@ -314,11 +555,119 @@ class _DocumentsTabState extends State<DocumentsTab> {
       try {
         _text = TextCodecs.decode(_bytes!, encoding);
         _lines = _text.split('\n');
+        _savedText = _text;
+        _editorController.text = _text;
+        _hadBom = TextCodecs.hasBom(_bytes!, encoding);
+        _dirty = false;
         _error = '';
       } catch (e) {
         _error = '以 ${encoding.label} 解码失败：$e';
       }
     });
+  }
+
+  bool get _canEdit =>
+      _bytes != null &&
+      _streamIndex == null &&
+      (_mode == DocViewMode.text || _mode == DocViewMode.markdown) &&
+      _path != null &&
+      File(_path!).existsSync();
+
+  void _beginEditing() {
+    if (!_canEdit) return;
+    setState(() {
+      _editing = true;
+      _markdownPreview = false;
+      _editorController.text = _text;
+      _editorController.selection = TextSelection.collapsed(
+        offset: _editorController.text.length,
+      );
+      _dirty = false;
+    });
+  }
+
+  void _onEditorChanged(String value) {
+    setState(() {
+      _text = value;
+      _lines = value.split('\n');
+      _dirty = value != _savedText;
+    });
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _text = _savedText;
+      _lines = _savedText.split('\n');
+      _editorController.text = _savedText;
+      _editing = false;
+      _dirty = false;
+    });
+  }
+
+  Future<bool> _confirmDiscardEdits() async {
+    if (!_dirty) return true;
+    final bool? discard = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('放弃未保存的修改？'),
+        content: Text('“$_name”的修改尚未保存。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('继续编辑'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('放弃修改'),
+          ),
+        ],
+      ),
+    );
+    return discard ?? false;
+  }
+
+  Future<void> _saveEdits() async {
+    final String? path = _path;
+    if (!_canEdit || path == null || _saving) return;
+    setState(() {
+      _saving = true;
+      _error = '';
+    });
+    try {
+      final Uint8List bytes = TextCodecs.encode(
+        _editorController.text,
+        _encoding,
+        includeBom: _hadBom,
+      );
+      final SourceSaveResult result = widget.saveFile != null
+          ? await widget.saveFile!(path, bytes, _loadedSize, _loadedModified)
+          : await SourceFileSaver.save(
+              path,
+              bytes,
+              expectedSize: _loadedSize,
+              expectedModified: _loadedModified,
+            );
+      if (!mounted) return;
+      setState(() {
+        _bytes = bytes;
+        _text = _editorController.text;
+        _savedText = _text;
+        _lines = _text.split('\n');
+        _dirty = false;
+        _saving = false;
+        _loadedSize = result.size;
+        _loadedModified = result.modified;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('已保存')));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = error is FileSystemException ? error.message : '保存失败：$error';
+      });
+    }
   }
 
   void _runSearch(String query) {
@@ -449,6 +798,20 @@ class _DocumentsTabState extends State<DocumentsTab> {
       children: <Widget>[
         _buildToolbar(),
         if (_searchOpen) _buildSearchBar(),
+        if (_error.isNotEmpty && _mode != DocViewMode.empty)
+          Container(
+            key: const Key('document-inline-error'),
+            width: double.infinity,
+            color: VibekitsColors.danger.withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            child: Text(
+              _error,
+              style: const TextStyle(
+                color: VibekitsColors.danger,
+                fontSize: 12,
+              ),
+            ),
+          ),
         const Divider(height: 1),
         Expanded(child: _buildContent()),
       ],
@@ -466,7 +829,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  _name.isEmpty ? '未打开文档' : _name,
+                  _name.isEmpty ? '未打开文档' : '${_dirty ? '● ' : ''}$_name',
                   key: const Key('document-current-name'),
                   style: TextStyle(
                     fontSize: 14,
@@ -476,11 +839,38 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (!compact && _language != null) ...<Widget>[
+                Container(
+                  key: const Key('source-language-badge'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.09),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    _language!.label,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (!compact &&
                   (_mode == DocViewMode.text ||
                       _mode == DocViewMode.markdown)) ...[
                 DropdownButton<DocEncoding>(
                   value: _encoding,
+                  onChanged: _editing
+                      ? null
+                      : (DocEncoding? e) {
+                          if (e != null) _switchEncoding(e);
+                        },
                   underline: const SizedBox.shrink(),
                   items: DocEncoding.values
                       .map(
@@ -493,11 +883,6 @@ class _DocumentsTabState extends State<DocumentsTab> {
                         ),
                       )
                       .toList(),
-                  onChanged: (DocEncoding? e) {
-                    if (e != null) {
-                      _switchEncoding(e);
-                    }
-                  },
                 ),
                 const SizedBox(width: 8),
                 Row(
@@ -513,7 +898,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   ],
                 ),
               ],
-              if (_mode == DocViewMode.markdown)
+              if (_mode == DocViewMode.markdown && !_editing)
                 SegmentedButton<bool>(
                   segments: const <ButtonSegment<bool>>[
                     ButtonSegment<bool>(value: true, label: Text('预览')),
@@ -558,25 +943,88 @@ class _DocumentsTabState extends State<DocumentsTab> {
                     }
                   },
                 ),
-              IconButton(
-                tooltip: '查找 (Ctrl+F)',
-                icon: const Icon(Icons.search, size: 18),
-                color: context.vibe.muted,
-                onPressed: _mode == DocViewMode.hex || _streamIndex != null
-                    ? null
-                    : () => setState(() => _searchOpen = !_searchOpen),
-              ),
-              IconButton(
-                tooltip: _showInfo ? '隐藏信息' : '显示信息',
-                icon: Icon(
-                  _showInfo ? Icons.info : Icons.info_outline,
-                  size: 18,
-                  color: _showInfo
-                      ? VibekitsColors.primary
-                      : context.vibe.muted,
+              if (_mode == DocViewMode.hex) ...<Widget>[
+                IconButton(
+                  tooltip: '搜索文本或字节',
+                  onPressed: _hexBusy ? null : _showHexSearchDialog,
+                  icon: const Icon(Icons.search, size: 18),
                 ),
-                onPressed: () => setState(() => _showInfo = !_showInfo),
-              ),
+                if (_isWindowedHex) ...<Widget>[
+                  IconButton(
+                    tooltip: '上一窗口',
+                    onPressed: _hexBusy || _hexWindowOffset == 0
+                        ? null
+                        : () => _loadHexWindow(
+                            _hexWindowOffset - HexFileReader.defaultWindowBytes,
+                          ),
+                    icon: const Icon(Icons.chevron_left, size: 18),
+                  ),
+                  TextButton(
+                    onPressed: _hexBusy ? null : _showHexJumpDialog,
+                    child: Text(
+                      '0x${_hexWindowOffset.toRadixString(16).toUpperCase()}',
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '下一窗口',
+                    onPressed:
+                        _hexBusy ||
+                            _hexWindowOffset + _bytes!.length >= _hexFileSize
+                        ? null
+                        : () => _loadHexWindow(
+                            _hexWindowOffset + HexFileReader.defaultWindowBytes,
+                          ),
+                    icon: const Icon(Icons.chevron_right, size: 18),
+                  ),
+                ],
+              ],
+              if (_canEdit && !_editing)
+                IconButton(
+                  key: const Key('document-edit'),
+                  tooltip: '编辑文件',
+                  onPressed: _beginEditing,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                ),
+              if (_editing) ...<Widget>[
+                IconButton(
+                  key: const Key('document-save'),
+                  tooltip: '保存 (Ctrl+S)',
+                  onPressed: _dirty && !_saving ? _saveEdits : null,
+                  icon: _saving
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.save_outlined, size: 18),
+                ),
+                IconButton(
+                  key: const Key('document-cancel-edit'),
+                  tooltip: '取消编辑',
+                  onPressed: _saving ? null : _cancelEditing,
+                  icon: const Icon(Icons.close, size: 18),
+                ),
+              ],
+              if (!compact) ...<Widget>[
+                IconButton(
+                  tooltip: '查找 (Ctrl+F)',
+                  icon: const Icon(Icons.search, size: 18),
+                  color: context.vibe.muted,
+                  onPressed: _mode == DocViewMode.hex || _streamIndex != null
+                      ? null
+                      : () => setState(() => _searchOpen = !_searchOpen),
+                ),
+                IconButton(
+                  tooltip: _showInfo ? '隐藏信息' : '显示信息',
+                  icon: Icon(
+                    _showInfo ? Icons.info : Icons.info_outline,
+                    size: 18,
+                    color: _showInfo
+                        ? VibekitsColors.primary
+                        : context.vibe.muted,
+                  ),
+                  onPressed: () => setState(() => _showInfo = !_showInfo),
+                ),
+              ],
             ],
           );
         },
@@ -741,6 +1189,30 @@ class _DocumentsTabState extends State<DocumentsTab> {
       );
     }
 
+    if (_editing) {
+      return TextField(
+        key: const Key('source-editor'),
+        controller: _editorController,
+        autofocus: true,
+        expands: true,
+        minLines: null,
+        maxLines: null,
+        keyboardType: TextInputType.multiline,
+        textAlignVertical: TextAlignVertical.top,
+        onChanged: _onEditorChanged,
+        style: const TextStyle(
+          fontFamily: 'Cascadia Mono',
+          fontSize: 13,
+          height: 1.55,
+        ),
+        decoration: const InputDecoration(
+          contentPadding: EdgeInsets.fromLTRB(14, 12, 14, 32),
+          border: InputBorder.none,
+          filled: false,
+        ),
+      );
+    }
+
     final bool colorLogs = _name.toLowerCase().endsWith('.log');
     return ListView.builder(
       controller: _scrollController,
@@ -836,7 +1308,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
         final int start = index * _bytesPerLine;
         final int end = (start + _bytesPerLine).clamp(0, bytes.length);
         final String line = HexView.formatLine(
-          offset: start,
+          offset: _hexWindowOffset + start,
           bytes: Uint8List.sublistView(bytes, start, end),
           bytesPerLine: _bytesPerLine,
         );
@@ -1074,8 +1546,10 @@ class _DocumentsTabState extends State<DocumentsTab> {
   }
 
   Widget _buildInfoPanel() {
-    final String? magic = _bytes == null ? null : detectMagicNumber(_bytes!);
-    final int size = _bytes?.length ?? _streamIndex?.fileSize ?? 0;
+    final String? magic = _bytes == null || _hexWindowOffset != 0
+        ? null
+        : detectMagicNumber(_bytes!);
+    final int size = _loadedSize;
     return SizedBox(
       width: 260,
       child: Padding(
@@ -1093,6 +1567,8 @@ class _DocumentsTabState extends State<DocumentsTab> {
             ),
             const SizedBox(height: 8),
             _InfoRow(label: '类型', value: _modeLabel()),
+            if (_language != null)
+              _InfoRow(label: '语言', value: _language!.label),
             _InfoRow(label: '路径', value: _path ?? '—'),
             _InfoRow(
               label: '编码',
@@ -1101,8 +1577,15 @@ class _DocumentsTabState extends State<DocumentsTab> {
             _InfoRow(label: '大小', value: _formatSize(size)),
             if (_mode == DocViewMode.text || _mode == DocViewMode.markdown)
               _InfoRow(label: '行数', value: '${_lines.length}'),
+            if (_editing) _InfoRow(label: '编辑', value: _dirty ? '未保存' : '已保存'),
             if (_mode == DocViewMode.hex)
               _InfoRow(label: '每行', value: '$_bytesPerLine 字节'),
+            if (_isWindowedHex)
+              _InfoRow(
+                label: '当前窗口',
+                value:
+                    '0x${_hexWindowOffset.toRadixString(16).toUpperCase()} · ${_formatSize(_bytes!.length)}',
+              ),
             _InfoRow(label: 'Magic', value: magic ?? '—'),
           ],
         ),

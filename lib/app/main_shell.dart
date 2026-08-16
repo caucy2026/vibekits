@@ -65,13 +65,18 @@ class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
   final ValueNotifier<int> _openRequest = ValueNotifier<int>(0);
   final ValueNotifier<int> _findRequest = ValueNotifier<int>(0);
+  final ValueNotifier<int> _saveRequest = ValueNotifier<int>(0);
   String? _archiveDropPath;
   String? _documentDropPath;
   DocViewMode? _documentDropMode;
   String? _modelDropPath;
+  String? _imageDropPath;
+  String? _databaseDropPath;
   int _archiveDropSerial = 0;
   int _documentDropSerial = 0;
   int _modelDropSerial = 0;
+  int _imageDropSerial = 0;
+  int _databaseDropSerial = 0;
   int _dropGeneration = 0;
   List<DroppedFileRoute> _dropBatch = const <DroppedFileRoute>[];
   StreamSubscription<List<String>>? _dropSubscription;
@@ -86,6 +91,8 @@ class _MainShellState extends State<MainShell> {
     _selectedIndex = switch (startupKind) {
       VibekitsFileKind.archive => 0,
       VibekitsFileKind.document => 2,
+      VibekitsFileKind.database => 3,
+      VibekitsFileKind.image => 4,
       VibekitsFileKind.model => 4,
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? settings.lastTab : 0,
@@ -122,6 +129,7 @@ class _MainShellState extends State<MainShell> {
     widget.settingsController.removeListener(_applySettings);
     _openRequest.dispose();
     _findRequest.dispose();
+    _saveRequest.dispose();
     _dropSubscription?.cancel();
     super.dispose();
   }
@@ -192,11 +200,15 @@ class _MainShellState extends State<MainShell> {
     if (!route.canOpen) return;
     final bool archive = route.kind == DroppedFileRouteKind.archive;
     final bool model = route.kind == DroppedFileRouteKind.model;
+    final bool image = route.kind == DroppedFileRouteKind.image;
+    final bool database = route.kind == DroppedFileRouteKind.database;
     _selectTab(
       archive
           ? 0
-          : model
+          : model || image
           ? 4
+          : database
+          ? 3
           : 2,
     );
     setState(() {
@@ -206,6 +218,12 @@ class _MainShellState extends State<MainShell> {
       } else if (model) {
         _modelDropPath = route.path;
         _modelDropSerial++;
+      } else if (image) {
+        _imageDropPath = route.path;
+        _imageDropSerial++;
+      } else if (database) {
+        _databaseDropPath = route.path;
+        _databaseDropSerial++;
       } else {
         _documentDropPath = route.path;
         _documentDropMode = route.documentMode;
@@ -234,6 +252,8 @@ class _MainShellState extends State<MainShell> {
               final DroppedFileRoute route = _dropBatch[index];
               final bool archive = route.kind == DroppedFileRouteKind.archive;
               final bool model = route.kind == DroppedFileRouteKind.model;
+              final bool image = route.kind == DroppedFileRouteKind.image;
+              final bool database = route.kind == DroppedFileRouteKind.database;
               return ListTile(
                 key: ValueKey<String>('drop-route-${route.path}'),
                 enabled: route.canOpen,
@@ -243,6 +263,10 @@ class _MainShellState extends State<MainShell> {
                             ? Icons.folder_zip_outlined
                             : model
                             ? Icons.memory_outlined
+                            : image
+                            ? Icons.image_outlined
+                            : database
+                            ? Icons.storage_outlined
                             : Icons.description_outlined
                       : Icons.warning_amber_outlined,
                 ),
@@ -318,6 +342,7 @@ class _MainShellState extends State<MainShell> {
         key: ValueKey<String>('document-drop-$_documentDropSerial'),
         openRequest: _openRequest,
         findRequest: _findRequest,
+        saveRequest: _saveRequest,
         initialPath:
             _documentDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
@@ -326,14 +351,30 @@ class _MainShellState extends State<MainShell> {
                 : null),
         initialMode: _documentDropPath == null ? null : _documentDropMode,
       ),
-      const DevToolsTab(),
+      DevToolsTab(
+        key: ValueKey<String>('database-drop-$_databaseDropSerial'),
+        initialDatabasePath:
+            _databaseDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.database
+                ? widget.initialFilePath
+                : null),
+      ),
       LocalModelsTab(
-        key: ValueKey<String>('${settings.modelDirectory}|$_modelDropSerial'),
+        key: ValueKey<String>(
+          '${settings.modelDirectory}|$_modelDropSerial|$_imageDropSerial',
+        ),
         directory: settings.modelDirectory,
         initialImportPath:
             _modelDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
                     VibekitsFileKind.model
+                ? widget.initialFilePath
+                : null),
+        initialImagePath:
+            _imageDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.image
                 ? widget.initialFilePath
                 : null),
       ),
@@ -349,6 +390,9 @@ class _MainShellState extends State<MainShell> {
           },
           onFind: () {
             if (_selectedIndex == 2) _findRequest.value++;
+          },
+          onSave: () {
+            if (_selectedIndex == 2) _saveRequest.value++;
           },
         );
 

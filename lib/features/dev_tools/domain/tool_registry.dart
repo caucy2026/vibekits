@@ -8,6 +8,10 @@ import 'tool_result.dart';
 
 /// 工具组（按 docs/06 §6.1 分组）。
 abstract final class ToolGroups {
+  static const String calculate = '计算调试';
+  static const String database = '数据库';
+  static const String remote = '远程连接';
+  static const String sourceControl = '版本控制';
   static const String encoding = '编码转换';
   static const String crypto = '加密生成';
   static const String time = '时间文本';
@@ -41,6 +45,44 @@ class ToolSpec {
 
 /// 开发工具注册表（M1 离线工具 + M6 网络/文件工具）。
 final List<ToolSpec> devToolRegistry = <ToolSpec>[
+  const ToolSpec(
+    id: 'programmer_calculator',
+    name: '程序员计算器',
+    group: ToolGroups.calculate,
+    description: '整数表达式、进制转换、位运算和有符号/无符号解释。',
+  ),
+  const ToolSpec(
+    id: 'database_manager',
+    name: '数据库管理器',
+    group: ToolGroups.database,
+    description: '拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。',
+  ),
+  const ToolSpec(
+    id: 'remote_workspace',
+    name: 'SSH / SFTP',
+    group: ToolGroups.remote,
+    description: '使用系统 OpenSSH 连接终端、传输文件和建立本地端口转发。',
+  ),
+  const ToolSpec(
+    id: 'api_workspace',
+    name: 'API 调试',
+    group: ToolGroups.network,
+    description: '发送有界 HTTP 请求，查看状态、响应头、耗时和正文。',
+    offline: false,
+  ),
+  const ToolSpec(
+    id: 'git_workspace',
+    name: 'Git 工作区',
+    group: ToolGroups.sourceControl,
+    description: '只读查看仓库根目录、分支、工作区变更、Diff 和最近提交。',
+  ),
+  const ToolSpec(
+    id: 'github_diagnostics',
+    name: 'GitHub 网络诊断',
+    group: ToolGroups.network,
+    description: '只读检查 GitHub 的 DNS、TLS、HTTPS、代理、hosts 与 SSH 端口。',
+    offline: false,
+  ),
   ToolSpec(
     id: 'base64_encode',
     name: 'Base64 编码',
@@ -235,15 +277,6 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
       }
       return NetworkTools.tcpPort(parts[0], port);
     },
-  ),
-  ToolSpec(
-    id: 'http_get',
-    name: 'HTTP GET',
-    group: ToolGroups.network,
-    description: '发送 GET 请求并显示状态、响应头与响应体。',
-    offline: false,
-    runAsync: (String input, String params) =>
-        NetworkTools.httpRequest('GET', input),
   ),
   ToolSpec(
     id: 'file_hash',

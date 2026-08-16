@@ -17,6 +17,7 @@ class CleanupScanTarget {
     required this.category,
     required this.defaultEnabled,
     this.strategy = CleanupTargetStrategy.directoryContents,
+    this.safetyNote = '',
   });
 
   final String id;
@@ -25,12 +26,13 @@ class CleanupScanTarget {
   final CleanupCategory category;
   final bool defaultEnabled;
   final CleanupTargetStrategy strategy;
+  final String safetyNote;
 
   bool get highRisk => category.highRisk;
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 3;
+  static const int catalogVersion = 4;
 
   static List<CleanupScanTarget> discover({Map<String, String>? environment}) {
     final Map<String, String> env = environment ?? Platform.environment;
@@ -40,6 +42,7 @@ abstract final class CleanupTargetDiscovery {
     final String? local = env['LOCALAPPDATA'];
     final String? roaming = env['APPDATA'];
     final String? userProfile = env['USERPROFILE'];
+    final String? home = env['HOME'];
 
     if (temp != null && temp.trim().isNotEmpty) {
       targets.add(
@@ -57,6 +60,8 @@ abstract final class CleanupTargetDiscovery {
       for (final (String id, String product, String folder)
           in <(String, String, String)>[
             ('vscode', 'Visual Studio Code', 'Code'),
+            ('cursor', 'Cursor', 'Cursor'),
+            ('windsurf', 'Windsurf', 'Windsurf'),
             ('discord', 'Discord', 'discord'),
           ]) {
         for (final String cache in <String>[
@@ -95,6 +100,7 @@ abstract final class CleanupTargetDiscovery {
           path: _join(roaming, <String>['Code', folder]),
           category: CleanupCategory.pluginCache,
           defaultEnabled: true,
+          safetyNote: '仅插件安装包和索引缓存；不会删除已安装插件',
         );
       }
     }
@@ -106,6 +112,7 @@ abstract final class CleanupTargetDiscovery {
         path: _join(userProfile, <String>['.gradle', 'caches']),
         category: CleanupCategory.devCache,
         defaultEnabled: true,
+        safetyNote: '可由 Gradle 重新生成；首次构建会变慢',
       );
       for (final (String id, String label, List<String> parts)
           in <(String, String, List<String>)>[
@@ -130,6 +137,7 @@ abstract final class CleanupTargetDiscovery {
           path: _join(userProfile, parts),
           category: CleanupCategory.devCache,
           defaultEnabled: true,
+          safetyNote: '包管理器可重新下载；默认不勾选具体文件',
         );
       }
       _addExisting(
@@ -140,7 +148,24 @@ abstract final class CleanupTargetDiscovery {
         category: CleanupCategory.pluginResidual,
         defaultEnabled: true,
         strategy: CleanupTargetStrategy.staleVsCodeExtensions,
+        safetyNote: '只有同一插件存在更高版本时才列出旧版本，且默认不勾选',
       );
+      for (final (String id, String label, String folder)
+          in <(String, String, String)>[
+            ('cursor-stale-extensions', 'Cursor 旧版本插件', '.cursor'),
+            ('windsurf-stale-extensions', 'Windsurf 旧版本插件', '.windsurf'),
+          ]) {
+        _addExisting(
+          targets,
+          id: id,
+          label: label,
+          path: _join(userProfile, <String>[folder, 'extensions']),
+          category: CleanupCategory.pluginResidual,
+          defaultEnabled: true,
+          strategy: CleanupTargetStrategy.staleVsCodeExtensions,
+          safetyNote: '只有同一插件存在更高版本时才列出旧版本，且默认不勾选',
+        );
+      }
       _addExisting(
         targets,
         id: 'downloads-suggestions',
@@ -149,6 +174,7 @@ abstract final class CleanupTargetDiscovery {
         category: CleanupCategory.downloads,
         defaultEnabled: true,
         strategy: CleanupTargetStrategy.downloadSuggestions,
+        safetyNote: '只建议未完成下载、旧安装包和旧压缩包；永不默认勾选',
       );
     }
     if (windows != null && windows.trim().isNotEmpty) {
@@ -171,6 +197,8 @@ abstract final class CleanupTargetDiscovery {
         category: CleanupCategory.systemCache,
         defaultEnabled: true,
       );
+      _addVisualStudioCaches(targets, local);
+      _addJetBrainsCaches(targets, local);
       _addExisting(
         targets,
         id: 'windows-error-reports',
@@ -214,10 +242,11 @@ abstract final class CleanupTargetDiscovery {
       _addExisting(
         targets,
         id: 'pnpm-cache',
-        label: 'pnpm 下载缓存',
-        path: _join(local, <String>['pnpm']),
+        label: 'pnpm Store 下载缓存',
+        path: _join(local, <String>['pnpm', 'store']),
         category: CleanupCategory.devCache,
         defaultEnabled: true,
+        safetyNote: '仅扫描 store；不会触碰 pnpm 可执行文件和配置',
       );
       _addChromiumProfiles(
         targets,
@@ -240,6 +269,10 @@ abstract final class CleanupTargetDiscovery {
         category: CleanupCategory.logs,
         defaultEnabled: true,
       );
+    }
+
+    if (home != null && home.trim().isNotEmpty) {
+      _addMacTargets(targets, home);
     }
 
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
@@ -349,6 +382,14 @@ abstract final class CleanupTargetDiscovery {
             lower.startsWith('dart_') ||
             lower.startsWith('pub_') ||
             lower.startsWith('gradle') ||
+            lower.startsWith('cmake') ||
+            lower.startsWith('ninja') ||
+            lower.startsWith('node-gyp') ||
+            lower.startsWith('pytest-') ||
+            lower.startsWith('pip-') ||
+            lower.startsWith('rustc') ||
+            lower.startsWith('go-build') ||
+            lower.startsWith('tmp') && lower.contains('debug') ||
             lower.startsWith('vscode-') ||
             lower.startsWith('scoped_dir');
         if (!knownDebugTemp ||
@@ -377,6 +418,7 @@ abstract final class CleanupTargetDiscovery {
     required CleanupCategory category,
     required bool defaultEnabled,
     CleanupTargetStrategy strategy = CleanupTargetStrategy.directoryContents,
+    String safetyNote = '',
   }) {
     if (!Directory(path).existsSync()) return;
     targets.add(
@@ -387,7 +429,158 @@ abstract final class CleanupTargetDiscovery {
         category: category,
         defaultEnabled: defaultEnabled,
         strategy: strategy,
+        safetyNote: safetyNote,
       ),
+    );
+  }
+
+  static void _addVisualStudioCaches(
+    List<CleanupScanTarget> targets,
+    String local,
+  ) {
+    final Directory root = Directory(
+      _join(local, <String>['Microsoft', 'VisualStudio']),
+    );
+    if (!root.existsSync()) return;
+    try {
+      for (final FileSystemEntity product in root.listSync(
+        followLinks: false,
+      )) {
+        if (FileSystemEntity.typeSync(product.path, followLinks: false) !=
+            FileSystemEntityType.directory) {
+          continue;
+        }
+        final String name = _baseName(product.path);
+        for (final String cache in <String>[
+          'ComponentModelCache',
+          'ImageLibrary',
+        ]) {
+          _addExisting(
+            targets,
+            id: 'visual-studio-${name.toLowerCase()}-${cache.toLowerCase()}',
+            label: 'Visual Studio $name $cache',
+            path: _join(product.path, <String>[cache]),
+            category: CleanupCategory.devCache,
+            defaultEnabled: true,
+            safetyNote: 'IDE 可重新生成；不会删除扩展、解决方案或源码',
+          );
+        }
+      }
+    } on FileSystemException {
+      return;
+    }
+  }
+
+  static void _addJetBrainsCaches(
+    List<CleanupScanTarget> targets,
+    String local,
+  ) {
+    for (final (String vendor, String label) in <(String, String)>[
+      ('JetBrains', 'JetBrains'),
+      ('Google', 'Android Studio'),
+    ]) {
+      final Directory root = Directory(_join(local, <String>[vendor]));
+      if (!root.existsSync()) continue;
+      try {
+        for (final FileSystemEntity product in root.listSync(
+          followLinks: false,
+        )) {
+          if (FileSystemEntity.typeSync(product.path, followLinks: false) !=
+              FileSystemEntityType.directory) {
+            continue;
+          }
+          final String name = _baseName(product.path);
+          final String lower = name.toLowerCase();
+          final bool recognized = vendor == 'JetBrains'
+              ? RegExp(
+                  r'^(idea|intellijidea|pycharm|webstorm|phpstorm|clion|rider|rubymine|goland|datagrip|androidstudio)',
+                ).hasMatch(lower)
+              : lower.startsWith('androidstudio');
+          if (!recognized) continue;
+          for (final String cache in <String>[
+            'caches',
+            'index',
+            'tmp',
+            'log',
+          ]) {
+            _addExisting(
+              targets,
+              id: '${vendor.toLowerCase()}-$lower-$cache',
+              label: '$label $name $cache',
+              path: _join(product.path, <String>[cache]),
+              category: cache == 'log'
+                  ? CleanupCategory.logs
+                  : CleanupCategory.devCache,
+              defaultEnabled: true,
+              safetyNote: cache == 'log'
+                  ? '仅诊断日志'
+                  : 'IDE 可重新生成；不会删除插件、设置、项目或源码',
+            );
+          }
+        }
+      } on FileSystemException {
+        continue;
+      }
+    }
+  }
+
+  static void _addMacTargets(List<CleanupScanTarget> targets, String home) {
+    for (final (String id, String label, List<String> parts)
+        in <(String, String, List<String>)>[
+          (
+            'mac-xcode-derived-data',
+            'Xcode DerivedData',
+            <String>['Library', 'Developer', 'Xcode', 'DerivedData'],
+          ),
+          (
+            'mac-swiftpm-cache',
+            'Swift Package Manager 缓存',
+            <String>['Library', 'Caches', 'org.swift.swiftpm'],
+          ),
+          (
+            'mac-homebrew-cache',
+            'Homebrew 下载缓存',
+            <String>['Library', 'Caches', 'Homebrew'],
+          ),
+          (
+            'mac-cocoapods-cache',
+            'CocoaPods 下载缓存',
+            <String>['Library', 'Caches', 'CocoaPods'],
+          ),
+          (
+            'mac-pip-cache',
+            'Python pip 下载缓存',
+            <String>['Library', 'Caches', 'pip'],
+          ),
+        ]) {
+      _addExisting(
+        targets,
+        id: id,
+        label: label,
+        path: _join(home, parts),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
+        safetyNote: '可重新生成或下载；默认不勾选具体文件',
+      );
+    }
+    _addExisting(
+      targets,
+      id: 'mac-diagnostic-reports',
+      label: 'macOS 诊断报告',
+      path: _join(home, <String>['Library', 'Logs', 'DiagnosticReports']),
+      category: CleanupCategory.logs,
+      defaultEnabled: true,
+      safetyNote: '仅本机应用崩溃诊断报告',
+    );
+    _addExisting(
+      targets,
+      id: 'mac-downloads-suggestions',
+      label: '下载目录清理建议',
+      path: _join(home, <String>['Downloads']),
+      category: CleanupCategory.downloads,
+      defaultEnabled: true,
+      strategy: CleanupTargetStrategy.downloadSuggestions,
+      safetyNote: '只建议未完成下载、旧安装包和旧压缩包；永不默认勾选',
     );
   }
 

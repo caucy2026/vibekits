@@ -76,4 +76,37 @@ void main() {
     expect(route.kind, DroppedFileRouteKind.model);
     expect(route.detail, contains('模型'));
   });
+
+  test('图片即使扩展名错误也按文件头进入预览与 OCR', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_drop_image',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final File image = File('${sandbox.path}${Platform.pathSeparator}photo.bin')
+      ..writeAsBytesSync(<int>[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+    final DroppedFileRoute route = await DroppedFileRouter.classify(image.path);
+    expect(route.kind, DroppedFileRouteKind.image);
+    expect(route.detail, contains('自动预览'));
+  });
+
+  test('SQLite 即使扩展名错误也按文件头只读打开', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_drop_sqlite',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final File database =
+        File('${sandbox.path}${Platform.pathSeparator}records.data')
+          ..writeAsBytesSync(<int>[
+            ...'SQLite format 3'.codeUnits,
+            0,
+            ...List<int>.filled(84, 0),
+          ]);
+
+    final DroppedFileRoute route = await DroppedFileRouter.classify(
+      database.path,
+    );
+    expect(route.kind, DroppedFileRouteKind.database);
+    expect(route.detail, contains('只读打开'));
+  });
 }

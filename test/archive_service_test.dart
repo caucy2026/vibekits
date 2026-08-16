@@ -21,6 +21,9 @@ void main() {
     expect(archiveFormatForPath('a.tar.gz'), ArchiveFormat.tar);
     expect(archiveFormatForPath('a.7z'), ArchiveFormat.sevenZip);
     expect(archiveFormatForPath('a.rar'), ArchiveFormat.rar);
+    expect(archiveFormatForPath('a.iso'), ArchiveFormat.iso);
+    expect(archiveFormatForPath('a.zst'), ArchiveFormat.external);
+    expect(archiveFormatForPath('a.wim'), ArchiveFormat.external);
     expect(archiveFormatForPath('a.xyz'), ArchiveFormat.unsupported);
   });
 

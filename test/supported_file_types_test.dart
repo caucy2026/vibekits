@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/app/supported_file_types.dart';
 
 void main() {
-  test('只把真实支持的压缩格式路由到解压模块', () {
+  test('内置 7-Zip 与纯 Dart 后端支持的压缩格式都路由到解压模块', () {
     for (final String extension in SupportedFileTypes.archiveExtensions) {
       expect(
         SupportedFileTypes.kindForPath('sample.$extension'),
@@ -10,12 +10,16 @@ void main() {
       );
     }
     expect(
-      SupportedFileTypes.kindForPath('unsupported.rar'),
-      VibekitsFileKind.unsupported,
+      SupportedFileTypes.kindForPath('sample.rar'),
+      VibekitsFileKind.archive,
     );
     expect(
-      SupportedFileTypes.kindForPath('unsupported.iso'),
-      VibekitsFileKind.unsupported,
+      SupportedFileTypes.kindForPath('sample.iso'),
+      VibekitsFileKind.archive,
+    );
+    expect(
+      SupportedFileTypes.kindForPath('sample.zst'),
+      VibekitsFileKind.archive,
     );
   });
 
@@ -64,6 +68,34 @@ void main() {
       expect(
         SupportedFileTypes.kindForPath('model.$extension'),
         VibekitsFileKind.model,
+      );
+    }
+  });
+
+  test('主流和开发图片格式路由到图片预览与 OCR', () {
+    for (final String extension in <String>[
+      'png',
+      'jpg',
+      'webp',
+      'gif',
+      'tiff',
+      'ico',
+      'psd',
+      'exr',
+    ]) {
+      expect(
+        SupportedFileTypes.kindForPath('image.$extension'),
+        VibekitsFileKind.image,
+        reason: extension,
+      );
+    }
+  });
+
+  test('SQLite 数据库扩展名路由到数据库管理器', () {
+    for (final String extension in SupportedFileTypes.databaseExtensions) {
+      expect(
+        SupportedFileTypes.kindForPath('data.$extension'),
+        VibekitsFileKind.database,
       );
     }
   });

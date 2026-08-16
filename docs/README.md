@@ -1,20 +1,27 @@
-# Vibekits Windows 开发文档
+# Vibekits 统一开发文档
 
-本目录是 Windows V1 的产品、设计、实现和验收基线。需求变更必须先更新文档与验收编号，再修改代码。
+本目录是 Windows/macOS 的统一产品、设计、实现和验收基线。需求变更必须先更新文档与验收编号，再修改代码。
 
 ## 阅读顺序
 
-1. [Windows V1 产品规格](00_WINDOWS_PRODUCT_SPEC.md)
-2. [Windows 界面布局](01_WINDOWS_UI_LAYOUT.md)
-3. [技术架构](02_TECHNICAL_ARCHITECTURE.md)
-4. [实施计划](03_IMPLEMENTATION_PLAN.md)
-5. [Windows 验收矩阵](04_WINDOWS_ACCEPTANCE_MATRIX.md)
-6. [Windows 验收流程](05_WINDOWS_ACCEPTANCE_PROCESS.md)
-7. [Windows 模块实现规格](06_WINDOWS_IMPLEMENTATION_SPEC.md)
-8. [Windows UI 验收矩阵](07_WINDOWS_UI_ACCEPTANCE_MATRIX.md)
-9. [Windows 交互与操作习惯规范](08_WINDOWS_UX_CONVENTIONS.md)
-10. [开发日志](09_DEVELOPMENT_LOG.md)
-11. [当前实现状态与未完成清单](10_CURRENT_IMPLEMENTATION_STATUS.md)
+1. [统一产品需求](00_PRODUCT_REQUIREMENTS.md)——最高产品与研发基线
+2. [Windows 平台产品附件](00_WINDOWS_PRODUCT_SPEC.md)
+3. [Windows 界面布局](01_WINDOWS_UI_LAYOUT.md)
+4. [跨平台技术架构](02_TECHNICAL_ARCHITECTURE.md)
+5. [统一实施计划](03_IMPLEMENTATION_PLAN.md)
+6. [Windows 验收矩阵](04_WINDOWS_ACCEPTANCE_MATRIX.md)
+7. [Windows 验收流程](05_WINDOWS_ACCEPTANCE_PROCESS.md)
+8. [Windows 模块实现规格](06_WINDOWS_IMPLEMENTATION_SPEC.md)
+9. [Windows UI 验收矩阵](07_WINDOWS_UI_ACCEPTANCE_MATRIX.md)
+10. [交互与操作习惯规范](08_WINDOWS_UX_CONVENTIONS.md)
+11. [开发日志](09_DEVELOPMENT_LOG.md)
+12. [当前实现状态与未完成清单](10_CURRENT_IMPLEMENTATION_STATUS.md)
+13. [macOS 平台实现附件](11_MACOS_PLATFORM_SPEC.md)
+14. [统一验收矩阵](12_UNIFIED_ACCEPTANCE_MATRIX.md)
+15. [用户需求总账](13_REQUIREMENT_LEDGER.md)
+16. [实验与闭环路径](14_EXPERIMENTATION_PATH.md)
+17. [程序员工具版图与移植决策](15_DEVELOPER_TOOL_LANDSCAPE.md)
+18. [第三方组件、模型与供应链记录](16_THIRD_PARTY_COMPONENTS.md)
 
 ## 完成定义
 
@@ -24,5 +31,5 @@
 2. 实现代码、错误处理和资源释放完整。
 3. 自动测试通过。
 4. Windows Release 构建通过。
-5. 验收矩阵中的人工步骤在当前 Windows 电脑实际执行并记录结果。
+5. 验收矩阵中的人工步骤在目标 Windows/macOS 电脑实际执行并记录结果。
 6. 对应 UI 验收编号通过并具有截图或录屏证据。

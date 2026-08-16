@@ -11,10 +11,38 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: DevToolsTab())),
     );
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, 'Base64');
+    await tester.pump();
+    await tester.tap(find.text('Base64 编码'));
+    await tester.pump();
     return find.byWidgetPredicate(
       (Widget w) => w is TextField && w.decoration?.hintText == '输入',
     );
   }
+
+  testWidgets('程序员计算器默认打开且输入即算', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: DevToolsTab())),
+    );
+    expect(find.text('程序员计算器'), findsWidgets);
+    final Finder input = find.byKey(const Key('programmer-calculator-input'));
+    expect(input, findsOneWidget);
+
+    await tester.enterText(input, '0xFF + 1');
+    await tester.pump();
+    expect(find.text('256'), findsOneWidget);
+    expect(find.text('0x0000000000000100'), findsOneWidget);
+
+    await tester.tap(find.text('8'));
+    await tester.pump();
+    expect(find.text('0'), findsOneWidget);
+    expect(find.text('0x00'), findsOneWidget);
+    expect(find.byTooltip('复制 HEX'), findsOneWidget);
+  });
 
   testWidgets('DEV-002 执行与交换', (WidgetTester tester) async {
     final Finder input = await pumpTools(tester);

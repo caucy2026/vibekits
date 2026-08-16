@@ -1,4 +1,4 @@
-enum VibekitsFileKind { archive, document, model, unsupported }
+enum VibekitsFileKind { archive, document, database, image, model, unsupported }
 
 /// File types that Vibekits can actually open today.
 abstract final class SupportedFileTypes {
@@ -12,6 +12,42 @@ abstract final class SupportedFileTypes {
     'xz',
     'txz',
     '7z',
+    'rar',
+    'r00',
+    'iso',
+    'img',
+    'zst',
+    'tzst',
+    'cab',
+    'arj',
+    'lzh',
+    'chm',
+    'msi',
+    'nsis',
+    'udf',
+    'wim',
+    'swm',
+    'esd',
+    'dmg',
+    'hfs',
+    'apfs',
+    'vhd',
+    'vhdx',
+    'ova',
+    'cpio',
+    'rpm',
+    'deb',
+    'squashfs',
+    'zipx',
+    'jar',
+    'xpi',
+    'apk',
+    'appx',
+    'ipa',
+    'odt',
+    'ods',
+    'docx',
+    'xlsx',
   ];
 
   static const List<String> documentExtensions = <String>[
@@ -80,7 +116,94 @@ abstract final class SupportedFileTypes {
     'gradle',
     'cmake',
     'dockerfile',
+    'rb',
+    'php',
+    'phtml',
+    'lua',
+    'r',
+    'scala',
+    'sc',
+    'groovy',
+    'clj',
+    'cljs',
+    'cljc',
+    'edn',
+    'ex',
+    'exs',
+    'erl',
+    'hrl',
+    'fs',
+    'fsx',
+    'fsi',
+    'vb',
+    'vbs',
+    'asm',
+    's',
+    'v',
+    'zig',
+    'nim',
+    'nims',
+    'sol',
+    'proto',
+    'graphql',
+    'gql',
+    'tf',
+    'tfvars',
+    'hcl',
+    'nix',
+    'fish',
+    'nu',
+    'awk',
+    'sed',
+    'pl',
+    'pm',
+    'tcl',
+    'coffee',
+    'wat',
+    'wasm',
+    'lock',
+    'ipynb',
+    'astro',
+    'elm',
+    'hs',
+    'lhs',
+    'jl',
+    'ml',
+    'mli',
+    'pas',
+    'pp',
+    'inc',
+    'rego',
+    'yara',
+    'yar',
+    'glsl',
+    'vert',
+    'frag',
+    'comp',
+    'hlsl',
+    'metal',
+    'rst',
+    'adoc',
+    'bazel',
+    'bzl',
+    'build',
   ];
+
+  static const Set<String> specialDocumentFileNames = <String>{
+    'makefile',
+    'gnumakefile',
+    'justfile',
+    'procfile',
+    'jenkinsfile',
+    'vagrantfile',
+    'gemfile',
+    'rakefile',
+    'podfile',
+    'brewfile',
+    'cmakelists.txt',
+    'workspace',
+    'build',
+  };
 
   static const List<String> modelExtensions = <String>[
     'onnx',
@@ -90,9 +213,42 @@ abstract final class SupportedFileTypes {
     'model',
   ];
 
+  static const List<String> databaseExtensions = <String>[
+    'db',
+    'db3',
+    'sqlite',
+    'sqlite3',
+  ];
+
+  static const List<String> imageExtensions = <String>[
+    'png',
+    'jpg',
+    'jpeg',
+    'jpe',
+    'jfif',
+    'webp',
+    'bmp',
+    'dib',
+    'gif',
+    'tif',
+    'tiff',
+    'ico',
+    'cur',
+    'tga',
+    'psd',
+    'exr',
+    'pnm',
+    'pbm',
+    'pgm',
+    'ppm',
+    'pvr',
+  ];
+
   static const List<String> allExtensions = <String>[
     ...archiveExtensions,
     ...documentExtensions,
+    ...databaseExtensions,
+    ...imageExtensions,
     ...modelExtensions,
   ];
 
@@ -103,16 +259,34 @@ abstract final class SupportedFileTypes {
         .last
         .toLowerCase();
     final String? extension = _extensionOf(name);
+    if (specialDocumentFileNames.contains(name)) {
+      return VibekitsFileKind.document;
+    }
     if (extension != null && archiveExtensions.contains(extension)) {
       return VibekitsFileKind.archive;
     }
     if (extension != null && documentExtensions.contains(extension)) {
       return VibekitsFileKind.document;
     }
+    if (extension != null && databaseExtensions.contains(extension)) {
+      return VibekitsFileKind.database;
+    }
+    if (extension != null && imageExtensions.contains(extension)) {
+      return VibekitsFileKind.image;
+    }
     if (extension != null && modelExtensions.contains(extension)) {
       return VibekitsFileKind.model;
     }
     return VibekitsFileKind.unsupported;
+  }
+
+  static bool isSpecialDocumentPath(String path) {
+    final String name = path
+        .replaceAll('\\', '/')
+        .split('/')
+        .last
+        .toLowerCase();
+    return specialDocumentFileNames.contains(name);
   }
 
   static String? _extensionOf(String name) {

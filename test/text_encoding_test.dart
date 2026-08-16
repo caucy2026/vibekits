@@ -6,6 +6,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/documents/domain/text_encoding.dart';
 
 void main() {
+  test('UTF-8/UTF-16 编码保存保持 BOM 策略并可往返', () {
+    const String text = 'hello 你好';
+    for (final DocEncoding encoding in <DocEncoding>[
+      DocEncoding.utf8,
+      DocEncoding.utf16le,
+      DocEncoding.utf16be,
+    ]) {
+      final Uint8List bytes = TextCodecs.encode(
+        text,
+        encoding,
+        includeBom: true,
+      );
+      expect(TextCodecs.hasBom(bytes, encoding), isTrue);
+      expect(TextCodecs.decode(bytes, encoding), text);
+    }
+  });
+
   group('编码探测', () {
     test('UTF-8 BOM', () {
       final Uint8List bytes = Uint8List.fromList(<int>[

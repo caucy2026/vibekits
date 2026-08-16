@@ -18,7 +18,7 @@ class WindowsFileDrop {
   Stream<List<String>> get files => _controller.stream;
 
   void start() {
-    if (_started || !Platform.isWindows) return;
+    if (_started || (!Platform.isWindows && !Platform.isMacOS)) return;
     _started = true;
     _channel.setMethodCallHandler((MethodCall call) async {
       if (call.method != 'filesDropped') return;
@@ -27,6 +27,7 @@ class WindowsFileDrop {
           .toList(growable: false);
       if (paths.isNotEmpty) _enqueue(paths);
     });
+    unawaited(_channel.invokeMethod<void>('ready').catchError((_) {}));
   }
 
   void _enqueue(List<String> paths) {

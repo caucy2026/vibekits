@@ -69,4 +69,59 @@ void main() {
       dir.deleteSync(recursive: true);
     }
   });
+
+  test('多文件模型包全部校验后一次安装，失败不替换旧模型', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_model_bundle',
+    );
+    final Directory models = Directory('${sandbox.path}/models');
+    final Directory originalSource = Directory('${sandbox.path}/original')
+      ..createSync();
+    final Directory bundleSource = Directory('${sandbox.path}/bundle')
+      ..createSync();
+    try {
+      final File original = File('${originalSource.path}/det.onnx')
+        ..writeAsStringSync('original');
+      await ModelStore.import(original.path, models.path);
+      final File replacement = File('${bundleSource.path}/det.onnx')
+        ..writeAsStringSync('new');
+      final File oversized = File('${bundleSource.path}/rec.onnx')
+        ..writeAsStringSync('too-large!');
+
+      await expectLater(
+        ModelStore.importBundle(
+          <String>[replacement.path, oversized.path],
+          models.path,
+          maxBytes: 9,
+        ),
+        throwsFormatException,
+      );
+      expect(File('${models.path}/det.onnx').readAsStringSync(), 'original');
+      expect(File('${models.path}/rec.onnx').existsSync(), isFalse);
+      expect(
+        models.listSync().where(
+          (FileSystemEntity item) => item.path.endsWith('.part'),
+        ),
+        isEmpty,
+      );
+
+      final File recognition = File('${bundleSource.path}/rec.onnx')
+        ..writeAsStringSync('rec');
+      final List<ModelInfo> installed = await ModelStore.importBundle(<String>[
+        replacement.path,
+        recognition.path,
+      ], models.path);
+      expect(installed, hasLength(2));
+      expect(File('${models.path}/det.onnx').readAsStringSync(), 'new');
+      expect(File('${models.path}/rec.onnx').readAsStringSync(), 'rec');
+      expect(
+        (await ModelStore.list(models.path)).every(
+          (ModelInfo model) => model.integrity == ModelIntegrity.verified,
+        ),
+        isTrue,
+      );
+    } finally {
+      sandbox.deleteSync(recursive: true);
+    }
+  });
 }

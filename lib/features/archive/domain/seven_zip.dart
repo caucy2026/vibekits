@@ -4,7 +4,7 @@ import 'archive_service.dart';
 import 'disk_space.dart';
 import 'atomic_file.dart';
 
-/// 7z 格式支持，基于官方 7za 命令行（native/7za/7za.exe）。
+/// Unified native archive support backed by official 7-Zip.
 class SevenZipEntry {
   const SevenZipEntry({
     required this.name,
@@ -17,7 +17,7 @@ class SevenZipEntry {
   final bool isDirectory;
 }
 
-/// 解压冲突策略 → 7za 参数。
+/// 解压冲突策略 → 7-Zip 参数。
 String sevenZipOverwriteArg(String policy) {
   switch (policy) {
     case 'overwrite':
@@ -32,18 +32,24 @@ String sevenZipOverwriteArg(String policy) {
 abstract final class SevenZip {
   static List<String> _candidatePaths() {
     final List<String> candidates = <String>[];
-    final String? env = Platform.environment['VIBEKITS_7ZA'];
+    final String? env =
+        Platform.environment['VIBEKITS_7Z'] ??
+        Platform.environment['VIBEKITS_7ZA'];
     if (env != null && env.isNotEmpty) {
       candidates.add(env);
     }
     candidates.add(
       '${Directory.current.path}${Platform.pathSeparator}native'
-      '${Platform.pathSeparator}7za${Platform.pathSeparator}7za.exe',
+      '${Platform.pathSeparator}7zip${Platform.pathSeparator}7z.exe',
     );
     candidates.add(
-      '${Platform.resolvedExecutable}${Platform.pathSeparator}..'
-      '${Platform.pathSeparator}native${Platform.pathSeparator}7za'
-      '${Platform.pathSeparator}7za.exe',
+      '${File(Platform.resolvedExecutable).parent.path}'
+      '${Platform.pathSeparator}tools${Platform.pathSeparator}7zip'
+      '${Platform.pathSeparator}7z.exe',
+    );
+    candidates.add(
+      '${Directory.current.path}${Platform.pathSeparator}native'
+      '${Platform.pathSeparator}7za${Platform.pathSeparator}7za.exe',
     );
     return candidates;
   }
@@ -60,10 +66,14 @@ abstract final class SevenZip {
   static bool get isAvailable => findExecutable() != null;
 
   /// 列出 7z 压缩包条目。
-  static Future<List<SevenZipEntry>> list(String archivePath) async {
+  static Future<List<SevenZipEntry>> list(
+    String archivePath, {
+    int maxEntries = 100000,
+    int maxSingleExpandedBytes = 20 * 1024 * 1024 * 1024,
+  }) async {
     final String? exe = findExecutable();
     if (exe == null) {
-      throw const FileSystemException('未找到 7za.exe');
+      throw const FileSystemException('未找到 Vibekits 内置 7-Zip 后端');
     }
     final ProcessResult result = await Process.run(exe, <String>[
       'l',
@@ -73,7 +83,16 @@ abstract final class SevenZip {
     if (result.exitCode != 0) {
       throw FileSystemException('7z 列表失败：${result.stderr}');
     }
-    return _parseList(result.stdout as String);
+    final List<SevenZipEntry> entries = _parseList(result.stdout as String);
+    if (entries.length > maxEntries) {
+      throw FormatException('压缩包条目超过安全上限 $maxEntries');
+    }
+    for (final SevenZipEntry entry in entries) {
+      if (entry.size < 0 || entry.size > maxSingleExpandedBytes) {
+        throw FormatException('条目展开大小超过安全上限：${entry.name}');
+      }
+    }
+    return entries;
   }
 
   static List<SevenZipEntry> _parseList(String output) {
@@ -94,13 +113,14 @@ abstract final class SevenZip {
 
     for (final String line in output.split('\n')) {
       final String trimmed = line.trim();
-      if (trimmed == '--') {
+      if (RegExp(r'^-{5,}$').hasMatch(trimmed)) {
         flush();
         inEntry = true;
         continue;
       }
       if (!inEntry) continue;
       if (trimmed.startsWith('Path = ')) {
+        if (name != null) flush();
         name = trimmed.substring('Path = '.length);
       } else if (trimmed.startsWith('Size = ')) {
         size = int.tryParse(trimmed.substring('Size = '.length)) ?? 0;
@@ -112,7 +132,7 @@ abstract final class SevenZip {
     return entries;
   }
 
-  /// 解压 7z 到目标目录。
+  /// 解压 7-Zip 后端支持的压缩包到目标目录。
   static Future<void> extract(
     String archivePath,
     String targetDir, {
@@ -139,14 +159,22 @@ abstract final class SevenZip {
     void Function(ArchiveExtractProgress progress)? onProgress,
     ArchiveConflictResolver? onConflict,
     int? Function(String path)? availableDiskBytes,
+    int maxEntries = 100000,
+    int maxSingleExpandedBytes = 20 * 1024 * 1024 * 1024,
+    int maxTotalExpandedBytes = 50 * 1024 * 1024 * 1024,
+    int maxCompressionRatio = 1000,
   }) async {
     final ArchiveCancellationToken token =
         cancellationToken ?? ArchiveCancellationToken();
     final String? exe = findExecutable();
     if (exe == null) {
-      throw const FileSystemException('未找到 7za.exe');
+      throw const FileSystemException('未找到 Vibekits 内置 7-Zip 后端');
     }
-    final List<SevenZipEntry> listing = await list(archivePath);
+    final List<SevenZipEntry> listing = await list(
+      archivePath,
+      maxEntries: maxEntries,
+      maxSingleExpandedBytes: maxSingleExpandedBytes,
+    );
     final Set<String>? selected = selectedEntries?.toSet();
     final List<SevenZipEntry> plan = listing
         .where(
@@ -173,6 +201,13 @@ abstract final class SevenZip {
       0,
       (int sum, SevenZipEntry entry) => sum + entry.size,
     );
+    if (totalBytes > maxTotalExpandedBytes) {
+      throw FormatException('选择内容的总展开大小超过安全上限');
+    }
+    final int archiveBytes = await File(archivePath).length();
+    if (archiveBytes > 0 && totalBytes > archiveBytes * maxCompressionRatio) {
+      throw FormatException('选择内容的展开比例超过安全上限');
+    }
     final int? available = (availableDiskBytes ?? DiskSpace.availableBytes)(
       targetDir,
     );
@@ -192,8 +227,7 @@ abstract final class SevenZip {
     if (plan.isNotEmpty) {
       args.addAll(plan.map((SevenZipEntry entry) => entry.name));
     }
-    // Bundled 7za 9.20 does not support the newer -bsp progress switch.
-    args.addAll(<String>['-o${staging.path}', '-y', '-aoa']);
+    args.addAll(<String>['-o${staging.path}', '-y', '-aoa', '-bsp1']);
     final Process process = await Process.start(exe, args);
     final StringBuffer outputs = StringBuffer();
     final StringBuffer errors = StringBuffer();

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -11,22 +13,23 @@ abstract final class AppShortcuts {
     required VoidCallback onOpenSettings,
     required VoidCallback onOpen,
     required VoidCallback onFind,
+    required VoidCallback onSave,
   }) {
+    SingleActivator primary(LogicalKeyboardKey key) => SingleActivator(
+      key,
+      control: !Platform.isMacOS,
+      meta: Platform.isMacOS,
+    );
     return <ShortcutActivator, VoidCallback>{
-      const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
-          onSelectTab(0),
-      const SingleActivator(LogicalKeyboardKey.digit2, control: true): () =>
-          onSelectTab(1),
-      const SingleActivator(LogicalKeyboardKey.digit3, control: true): () =>
-          onSelectTab(2),
-      const SingleActivator(LogicalKeyboardKey.digit4, control: true): () =>
-          onSelectTab(3),
-      const SingleActivator(LogicalKeyboardKey.digit5, control: true): () =>
-          onSelectTab(4),
-      const SingleActivator(LogicalKeyboardKey.comma, control: true):
-          onOpenSettings,
-      const SingleActivator(LogicalKeyboardKey.keyO, control: true): onOpen,
-      const SingleActivator(LogicalKeyboardKey.keyF, control: true): onFind,
+      primary(LogicalKeyboardKey.digit1): () => onSelectTab(0),
+      primary(LogicalKeyboardKey.digit2): () => onSelectTab(1),
+      primary(LogicalKeyboardKey.digit3): () => onSelectTab(2),
+      primary(LogicalKeyboardKey.digit4): () => onSelectTab(3),
+      primary(LogicalKeyboardKey.digit5): () => onSelectTab(4),
+      primary(LogicalKeyboardKey.comma): onOpenSettings,
+      primary(LogicalKeyboardKey.keyO): onOpen,
+      primary(LogicalKeyboardKey.keyF): onFind,
+      primary(LogicalKeyboardKey.keyS): onSave,
     };
   }
 }

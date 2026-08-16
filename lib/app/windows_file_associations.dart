@@ -65,6 +65,8 @@ typedef _ShChangeNotifyDart = void Function(
 abstract final class WindowsFileAssociations {
   static const String documentProgId = 'Vibekits.Document';
   static const String archiveProgId = 'Vibekits.Archive';
+  static const String imageProgId = 'Vibekits.Image';
+  static const String databaseProgId = 'Vibekits.Database';
   static const String modelProgId = 'Vibekits.Model';
 
   static bool shouldRegisterExecutable(String executable) {
@@ -166,6 +168,8 @@ abstract final class WindowsFileAssociations {
 
     progId(documentProgId, 'Vibekits 文档');
     progId(archiveProgId, 'Vibekits 压缩文件');
+    progId(imageProgId, 'Vibekits 图片');
+    progId(databaseProgId, 'Vibekits SQLite 数据库');
     progId(modelProgId, 'Vibekits 本地模型');
     const String appBase = 'Software\\Classes\\Applications\\vibekits.exe';
     write(appBase, 'FriendlyAppName', 'Vibekits');
@@ -181,6 +185,10 @@ abstract final class WindowsFileAssociations {
       final String progId =
           SupportedFileTypes.archiveExtensions.contains(extension)
           ? archiveProgId
+          : SupportedFileTypes.databaseExtensions.contains(extension)
+          ? databaseProgId
+          : SupportedFileTypes.imageExtensions.contains(extension)
+          ? imageProgId
           : SupportedFileTypes.modelExtensions.contains(extension)
           ? modelProgId
           : documentProgId;
@@ -193,11 +201,19 @@ abstract final class WindowsFileAssociations {
         extension,
       );
       final bool model = SupportedFileTypes.modelExtensions.contains(extension);
+      final bool image = SupportedFileTypes.imageExtensions.contains(extension);
+      final bool database = SupportedFileTypes.databaseExtensions.contains(
+        extension,
+      );
       write(
         contextMenu,
         'MUIVerb',
         archive
             ? '用 Vibekits 解压或查看'
+            : database
+            ? '用 Vibekits 浏览 SQLite 数据库'
+            : image
+            ? '用 Vibekits 查看或识别文字'
             : model
             ? '导入到 Vibekits 本地模型'
             : '用 Vibekits 查看或解码',

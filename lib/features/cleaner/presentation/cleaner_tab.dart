@@ -439,128 +439,125 @@ class _CleanerTabState extends State<CleanerTab> {
       builder: (BuildContext dialogContext) {
         final Set<String> draft = <String>{..._enabledTargetIds};
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setDialogState) =>
-              AlertDialog(
-                title: const Text('扫描范围'),
-                content: SizedBox(
-                  width: 620,
-                  height: 420,
-                  child: _availableTargets.isEmpty
-                      ? const Center(child: Text('当前环境没有可用扫描范围'))
-                      : Column(
+          builder: (BuildContext context, StateSetter setDialogState) => AlertDialog(
+            title: const Text('扫描范围'),
+            content: SizedBox(
+              width: 620,
+              height: 420,
+              child: _availableTargets.isEmpty
+                  ? const Center(child: Text('当前环境没有可用扫描范围'))
+                  : Column(
+                      children: <Widget>[
+                        Wrap(
+                          spacing: 8,
                           children: <Widget>[
-                            Wrap(
-                              spacing: 8,
-                              children: <Widget>[
-                                TextButton.icon(
-                                  onPressed: () => setDialogState(() {
-                                    draft
-                                      ..clear()
-                                      ..addAll(
-                                        _availableTargets
-                                            .where(
-                                              (CleanupScanTarget target) =>
-                                                  target.defaultEnabled,
-                                            )
-                                            .map(
-                                              (CleanupScanTarget target) =>
-                                                  target.id,
-                                            ),
-                                      );
-                                  }),
-                                  icon: const Icon(
-                                    Icons.auto_awesome,
-                                    size: 16,
-                                  ),
-                                  label: const Text('推荐范围'),
-                                ),
-                                TextButton(
-                                  onPressed: () => setDialogState(() {
-                                    draft
-                                      ..clear()
-                                      ..addAll(
-                                        _availableTargets.map(
+                            TextButton.icon(
+                              onPressed: () => setDialogState(() {
+                                draft
+                                  ..clear()
+                                  ..addAll(
+                                    _availableTargets
+                                        .where(
+                                          (CleanupScanTarget target) =>
+                                              target.defaultEnabled,
+                                        )
+                                        .map(
                                           (CleanupScanTarget target) =>
                                               target.id,
                                         ),
-                                      );
-                                  }),
-                                  child: const Text('全部'),
-                                ),
-                                TextButton(
-                                  onPressed: () => setDialogState(draft.clear),
-                                  child: const Text('清空'),
-                                ),
-                              ],
+                                  );
+                              }),
+                              icon: const Icon(Icons.auto_awesome, size: 16),
+                              label: const Text('推荐范围'),
                             ),
-                            const Divider(height: 1),
-                            Expanded(
-                              child: ListView(
-                                children: <Widget>[
-                                  for (final CleanupCategory category
-                                      in CleanupCategory.values)
-                                    if (_availableTargets.any(
-                                      (CleanupScanTarget target) =>
-                                          target.category == category,
-                                    )) ...<Widget>[
-                                      Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          16,
-                                          12,
-                                          16,
-                                          4,
-                                        ),
-                                        child: Text(
-                                          '${category.label}${category.highRisk ? ' · 默认不选择清理项' : ''}',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            color: category.highRisk
-                                                ? VibekitsColors.warning
-                                                : context.vibe.muted,
-                                          ),
-                                        ),
-                                      ),
-                                      for (final CleanupScanTarget target
-                                          in _availableTargets.where(
-                                            (CleanupScanTarget target) =>
-                                                target.category == category,
-                                          ))
-                                        CheckboxListTile(
-                                          dense: true,
-                                          value: draft.contains(target.id),
-                                          title: Text(target.label),
-                                          subtitle: Text(
-                                            target.path,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          onChanged: (bool? enabled) =>
-                                              setDialogState(() {
-                                                if (enabled == true) {
-                                                  draft.add(target.id);
-                                                } else {
-                                                  draft.remove(target.id);
-                                                }
-                                              }),
-                                        ),
-                                    ],
-                                ],
-                              ),
+                            TextButton(
+                              onPressed: () => setDialogState(() {
+                                draft
+                                  ..clear()
+                                  ..addAll(
+                                    _availableTargets.map(
+                                      (CleanupScanTarget target) => target.id,
+                                    ),
+                                  );
+                              }),
+                              child: const Text('全部'),
+                            ),
+                            TextButton(
+                              onPressed: () => setDialogState(draft.clear),
+                              child: const Text('清空'),
                             ),
                           ],
                         ),
-                ),
-                actions: <Widget>[
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('取消'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).pop(draft),
-                    child: const Text('应用'),
-                  ),
-                ],
+                        const Divider(height: 1),
+                        Expanded(
+                          child: ListView(
+                            children: <Widget>[
+                              for (final CleanupCategory category
+                                  in CleanupCategory.values)
+                                if (_availableTargets.any(
+                                  (CleanupScanTarget target) =>
+                                      target.category == category,
+                                )) ...<Widget>[
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      12,
+                                      16,
+                                      4,
+                                    ),
+                                    child: Text(
+                                      '${category.label}${category.highRisk ? ' · 默认不选择清理项' : ''}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: category.highRisk
+                                            ? VibekitsColors.warning
+                                            : context.vibe.muted,
+                                      ),
+                                    ),
+                                  ),
+                                  for (final CleanupScanTarget target
+                                      in _availableTargets.where(
+                                        (CleanupScanTarget target) =>
+                                            target.category == category,
+                                      ))
+                                    CheckboxListTile(
+                                      dense: true,
+                                      value: draft.contains(target.id),
+                                      title: Text(target.label),
+                                      subtitle: Text(
+                                        target.safetyNote.isEmpty
+                                            ? target.path
+                                            : '${target.safetyNote}\n${target.path}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onChanged: (bool? enabled) =>
+                                          setDialogState(() {
+                                            if (enabled == true) {
+                                              draft.add(target.id);
+                                            } else {
+                                              draft.remove(target.id);
+                                            }
+                                          }),
+                                    ),
+                                ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('取消'),
               ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(draft),
+                child: const Text('应用'),
+              ),
+            ],
+          ),
         );
       },
     );

@@ -6,7 +6,7 @@ import 'package:archive/archive.dart';
 import 'disk_space.dart';
 import 'atomic_file.dart';
 
-/// 支持的压缩格式（7z/rar/iso 需原生 libarchive 层，纯 Dart 暂不支持）。
+/// 支持的压缩格式；复杂格式统一交给内置 7-Zip 后端。
 enum ArchiveFormat {
   zip,
   tar,
@@ -16,6 +16,7 @@ enum ArchiveFormat {
   sevenZip,
   rar,
   iso,
+  external,
   unsupported,
 }
 
@@ -24,11 +25,48 @@ ArchiveFormat archiveFormatForPath(String path) {
   if (lower.endsWith('.7z')) {
     return ArchiveFormat.sevenZip;
   }
-  if (lower.endsWith('.rar')) {
+  if (lower.endsWith('.rar') || lower.endsWith('.r00')) {
     return ArchiveFormat.rar;
   }
   if (lower.endsWith('.iso')) {
     return ArchiveFormat.iso;
+  }
+  if (<String>[
+    '.zst',
+    '.tzst',
+    '.cab',
+    '.arj',
+    '.lzh',
+    '.chm',
+    '.msi',
+    '.nsis',
+    '.udf',
+    '.wim',
+    '.swm',
+    '.esd',
+    '.dmg',
+    '.hfs',
+    '.apfs',
+    '.vhd',
+    '.vhdx',
+    '.ova',
+    '.cpio',
+    '.rpm',
+    '.deb',
+    '.squashfs',
+    '.img',
+    '.zipx',
+    '.jar',
+    '.xpi',
+    '.apk',
+    '.appx',
+    '.ipa',
+    '.odt',
+    '.ods',
+    '.docx',
+    '.xlsx',
+  ].any(lower.endsWith)) {
+    return ArchiveFormat.external;
   }
   if (lower.endsWith('.zip')) {
     return ArchiveFormat.zip;
@@ -79,6 +117,12 @@ ArchiveFormat archiveFormatForBytes(Uint8List bytes, {String path = ''}) {
   }
   if (signatureAt(0, <int>[0x52, 0x61, 0x72, 0x21, 0x1a, 0x07])) {
     return ArchiveFormat.rar;
+  }
+  if (signatureAt(0, <int>[0x28, 0xb5, 0x2f, 0xfd]) ||
+      signatureAt(0, <int>[0x4d, 0x53, 0x43, 0x46]) ||
+      signatureAt(0, <int>[0x4d, 0x53, 0x57, 0x49, 0x4d]) ||
+      signatureAt(0, <int>[0x76, 0x68, 0x64, 0x78, 0x66, 0x69, 0x6c, 0x65])) {
+    return ArchiveFormat.external;
   }
   if (signatureAt(0, <int>[0x50, 0x4b, 0x03, 0x04]) ||
       signatureAt(0, <int>[0x50, 0x4b, 0x05, 0x06]) ||
@@ -245,6 +289,7 @@ abstract final class ArchiveService {
     if (format == ArchiveFormat.sevenZip ||
         format == ArchiveFormat.rar ||
         format == ArchiveFormat.iso ||
+        format == ArchiveFormat.external ||
         format == ArchiveFormat.unsupported) {
       throw UnsupportedError('暂不支持该格式：$path');
     }
@@ -321,6 +366,7 @@ abstract final class ArchiveService {
       case ArchiveFormat.sevenZip:
       case ArchiveFormat.rar:
       case ArchiveFormat.iso:
+      case ArchiveFormat.external:
       case ArchiveFormat.unsupported:
         throw UnsupportedError('暂不支持该格式');
     }

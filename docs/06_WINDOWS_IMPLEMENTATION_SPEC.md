@@ -1,5 +1,7 @@
 # Vibekits Windows V1 模块实现规格
 
+> 本文件保留 Windows 实现合同。新增领域代码必须同时符合 [统一产品需求](00_PRODUCT_REQUIREMENTS.md)、[macOS 平台实现附件](11_MACOS_PLATFORM_SPEC.md)和[统一验收矩阵](12_UNIFIED_ACCEPTANCE_MATRIX.md)，通过平台接口隔离系统差异。
+
 版本：0.1
 状态：交付给开发者的实现合同
 平台：Windows 10 22H2、Windows 11，x64

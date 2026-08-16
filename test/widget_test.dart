@@ -12,6 +12,8 @@ import 'package:vibekits/app/dropped_file_router.dart';
 import 'package:vibekits/app/main_shell.dart';
 import 'package:vibekits/features/documents/domain/format_router.dart';
 import 'package:vibekits/features/documents/presentation/documents_tab.dart';
+import 'package:vibekits/features/local_models/domain/model_store.dart';
+import 'package:vibekits/features/local_models/domain/pp_ocr_v6.dart';
 import 'package:vibekits/features/local_models/presentation/local_models_tab.dart';
 
 void main() {
@@ -61,7 +63,10 @@ void main() {
     expect(find.byType(TextField), findsOneWidget);
 
     await pressCtrlWithKey(LogicalKeyboardKey.digit4);
-    expect(find.text('执行'), findsOneWidget);
+    expect(
+      find.byKey(const Key('programmer-calculator-input')),
+      findsOneWidget,
+    );
 
     await pressCtrlWithKey(LogicalKeyboardKey.digit1);
     expect(find.text('打开压缩包'), findsOneWidget);
@@ -159,6 +164,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
     }
 
+    final List<String> loadErrors = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((Text widget) => widget.data)
+        .whereType<String>()
+        .where((String value) => value.contains('打开失败'))
+        .toList();
+    expect(loadErrors, isEmpty);
     expect(find.byKey(const Key('markdown-preview')), findsOneWidget);
     expect(find.text('使用说明'), findsOneWidget);
     expect(find.text('拖入文件后自动处理。'), findsOneWidget);
@@ -356,13 +368,120 @@ void main() {
     expect(find.text('刷新'), findsOneWidget);
     expect(find.textContaining('推理全离线'), findsOneWidget);
     expect(find.text('精选小模型'), findsOneWidget);
+    expect(find.text('PP-OCRv6 tiny'), findsOneWidget);
     expect(find.text('Silero VAD · Sherpa 兼容版'), findsOneWidget);
     expect(find.text('语音片段检测'), findsOneWidget);
+    expect(find.byKey(const Key('ocr-pick-image')), findsOneWidget);
+    expect(find.byKey(const Key('ocr-run')), findsOneWidget);
+    await tester.tap(find.text('语音片段检测'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('vad-pick-wav')), findsOneWidget);
     expect(find.byKey(const Key('vad-run')), findsOneWidget);
     expect(
       tester.widget<FilledButton>(find.byKey(const Key('vad-run'))).onPressed,
       isNull,
     );
+  });
+
+  testWidgets('拖入图片直接进入本地 OCR 工作区并显示预览', (WidgetTester tester) async {
+    final StreamController<List<String>> drops =
+        StreamController<List<String>>.broadcast();
+    addTearDown(drops.close);
+    final String imagePath = File(
+      'test_data${Platform.pathSeparator}images${Platform.pathSeparator}'
+      'general_ocr_002.png',
+    ).absolute.path;
+    await tester.pumpWidget(
+      VibekitsApp(
+        droppedFiles: drops.stream,
+        dropClassifier: (String path) async => DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.image,
+          detail: '已识别为图片，自动预览并准备文字识别',
+        ),
+      ),
+    );
+    drops.add(<String>[imagePath]);
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text('本地模型'), findsWidgets);
+    expect(find.byKey(const Key('ocr-image-preview')), findsOneWidget);
+    expect(
+      tester
+          .widget<LocalModelsTab>(find.byType(LocalModelsTab))
+          .initialImagePath,
+      imagePath,
+    );
+  });
+
+  testWidgets('拖入图片在模型已安装时自动识别并显示可复制结果', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync('vk_ocr_ui');
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final String imagePath = File(
+      'test_data${Platform.pathSeparator}images${Platform.pathSeparator}'
+      'general_ocr_002.png',
+    ).absolute.path;
+    int requests = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LocalModelsTab(
+          directory: sandbox.path,
+          initialImagePath: imagePath,
+          modelLister: (_) async => const <ModelInfo>[
+            ModelInfo(
+              fileName: 'ppocrv6_tiny_det.onnx',
+              capability: 'OCR',
+              size: 1,
+              sha256: 'det',
+              integrity: ModelIntegrity.verified,
+            ),
+            ModelInfo(
+              fileName: 'ppocrv6_tiny_rec.onnx',
+              capability: 'OCR',
+              size: 1,
+              sha256: 'rec',
+              integrity: ModelIntegrity.verified,
+            ),
+            ModelInfo(
+              fileName: 'ppocrv6_tiny_rec.yml',
+              capability: 'OCR',
+              size: 1,
+              sha256: 'config',
+              integrity: ModelIntegrity.verified,
+            ),
+          ],
+          ocrRunner: (PpOcrRequest request) async {
+            requests++;
+            expect(request.imagePath, imagePath);
+            return const PpOcrResult(
+              lines: <OcrTextLine>[
+                OcrTextLine(
+                  text: '自动识别成功',
+                  confidence: 0.99,
+                  bounds: OcrRect(left: 1, top: 2, right: 20, bottom: 10),
+                ),
+              ],
+              imageWidth: 100,
+              imageHeight: 50,
+              elapsed: Duration(milliseconds: 8),
+              runtime: 'test runtime',
+            );
+          },
+        ),
+      ),
+    );
+    for (
+      int attempt = 0;
+      attempt < 100 && find.text('自动识别成功').evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    expect(requests, 1);
+    expect(find.text('自动识别成功'), findsOneWidget);
+    expect(find.byTooltip('复制文字'), findsOneWidget);
+    expect(find.textContaining('8ms'), findsOneWidget);
   });
 }

@@ -11,6 +11,17 @@ import '../domain/seven_zip.dart';
 
 enum _ArchiveSource { files, directory }
 
+Future<Uint8List> readArchiveHeader(String path) async {
+  final File source = File(path);
+  final RandomAccessFile headerFile = await source.open();
+  try {
+    final int headerLength = (await source.length()).clamp(0, 0x8006);
+    return await headerFile.read(headerLength);
+  } finally {
+    await headerFile.close();
+  }
+}
+
 /// T1 解压缩 Tab（对标 7-Zip 的操作习惯，docs/08 §3）。
 class ArchiveTab extends StatefulWidget {
   const ArchiveTab({
@@ -19,12 +30,16 @@ class ArchiveTab extends StatefulWidget {
     this.openRequest,
     this.maxEntries = 100000,
     this.maxSingleExpandedBytes = 20 * 1024 * 1024 * 1024,
+    this.headerReader = readArchiveHeader,
+    this.nativeLister = SevenZip.list,
   });
 
   final String? initialPath;
   final ValueListenable<int>? openRequest;
   final int maxEntries;
   final int maxSingleExpandedBytes;
+  final Future<Uint8List> Function(String path) headerReader;
+  final Future<List<SevenZipEntry>> Function(String path) nativeLister;
 
   @override
   State<ArchiveTab> createState() => _ArchiveTabState();
@@ -87,20 +102,23 @@ class _ArchiveTabState extends State<ArchiveTab> {
     try {
       final File source = File(path);
       final String fileName = source.uri.pathSegments.last;
-      final RandomAccessFile headerFile = await source.open();
-      late final Uint8List header;
-      try {
-        final int headerLength = (await source.length()).clamp(0, 0x8006);
-        header = await headerFile.read(headerLength);
-      } finally {
-        await headerFile.close();
-      }
+      final Uint8List header = await widget.headerReader(path);
       final ArchiveFormat format = archiveFormatForBytes(
         header,
         path: fileName,
       );
-      if (format == ArchiveFormat.sevenZip) {
-        final List<SevenZipEntry> entries = await SevenZip.list(path);
+      if (format == ArchiveFormat.sevenZip ||
+          format == ArchiveFormat.rar ||
+          format == ArchiveFormat.iso ||
+          format == ArchiveFormat.external) {
+        final List<SevenZipEntry> entries = await widget.nativeLister(path);
+        if (entries.length > widget.maxEntries ||
+            entries.any(
+              (SevenZipEntry entry) =>
+                  entry.size < 0 || entry.size > widget.maxSingleExpandedBytes,
+            )) {
+          throw const FormatException('压缩包条目数量或展开大小超过安全上限');
+        }
         setState(() {
           _sevenEntries = entries;
           _sevenPath = path;
@@ -114,15 +132,6 @@ class _ArchiveTabState extends State<ArchiveTab> {
                   .map((SevenZipEntry entry) => entry.name),
             );
           _message = '';
-        });
-        return;
-      }
-      if (format == ArchiveFormat.rar || format == ArchiveFormat.iso) {
-        setState(() {
-          _listing = null;
-          _sevenEntries = null;
-          _sevenPath = null;
-          _message = '暂不支持 rar/iso 格式（需 unrar 或系统工具）';
         });
         return;
       }
@@ -192,6 +201,8 @@ class _ArchiveTabState extends State<ArchiveTab> {
             if (mounted) setState(() => _extractProgress = progress);
           },
           onConflict: _askConflict,
+          maxEntries: widget.maxEntries,
+          maxSingleExpandedBytes: widget.maxSingleExpandedBytes,
         );
         if (mounted) {
           setState(() {

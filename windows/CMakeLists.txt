@@ -52,6 +52,14 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Minimal generic ONNX bridge used by local OCR. It dynamically loads the
+# onnxruntime.dll already bundled by sherpa_onnx_windows, avoiding duplicate
+# runtime versions in the Release directory.
+add_library(vibekits_onnx SHARED "runner/onnx_bridge.cpp")
+apply_standard_settings(vibekits_onnx)
+target_include_directories(vibekits_onnx PRIVATE
+  "${CMAKE_SOURCE_DIR}/../native/onnxruntime/include")
+
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
@@ -73,6 +81,19 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(TARGETS vibekits_onnx RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
+# Current full 7-Zip console backend. 7z.dll supplies RAR/ISO/ZSTD and the
+# broader format set that the standalone 7za executable intentionally omits.
+install(FILES
+  "${CMAKE_SOURCE_DIR}/../native/7zip/7z.exe"
+  "${CMAKE_SOURCE_DIR}/../native/7zip/7z.dll"
+  "${CMAKE_SOURCE_DIR}/../native/7zip/License.txt"
+  "${CMAKE_SOURCE_DIR}/../native/7zip/readme.txt"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/7zip"
   COMPONENT Runtime)
 
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

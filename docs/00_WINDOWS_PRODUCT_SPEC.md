@@ -1,4 +1,6 @@
-# Vibekits Windows V1 产品规格
+# Vibekits Windows 平台产品附件
+
+> 产品定位、统一路由、极简交互、图片/二进制/压缩格式和 Windows/macOS 总体范围以 [统一产品需求](00_PRODUCT_REQUIREMENTS.md) 为最高基线。本文件保留 Windows 现有验收编号与详细功能合同；发生冲突时以统一产品需求为准并同步修订本附件。
 
 版本：0.1
 状态：开发基线

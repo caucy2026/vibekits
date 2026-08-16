@@ -114,6 +114,10 @@ abstract final class CleanupDeleter {
 
   static _RecycleResult _sendToRecycleBin(List<String> paths) {
     if (paths.isEmpty) return const _RecycleResult(code: 0, aborted: false);
+    if (Platform.isMacOS) return _sendToMacTrash(paths);
+    if (!Platform.isWindows) {
+      return const _RecycleResult(code: -1, aborted: false);
+    }
     final DynamicLibrary lib = DynamicLibrary.open('shell32.dll');
     final _ShFileOperationWDart fn = lib
         .lookupFunction<_ShFileOperationWNative, _ShFileOperationWDart>(
@@ -142,6 +146,48 @@ abstract final class CleanupDeleter {
     } finally {
       malloc.free(pFrom);
       calloc.free(struct);
+    }
+  }
+
+  static _RecycleResult _sendToMacTrash(List<String> paths) {
+    final String? home = Platform.environment['HOME'];
+    if (home == null || home.trim().isEmpty) {
+      return const _RecycleResult(code: -2, aborted: false);
+    }
+    final Directory trash = Directory('$home${Platform.pathSeparator}.Trash');
+    try {
+      if (!trash.existsSync()) trash.createSync(recursive: true);
+      for (final String path in paths) {
+        final FileSystemEntityType type = FileSystemEntity.typeSync(
+          path,
+          followLinks: false,
+        );
+        if (type != FileSystemEntityType.file &&
+            type != FileSystemEntityType.directory) {
+          return const _RecycleResult(code: -3, aborted: false);
+        }
+        final String name = path
+            .replaceAll('\\', '/')
+            .split('/')
+            .where((String part) => part.isNotEmpty)
+            .last;
+        String destination = '${trash.path}${Platform.pathSeparator}$name';
+        int suffix = 1;
+        while (FileSystemEntity.typeSync(destination, followLinks: false) !=
+            FileSystemEntityType.notFound) {
+          destination =
+              '${trash.path}${Platform.pathSeparator}$name.vibekits-$suffix';
+          suffix++;
+        }
+        if (type == FileSystemEntityType.directory) {
+          Directory(path).renameSync(destination);
+        } else {
+          File(path).renameSync(destination);
+        }
+      }
+      return const _RecycleResult(code: 0, aborted: false);
+    } on FileSystemException {
+      return const _RecycleResult(code: -4, aborted: false);
     }
   }
 
@@ -236,8 +282,8 @@ abstract final class CleanupDeleter {
                 : shellResult.aborted
                 ? '用户或系统中止了回收站操作'
                 : shellResult.code == 0
-                ? 'Windows Shell 未移除项目'
-                : 'Windows Shell 错误 ${shellResult.code}';
+                ? '系统废纸篓未移除项目'
+                : '系统废纸篓错误 ${shellResult.code}';
             items.add(
               CleanupItemResult(
                 candidate: candidate,

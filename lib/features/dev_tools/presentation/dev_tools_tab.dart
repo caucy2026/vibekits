@@ -7,8 +7,14 @@ import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import '../domain/tool_result.dart';
 import 'batch_rename_workspace.dart';
+import 'api_workspace.dart';
+import 'database_workspace.dart';
 import 'duplicate_files_workspace.dart';
 import 'file_hash_workspace.dart';
+import 'git_workspace.dart';
+import 'github_diagnostics_workspace.dart';
+import 'programmer_calculator_workspace.dart';
+import 'remote_workspace.dart';
 
 /// T4 开发工具 Tab。
 ///
@@ -19,10 +25,30 @@ class DevToolsTab extends StatefulWidget {
     super.key,
     this.fileHashPickFiles,
     this.fileHashCalculator,
+    this.initialDatabasePath,
+    this.databasePickFile,
+    this.databaseInspect,
+    this.databaseLoadPage,
+    this.databaseRunQuery,
+    this.remoteStartSession,
+    this.apiExecute,
+    this.gitInspect,
+    this.gitPickDirectory,
+    this.githubDiagnostics,
   });
 
   final FileHashPicker? fileHashPickFiles;
   final FileHashCalculator? fileHashCalculator;
+  final String? initialDatabasePath;
+  final SqliteFilePicker? databasePickFile;
+  final SqliteInspector? databaseInspect;
+  final SqlitePageLoader? databaseLoadPage;
+  final SqliteQueryRunner? databaseRunQuery;
+  final RemoteSessionStarter? remoteStartSession;
+  final ApiExecutor? apiExecute;
+  final GitInspector? gitInspect;
+  final GitDirectoryPicker? gitPickDirectory;
+  final GithubDiagnosticsRunner? githubDiagnostics;
 
   @override
   State<DevToolsTab> createState() => _DevToolsTabState();
@@ -37,6 +63,16 @@ class _DevToolsTabState extends State<DevToolsTab> {
   ToolSpec _selected = devToolRegistry.first;
   bool _outputIsError = false;
   bool _executing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialDatabasePath != null) {
+      _selected = devToolRegistry.firstWhere(
+        (ToolSpec tool) => tool.id == 'database_manager',
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -253,6 +289,35 @@ class _DevToolsTabState extends State<DevToolsTab> {
 
   Widget _buildWorkArea() {
     final ToolSpec tool = _selected;
+    if (tool.id == 'programmer_calculator') {
+      return const ProgrammerCalculatorWorkspace();
+    }
+    if (tool.id == 'database_manager') {
+      return DatabaseWorkspace(
+        initialPath: widget.initialDatabasePath,
+        pickFile: widget.databasePickFile,
+        inspect: widget.databaseInspect,
+        loadPage: widget.databaseLoadPage,
+        runQuery: widget.databaseRunQuery,
+      );
+    }
+    if (tool.id == 'remote_workspace') {
+      return RemoteWorkspace(startSession: widget.remoteStartSession);
+    }
+    if (tool.id == 'api_workspace') {
+      return ApiWorkspace(execute: widget.apiExecute);
+    }
+    if (tool.id == 'git_workspace') {
+      return GitWorkspace(
+        inspect: widget.gitInspect,
+        pickDirectory: widget.gitPickDirectory,
+      );
+    }
+    if (tool.id == 'github_diagnostics') {
+      return GithubDiagnosticsWorkspace(
+        runDiagnostics: widget.githubDiagnostics,
+      );
+    }
     if (tool.id == 'batch_rename') {
       return const BatchRenameWorkspace();
     }

@@ -1,4 +1,6 @@
-# Vibekits Windows V1 技术架构
+# Vibekits Windows/macOS 技术架构
+
+> 统一产品边界见 [00_PRODUCT_REQUIREMENTS.md](00_PRODUCT_REQUIREMENTS.md)。现有 Windows 原生实现保留，但新增领域逻辑不得继续写死 Windows 路径、注册表或系统 API。
 
 ## 1. 技术栈
 
@@ -173,6 +175,10 @@ void vk_string_free(char* value);
 6. 下载模型和工具必须校验来源、许可证和哈希。
 
 ## 9. 测试策略
+
+共享领域测试在 Windows 与 macOS 使用同一夹具。平台层分别验证文件打开事件、拖放、回收站/废纸篓、Web 隔离、格式后端和 Release 打包。图片解码、压缩格式和模型运行时通过 capability provider 注入；UI 只依赖稳定的能力状态，不判断操作系统或底层二进制名称。
+
+新增平台接口至少包括：`FileOpenBridge`、`TrashProvider`、`ArchiveBackend`、`ImageCodecProvider`、`RuntimeLibraryProvider`、`SystemIntegrationRegistrar`。Windows 现有 FFI/注册表实现逐步迁入这些接口，macOS 提供对应实现。
 
 - Domain/Application：纯 Dart 单元测试。
 - Widget：五个 Tab、空/加载/成功/失败状态和 1024×700 布局。

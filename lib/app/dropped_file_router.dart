@@ -5,7 +5,14 @@ import '../features/archive/domain/archive_service.dart';
 import '../features/documents/domain/format_router.dart';
 import 'supported_file_types.dart';
 
-enum DroppedFileRouteKind { archive, document, model, rejected }
+enum DroppedFileRouteKind {
+  archive,
+  document,
+  database,
+  image,
+  model,
+  rejected,
+}
 
 class DroppedFileRoute {
   const DroppedFileRoute({
@@ -75,6 +82,22 @@ abstract final class DroppedFileRouter {
         );
       }
 
+      if (_isImageHeader(header)) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.image,
+          detail: '已按文件内容识别为图片，自动预览并准备文字识别',
+        );
+      }
+
+      if (_isSqliteHeader(header)) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.database,
+          detail: '已按文件内容识别为 SQLite 数据库，自动只读打开',
+        );
+      }
+
       final VibekitsFileKind extensionKind = SupportedFileTypes.kindForPath(
         path,
       );
@@ -91,6 +114,20 @@ abstract final class DroppedFileRouter {
           kind: DroppedFileRouteKind.document,
           detail: '按扩展名交给文档阅读处理',
           documentMode: documentModeForPath(path),
+        );
+      }
+      if (extensionKind == VibekitsFileKind.database) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.database,
+          detail: '按扩展名交给 SQLite 数据库管理器验证并只读打开',
+        );
+      }
+      if (extensionKind == VibekitsFileKind.image) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.image,
+          detail: '已识别为图片，自动预览并准备文字识别',
         );
       }
       if (extensionKind == VibekitsFileKind.model) {
@@ -119,6 +156,59 @@ abstract final class DroppedFileRouter {
     }
   }
 
+  static bool _isImageHeader(Uint8List bytes) {
+    bool matches(List<int> signature) {
+      if (bytes.length < signature.length) return false;
+      for (int index = 0; index < signature.length; index++) {
+        if (bytes[index] != signature[index]) return false;
+      }
+      return true;
+    }
+
+    if (matches(<int>[0x89, 0x50, 0x4e, 0x47]) ||
+        matches(<int>[0xff, 0xd8, 0xff]) ||
+        matches(<int>[0x47, 0x49, 0x46, 0x38]) ||
+        matches(<int>[0x42, 0x4d]) ||
+        matches(<int>[0x49, 0x49, 0x2a, 0x00]) ||
+        matches(<int>[0x4d, 0x4d, 0x00, 0x2a]) ||
+        matches(<int>[0x38, 0x42, 0x50, 0x53]) ||
+        matches(<int>[0x76, 0x2f, 0x31, 0x01]) ||
+        matches(<int>[0x01, 0x01, 0x00, 0x00]) ||
+        matches(<int>[0x00, 0x00, 0x01, 0x00]) ||
+        matches(<int>[0x00, 0x00, 0x02, 0x00])) {
+      return true;
+    }
+    return bytes.length >= 12 &&
+        String.fromCharCodes(bytes.sublist(0, 4)) == 'RIFF' &&
+        String.fromCharCodes(bytes.sublist(8, 12)) == 'WEBP';
+  }
+
+  static bool _isSqliteHeader(Uint8List bytes) {
+    const List<int> signature = <int>[
+      0x53,
+      0x51,
+      0x4c,
+      0x69,
+      0x74,
+      0x65,
+      0x20,
+      0x66,
+      0x6f,
+      0x72,
+      0x6d,
+      0x61,
+      0x74,
+      0x20,
+      0x33,
+      0x00,
+    ];
+    if (bytes.length < signature.length) return false;
+    for (int index = 0; index < signature.length; index++) {
+      if (bytes[index] != signature[index]) return false;
+    }
+    return true;
+  }
+
   static String _archiveLabel(ArchiveFormat format) => switch (format) {
     ArchiveFormat.zip => 'ZIP',
     ArchiveFormat.tar => 'TAR',
@@ -126,8 +216,9 @@ abstract final class DroppedFileRouter {
     ArchiveFormat.bzip2 => 'BZip2',
     ArchiveFormat.xz => 'XZ',
     ArchiveFormat.sevenZip => '7z',
-    ArchiveFormat.rar => 'RAR（当前仅识别）',
-    ArchiveFormat.iso => 'ISO（当前仅识别）',
+    ArchiveFormat.rar => 'RAR',
+    ArchiveFormat.iso => 'ISO',
+    ArchiveFormat.external => '7-Zip 兼容压缩格式',
     ArchiveFormat.unsupported => '未知压缩格式',
   };
 }

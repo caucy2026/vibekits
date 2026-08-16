@@ -130,6 +130,113 @@ abstract final class ModelStore {
     }
   }
 
+  /// Imports a multi-file model as one transaction. All sources are staged and
+  /// hashed before any installed file is replaced; failures restore originals.
+  static Future<List<ModelInfo>> importBundle(
+    List<String> sourcePaths,
+    String directory, {
+    int maxBytes = maxModelBytes,
+  }) async {
+    if (sourcePaths.isEmpty) return const <ModelInfo>[];
+    final Directory targetDirectory = Directory(directory);
+    if (!targetDirectory.existsSync()) {
+      targetDirectory.createSync(recursive: true);
+    }
+    final Set<String> names = <String>{};
+    final List<File> stagingPaths = <File>[];
+    final List<({File target, File staged, int size, String sha})> stagedFiles =
+        <({File target, File staged, int size, String sha})>[];
+    try {
+      for (final String path in sourcePaths) {
+        final File source = File(path);
+        if (!source.existsSync()) {
+          throw FileSystemException('模型包文件不存在', path);
+        }
+        final String name = source.uri.pathSegments.last;
+        if (!names.add(name)) throw FormatException('模型包文件名重复：$name');
+        final int size = await source.length();
+        if (size > maxBytes) {
+          throw FormatException('$name 超过 ${maxBytes ~/ 1024 ~/ 1024}MB 上限');
+        }
+        final File target = File(
+          '${targetDirectory.path}${Platform.pathSeparator}$name',
+        );
+        final File staged = File('${target.path}.part');
+        stagingPaths.add(staged);
+        if (await staged.exists()) await staged.delete();
+        await source.openRead().pipe(staged.openWrite());
+        stagedFiles.add((
+          target: target,
+          staged: staged,
+          size: size,
+          sha: await sha256OfFile(staged.path),
+        ));
+      }
+    } catch (_) {
+      for (final File staged in stagingPaths) {
+        if (await staged.exists()) await staged.delete();
+      }
+      rethrow;
+    }
+
+    final Map<String, Object?> originalManifest = await _readManifest(
+      targetDirectory,
+    );
+    final Map<String, Object?> nextManifest = Map<String, Object?>.from(
+      originalManifest,
+    );
+    final List<({File target, File backup})> backups =
+        <({File target, File backup})>[];
+    final List<File> promoted = <File>[];
+    try {
+      for (final item in stagedFiles) {
+        final File backup = File('${item.target.path}.backup');
+        if (await backup.exists()) await backup.delete();
+        if (await item.target.exists()) {
+          await item.target.rename(backup.path);
+          backups.add((target: item.target, backup: backup));
+        }
+        await item.staged.rename(item.target.path);
+        promoted.add(item.target);
+        final String name = item.target.uri.pathSegments.last;
+        nextManifest[name] = <String, Object>{
+          'sha256': item.sha,
+          'size': item.size,
+        };
+      }
+      await _writeManifest(targetDirectory, nextManifest);
+      for (final item in backups) {
+        if (await item.backup.exists()) await item.backup.delete();
+      }
+      return List<ModelInfo>.unmodifiable(
+        stagedFiles.map((item) {
+          final String name = item.target.uri.pathSegments.last;
+          return ModelInfo(
+            fileName: name,
+            capability: _capabilityFor(name),
+            size: item.size,
+            sha256: item.sha,
+            integrity: ModelIntegrity.verified,
+          );
+        }),
+      );
+    } catch (_) {
+      for (final File target in promoted.reversed) {
+        if (await target.exists()) await target.delete();
+      }
+      for (final item in backups.reversed) {
+        if (await item.backup.exists()) {
+          await item.backup.rename(item.target.path);
+        }
+      }
+      for (final item in stagedFiles) {
+        if (await item.staged.exists()) await item.staged.delete();
+      }
+      await _writeManifest(targetDirectory, originalManifest);
+      rethrow;
+    }
+  }
+
   static bool delete(String path) {
     try {
       final File file = File(path);

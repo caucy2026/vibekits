@@ -3,14 +3,28 @@ import 'dart:io';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
 import '../domain/curated_model.dart';
+import '../domain/curated_model_bundle.dart';
+import '../domain/image_preview.dart';
 import '../domain/model_store.dart';
+import '../domain/pp_ocr_v6.dart';
 import '../domain/vad_inference.dart';
 
 /// 模型目录默认位置（docs/02 §7）。
 String defaultModelDirectory() {
+  if (Platform.isMacOS) {
+    final String home = Platform.environment['HOME'] ?? '.';
+    return <String>[
+      home,
+      'Library',
+      'Application Support',
+      'Vibekits',
+      'Models',
+    ].join(Platform.pathSeparator);
+  }
   final String base =
       Platform.environment['LOCALAPPDATA'] ??
       Platform.environment['APPDATA'] ??
@@ -24,10 +38,18 @@ class LocalModelsTab extends StatefulWidget {
     super.key,
     this.directory = '',
     this.initialImportPath,
+    this.initialImagePath,
+    this.ocrRunner = runPpOcr,
+    this.modelLister = ModelStore.list,
+    this.nativeDirectory,
   });
 
   final String directory;
   final String? initialImportPath;
+  final String? initialImagePath;
+  final Future<PpOcrResult> Function(PpOcrRequest request) ocrRunner;
+  final Future<List<ModelInfo>> Function(String directory) modelLister;
+  final String? nativeDirectory;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -42,6 +64,15 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   String? _wavPath;
   VadInferenceResult? _vadResult;
   bool _runningVad = false;
+  _ModelWorkspace _workspace = _ModelWorkspace.ocr;
+  String? _imagePath;
+  PpOcrResult? _ocrResult;
+  bool _runningOcr = false;
+  bool _autoOcrStarted = false;
+  Uint8List? _portablePreview;
+  bool _loadingPortablePreview = false;
+  bool _portablePreviewAttempted = false;
+  String? _portablePreviewError;
   String? _downloadingId;
   double? _downloadProgress;
   HttpClient? _downloadClient;
@@ -49,6 +80,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   @override
   void initState() {
     super.initState();
+    _imagePath = widget.initialImagePath;
     _refresh();
     final String? path = widget.initialImportPath;
     if (path != null) {
@@ -57,9 +89,22 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   }
 
   Future<void> _refresh() async {
-    final List<ModelInfo> models = await ModelStore.list(_directory);
-    if (mounted) setState(() => _models = models);
+    final List<ModelInfo> models = await widget.modelLister(_directory);
+    if (!mounted) return;
+    setState(() => _models = models);
+    if (_imagePath != null && _ocrBundleInstalled && !_autoOcrStarted) {
+      _autoOcrStarted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runOcr());
+    }
   }
+
+  bool get _ocrBundleInstalled => ppOcrV6TinyBundle.artifacts.every(
+    (CuratedModelArtifact artifact) => _models.any(
+      (ModelInfo model) =>
+          model.fileName == artifact.fileName &&
+          model.integrity == ModelIntegrity.verified,
+    ),
+  );
 
   ModelInfo? get _runnableVadModel {
     for (final String preferred in <String>[
@@ -145,6 +190,78 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     }
   }
 
+  Future<void> _downloadOcrBundle() async {
+    if (_downloadingId != null) return;
+    final Directory temp = Directory.systemTemp.createTempSync(
+      'vibekits_ocr_model',
+    );
+    final HttpClient client = HttpClient();
+    _downloadClient = client;
+    int completedBytes = 0;
+    setState(() {
+      _downloadingId = ppOcrV6TinyBundle.id;
+      _downloadProgress = 0;
+      _message = '正在安装 PP-OCRv6 tiny（3 个经过校验的文件）…';
+    });
+    try {
+      final List<String> downloadedPaths = <String>[];
+      for (final CuratedModelArtifact artifact in ppOcrV6TinyBundle.artifacts) {
+        final File downloaded = File(
+          '${temp.path}${Platform.pathSeparator}${artifact.fileName}',
+        );
+        final HttpClientRequest request = await client.getUrl(
+          Uri.parse(artifact.sourceUrl),
+        );
+        final HttpClientResponse response = await request.close();
+        if (response.statusCode != HttpStatus.ok) {
+          throw HttpException(
+            '${artifact.fileName}：HTTP ${response.statusCode}',
+          );
+        }
+        final IOSink sink = downloaded.openWrite();
+        int fileBytes = 0;
+        try {
+          await for (final List<int> chunk in response) {
+            sink.add(chunk);
+            fileBytes += chunk.length;
+            if (mounted) {
+              setState(() {
+                _downloadProgress =
+                    (completedBytes + fileBytes) /
+                    ppOcrV6TinyBundle.downloadBytes;
+              });
+            }
+          }
+        } finally {
+          await sink.close();
+        }
+        final String digest =
+            (await crypto.sha256.bind(downloaded.openRead()).first).toString();
+        if (digest != artifact.sha256) {
+          throw FormatException('${artifact.fileName} SHA-256 校验失败');
+        }
+        downloadedPaths.add(downloaded.path);
+        completedBytes += fileBytes;
+      }
+      await ModelStore.importBundle(downloadedPaths, _directory);
+      if (!mounted) return;
+      setState(() => _message = 'PP-OCRv6 tiny 已安装并完成逐文件校验');
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _message = 'OCR 模型安装失败：$error');
+    } finally {
+      client.close(force: true);
+      _downloadClient = null;
+      if (temp.existsSync()) temp.deleteSync(recursive: true);
+      if (mounted) {
+        setState(() {
+          _downloadingId = null;
+          _downloadProgress = null;
+        });
+      }
+    }
+  }
+
   void _cancelDownload() {
     _downloadClient?.close(force: true);
     setState(() => _message = '已取消模型下载');
@@ -162,6 +279,127 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         _vadResult = null;
       });
     }
+  }
+
+  Future<void> _chooseImage() async {
+    final XFile? file = await openFile(
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(
+          label: '图片',
+          extensions: <String>[
+            'png',
+            'jpg',
+            'jpeg',
+            'webp',
+            'bmp',
+            'gif',
+            'tif',
+            'tiff',
+            'ico',
+            'cur',
+            'tga',
+            'psd',
+            'exr',
+            'pnm',
+            'pbm',
+            'pgm',
+            'ppm',
+            'pvr',
+          ],
+        ),
+      ],
+    );
+    if (file == null || !mounted) return;
+    setState(() {
+      _imagePath = file.path;
+      _ocrResult = null;
+      _autoOcrStarted = true;
+      _portablePreview = null;
+      _portablePreviewAttempted = false;
+      _portablePreviewError = null;
+    });
+    if (_ocrBundleInstalled) await _runOcr();
+  }
+
+  Future<void> _runOcr() async {
+    final String? imagePath = _imagePath;
+    if (!_ocrBundleInstalled || imagePath == null || _runningOcr) return;
+    setState(() {
+      _runningOcr = true;
+      _ocrResult = null;
+      _message = '正在本机 CPU 识别文字，图片不会上传…';
+    });
+    try {
+      final String separator = Platform.pathSeparator;
+      final PpOcrResult result = await widget.ocrRunner(
+        PpOcrRequest(
+          imagePath: imagePath,
+          detectionModelPath: '$_directory${separator}ppocrv6_tiny_det.onnx',
+          recognitionModelPath: '$_directory${separator}ppocrv6_tiny_rec.onnx',
+          recognitionConfigPath: '$_directory${separator}ppocrv6_tiny_rec.yml',
+          nativeDirectory:
+              widget.nativeDirectory ??
+              File(Platform.resolvedExecutable).parent.path,
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _ocrResult = result;
+        _message = result.lines.isEmpty
+            ? '识别完成，没有发现清晰文字'
+            : '识别完成：${result.lines.length} 行文字';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _message = '文字识别失败：$error');
+    } finally {
+      if (mounted) setState(() => _runningOcr = false);
+    }
+  }
+
+  Future<void> _copyOcrText() async {
+    final String text = _ocrResult?.text ?? '';
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) setState(() => _message = '识别文字已复制');
+  }
+
+  void _loadPortablePreview() {
+    final String? path = _imagePath;
+    if (path == null || _portablePreviewAttempted) return;
+    _portablePreviewAttempted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      setState(() => _loadingPortablePreview = true);
+      try {
+        final Uint8List bytes = await buildPortableImagePreview(path);
+        if (mounted && _imagePath == path) {
+          setState(() {
+            _portablePreview = bytes;
+            _portablePreviewError = null;
+          });
+        }
+      } catch (error) {
+        if (mounted && _imagePath == path) {
+          setState(() {
+            _portablePreviewError = '$error';
+            _message = '图片预览失败：$error';
+          });
+        }
+      } finally {
+        if (mounted) setState(() => _loadingPortablePreview = false);
+      }
+    });
+  }
+
+  Future<void> _saveOcrText() async {
+    final String text = _ocrResult?.text ?? '';
+    if (text.isEmpty) return;
+    final FileSaveLocation? location = await getSaveLocation(
+      suggestedName: '${_imageBaseName()}.txt',
+    );
+    if (location == null) return;
+    await File(location.path).writeAsString(text, flush: true);
+    if (mounted) setState(() => _message = '识别文字已保存到 ${location.path}');
   }
 
   Future<void> _runVad() async {
@@ -308,10 +546,11 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
             builder: (BuildContext context, BoxConstraints constraints) {
               final bool compact = constraints.maxWidth < 780;
               final Widget models = _buildModelPanel();
-              final Widget workspace = _buildVadWorkspace();
+              final Widget workspace = _buildWorkspace();
               if (compact) {
                 return DefaultTabController(
                   length: 2,
+                  initialIndex: widget.initialImagePath == null ? 0 : 1,
                   child: Column(
                     children: <Widget>[
                       const TabBar(
@@ -410,11 +649,12 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
           ),
         ),
         SizedBox(
-          height: 142,
+          height: 190,
           child: ListView.builder(
-            itemCount: curatedModels.length,
+            itemCount: curatedModels.length + 1,
             itemBuilder: (BuildContext context, int index) {
-              final CuratedModel model = curatedModels[index];
+              if (index == 0) return _buildOcrBundleTile();
+              final CuratedModel model = curatedModels[index - 1];
               final bool installed = _models.any(
                 (ModelInfo item) =>
                     item.fileName == model.fileName &&
@@ -457,6 +697,245 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildOcrBundleTile() {
+    final bool downloading = _downloadingId == ppOcrV6TinyBundle.id;
+    return ListTile(
+      dense: true,
+      title: Text(ppOcrV6TinyBundle.name, style: const TextStyle(fontSize: 12)),
+      subtitle: Text(
+        '${_formatSize(ppOcrV6TinyBundle.downloadBytes)} · '
+        '${ppOcrV6TinyBundle.license} · 多语言 OCR',
+        style: TextStyle(fontSize: 10, color: context.vibe.muted),
+      ),
+      trailing: downloading
+          ? SizedBox(
+              width: 86,
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: LinearProgressIndicator(value: _downloadProgress),
+                  ),
+                  IconButton(
+                    tooltip: '取消下载',
+                    onPressed: _cancelDownload,
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
+                ],
+              ),
+            )
+          : TextButton(
+              key: const Key('ocr-install'),
+              onPressed: _ocrBundleInstalled || _downloadingId != null
+                  ? null
+                  : _downloadOcrBundle,
+              child: Text(_ocrBundleInstalled ? '已安装' : '安装'),
+            ),
+    );
+  }
+
+  Widget _buildWorkspace() {
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<_ModelWorkspace>(
+              showSelectedIcon: false,
+              segments: const <ButtonSegment<_ModelWorkspace>>[
+                ButtonSegment<_ModelWorkspace>(
+                  value: _ModelWorkspace.ocr,
+                  icon: Icon(Icons.document_scanner_outlined, size: 17),
+                  label: Text('文字识别'),
+                ),
+                ButtonSegment<_ModelWorkspace>(
+                  value: _ModelWorkspace.vad,
+                  icon: Icon(Icons.graphic_eq, size: 17),
+                  label: Text('语音片段检测'),
+                ),
+              ],
+              selected: <_ModelWorkspace>{_workspace},
+              onSelectionChanged: (Set<_ModelWorkspace> selected) {
+                setState(() => _workspace = selected.first);
+              },
+            ),
+          ),
+        ),
+        Expanded(
+          child: _workspace == _ModelWorkspace.ocr
+              ? _buildOcrWorkspace()
+              : _buildVadWorkspace(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOcrWorkspace() {
+    final String imageName = _imagePath == null ? '尚未选择图片' : _imageBaseName();
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.document_scanner_outlined, size: 21),
+              const SizedBox(width: 8),
+              const Text(
+                '图片文字识别',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Text(
+                '本机 CPU · 不上传',
+                style: TextStyle(fontSize: 11, color: context.vibe.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Expanded(
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: context.vibe.panelRaised,
+                      border: Border.all(color: context.vibe.border),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: _imagePath == null
+                        ? Center(
+                            child: Text(
+                              '拖入图片即可自动预览并识别',
+                              style: TextStyle(color: context.vibe.muted),
+                            ),
+                          )
+                        : _portablePreview != null
+                        ? Image.memory(
+                            _portablePreview!,
+                            key: const Key('ocr-portable-image-preview'),
+                            fit: BoxFit.contain,
+                          )
+                        : Image.file(
+                            File(_imagePath!),
+                            key: const Key('ocr-image-preview'),
+                            fit: BoxFit.contain,
+                            errorBuilder:
+                                (
+                                  BuildContext context,
+                                  Object error,
+                                  StackTrace? stackTrace,
+                                ) {
+                                  _loadPortablePreview();
+                                  return Center(
+                                    child: _loadingPortablePreview
+                                        ? const CircularProgressIndicator()
+                                        : Padding(
+                                            padding: const EdgeInsets.all(24),
+                                            child: Text(
+                                              _portablePreviewError == null
+                                                  ? '正在转换此图片的预览…'
+                                                  : '当前系统与内置解码器无法安全预览此格式。\n'
+                                                        '仍可保留文件并使用 Hex/哈希工具检查。\n\n'
+                                                        '$_portablePreviewError',
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+                                  );
+                                },
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.vibe.panelRaised,
+                      border: Border.all(color: context.vibe.border),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: _runningOcr
+                        ? const Center(child: CircularProgressIndicator())
+                        : _ocrResult == null
+                        ? Center(
+                            child: Text(
+                              _ocrBundleInstalled
+                                  ? '识别结果会显示在这里'
+                                  : '先安装 6.0MB 的 PP-OCRv6 tiny',
+                              style: TextStyle(color: context.vibe.muted),
+                            ),
+                          )
+                        : SelectableText(
+                            _ocrResult!.text.isEmpty
+                                ? '没有识别到文字'
+                                : _ocrResult!.text,
+                            key: const Key('ocr-result'),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  imageName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('ocr-pick-image'),
+                onPressed: _runningOcr ? null : _chooseImage,
+                icon: const Icon(Icons.image_outlined, size: 18),
+                label: const Text('选择图片'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                key: const Key('ocr-run'),
+                onPressed:
+                    !_ocrBundleInstalled || _imagePath == null || _runningOcr
+                    ? null
+                    : _runOcr,
+                icon: const Icon(Icons.auto_fix_high, size: 18),
+                label: Text(_runningOcr ? '识别中…' : '识别文字'),
+              ),
+              if ((_ocrResult?.text.isNotEmpty ?? false)) ...<Widget>[
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '复制文字',
+                  onPressed: _copyOcrText,
+                  icon: const Icon(Icons.copy_outlined),
+                ),
+                IconButton(
+                  tooltip: '保存为 TXT',
+                  onPressed: _saveOcrText,
+                  icon: const Icon(Icons.save_alt_outlined),
+                ),
+              ],
+            ],
+          ),
+          if (_ocrResult != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '${_ocrResult!.lines.length} 行 · '
+                '${_ocrResult!.elapsed.inMilliseconds}ms · '
+                '${_ocrResult!.runtime}',
+                style: TextStyle(fontSize: 11, color: context.vibe.muted),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -564,6 +1043,15 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     );
   }
 
+  String _imageBaseName() {
+    final String name = (_imagePath ?? 'ocr')
+        .replaceAll('\\', '/')
+        .split('/')
+        .last;
+    final int dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
+  }
+
   Widget _buildVadResult(VadInferenceResult result) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -607,3 +1095,5 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
 }
+
+enum _ModelWorkspace { ocr, vad }
