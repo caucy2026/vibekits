@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/port_forward_service.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_desktop_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 import 'package:vibekits/features/dev_tools/presentation/remote_workspace.dart';
@@ -517,6 +518,56 @@ void main() {
       connection.handles.every((_FakePortForwardHandle item) => !item.running),
       isTrue,
     );
+  });
+
+  testWidgets('桌面模式保存脱敏记录并一次交给系统客户端', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    List<String> persisted = <String>[];
+    RemoteDesktopTarget? launched;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            profileIdGenerator: () => 'desktop_test',
+            onProfilesChanged: (List<String> profiles) async {
+              persisted = profiles;
+            },
+            launchRemoteDesktop: (RemoteDesktopTarget target) async {
+              launched = target;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('桌面'));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('remote-host')), 'rdp.test');
+    await tester.enterText(find.byKey(const Key('remote-port')), '3390');
+    expect(find.byKey(const Key('remote-user')), findsNothing);
+    expect(find.byKey(const Key('remote-identity')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('remote-profile-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remote-profile-secret')), findsNothing);
+    await tester.enterText(
+      find.byKey(const Key('remote-profile-name')),
+      '测试桌面',
+    );
+    await tester.tap(find.byKey(const Key('remote-profile-confirm-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(persisted.single, contains('"mode":"remoteDesktop"'));
+    expect(persisted.single, contains('"user":""'));
+
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(launched?.host, 'rdp.test');
+    expect(launched?.port, 3390);
+    expect(find.textContaining('已交给系统远程桌面客户端'), findsOneWidget);
   });
 }
 

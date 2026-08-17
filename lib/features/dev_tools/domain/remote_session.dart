@@ -5,7 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 
-enum RemoteSessionMode { ssh, sftp, localForward }
+enum RemoteSessionMode { ssh, sftp, localForward, remoteDesktop }
 
 class RemoteConnectionProfile {
   const RemoteConnectionProfile({
@@ -20,10 +20,10 @@ class RemoteConnectionProfile {
   final int port;
   final String? identityFile;
 
-  void validate() {
+  void validate({bool requireUser = true}) {
     _validateHost(host, label: '主机');
     final String login = user.trim();
-    if (login.isEmpty ||
+    if (requireUser && login.isEmpty ||
         login.length > 128 ||
         login.codeUnits.any((int unit) => unit < 0x20) ||
         login.startsWith('-')) {
@@ -57,7 +57,13 @@ class RemoteLaunchRequest {
   final String? targetHost;
   final int? targetPort;
 
-  String get executable => mode == RemoteSessionMode.sftp ? 'sftp' : 'ssh';
+  String get executable => switch (mode) {
+    RemoteSessionMode.sftp => 'sftp',
+    RemoteSessionMode.ssh || RemoteSessionMode.localForward => 'ssh',
+    RemoteSessionMode.remoteDesktop => throw UnsupportedError(
+      '远程桌面必须使用系统客户端服务',
+    ),
+  };
 
   List<String> buildArguments() {
     profile.validate();
@@ -110,6 +116,8 @@ class RemoteLaunchRequest {
           'ExitOnForwardFailure=yes',
         ]);
         break;
+      case RemoteSessionMode.remoteDesktop:
+        throw UnsupportedError('远程桌面必须使用系统客户端服务');
     }
     arguments.add(profile.host.trim());
     return arguments;

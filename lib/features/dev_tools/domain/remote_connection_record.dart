@@ -99,7 +99,7 @@ class RemoteConnectionRecord {
           name.length > 100 ||
           host.isEmpty ||
           host.length > 253 ||
-          user.isEmpty ||
+          user.isEmpty && mode != RemoteSessionMode.remoteDesktop ||
           user.length > 128 ||
           port == null ||
           port < 1 ||

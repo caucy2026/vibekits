@@ -92,4 +92,22 @@ void main() {
     )!;
     expect(record.encode(), isNot(contains('VK_SECRET_20260817_7f3a')));
   });
+
+  test('远程桌面记录允许空用户名并可跨重启恢复', () {
+    const RemoteConnectionRecord desktop = RemoteConnectionRecord(
+      id: 'desktop_test',
+      name: '测试桌面',
+      mode: RemoteSessionMode.remoteDesktop,
+      host: 'rdp.test',
+      user: '',
+      port: 3390,
+    );
+
+    final RemoteConnectionRecord restored = RemoteConnectionRecord.decode(
+      desktop.encode(),
+    )!;
+    expect(restored.mode, RemoteSessionMode.remoteDesktop);
+    expect(restored.user, isEmpty);
+    expect(restored.port, 3390);
+  });
 }

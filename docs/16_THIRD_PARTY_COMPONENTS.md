@@ -2,7 +2,7 @@
 
 更新日期：2026-08-17
 
-适用版本：`1.9.0-dev.3+13`
+适用版本：`1.9.0-dev.4+14`
 
 ## 发布时直接使用的关键组件
 
@@ -20,6 +20,8 @@
 | `xterm` | 4.0.0 | Windows/macOS 交互终端渲染、键盘、选择与缩放 | MIT | pub.dev 锁文件；纯 Flutter 终端视图，不携带 SSH 密码学 |
 
 数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。串口封装使用 MIT 许可证，但发布 NOTICE 必须同时保留底层 `libserialport` 的 LGPL-3.0-or-later 声明和对应源代码获取方式。
+
+远程桌面不打包第三方协议实现：Windows 调用系统 `mstsc.exe`，macOS 调用 `/usr/bin/open` 打开系统 VNC/屏幕共享 URL。Vibekits 只传脱敏的主机和端口参数，不读取或传递桌面密码。
 
 完整 Dart/Flutter 直接与传递依赖版本、来源和包哈希以 `pubspec.lock` 为准；发布前不得绕过锁文件临时升级。
 

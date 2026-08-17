@@ -9,6 +9,7 @@ import '../../../app/app_theme.dart';
 import '../domain/platform_credential_store.dart';
 import '../domain/port_forward_service.dart';
 import '../domain/remote_connection_record.dart';
+import '../domain/remote_desktop_service.dart';
 import '../domain/remote_session.dart';
 import '../domain/sftp_service.dart';
 import 'sftp_browser.dart';
@@ -38,6 +39,9 @@ typedef PortForwardConnector = Future<PortForwardConnection> Function(
   String? secret,
   RemoteHostKeyVerifier verifyHostKey,
 );
+typedef RemoteDesktopLauncher = Future<void> Function(
+  RemoteDesktopTarget target,
+);
 
 class RemoteWorkspace extends StatefulWidget {
   const RemoteWorkspace({
@@ -53,6 +57,7 @@ class RemoteWorkspace extends StatefulWidget {
     this.readClipboard,
     this.connectRemoteFiles,
     this.connectPortForwards,
+    this.launchRemoteDesktop,
   });
 
   final RemoteSessionStarter? startSession;
@@ -66,6 +71,7 @@ class RemoteWorkspace extends StatefulWidget {
   final RemoteClipboardReader? readClipboard;
   final RemoteFileConnector? connectRemoteFiles;
   final PortForwardConnector? connectPortForwards;
+  final RemoteDesktopLauncher? launchRemoteDesktop;
 
   @override
   State<RemoteWorkspace> createState() => _RemoteWorkspaceState();
@@ -96,6 +102,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   final List<_RemoteTerminalTab> _terminalTabs = <_RemoteTerminalTab>[];
   int _activeTerminalTab = -1;
   String? _error;
+  String? _desktopStatus;
   bool _starting = false;
   int _connectGeneration = 0;
   late final List<RemoteConnectionRecord> _profiles =
@@ -317,7 +324,9 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     setState(() {
       _savedCredentialAvailable = false;
       _error = null;
+      _desktopStatus = null;
     });
+    if (profile.mode == RemoteSessionMode.remoteDesktop) return;
     final String? secret = await _readCredential(profile.credentialKey);
     if (!mounted || _selectedProfileId != profile.id) return;
     setState(() => _savedCredentialAvailable = secret?.isNotEmpty == true);
@@ -333,10 +342,29 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _port.text = '22';
       _identity.clear();
       _error = null;
+      _desktopStatus = null;
+    });
+  }
+
+  void _selectMode(RemoteSessionMode mode) {
+    if (_mode == mode) return;
+    final bool enteringDesktop = mode == RemoteSessionMode.remoteDesktop;
+    final bool leavingDesktop = _mode == RemoteSessionMode.remoteDesktop;
+    setState(() {
+      _mode = mode;
+      _desktopStatus = null;
+      _error = null;
+      if (enteringDesktop && _port.text == '22') {
+        _port.text = '${RemoteDesktopService.defaultPort()}';
+      } else if (leavingDesktop &&
+          (_port.text == '3389' || _port.text == '5900')) {
+        _port.text = '22';
+      }
     });
   }
 
   Future<void> _saveProfile() async {
+    final bool desktop = _mode == RemoteSessionMode.remoteDesktop;
     final RemoteLaunchRequest request = RemoteLaunchRequest(
       mode: _mode,
       profile: RemoteConnectionProfile(
@@ -350,7 +378,14 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       targetPort: int.tryParse(_targetPort.text),
     );
     try {
-      request.buildArguments();
+      if (desktop) {
+        RemoteDesktopTarget(
+          host: _host.text,
+          port: int.tryParse(_port.text) ?? 0,
+        ).validate();
+      } else {
+        request.buildArguments();
+      }
     } on Object catch (error) {
       setState(() {
         _error = error is FormatException ? error.message : '$error';
@@ -359,7 +394,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     }
     final RemoteConnectionRecord? selected = _selectedProfile;
     final TextEditingController name = TextEditingController(
-      text: selected?.name ?? '${_user.text.trim()}@${_host.text.trim()}',
+      text:
+          selected?.name ??
+          (desktop
+              ? _host.text.trim()
+              : '${_user.text.trim()}@${_host.text.trim()}'),
     );
     final TextEditingController secret = TextEditingController();
     bool favorite = selected?.favorite ?? false;
@@ -383,19 +422,21 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                         border: OutlineInputBorder(),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const Key('remote-profile-secret'),
-                      controller: secret,
-                      obscureText: true,
-                      decoration: InputDecoration(
-                        labelText: selected == null
-                            ? '密码或口令（可选）'
-                            : '密码或口令（留空不修改）',
-                        helperText: '只保存到系统安全凭据，不写入普通设置',
-                        border: const OutlineInputBorder(),
+                    if (!desktop) ...<Widget>[
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('remote-profile-secret'),
+                        controller: secret,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: selected == null
+                              ? '密码或口令（可选）'
+                              : '密码或口令（留空不修改）',
+                          helperText: '只保存到系统安全凭据，不写入普通设置',
+                          border: const OutlineInputBorder(),
+                        ),
                       ),
-                    ),
+                    ],
                     CheckboxListTile(
                       key: const Key('remote-profile-favorite'),
                       contentPadding: EdgeInsets.zero,
@@ -437,32 +478,37 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       name: name.text.trim(),
       mode: _mode,
       host: _host.text.trim(),
-      user: _user.text.trim(),
+      user: desktop ? '' : _user.text.trim(),
       port: int.parse(_port.text),
-      identityFile: _identity.text.trim().isEmpty
+      identityFile: desktop || _identity.text.trim().isEmpty
           ? null
           : _identity.text.trim(),
       favorite: favorite,
       lastUsedEpochMs: selected?.lastUsedEpochMs ?? 0,
       hostKeyType:
-          selected?.host == _host.text.trim() &&
+          !desktop &&
+              selected?.host == _host.text.trim() &&
               selected?.port == int.parse(_port.text)
           ? selected?.hostKeyType
           : null,
       hostKeyFingerprint:
-          selected?.host == _host.text.trim() &&
+          !desktop &&
+              selected?.host == _host.text.trim() &&
               selected?.port == int.parse(_port.text)
           ? selected?.hostKeyFingerprint
           : null,
     );
-    final String newSecret = secret.text;
+    final String newSecret = desktop ? '' : secret.text;
     _disposeDialogControllersLater(name, secret);
     if (selected == null) {
       _profiles.add(updated);
     } else {
       _profiles[_profiles.indexOf(selected)] = updated;
     }
-    if (newSecret.isNotEmpty) {
+    if (desktop && selected != null) {
+      await _deleteCredential(updated.credentialKey);
+      _savedCredentialAvailable = false;
+    } else if (newSecret.isNotEmpty) {
       await _writeCredential(updated.credentialKey, newSecret);
       _savedCredentialAvailable = true;
     }
@@ -767,7 +813,48 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     await connection.close();
   }
 
+  Future<void> _launchDesktop() async {
+    setState(() {
+      _starting = true;
+      _error = null;
+      _desktopStatus = null;
+    });
+    try {
+      final RemoteDesktopTarget target = RemoteDesktopTarget(
+        host: _host.text,
+        port: int.tryParse(_port.text) ?? 0,
+      )..validate();
+      await (widget.launchRemoteDesktop != null
+          ? widget.launchRemoteDesktop!(target)
+          : RemoteDesktopService.launch(target));
+      if (!mounted) return;
+      setState(() {
+        _starting = false;
+        _desktopStatus = '已交给系统远程桌面客户端：${target.authority}';
+      });
+      final RemoteConnectionRecord? selected = _selectedProfile;
+      if (selected != null) {
+        _profiles[_profiles.indexOf(selected)] = selected.copyWith(
+          lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        unawaited(_persistProfiles());
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _starting = false;
+        _error = error is FormatException
+            ? error.message
+            : error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
   Future<void> _start() async {
+    if (_mode == RemoteSessionMode.remoteDesktop) {
+      await _launchDesktop();
+      return;
+    }
     if (_mode == RemoteSessionMode.localForward) {
       await _startForward();
       return;
@@ -1053,7 +1140,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                     : _deleteProfile,
                 icon: const Icon(Icons.delete_outline),
               ),
-              if (_savedCredentialAvailable)
+              if (_savedCredentialAvailable &&
+                  _mode != RemoteSessionMode.remoteDesktop)
                 _RemoteBadge(text: '系统凭据已保存', color: context.vibe.success),
             ],
           ),
@@ -1076,12 +1164,16 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 icon: Icon(Icons.swap_horiz, size: 16),
                 label: Text('端口转发'),
               ),
+              ButtonSegment<RemoteSessionMode>(
+                value: RemoteSessionMode.remoteDesktop,
+                icon: Icon(Icons.desktop_windows_outlined, size: 16),
+                label: Text('桌面'),
+              ),
             ],
             selected: <RemoteSessionMode>{_mode},
             onSelectionChanged: _connected || _starting
                 ? null
-                : (Set<RemoteSessionMode> value) =>
-                      setState(() => _mode = value.first),
+                : (Set<RemoteSessionMode> value) => _selectMode(value.first),
           ),
           const SizedBox(height: 10),
           Wrap(
@@ -1096,14 +1188,15 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 keyName: 'remote-host',
                 enabled: !_connected && !_starting,
               ),
-              _Field(
-                width: 150,
-                controller: _user,
-                label: '用户名',
-                hint: 'developer',
-                keyName: 'remote-user',
-                enabled: !_connected && !_starting,
-              ),
+              if (_mode != RemoteSessionMode.remoteDesktop)
+                _Field(
+                  width: 150,
+                  controller: _user,
+                  label: '用户名',
+                  hint: 'developer',
+                  keyName: 'remote-user',
+                  enabled: !_connected && !_starting,
+                ),
               _Field(
                 width: 90,
                 controller: _port,
@@ -1111,24 +1204,27 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 keyName: 'remote-port',
                 enabled: !_connected && !_starting,
               ),
-              SizedBox(
-                width: 300,
-                child: TextField(
-                  key: const Key('remote-identity'),
-                  controller: _identity,
-                  enabled: !_connected && !_starting,
-                  decoration: InputDecoration(
-                    labelText: '私钥（可选）',
-                    isDense: true,
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      tooltip: '选择私钥',
-                      onPressed: _connected || _starting ? null : _pickIdentity,
-                      icon: const Icon(Icons.key_outlined, size: 17),
+              if (_mode != RemoteSessionMode.remoteDesktop)
+                SizedBox(
+                  width: 300,
+                  child: TextField(
+                    key: const Key('remote-identity'),
+                    controller: _identity,
+                    enabled: !_connected && !_starting,
+                    decoration: InputDecoration(
+                      labelText: '私钥（可选）',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: '选择私钥',
+                        onPressed: _connected || _starting
+                            ? null
+                            : _pickIdentity,
+                        icon: const Icon(Icons.key_outlined, size: 17),
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
           if (_mode == RemoteSessionMode.localForward) ...<Widget>[
@@ -1204,7 +1300,9 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               FilledButton.icon(
                 key: const Key('remote-primary-action'),
                 onPressed: _starting
-                    ? _cancelStart
+                    ? _mode == RemoteSessionMode.remoteDesktop
+                          ? null
+                          : _cancelStart
                     : _sftpClient != null
                     ? _disconnectSftp
                     : _mode == RemoteSessionMode.localForward
@@ -1214,11 +1312,15 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                     : _start,
                 icon: Icon(
                   _starting
-                      ? Icons.close_rounded
+                      ? _mode == RemoteSessionMode.remoteDesktop
+                            ? Icons.hourglass_top_rounded
+                            : Icons.close_rounded
                       : _sftpClient != null
                       ? Icons.stop_rounded
                       : _mode == RemoteSessionMode.localForward
                       ? Icons.add_rounded
+                      : _mode == RemoteSessionMode.remoteDesktop
+                      ? Icons.desktop_windows_outlined
                       : _running
                       ? Icons.stop_rounded
                       : Icons.power_settings_new,
@@ -1226,13 +1328,17 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 ),
                 label: Text(
                   _starting
-                      ? '取消连接'
+                      ? _mode == RemoteSessionMode.remoteDesktop
+                            ? '正在打开…'
+                            : '取消连接'
                       : _sftpClient != null
                       ? '断开 SFTP'
                       : _mode == RemoteSessionMode.localForward
                       ? _forwardConnection == null
                             ? '启动转发'
                             : '添加转发'
+                      : _mode == RemoteSessionMode.remoteDesktop
+                      ? '打开桌面'
                       : _running
                       ? '断开'
                       : '连接',
@@ -1264,6 +1370,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                       ? '连接后直接在本地/远端双栏拖放；同名文件先确认。'
                       : _mode == RemoteSessionMode.localForward
                       ? '本地/SOCKS 只监听 127.0.0.1；每条可独立停止。'
+                      : _mode == RemoteSessionMode.remoteDesktop
+                      ? '调用系统客户端；登录和凭据由 Windows/macOS 管理。'
                       : '首次连接必须核对服务端主机指纹；不会自动跳过验证。',
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
                 ),
@@ -1356,6 +1464,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                     connected: _forwardConnection != null,
                     onStop: _stopForward,
                   )
+                : _mode == RemoteSessionMode.remoteDesktop
+                ? _RemoteDesktopPanel(status: _desktopStatus)
                 : _sftpClient != null
                 ? SftpBrowser(
                     key: const Key('sftp-browser'),
@@ -1421,6 +1531,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           ),
           if (_sftpClient == null &&
               _mode != RemoteSessionMode.localForward &&
+              _mode != RemoteSessionMode.remoteDesktop &&
               !_interactive) ...<Widget>[
             const SizedBox(height: 8),
             TextField(
@@ -1454,6 +1565,45 @@ class _PortForwardItem {
 
   final PortForwardHandle handle;
   bool stopped = false;
+}
+
+class _RemoteDesktopPanel extends StatelessWidget {
+  const _RemoteDesktopPanel({required this.status});
+
+  final String? status;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('remote-desktop-panel'),
+    decoration: BoxDecoration(
+      color: context.vibe.canvas,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: context.vibe.border),
+    ),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.desktop_windows_outlined,
+            size: 42,
+            color: context.vibe.glow,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            status ?? '输入主机和端口，然后打开系统远程桌面。',
+            key: const Key('remote-desktop-status'),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Vibekits 不读取或传递远程桌面密码。',
+            style: TextStyle(fontSize: 11, color: context.vibe.muted),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _PortForwardList extends StatelessWidget {
