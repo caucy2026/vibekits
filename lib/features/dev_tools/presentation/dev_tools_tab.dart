@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import 'batch_rename_workspace.dart';
+import 'adb_workspace.dart';
 import 'api_workspace.dart';
 import 'database_workspace.dart';
 import 'duplicate_files_workspace.dart';
@@ -41,6 +42,7 @@ class DevToolsTab extends StatefulWidget {
     this.remoteCredentialWrite,
     this.remoteCredentialDelete,
     this.remoteProfileIdGenerator,
+    this.adbLoadSnapshot,
     this.initialSerialPortSettings,
     this.onSerialPortSettingsChanged,
     this.serialPortLister,
@@ -72,6 +74,7 @@ class DevToolsTab extends StatefulWidget {
   final RemoteCredentialWriter? remoteCredentialWrite;
   final RemoteCredentialDeleter? remoteCredentialDelete;
   final String Function()? remoteProfileIdGenerator;
+  final AdbWorkspaceLoader? adbLoadSnapshot;
   final String? initialSerialPortSettings;
   final Future<void> Function(String settings)? onSerialPortSettingsChanged;
   final SerialPortLister? serialPortLister;
@@ -267,6 +270,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
         listPorts: widget.serialPortLister,
         openSession: widget.serialPortOpener,
       );
+    }
+    if (tool.id == 'adb_workspace') {
+      return AdbWorkspace(loadSnapshot: widget.adbLoadSnapshot);
     }
     if (tool.id == 'api_workspace') {
       return ApiWorkspace(execute: widget.apiExecute);

@@ -71,6 +71,13 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     description: '打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。',
   ),
   const ToolSpec(
+    id: 'adb_workspace',
+    name: 'ADB',
+    group: ToolGroups.remote,
+    description: '管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。',
+    offline: false,
+  ),
+  const ToolSpec(
     id: 'api_workspace',
     name: 'API 调试',
     group: ToolGroups.network,
@@ -330,6 +337,7 @@ const Set<String> _standaloneToolIds = <String>{
   'database_manager',
   'remote_workspace',
   'serial_port',
+  'adb_workspace',
   'api_workspace',
   'git_workspace',
   'github_diagnostics',

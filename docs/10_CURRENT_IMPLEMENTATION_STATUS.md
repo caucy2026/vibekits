@@ -4,13 +4,13 @@
 
 更新日期：2026-08-17
 
-当前版本：`1.9.0-dev.4+14`（R9 开发检查点，非正式发布）
+当前版本：`1.9.0-dev.5+15`（R9 开发检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。当前 R9 检查点已补齐远程会话资料、交互式 SSH、SFTP 双栏、后台端口转发和系统远程桌面软件主路径。远程桌面只把脱敏目标交给 Windows `mstsc.exe` 或 macOS 系统屏幕共享，不传密码、不自研协议。SSH/SFTP/转发和桌面真实目标证据仍待补，代码继续进入 ADB。macOS 工程已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 与真实设备验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。R9 的远程会话、SSH、SFTP、后台转发和系统桌面软件主路径已完成；ADB 工作区已进入代码并完成官方路径/版本识别和设备状态基础层。本机真实 ADB server 已启动但没有设备，因此 USB/无线操作仍不能写成完成。SSH/SFTP/转发和桌面真实目标证据仍待补。macOS 工程已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 与真实设备验证写成完成。
 
 ## 2. 五个主工作区
 
@@ -19,7 +19,7 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 解压缩 | 官方 7-Zip 26.02 + Dart 后端；RAR/RAR5、ZIP/ZIPX、7z、TAR、GZ/BZ2/XZ/ZST、CAB、ISO/WIM/DMG 等列表/解压；路径、链接、空间、大小、压缩比、冲突、暂存、取消保护 | Windows 主路径完成 |
 | 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
 | 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
-| 开发工具 | 左侧只保留计算器、数据库、串口、远程、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | 数据库、串口、远程会话、SSH/SFTP/转发/系统桌面软件主路径完成；ADB 待继续 |
+| 开发工具 | 左侧只保留计算器、数据库、串口、远程、ADB、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | 数据库、串口、SSH/SFTP/转发/系统桌面主路径完成；ADB 路径/设备层完成，操作层待继续 |
 | 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体支持持久会话、上下文追问、Markdown、复制、新任务、进度和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
 
 ## 3. 文件融合与系统入口
@@ -54,6 +54,7 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 - 常用源码、Shell、配置、特殊文件名和 shebang 自动识别；保留 BOM/编码，保存前复核外部修改并原子替换。
 - SSH 使用 `dartssh2` 认证和远程 PTY、`xterm.dart` 渲染，密码/口令只进入系统凭据；首次主机指纹人工确认并绑定，支持多标签、搜索、清屏、安全粘贴和取消。SFTP 提供双栏、拖放、冲突确认、进度、取消、失败重试与临时文件清理。端口转发支持本地、远程、SOCKS5、多条列表、逐条停止和全部断开；连接与数据泵完整运行在后台 Isolate。
 - 桌面模式复用会话记录，只保存主机、端口、模式和名称。Windows 调用 `mstsc.exe`，macOS 调用系统 VNC/屏幕共享；不显示或传递远程桌面密码，不经过 shell，系统客户端缺失时显示可行动错误。
+- ADB 独立工作区调用用户已安装的官方 Platform-Tools：显示解析后的绝对路径和版本，后台运行 `devices -l` 并区分可用、未授权、离线和未知设备。Shell、文件、Logcat、截图、APK、无线配对及智能体逐项审批仍在 ADB-106 后续步骤。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
 
@@ -97,9 +98,10 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 - R9 SFTP 定向 Analyze：6 个相关文件无问题；Widget 专项 3/3 通过。
 - R9 端口转发：参数与后台 Isolate 单元测试 3/3、三类型/端口占用/停止 Widget 专项通过；4 个相关文件定向 Analyze 无问题。
 - R9 系统桌面：服务与记录 9/9、桌面模式 Widget 1/1 通过；7 个相关文件定向 Analyze 无问题；Windows 实查 `mstsc.exe 10.0.19041.5965` 存在。
+- R9 ADB 基础：版本/设备解析、Widget 和独立入口 4/4 通过，6 个相关文件定向 Analyze 无问题；本机 ADB `1.0.41`、Platform-Tools `31.0.3-7562133`、server 启动成功，设备与 mDNS 列表为空。
 - `flutter test --reporter expanded`：271/271 通过。
 - `flutter build windows --release`：成功（78.8 秒）。
-- 已发布 EXE 文件/产品版本仍为 `1.8.0+10`；当前源码为 `1.9.0-dev.4+14`，待 R9 退出条件完成后生成新 Release。
+- 已发布 EXE 文件/产品版本仍为 `1.8.0+10`；当前源码为 `1.9.0-dev.5+15`，待 R9 退出条件完成后生成新 Release。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
 - Release 产物：`libserialport_plus.dll`、`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 与内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。
@@ -115,4 +117,4 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 6. DeepSeek Harness 官方 npm 包在当前网络未完成真实下载和启动；macOS 实启、ACP 原生会话均待验证。
 7. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
 8. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
-9. SSH/SFTP/转发仍需真实服务端证据；系统远程桌面仍需 Windows 真实目标与 macOS 实机证据；ADB 尚待研发。
+9. SSH/SFTP/转发仍需真实服务端证据；系统远程桌面仍需 Windows 真实目标与 macOS 实机证据；ADB 的 Shell、文件、Logcat、截图、APK、无线调试和智能体审批尚待研发与真机。

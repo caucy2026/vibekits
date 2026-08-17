@@ -279,3 +279,11 @@
 - 主机/IPv6/端口逐项校验，进程不经过 shell，参数中没有密码；系统客户端缺失时分别给出 Windows 可选功能或 macOS 屏幕共享的可行动错误。
 - 系统参数与错误映射、脱敏记录共 9/9 通过；桌面模式保存和一次启动 Widget 通过；相关 7 个文件定向 Analyze 无问题。当前 Windows 实查存在 `mstsc.exe 10.0.19041.5965`，未擅自连接外部主机。
 - 源码版本更新为 `1.9.0-dev.4+14`。REM-105 软件主路径完成，Windows 真实目标启动和 macOS 实机仍待实证；R9 下一代码项为 ADB-106。
+
+## 2026-08-17 · R9 ADB 路径与设备状态检查点
+
+- 开发工具新增独立 ADB 工作区，自动从 `ANDROID_SDK_ROOT`、`ANDROID_HOME` 和 PATH 查找用户已安装的官方 Platform-Tools；必须是实际存在且文件名为 `adb/adb.exe` 的可执行文件。
+- 通过参数数组运行 `adb version` 和 `adb devices -l`，不经过 shell；显示绝对路径、精确协议版本，以及 `device / unauthorized / offline / unknown` 状态和型号、序列号。
+- ADB 命令运行在独立子进程，10 秒超时会终止子进程；界面只接收最终快照，销毁工作区后忽略迟到结果。未授权和离线设备给出可行动提示。
+- 版本/设备解析、基础 Widget 和独立入口 4/4 通过，相关 6 个文件定向 Analyze 无问题。本机真实探测为 ADB `1.0.41` / Platform-Tools `31.0.3-7562133`，绝对路径 `D:\work\allwin\platform-tools\adb.exe`；官方 server 成功启动，当前无 USB/无线设备和 mDNS 服务。
+- 源码版本更新为 `1.9.0-dev.5+15`。本检查点只关闭 ADB-106-A/B 的路径、版本和状态基础层，不宣称 Shell、文件、Logcat、截图、APK、无线配对或智能体审批已完成。
