@@ -382,6 +382,13 @@ class _MainShellState extends State<MainShell> {
                 remoteDatabaseProfiles: profiles,
               ),
             ),
+        initialRemoteSessionProfiles: settings.remoteSessionProfiles,
+        onRemoteSessionProfilesChanged: (List<String> profiles) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                remoteSessionProfiles: profiles,
+              ),
+            ),
         initialSerialPortSettings: settings.serialPortSettings,
         onSerialPortSettingsChanged: (String serialSettings) =>
             widget.settingsController.update(

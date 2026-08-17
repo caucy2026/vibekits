@@ -4,13 +4,13 @@
 
 更新日期：2026-08-17
 
-当前版本：`1.8.0+10`
+当前版本：`1.9.0-dev.1+11`（R9 开发检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
 ## 1. 当前结论
 
-Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。本批补齐 MySQL/MariaDB 远程只读数据库，并新增独立后台串口终端。数据库连接/查询和串口枚举/打开/收发均不占 UI Isolate；关闭或停止会终止工作 Isolate 并释放资源。`flutter analyze` 无问题，271/271 自动测试通过；Windows Release 构建与真实启动纳入本版发布验收。macOS 工程、Open With 文件事件、串口权限和共享逻辑已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 与真实设备验证写成完成。
+Windows 已形成可构建、可启动、可自动路由的开发者工具融合器。当前 R9 检查点补齐远程会话资料与交互式 SSH 终端：系统安全凭据、主机指纹绑定、多标签、搜索/清屏、安全粘贴和连接取消已进入代码与回归。`flutter analyze` 无问题，282/282 自动测试通过；SFTP 双栏、转发管理、系统远程桌面与新入账的 ADB 工作区仍按发布清单继续研发。macOS 工程已接入，但当前机器不是 macOS，不能把未执行的 Xcode/arm64 与真实设备验证写成完成。
 
 ## 2. 五个主工作区
 
@@ -19,7 +19,7 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 解压缩 | 官方 7-Zip 26.02 + Dart 后端；RAR/RAR5、ZIP/ZIPX、7z、TAR、GZ/BZ2/XZ/ZST、CAB、ISO/WIM/DMG 等列表/解压；路径、链接、空间、大小、压缩比、冲突、暂存、取消保护 | Windows 主路径完成 |
 | 系统清理 | 浏览器/应用/系统/开发/IDE/插件下载/调试/日志缓存；后台 Isolate、低 I/O 占用、扫描/清理取消；本次/累计/系统盘容量总结；白名单、竞态身份、回收站优先、报告 | Windows 完成主路径；macOS 待实机 |
 | 文档阅读 | Markdown 默认预览；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
-| 开发工具 | 左侧只保留计算器、数据库、串口、远程、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | SQLite/PostgreSQL/MySQL/MariaDB 与串口主路径完成；远程融合增强待做 |
+| 开发工具 | 左侧只保留计算器、数据库、串口、远程、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | 数据库与串口主路径完成；远程会话/SSH 软件闭环，SFTP/转发/RDP/ADB 待继续 |
 | 本地模型 | 首屏只有“截图 OCR / DeepSeek 智能体”；区域截图后自动 OCR；拖入图片仍自动识别；模型管理收进次级入口；智能体支持持久会话、上下文追问、Markdown、复制、新任务、进度和停止 | Windows 适配与自动测试完成；OCR/macOS ONNX、Harness 双平台实启待验证 |
 
 ## 3. 文件融合与系统入口
@@ -52,7 +52,7 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 ### 4.4 源码、远程、API 与 Git
 
 - 常用源码、Shell、配置、特殊文件名和 shebang 自动识别；保留 BOM/编码，保存前复核外部修改并原子替换。
-- SSH/SFTP 使用系统 OpenSSH，参数数组直传且不经过 Shell；严格主机密钥询问、密钥/Agent 认证、不保存密码；端口转发只绑定 `127.0.0.1`。
+- SSH 使用 `dartssh2` 认证和远程 PTY、`xterm.dart` 渲染，密码/口令只进入系统凭据；首次主机指纹人工确认并绑定，支持多标签、搜索、清屏、安全粘贴和取消。SFTP 双栏、端口转发管理仍是 R9 下一阶段。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
 
@@ -95,7 +95,7 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 - `flutter analyze`：`No issues found`。
 - `flutter test --reporter expanded`：271/271 通过。
 - `flutter build windows --release`：成功（78.8 秒）。
-- EXE 文件/产品版本：`1.8.0+10`。
+- 已发布 EXE 文件/产品版本仍为 `1.8.0+10`；当前源码为 `1.9.0-dev.1+11`，待 R9 退出条件完成后生成新 Release。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
 - Release 产物：`libserialport_plus.dll`、`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 与内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。

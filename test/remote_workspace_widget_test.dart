@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
+import 'package:vibekits/features/dev_tools/presentation/remote_workspace.dart';
 
 void main() {
   testWidgets('SSH 工作区用一个主操作连接并发送输入', (WidgetTester tester) async {
@@ -75,6 +76,367 @@ void main() {
     expect(started, isFalse);
     expect(find.byKey(const Key('remote-error')), findsOneWidget);
   });
+
+  testWidgets('保存会话时普通设置不含密码且密码只写系统凭据', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    List<String> persisted = <String>[];
+    final Map<String, String> credentials = <String, String>{};
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsTab(
+            remoteProfileIdGenerator: () => 'remote_test_1',
+            onRemoteSessionProfilesChanged: (List<String> profiles) async {
+              persisted = profiles;
+            },
+            remoteCredentialRead: (String key) async => credentials[key],
+            remoteCredentialWrite: (String key, String value) async {
+              credentials[key] = value;
+            },
+            remoteCredentialDelete: (String key) async {
+              credentials.remove(key);
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('SSH / SFTP'));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'server.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'developer');
+    await tester.tap(find.byKey(const Key('remote-profile-save')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('remote-profile-name')),
+      '生产服务器',
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-profile-secret')),
+      'VK_SECRET_20260817_7f3a',
+    );
+    await tester.tap(find.byKey(const Key('remote-profile-confirm-save')));
+    await tester.pumpAndSettle();
+
+    expect(persisted, hasLength(1));
+    expect(persisted.single, isNot(contains('VK_SECRET_20260817_7f3a')));
+    expect(
+      credentials['vibekits.remote-session.remote_test_1'],
+      'VK_SECRET_20260817_7f3a',
+    );
+    expect(find.text('系统凭据已保存'), findsOneWidget);
+  });
+
+  testWidgets('最近会话可重启选择、编辑且不重复新增', (WidgetTester tester) async {
+    const String initial =
+        '{"version":1,"id":"remote_test_1","name":"生产服务器",'
+        '"mode":"ssh","host":"old.example.com","user":"developer",'
+        '"port":22,"identityFile":null,"favorite":false,'
+        '"lastUsedEpochMs":0}';
+    List<String> persisted = <String>[initial];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsTab(
+            initialRemoteSessionProfiles: persisted,
+            onRemoteSessionProfilesChanged: (List<String> profiles) async {
+              persisted = profiles;
+            },
+            remoteCredentialRead: (String key) async => 'saved',
+            remoteCredentialWrite: (String key, String value) async {},
+            remoteCredentialDelete: (String key) async {},
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('SSH / SFTP'));
+    await tester.pump();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('生产服务器').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-host')))
+          .controller!
+          .text,
+      'old.example.com',
+    );
+    expect(find.text('系统凭据已保存'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'new.example.com',
+    );
+    await tester.tap(find.byKey(const Key('remote-profile-save')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('remote-profile-name')), '新名称');
+    await tester.tap(find.byKey(const Key('remote-profile-confirm-save')));
+    await tester.pumpAndSettle();
+
+    expect(persisted, hasLength(1));
+    expect(persisted.single, contains('new.example.com'));
+    expect(persisted.single, contains('新名称'));
+  });
+
+  testWidgets('删除会话同时删除系统凭据且不影响其他记录', (WidgetTester tester) async {
+    const String target =
+        '{"version":1,"id":"target","name":"目标",'
+        '"mode":"ssh","host":"target.example.com","user":"dev",'
+        '"port":22,"favorite":false,"lastUsedEpochMs":0}';
+    const String keep =
+        '{"version":1,"id":"keep","name":"保留",'
+        '"mode":"sftp","host":"keep.example.com","user":"dev",'
+        '"port":22,"favorite":false,"lastUsedEpochMs":0}';
+    List<String> persisted = <String>[target, keep];
+    final List<String> deletedKeys = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DevToolsTab(
+            initialRemoteSessionProfiles: persisted,
+            onRemoteSessionProfilesChanged: (List<String> profiles) async {
+              persisted = profiles;
+            },
+            remoteCredentialRead: (String key) async => null,
+            remoteCredentialWrite: (String key, String value) async {},
+            remoteCredentialDelete: (String key) async {
+              deletedKeys.add(key);
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('SSH / SFTP'));
+    await tester.pump();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('目标').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('remote-profile-delete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('remote-profile-confirm-delete')));
+    await tester.pumpAndSettle();
+
+    expect(deletedKeys, <String>['vibekits.remote-session.target']);
+    expect(persisted, hasLength(1));
+    expect(persisted.single, contains('"id":"keep"'));
+  });
+
+  testWidgets('安全连接使用系统凭据并在确认后绑定主机指纹', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const String initial =
+        '{"version":1,"id":"secure","name":"安全服务器",'
+        '"mode":"ssh","host":"secure.example.com","user":"dev",'
+        '"port":22,"favorite":true,"lastUsedEpochMs":0}';
+    List<String> persisted = <String>[initial];
+    String? receivedSecret;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            initialProfiles: persisted,
+            onProfilesChanged: (List<String> profiles) async {
+              persisted = profiles;
+            },
+            readCredential: (String key) async => 'system-vault-secret',
+            writeCredential: (String key, String secret) async {},
+            deleteCredential: (String key) async {},
+            secureStartSession:
+                (
+                  RemoteLaunchRequest request,
+                  String? secret,
+                  RemoteHostKeyVerifier verifyHostKey,
+                ) async {
+                  receivedSecret = secret;
+                  final bool trusted = await verifyHostKey(
+                    'ssh-ed25519',
+                    'SHA256:TrustedHostKey0123456789+/',
+                  );
+                  if (!trusted) throw StateError('主机指纹未确认');
+                  return _FakeInteractiveRemoteSession();
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('★ 安全服务器').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+
+    expect(receivedSecret, 'system-vault-secret');
+    expect(find.text('确认主机指纹'), findsOneWidget);
+    expect(
+      find.textContaining('SHA256:TrustedHostKey0123456789+/'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('remote-host-fingerprint-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(persisted.single, contains('SHA256:TrustedHostKey0123456789+/'));
+    expect(
+      find.byKey(const Key('remote-interactive-terminal')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('两个终端标签切换时输出互不串线且保留', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    int starts = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            startSession: (RemoteLaunchRequest request) async {
+              starts += 1;
+              final _FakeRemoteSession session = _FakeRemoteSession();
+              session.addOutput(
+                starts == 1 ? 'OUTPUT_ONLY_A' : 'OUTPUT_ONLY_B',
+              );
+              return session;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'a.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('OUTPUT_ONLY_A'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('remote-new-terminal')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'b.example.com',
+    );
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('OUTPUT_ONLY_B'), findsOneWidget);
+    expect(find.textContaining('OUTPUT_ONLY_A'), findsNothing);
+
+    await tester.tap(find.text('dev@a.example.com'));
+    await tester.pump();
+    expect(find.textContaining('OUTPUT_ONLY_A'), findsOneWidget);
+    expect(find.textContaining('OUTPUT_ONLY_B'), findsNothing);
+    await tester.tap(find.text('dev@b.example.com'));
+    await tester.pump();
+    expect(find.textContaining('OUTPUT_ONLY_B'), findsOneWidget);
+    expect(find.textContaining('OUTPUT_ONLY_A'), findsNothing);
+  });
+
+  testWidgets('终端搜索计数且多行粘贴确认前不发送', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final _FakeInteractiveRemoteSession session =
+        _FakeInteractiveRemoteSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            startSession: (RemoteLaunchRequest request) async => session,
+            readClipboard: () async => 'printf A\nprintf B',
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'a.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+    session.addOutput('before needle-7f3a after\r\n');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('remote-terminal-search-toggle')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('remote-terminal-search')),
+      'needle-7f3a',
+    );
+    await tester.pump();
+    expect(find.text('1 个匹配'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('remote-terminal-paste')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('remote-paste-preview')), findsOneWidget);
+    expect(session.sentData, isEmpty);
+    await tester.tap(find.byKey(const Key('remote-paste-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(session.sentData.join(), contains('printf A'));
+    expect(session.sentData.join(), contains('printf B'));
+
+    await tester.tap(find.byKey(const Key('remote-terminal-clear')));
+    await tester.pump();
+    expect(find.text('0 个匹配'), findsOneWidget);
+  });
+
+  testWidgets('连接中可立即取消且迟到会话自动释放', (WidgetTester tester) async {
+    final Completer<RemoteSessionHandle> pending =
+        Completer<RemoteSessionHandle>();
+    final _FakeRemoteSession lateSession = _FakeRemoteSession();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            startSession: (RemoteLaunchRequest request) => pending.future,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'slow.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(find.text('取消连接'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(find.textContaining('连接已取消'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('remote-host'))).enabled,
+      isNot(false),
+    );
+
+    pending.complete(lateSession);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(lateSession.running, isFalse);
+    expect(find.byKey(const Key('remote-terminal-tabs')), findsNothing);
+  });
 }
 
 class _FakeRemoteSession implements RemoteSessionHandle {
@@ -102,5 +464,19 @@ class _FakeRemoteSession implements RemoteSessionHandle {
     running = false;
     if (!_exit.isCompleted) _exit.complete(0);
     await _output.close();
+  }
+}
+
+class _FakeInteractiveRemoteSession extends _FakeRemoteSession
+    implements RemoteInteractiveSessionHandle {
+  final List<String> sentData = <String>[];
+  final List<(int, int)> sizes = <(int, int)>[];
+
+  @override
+  void send(String data) => sentData.add(data);
+
+  @override
+  void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
+    sizes.add((columns, rows));
   }
 }

@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:dartssh2/dartssh2.dart';
 
 enum RemoteSessionMode { ssh, sftp, localForward }
 
@@ -121,8 +124,36 @@ abstract interface class RemoteSessionHandle {
   Future<void> stop();
 }
 
+abstract interface class RemoteInteractiveSessionHandle
+    implements RemoteSessionHandle {
+  void send(String data);
+  void resize(int columns, int rows, int pixelWidth, int pixelHeight);
+}
+
+typedef RemoteHostKeyVerifier = Future<bool> Function(
+  String type,
+  String fingerprint,
+);
+
 abstract final class RemoteSessionService {
-  static Future<RemoteSessionHandle> start(RemoteLaunchRequest request) async {
+  static Future<RemoteSessionHandle> start(
+    RemoteLaunchRequest request, {
+    String? secret,
+    RemoteHostKeyVerifier? verifyHostKey,
+  }) async {
+    if (request.mode == RemoteSessionMode.ssh) {
+      return _DartSshRemoteSession.start(
+        request,
+        secret: secret,
+        verifyHostKey: verifyHostKey,
+      );
+    }
+    return _startSystemClient(request);
+  }
+
+  static Future<RemoteSessionHandle> _startSystemClient(
+    RemoteLaunchRequest request,
+  ) async {
     final Process process;
     try {
       process = await Process.start(
@@ -137,6 +168,116 @@ abstract final class RemoteSessionService {
       );
     }
     return _ProcessRemoteSession(process);
+  }
+}
+
+class _DartSshRemoteSession implements RemoteInteractiveSessionHandle {
+  _DartSshRemoteSession._(this._client, this._session) {
+    _stdout = _session.stdout
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(_output.add, onError: _output.addError);
+    _stderr = _session.stderr
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(_output.add, onError: _output.addError);
+    _exit = _session.done.then((_) async {
+      _running = false;
+      await _stdout.cancel();
+      await _stderr.cancel();
+      await _output.close();
+      _client.close();
+      return _session.exitCode ?? 0;
+    });
+  }
+
+  static Future<_DartSshRemoteSession> start(
+    RemoteLaunchRequest request, {
+    String? secret,
+    RemoteHostKeyVerifier? verifyHostKey,
+  }) async {
+    request.profile.validate();
+    final String? identityPath = request.profile.identityFile?.trim();
+    List<SSHKeyPair>? identities;
+    if (identityPath?.isNotEmpty == true) {
+      final String pem = await File(identityPath!).readAsString();
+      identities = SSHKeyPair.fromPem(
+        pem,
+        secret?.isEmpty == true ? null : secret,
+      );
+    }
+    final SSHSocket socket = await SSHSocket.connect(
+      request.profile.host.trim(),
+      request.profile.port,
+      timeout: const Duration(seconds: 10),
+    );
+    final SSHClient client = SSHClient(
+      socket,
+      username: request.profile.user.trim(),
+      identities: identities,
+      onPasswordRequest: identityPath?.isNotEmpty == true
+          ? null
+          : () => secret?.isEmpty == true ? null : secret,
+      onVerifyHostKey: (String type, Uint8List fingerprint) async {
+        final RemoteHostKeyVerifier? verifier = verifyHostKey;
+        if (verifier == null) return false;
+        return verifier(type, utf8.decode(fingerprint));
+      },
+      handshakeTimeout: const Duration(seconds: 12),
+      authTimeout: const Duration(seconds: 15),
+      keepAliveInterval: const Duration(seconds: 20),
+    );
+    try {
+      await client.authenticated;
+      final SSHSession session = await client.shell(
+        pty: const SSHPtyConfig(width: 100, height: 30),
+      );
+      return _DartSshRemoteSession._(client, session);
+    } on Object {
+      client.close();
+      rethrow;
+    }
+  }
+
+  final SSHClient _client;
+  final SSHSession _session;
+  final StreamController<String> _output = StreamController<String>();
+  late final StreamSubscription<String> _stdout;
+  late final StreamSubscription<String> _stderr;
+  late final Future<int> _exit;
+  bool _running = true;
+
+  @override
+  Stream<String> get output => _output.stream;
+
+  @override
+  Future<int> get exitCode => _exit;
+
+  @override
+  bool get running => _running;
+
+  @override
+  void send(String data) {
+    if (!_running || data.isEmpty) return;
+    _session.write(Uint8List.fromList(utf8.encode(data)));
+  }
+
+  @override
+  void sendLine(String line) => send('$line\r');
+
+  @override
+  void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
+    if (!_running || columns < 1 || rows < 1) return;
+    _session.resizeTerminal(columns, rows, pixelWidth, pixelHeight);
+  }
+
+  @override
+  Future<void> stop() async {
+    if (!_running) return;
+    _running = false;
+    _session.close();
+    _client.close();
+    await _exit.timeout(const Duration(seconds: 3), onTimeout: () => 0);
   }
 }
 

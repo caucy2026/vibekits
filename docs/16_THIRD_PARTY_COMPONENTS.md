@@ -2,7 +2,7 @@
 
 更新日期：2026-08-17
 
-适用版本：`1.8.0+10`
+适用版本：`1.9.0-dev.1+11`
 
 ## 发布时直接使用的关键组件
 
@@ -16,6 +16,8 @@
 | `postgres` | 3.5.12 | PostgreSQL TLS 连接、对象浏览、分页和只读查询 | BSD-3-Clause | pub.dev SHA-256 `123de5cb...299b`；普通设置只保存脱敏连接资料 |
 | `mysql_dart` | 3.0.0 | MySQL/MariaDB TLS、对象浏览、分页和只读查询 | MIT | pub.dev 锁文件 SHA-256 `7796f958...464ba`；每次操作在可终止 Isolate 中建立短连接 |
 | `libserialport_plus` | 1.0.1 | Windows/macOS 串口枚举、帧参数、读写和关闭 | Dart 封装 MIT；原生 `libserialport` LGPL-3.0-or-later | pub.dev 锁文件 SHA-256 `b6e55f52...31902`；原生动态库由 native-assets 构建并随 Release 分发 |
+| `dartssh2` | 2.22.5 | SSH 密码/私钥认证、主机指纹、远程 PTY 与后续 SFTP | MIT | pub.dev 锁文件；固定在 `pubspec.lock`，Vibekits 强制提供主机密钥验证回调且不关闭验证 |
+| `xterm` | 4.0.0 | Windows/macOS 交互终端渲染、键盘、选择与缩放 | MIT | pub.dev 锁文件；纯 Flutter 终端视图，不携带 SSH 密码学 |
 
 数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。串口封装使用 MIT 许可证，但发布 NOTICE 必须同时保留底层 `libserialport` 的 LGPL-3.0-or-later 声明和对应源代码获取方式。
 
@@ -44,7 +46,7 @@
 ## 开源借鉴边界
 
 - Zed、Geany、OpenSSH、Git 和 GitHub 文档只用于工作流与操作习惯研究，没有复制 GPL 项目代码。
-- SSH/SFTP、Git 使用用户系统安装的官方命令；参数以列表传递，`runInShell=false`。
+- SSH 交互终端使用 `dartssh2` + `xterm`；SFTP/转发在 R9 完成前仍保留系统 OpenSSH 路径。两条路径均不经过 shell；不自行实现密码学。
 - GitHub 网络诊断只读取 DNS/TLS/HTTPS/代理/hosts/SSH 状态，不移植 FastGithub 的 hosts、代理、证书或系统修改逻辑。
 - 不直接嵌入 GPL/AGPL 工具源码；新增组件必须先记录版本、许可证、上游、产物方式和哈希。
 

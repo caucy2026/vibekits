@@ -23,6 +23,7 @@ class AppSettings {
     this.cleanupCompletedRuns = 0,
     this.recentDocumentPaths = const <String>[],
     this.remoteDatabaseProfiles = const <String>[],
+    this.remoteSessionProfiles = const <String>[],
     this.serialPortSettings = '',
     this.deepSeekHarnessWorkspace = '',
   });
@@ -42,6 +43,7 @@ class AppSettings {
   final int cleanupCompletedRuns;
   final List<String> recentDocumentPaths;
   final List<String> remoteDatabaseProfiles;
+  final List<String> remoteSessionProfiles;
   final String serialPortSettings;
   final String deepSeekHarnessWorkspace;
 
@@ -61,6 +63,7 @@ class AppSettings {
     int? cleanupCompletedRuns,
     List<String>? recentDocumentPaths,
     List<String>? remoteDatabaseProfiles,
+    List<String>? remoteSessionProfiles,
     String? serialPortSettings,
     String? deepSeekHarnessWorkspace,
   }) => AppSettings(
@@ -82,6 +85,7 @@ class AppSettings {
     recentDocumentPaths: recentDocumentPaths ?? this.recentDocumentPaths,
     remoteDatabaseProfiles:
         remoteDatabaseProfiles ?? this.remoteDatabaseProfiles,
+    remoteSessionProfiles: remoteSessionProfiles ?? this.remoteSessionProfiles,
     serialPortSettings: serialPortSettings ?? this.serialPortSettings,
     deepSeekHarnessWorkspace:
         deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
@@ -103,6 +107,7 @@ class AppSettings {
     'cleanupCompletedRuns': cleanupCompletedRuns,
     'recentDocumentPaths': recentDocumentPaths,
     'remoteDatabaseProfiles': remoteDatabaseProfiles,
+    'remoteSessionProfiles': remoteSessionProfiles,
     'serialPortSettings': serialPortSettings,
     'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
   };
@@ -188,6 +193,18 @@ class AppSettings {
                       profile.isNotEmpty && profile.length <= 4096,
                 )
                 .take(20)
+                .toList(growable: false)
+          : const <String>[],
+      remoteSessionProfiles: json['remoteSessionProfiles'] is List<Object?>
+          ? (json['remoteSessionProfiles']! as List<Object?>)
+                .whereType<String>()
+                .where(
+                  (String profile) =>
+                      profile.isNotEmpty &&
+                      profile.length <= 4096 &&
+                      !profile.contains('\u0000'),
+                )
+                .take(50)
                 .toList(growable: false)
           : const <String>[],
       serialPortSettings:

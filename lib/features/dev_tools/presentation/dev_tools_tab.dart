@@ -35,6 +35,12 @@ class DevToolsTab extends StatefulWidget {
     this.initialRemoteDatabaseProfiles = const <String>[],
     this.onRemoteDatabaseProfilesChanged,
     this.remoteStartSession,
+    this.initialRemoteSessionProfiles = const <String>[],
+    this.onRemoteSessionProfilesChanged,
+    this.remoteCredentialRead,
+    this.remoteCredentialWrite,
+    this.remoteCredentialDelete,
+    this.remoteProfileIdGenerator,
     this.initialSerialPortSettings,
     this.onSerialPortSettingsChanged,
     this.serialPortLister,
@@ -59,6 +65,13 @@ class DevToolsTab extends StatefulWidget {
   final Future<void> Function(List<String> profiles)?
   onRemoteDatabaseProfilesChanged;
   final RemoteSessionStarter? remoteStartSession;
+  final List<String> initialRemoteSessionProfiles;
+  final Future<void> Function(List<String> profiles)?
+  onRemoteSessionProfilesChanged;
+  final RemoteCredentialReader? remoteCredentialRead;
+  final RemoteCredentialWriter? remoteCredentialWrite;
+  final RemoteCredentialDeleter? remoteCredentialDelete;
+  final String Function()? remoteProfileIdGenerator;
   final String? initialSerialPortSettings;
   final Future<void> Function(String settings)? onSerialPortSettingsChanged;
   final SerialPortLister? serialPortLister;
@@ -237,7 +250,15 @@ class _DevToolsTabState extends State<DevToolsTab> {
       );
     }
     if (tool.id == 'remote_workspace') {
-      return RemoteWorkspace(startSession: widget.remoteStartSession);
+      return RemoteWorkspace(
+        startSession: widget.remoteStartSession,
+        initialProfiles: widget.initialRemoteSessionProfiles,
+        onProfilesChanged: widget.onRemoteSessionProfilesChanged,
+        readCredential: widget.remoteCredentialRead,
+        writeCredential: widget.remoteCredentialWrite,
+        deleteCredential: widget.remoteCredentialDelete,
+        profileIdGenerator: widget.remoteProfileIdGenerator,
+      );
     }
     if (tool.id == 'serial_port') {
       return SerialPortWorkspace(
