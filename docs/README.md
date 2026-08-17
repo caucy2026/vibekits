@@ -22,6 +22,8 @@
 16. [实验与闭环路径](14_EXPERIMENTATION_PATH.md)
 17. [程序员工具版图与移植决策](15_DEVELOPER_TOOL_LANDSCAPE.md)
 18. [第三方组件、模型与供应链记录](16_THIRD_PARTY_COMPONENTS.md)
+19. [发布完成清单](17_RELEASE_COMPLETION_CHECKLIST.md)——当前唯一执行与验收清单
+20. [无歧义原子验收动作](18_ATOMIC_ACCEPTANCE_CASES.md)——前置、动作、唯一预期、失败判定与证据
 
 ## 完成定义
 

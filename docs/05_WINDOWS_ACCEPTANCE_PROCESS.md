@@ -8,7 +8,7 @@
 
 本流程规定 Vibekits Windows V1 如何准备、执行、留证、复测和签署验收。验收结果以实际运行证据为准，不以代码存在、开发者口头说明或“理论可用”代替。
 
-产品能力以 [00_WINDOWS_PRODUCT_SPEC.md](00_WINDOWS_PRODUCT_SPEC.md) 为准，逐项预期结果以 [04_WINDOWS_ACCEPTANCE_MATRIX.md](04_WINDOWS_ACCEPTANCE_MATRIX.md) 和 [07_WINDOWS_UI_ACCEPTANCE_MATRIX.md](07_WINDOWS_UI_ACCEPTANCE_MATRIX.md) 为准。
+产品能力以 [00_PRODUCT_REQUIREMENTS.md](00_PRODUCT_REQUIREMENTS.md) 为准；v1.8.0 之后的当前范围以 [发布完成清单](17_RELEASE_COMPLETION_CHECKLIST.md) 为准，实际测试动作以 [无歧义原子验收动作](18_ATOMIC_ACCEPTANCE_CASES.md) 为准。`04` 和 `07` 保留为早期用例库，不再单独决定当前状态。
 
 ## 2. 角色
 
@@ -129,6 +129,10 @@ Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\*' -ErrorAction Si
 先验收只读能力，再验收写文件和删除能力。每个模块开始前恢复夹具基线，结束后检查临时文件、句柄、后台进程和日志。
 
 ## 7. 单项验收步骤
+
+### 7.1 原子动作约束
+
+一个用例只能覆盖一个场景和一个二值结论；需要状态切换时必须写完整编号动作序列。控件必须写可见文字，结果必须写精确文本、数量、哈希、时间、进程数或文件树。出现“正常、好用、流畅、基本、完整、按需、尝试”等无法直接判定的词时，用例不得执行，必须先回到 `18_ATOMIC_ACCEPTANCE_CASES.md` 拆分或补阈值。
 
 每个 ID 都按以下流程执行：
 

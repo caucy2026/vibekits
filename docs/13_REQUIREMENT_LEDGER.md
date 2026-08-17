@@ -85,6 +85,8 @@
 
 ## 7. 当前执行顺序
 
+详细验收条件、真实环境阻塞项和发布批次已收敛到 `17_RELEASE_COMPLETION_CHECKLIST.md`，本节只保留产品级顺序。
+
 1. 清理后台/取消/容量总结与文档记录持久化闭环。
 2. Windows 风格程序员计算器与工具信息架构收敛。
 3. SQLite + PostgreSQL/MySQL/MariaDB、连接记录和系统安全凭据。
