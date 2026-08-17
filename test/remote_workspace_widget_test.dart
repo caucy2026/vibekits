@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/dev_tools/domain/port_forward_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 import 'package:vibekits/features/dev_tools/presentation/remote_workspace.dart';
@@ -437,6 +438,86 @@ void main() {
     expect(lateSession.running, isFalse);
     expect(find.byKey(const Key('remote-terminal-tabs')), findsNothing);
   });
+
+  testWidgets('端口转发表支持本地、远程和 SOCKS5 并可逐条停止', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final _FakePortForwardConnection connection = _FakePortForwardConnection();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            connectPortForwards: (
+              RemoteConnectionProfile profile,
+              String? secret,
+              RemoteHostKeyVerifier verifier,
+            ) async => connection,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'jump.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.tap(find.text('端口转发'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('remote-session-secret')),
+      'test-secret',
+    );
+    await tester.tap(find.byKey(const Key('remote-session-secret-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(connection.specs.single.kind, PortForwardKind.local);
+    expect(find.textContaining('127.0.0.1:8080'), findsOneWidget);
+    expect(find.text('运行中'), findsOneWidget);
+    expect(find.text('添加转发'), findsOneWidget);
+
+    connection.failPort = 18082;
+    await tester.enterText(find.byKey(const Key('remote-local-port')), '18082');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(find.textContaining('本地端口 18082 已占用'), findsOneWidget);
+    expect(connection.handles, hasLength(1));
+    connection.failPort = null;
+
+    await tester.tap(find.text('远程'));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('remote-local-port')), '18081');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(connection.specs.last.kind, PortForwardKind.remote);
+
+    await tester.tap(find.text('SOCKS5'));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('remote-local-port')), '1080');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    expect(connection.specs.last.kind, PortForwardKind.dynamic);
+    expect(find.textContaining('SOCKS5 127.0.0.1:1080'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('remote-forward-stop-0')));
+    await tester.pump();
+    expect(connection.handles.first.running, isFalse);
+    expect(find.text('已停止'), findsOneWidget);
+    expect(connection.connected, isTrue);
+
+    await tester.tap(find.byKey(const Key('remote-forward-disconnect-all')));
+    await tester.pump();
+    expect(connection.connected, isFalse);
+    expect(
+      connection.handles.every((_FakePortForwardHandle item) => !item.running),
+      isTrue,
+    );
+  });
 }
 
 class _FakeRemoteSession implements RemoteSessionHandle {
@@ -479,4 +560,51 @@ class _FakeInteractiveRemoteSession extends _FakeRemoteSession
   void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
     sizes.add((columns, rows));
   }
+}
+
+class _FakePortForwardConnection implements PortForwardConnection {
+  final Completer<void> _done = Completer<void>();
+  final List<PortForwardSpec> specs = <PortForwardSpec>[];
+  final List<_FakePortForwardHandle> handles = <_FakePortForwardHandle>[];
+  int? failPort;
+
+  @override
+  bool connected = true;
+
+  @override
+  Future<void> get done => _done.future;
+
+  @override
+  Future<PortForwardHandle> start(PortForwardSpec spec) async {
+    if (spec.listenPort == failPort) {
+      throw StateError('本地端口 ${spec.listenPort} 已占用');
+    }
+    specs.add(spec);
+    final _FakePortForwardHandle handle = _FakePortForwardHandle(spec);
+    handles.add(handle);
+    return handle;
+  }
+
+  @override
+  Future<void> close() async {
+    if (!connected) return;
+    connected = false;
+    for (final _FakePortForwardHandle handle in handles) {
+      await handle.stop();
+    }
+    if (!_done.isCompleted) _done.complete();
+  }
+}
+
+class _FakePortForwardHandle implements PortForwardHandle {
+  _FakePortForwardHandle(this.spec);
+
+  @override
+  final PortForwardSpec spec;
+
+  @override
+  bool running = true;
+
+  @override
+  Future<void> stop() async => running = false;
 }

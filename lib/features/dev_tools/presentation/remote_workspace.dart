@@ -7,6 +7,7 @@ import 'package:xterm/xterm.dart';
 
 import '../../../app/app_theme.dart';
 import '../domain/platform_credential_store.dart';
+import '../domain/port_forward_service.dart';
 import '../domain/remote_connection_record.dart';
 import '../domain/remote_session.dart';
 import '../domain/sftp_service.dart';
@@ -32,6 +33,11 @@ typedef RemoteFileConnector = Future<RemoteFileClient> Function(
   String? secret,
   RemoteHostKeyVerifier verifyHostKey,
 );
+typedef PortForwardConnector = Future<PortForwardConnection> Function(
+  RemoteConnectionProfile profile,
+  String? secret,
+  RemoteHostKeyVerifier verifyHostKey,
+);
 
 class RemoteWorkspace extends StatefulWidget {
   const RemoteWorkspace({
@@ -46,6 +52,7 @@ class RemoteWorkspace extends StatefulWidget {
     this.profileIdGenerator,
     this.readClipboard,
     this.connectRemoteFiles,
+    this.connectPortForwards,
   });
 
   final RemoteSessionStarter? startSession;
@@ -58,6 +65,7 @@ class RemoteWorkspace extends StatefulWidget {
   final String Function()? profileIdGenerator;
   final RemoteClipboardReader? readClipboard;
   final RemoteFileConnector? connectRemoteFiles;
+  final PortForwardConnector? connectPortForwards;
 
   @override
   State<RemoteWorkspace> createState() => _RemoteWorkspaceState();
@@ -78,8 +86,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   final ScrollController _outputScroll = ScrollController();
   Terminal _terminal = Terminal(maxLines: 10000);
   RemoteSessionMode _mode = RemoteSessionMode.ssh;
+  PortForwardKind _forwardKind = PortForwardKind.local;
   RemoteSessionHandle? _session;
   RemoteFileClient? _sftpClient;
+  PortForwardConnection? _forwardConnection;
+  final List<_PortForwardItem> _forwardItems = <_PortForwardItem>[];
   StreamSubscription<String>? _outputSubscription;
   String _output = '';
   final List<_RemoteTerminalTab> _terminalTabs = <_RemoteTerminalTab>[];
@@ -95,7 +106,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   int _terminalSearchMatches = 0;
 
   bool get _running => _session?.running == true;
-  bool get _connected => _running || _sftpClient != null;
+  bool get _connected =>
+      _running || _sftpClient != null || _forwardConnection != null;
   bool get _interactive => _session is RemoteInteractiveSessionHandle;
   _RemoteTerminalTab? get _activeTab =>
       _activeTerminalTab >= 0 && _activeTerminalTab < _terminalTabs.length
@@ -507,6 +519,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     }
     final RemoteFileClient? sftp = _sftpClient;
     if (sftp != null) unawaited(sftp.close());
+    final PortForwardConnection? forwards = _forwardConnection;
+    if (forwards != null) unawaited(forwards.close());
     for (final TextEditingController controller in <TextEditingController>[
       _host,
       _user,
@@ -640,7 +654,124 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     return accepted == true;
   }
 
+  PortForwardSpec _buildForwardSpec() => PortForwardSpec(
+    kind: _forwardKind,
+    listenPort: int.tryParse(_localPort.text) ?? 0,
+    targetHost: _targetHost.text,
+    targetPort: int.tryParse(_targetPort.text),
+  );
+
+  Future<void> _startForward() async {
+    final int generation = ++_connectGeneration;
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    try {
+      final RemoteConnectionProfile profile = RemoteConnectionProfile(
+        host: _host.text,
+        user: _user.text,
+        port: int.tryParse(_port.text) ?? 0,
+        identityFile: _identity.text.trim().isEmpty ? null : _identity.text,
+      );
+      profile.validate();
+      final PortForwardSpec spec = _buildForwardSpec()..validate();
+      PortForwardConnection? connection = _forwardConnection;
+      if (connection == null || !connection.connected) {
+        String? secret;
+        final RemoteConnectionRecord? selected = _selectedProfile;
+        if (selected != null) {
+          secret = await _readCredential(selected.credentialKey);
+        }
+        if (secret?.isNotEmpty != true &&
+            profile.identityFile?.isNotEmpty != true) {
+          secret = await _requestSessionSecret();
+          if (secret == null) {
+            if (mounted) setState(() => _starting = false);
+            return;
+          }
+        }
+        Future<bool> verifier(String type, String fingerprint) =>
+            generation == _connectGeneration
+            ? _verifyHostKey(type, fingerprint)
+            : Future<bool>.value(false);
+        connection = await (widget.connectPortForwards != null
+            ? widget.connectPortForwards!(profile, secret, verifier)
+            : PortForwardService.connect(
+                profile,
+                secret: secret,
+                verifyHostKey: verifier,
+              ));
+        if (!mounted || generation != _connectGeneration) {
+          await connection.close();
+          return;
+        }
+        _forwardConnection = connection;
+        final PortForwardConnection activeConnection = connection;
+        unawaited(
+          activeConnection.done.whenComplete(() {
+            if (!mounted || !identical(_forwardConnection, activeConnection)) {
+              return;
+            }
+            _forwardConnection = null;
+            for (final _PortForwardItem item in _forwardItems) {
+              item.stopped = true;
+            }
+            setState(() => _error = 'SSH 转发连接已断开');
+          }),
+        );
+      }
+      final PortForwardHandle handle = await connection.start(spec);
+      if (!mounted || generation != _connectGeneration) {
+        await handle.stop();
+        return;
+      }
+      setState(() {
+        _starting = false;
+        _forwardItems.add(_PortForwardItem(handle));
+      });
+      final RemoteConnectionRecord? selected = _selectedProfile;
+      if (selected != null) {
+        _profiles[_profiles.indexOf(selected)] = selected.copyWith(
+          lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        unawaited(_persistProfiles());
+      }
+    } catch (error) {
+      if (!mounted || generation != _connectGeneration) return;
+      setState(() {
+        _starting = false;
+        _error = error is FormatException
+            ? error.message
+            : error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Future<void> _stopForward(_PortForwardItem item) async {
+    if (item.stopped) return;
+    item.stopped = true;
+    setState(() {});
+    await item.handle.stop();
+  }
+
+  Future<void> _disconnectForwards() async {
+    final PortForwardConnection? connection = _forwardConnection;
+    if (connection == null) return;
+    _connectGeneration += 1;
+    _forwardConnection = null;
+    for (final _PortForwardItem item in _forwardItems) {
+      item.stopped = true;
+    }
+    setState(() {});
+    await connection.close();
+  }
+
   Future<void> _start() async {
+    if (_mode == RemoteSessionMode.localForward) {
+      await _startForward();
+      return;
+    }
     final int generation = ++_connectGeneration;
     setState(() {
       _starting = true;
@@ -963,6 +1094,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 label: '主机',
                 hint: 'server.example.com',
                 keyName: 'remote-host',
+                enabled: !_connected && !_starting,
               ),
               _Field(
                 width: 150,
@@ -970,12 +1102,14 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 label: '用户名',
                 hint: 'developer',
                 keyName: 'remote-user',
+                enabled: !_connected && !_starting,
               ),
               _Field(
                 width: 90,
                 controller: _port,
                 label: '端口',
                 keyName: 'remote-port',
+                enabled: !_connected && !_starting,
               ),
               SizedBox(
                 width: 300,
@@ -999,6 +1133,29 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           ),
           if (_mode == RemoteSessionMode.localForward) ...<Widget>[
             const SizedBox(height: 10),
+            SegmentedButton<PortForwardKind>(
+              showSelectedIcon: false,
+              segments: const <ButtonSegment<PortForwardKind>>[
+                ButtonSegment<PortForwardKind>(
+                  value: PortForwardKind.local,
+                  label: Text('本地'),
+                ),
+                ButtonSegment<PortForwardKind>(
+                  value: PortForwardKind.remote,
+                  label: Text('远程'),
+                ),
+                ButtonSegment<PortForwardKind>(
+                  value: PortForwardKind.dynamic,
+                  label: Text('SOCKS5'),
+                ),
+              ],
+              selected: <PortForwardKind>{_forwardKind},
+              onSelectionChanged: _starting
+                  ? null
+                  : (Set<PortForwardKind> value) =>
+                        setState(() => _forwardKind = value.first),
+            ),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -1006,21 +1163,27 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 _Field(
                   width: 130,
                   controller: _localPort,
-                  label: '本地端口',
+                  label: _forwardKind == PortForwardKind.remote
+                      ? '远端监听端口'
+                      : '本地监听端口',
                   keyName: 'remote-local-port',
                 ),
-                _Field(
-                  width: 230,
-                  controller: _targetHost,
-                  label: '远端可访问的目标',
-                  keyName: 'remote-target-host',
-                ),
-                _Field(
-                  width: 130,
-                  controller: _targetPort,
-                  label: '目标端口',
-                  keyName: 'remote-target-port',
-                ),
+                if (_forwardKind != PortForwardKind.dynamic) ...<Widget>[
+                  _Field(
+                    width: 230,
+                    controller: _targetHost,
+                    label: _forwardKind == PortForwardKind.remote
+                        ? '本机目标主机'
+                        : '远端目标主机',
+                    keyName: 'remote-target-host',
+                  ),
+                  _Field(
+                    width: 130,
+                    controller: _targetPort,
+                    label: '目标端口',
+                    keyName: 'remote-target-port',
+                  ),
+                ],
               ],
             ),
           ],
@@ -1044,6 +1207,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                     ? _cancelStart
                     : _sftpClient != null
                     ? _disconnectSftp
+                    : _mode == RemoteSessionMode.localForward
+                    ? _start
                     : _running
                     ? _stop
                     : _start,
@@ -1052,6 +1217,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                       ? Icons.close_rounded
                       : _sftpClient != null
                       ? Icons.stop_rounded
+                      : _mode == RemoteSessionMode.localForward
+                      ? Icons.add_rounded
                       : _running
                       ? Icons.stop_rounded
                       : Icons.power_settings_new,
@@ -1062,13 +1229,25 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                       ? '取消连接'
                       : _sftpClient != null
                       ? '断开 SFTP'
+                      : _mode == RemoteSessionMode.localForward
+                      ? _forwardConnection == null
+                            ? '启动转发'
+                            : '添加转发'
                       : _running
                       ? '断开'
-                      : _mode == RemoteSessionMode.localForward
-                      ? '启动转发'
                       : '连接',
                 ),
               ),
+              if (_mode == RemoteSessionMode.localForward &&
+                  _forwardConnection != null) ...<Widget>[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  key: const Key('remote-forward-disconnect-all'),
+                  onPressed: _disconnectForwards,
+                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                  label: const Text('全部断开'),
+                ),
+              ],
               if (_running) ...<Widget>[
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
@@ -1084,7 +1263,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                   _mode == RemoteSessionMode.sftp
                       ? '连接后直接在本地/远端双栏拖放；同名文件先确认。'
                       : _mode == RemoteSessionMode.localForward
-                      ? '仅监听 127.0.0.1，停止会话即关闭转发。'
+                      ? '本地/SOCKS 只监听 127.0.0.1；每条可独立停止。'
                       : '首次连接必须核对服务端主机指纹；不会自动跳过验证。',
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
                 ),
@@ -1171,7 +1350,13 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           ],
           const SizedBox(height: 10),
           Expanded(
-            child: _sftpClient != null
+            child: _mode == RemoteSessionMode.localForward
+                ? _PortForwardList(
+                    items: _forwardItems,
+                    connected: _forwardConnection != null,
+                    onStop: _stopForward,
+                  )
+                : _sftpClient != null
                 ? SftpBrowser(
                     key: const Key('sftp-browser'),
                     client: _sftpClient!,
@@ -1264,6 +1449,68 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   }
 }
 
+class _PortForwardItem {
+  _PortForwardItem(this.handle);
+
+  final PortForwardHandle handle;
+  bool stopped = false;
+}
+
+class _PortForwardList extends StatelessWidget {
+  const _PortForwardList({
+    required this.items,
+    required this.connected,
+    required this.onStop,
+  });
+
+  final List<_PortForwardItem> items;
+  final bool connected;
+  final Future<void> Function(_PortForwardItem item) onStop;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('remote-forward-list'),
+    decoration: BoxDecoration(
+      color: context.vibe.canvas,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: context.vibe.border),
+    ),
+    child: items.isEmpty
+        ? Center(
+            child: Text(
+              connected ? '连接已就绪，添加第一条转发。' : '填写规则后启动转发。',
+              style: TextStyle(color: context.vibe.muted),
+            ),
+          )
+        : ListView.separated(
+            padding: const EdgeInsets.all(8),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final _PortForwardItem item = items[index];
+              final bool running = !item.stopped && item.handle.running;
+              return ListTile(
+                key: Key('remote-forward-item-$index'),
+                dense: true,
+                leading: Icon(
+                  running ? Icons.swap_horiz_rounded : Icons.stop_rounded,
+                  color: running ? context.vibe.success : context.vibe.muted,
+                ),
+                title: Text(item.handle.spec.description),
+                subtitle: Text(running ? '运行中' : '已停止'),
+                trailing: running
+                    ? TextButton(
+                        key: Key('remote-forward-stop-$index'),
+                        onPressed: () => onStop(item),
+                        child: const Text('停止'),
+                      )
+                    : null,
+              );
+            },
+          ),
+  );
+}
+
 class _Field extends StatelessWidget {
   const _Field({
     required this.width,
@@ -1271,6 +1518,7 @@ class _Field extends StatelessWidget {
     required this.label,
     required this.keyName,
     this.hint,
+    this.enabled = true,
   });
 
   final double width;
@@ -1278,6 +1526,7 @@ class _Field extends StatelessWidget {
   final String label;
   final String keyName;
   final String? hint;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1286,6 +1535,7 @@ class _Field extends StatelessWidget {
       child: TextField(
         key: Key(keyName),
         controller: controller,
+        enabled: enabled,
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,

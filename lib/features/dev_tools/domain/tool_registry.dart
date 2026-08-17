@@ -62,7 +62,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     id: 'remote_workspace',
     name: 'SSH / SFTP',
     group: ToolGroups.remote,
-    description: '使用系统 OpenSSH 连接终端、传输文件和建立本地端口转发。',
+    description: '统一管理安全终端、双栏文件和本地/远程/SOCKS5 端口转发。',
   ),
   const ToolSpec(
     id: 'serial_port',
