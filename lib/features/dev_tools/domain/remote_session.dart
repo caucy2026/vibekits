@@ -171,6 +171,53 @@ abstract final class RemoteSessionService {
   }
 }
 
+abstract final class RemoteSshConnector {
+  static Future<SSHClient> connect(
+    RemoteConnectionProfile profile, {
+    String? secret,
+    RemoteHostKeyVerifier? verifyHostKey,
+  }) async {
+    profile.validate();
+    final String? identityPath = profile.identityFile?.trim();
+    List<SSHKeyPair>? identities;
+    if (identityPath?.isNotEmpty == true) {
+      final String pem = await File(identityPath!).readAsString();
+      identities = SSHKeyPair.fromPem(
+        pem,
+        secret?.isEmpty == true ? null : secret,
+      );
+    }
+    final SSHSocket socket = await SSHSocket.connect(
+      profile.host.trim(),
+      profile.port,
+      timeout: const Duration(seconds: 10),
+    );
+    final SSHClient client = SSHClient(
+      socket,
+      username: profile.user.trim(),
+      identities: identities,
+      onPasswordRequest: identityPath?.isNotEmpty == true
+          ? null
+          : () => secret?.isEmpty == true ? null : secret,
+      onVerifyHostKey: (String type, Uint8List fingerprint) async {
+        final RemoteHostKeyVerifier? verifier = verifyHostKey;
+        if (verifier == null) return false;
+        return verifier(type, utf8.decode(fingerprint));
+      },
+      handshakeTimeout: const Duration(seconds: 12),
+      authTimeout: const Duration(seconds: 15),
+      keepAliveInterval: const Duration(seconds: 20),
+    );
+    try {
+      await client.authenticated;
+      return client;
+    } on Object {
+      client.close();
+      rethrow;
+    }
+  }
+}
+
 class _DartSshRemoteSession implements RemoteInteractiveSessionHandle {
   _DartSshRemoteSession._(this._client, this._session) {
     _stdout = _session.stdout
@@ -196,36 +243,10 @@ class _DartSshRemoteSession implements RemoteInteractiveSessionHandle {
     String? secret,
     RemoteHostKeyVerifier? verifyHostKey,
   }) async {
-    request.profile.validate();
-    final String? identityPath = request.profile.identityFile?.trim();
-    List<SSHKeyPair>? identities;
-    if (identityPath?.isNotEmpty == true) {
-      final String pem = await File(identityPath!).readAsString();
-      identities = SSHKeyPair.fromPem(
-        pem,
-        secret?.isEmpty == true ? null : secret,
-      );
-    }
-    final SSHSocket socket = await SSHSocket.connect(
-      request.profile.host.trim(),
-      request.profile.port,
-      timeout: const Duration(seconds: 10),
-    );
-    final SSHClient client = SSHClient(
-      socket,
-      username: request.profile.user.trim(),
-      identities: identities,
-      onPasswordRequest: identityPath?.isNotEmpty == true
-          ? null
-          : () => secret?.isEmpty == true ? null : secret,
-      onVerifyHostKey: (String type, Uint8List fingerprint) async {
-        final RemoteHostKeyVerifier? verifier = verifyHostKey;
-        if (verifier == null) return false;
-        return verifier(type, utf8.decode(fingerprint));
-      },
-      handshakeTimeout: const Duration(seconds: 12),
-      authTimeout: const Duration(seconds: 15),
-      keepAliveInterval: const Duration(seconds: 20),
+    final SSHClient client = await RemoteSshConnector.connect(
+      request.profile,
+      secret: secret,
+      verifyHostKey: verifyHostKey,
     );
     try {
       await client.authenticated;

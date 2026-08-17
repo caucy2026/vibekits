@@ -9,6 +9,8 @@ import '../../../app/app_theme.dart';
 import '../domain/platform_credential_store.dart';
 import '../domain/remote_connection_record.dart';
 import '../domain/remote_session.dart';
+import '../domain/sftp_service.dart';
+import 'sftp_browser.dart';
 
 typedef RemoteSessionStarter = Future<RemoteSessionHandle> Function(
   RemoteLaunchRequest request,
@@ -25,6 +27,11 @@ typedef RemoteCredentialWriter = Future<void> Function(
 );
 typedef RemoteCredentialDeleter = Future<void> Function(String key);
 typedef RemoteClipboardReader = Future<String?> Function();
+typedef RemoteFileConnector = Future<RemoteFileClient> Function(
+  RemoteConnectionProfile profile,
+  String? secret,
+  RemoteHostKeyVerifier verifyHostKey,
+);
 
 class RemoteWorkspace extends StatefulWidget {
   const RemoteWorkspace({
@@ -38,6 +45,7 @@ class RemoteWorkspace extends StatefulWidget {
     this.deleteCredential,
     this.profileIdGenerator,
     this.readClipboard,
+    this.connectRemoteFiles,
   });
 
   final RemoteSessionStarter? startSession;
@@ -49,6 +57,7 @@ class RemoteWorkspace extends StatefulWidget {
   final RemoteCredentialDeleter? deleteCredential;
   final String Function()? profileIdGenerator;
   final RemoteClipboardReader? readClipboard;
+  final RemoteFileConnector? connectRemoteFiles;
 
   @override
   State<RemoteWorkspace> createState() => _RemoteWorkspaceState();
@@ -70,6 +79,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   Terminal _terminal = Terminal(maxLines: 10000);
   RemoteSessionMode _mode = RemoteSessionMode.ssh;
   RemoteSessionHandle? _session;
+  RemoteFileClient? _sftpClient;
   StreamSubscription<String>? _outputSubscription;
   String _output = '';
   final List<_RemoteTerminalTab> _terminalTabs = <_RemoteTerminalTab>[];
@@ -85,6 +95,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   int _terminalSearchMatches = 0;
 
   bool get _running => _session?.running == true;
+  bool get _connected => _running || _sftpClient != null;
   bool get _interactive => _session is RemoteInteractiveSessionHandle;
   _RemoteTerminalTab? get _activeTab =>
       _activeTerminalTab >= 0 && _activeTerminalTab < _terminalTabs.length
@@ -494,6 +505,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       unawaited(tab.session.stop());
       tab.controller.dispose();
     }
+    final RemoteFileClient? sftp = _sftpClient;
+    if (sftp != null) unawaited(sftp.close());
     for (final TextEditingController controller in <TextEditingController>[
       _host,
       _user,
@@ -650,7 +663,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       // Build first so validation errors appear before process creation.
       request.buildArguments();
       String? secret;
-      if (widget.startSession == null && _mode == RemoteSessionMode.ssh) {
+      if (widget.startSession == null &&
+          (_mode == RemoteSessionMode.ssh || _mode == RemoteSessionMode.sftp)) {
         final RemoteConnectionRecord? selected = _selectedProfile;
         if (selected != null) {
           secret = await _readCredential(selected.credentialKey);
@@ -664,24 +678,41 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           }
         }
       }
+      Future<bool> verifier(String type, String fingerprint) =>
+          generation == _connectGeneration
+          ? _verifyHostKey(type, fingerprint)
+          : Future<bool>.value(false);
+      if (_mode == RemoteSessionMode.sftp && widget.startSession == null) {
+        final RemoteFileClient client = await (widget.connectRemoteFiles != null
+            ? widget.connectRemoteFiles!(request.profile, secret, verifier)
+            : RemoteFileService.connect(
+                request.profile,
+                secret: secret,
+                verifyHostKey: verifier,
+              ));
+        if (!mounted || generation != _connectGeneration) {
+          await client.close();
+          return;
+        }
+        _sftpClient = client;
+        setState(() => _starting = false);
+        final RemoteConnectionRecord? selected = _selectedProfile;
+        if (selected != null) {
+          _profiles[_profiles.indexOf(selected)] = selected.copyWith(
+            lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
+          );
+          unawaited(_persistProfiles());
+        }
+        return;
+      }
       final RemoteSessionHandle session = await (widget.startSession != null
           ? widget.startSession!(request)
           : widget.secureStartSession != null
-          ? widget.secureStartSession!(
-              request,
-              secret,
-              (String type, String fingerprint) =>
-                  generation == _connectGeneration
-                  ? _verifyHostKey(type, fingerprint)
-                  : Future<bool>.value(false),
-            )
+          ? widget.secureStartSession!(request, secret, verifier)
           : RemoteSessionService.start(
               request,
               secret: secret,
-              verifyHostKey: (String type, String fingerprint) =>
-                  generation == _connectGeneration
-                  ? _verifyHostKey(type, fingerprint)
-                  : Future<bool>.value(false),
+              verifyHostKey: verifier,
             ));
       if (!mounted || generation != _connectGeneration) {
         await session.stop();
@@ -777,6 +808,14 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     setState(() {});
   }
 
+  Future<void> _disconnectSftp() async {
+    final RemoteFileClient? client = _sftpClient;
+    if (client == null) return;
+    _sftpClient = null;
+    setState(() {});
+    await client.close();
+  }
+
   Future<void> _closeTerminalTab(int index) async {
     if (index < 0 || index >= _terminalTabs.length) return;
     final _RemoteTerminalTab tab = _terminalTabs[index];
@@ -848,25 +887,25 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                         ),
                       )
                       .toList(growable: false),
-                  onChanged: _running || _starting ? null : _selectProfile,
+                  onChanged: _connected || _starting ? null : _selectProfile,
                 ),
               ),
               OutlinedButton.icon(
                 key: const Key('remote-profile-save'),
-                onPressed: _running || _starting ? null : _saveProfile,
+                onPressed: _connected || _starting ? null : _saveProfile,
                 icon: const Icon(Icons.save_outlined, size: 17),
                 label: Text(_selectedProfile == null ? '保存会话' : '更新'),
               ),
               IconButton(
                 key: const Key('remote-profile-new'),
                 tooltip: '新建会话',
-                onPressed: _running || _starting ? null : _newProfile,
+                onPressed: _connected || _starting ? null : _newProfile,
                 icon: const Icon(Icons.add_rounded),
               ),
               IconButton(
                 key: const Key('remote-profile-favorite-toggle'),
                 tooltip: _selectedProfile?.favorite == true ? '取消收藏' : '收藏',
-                onPressed: _selectedProfile == null || _running || _starting
+                onPressed: _selectedProfile == null || _connected || _starting
                     ? null
                     : _toggleFavorite,
                 icon: Icon(
@@ -878,7 +917,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               IconButton(
                 key: const Key('remote-profile-delete'),
                 tooltip: '删除会话',
-                onPressed: _selectedProfile == null || _running || _starting
+                onPressed: _selectedProfile == null || _connected || _starting
                     ? null
                     : _deleteProfile,
                 icon: const Icon(Icons.delete_outline),
@@ -908,7 +947,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               ),
             ],
             selected: <RemoteSessionMode>{_mode},
-            onSelectionChanged: _running || _starting
+            onSelectionChanged: _connected || _starting
                 ? null
                 : (Set<RemoteSessionMode> value) =>
                       setState(() => _mode = value.first),
@@ -943,14 +982,14 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 child: TextField(
                   key: const Key('remote-identity'),
                   controller: _identity,
-                  enabled: !_running && !_starting,
+                  enabled: !_connected && !_starting,
                   decoration: InputDecoration(
                     labelText: '私钥（可选）',
                     isDense: true,
                     border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
                       tooltip: '选择私钥',
-                      onPressed: _running || _starting ? null : _pickIdentity,
+                      onPressed: _connected || _starting ? null : _pickIdentity,
                       icon: const Icon(Icons.key_outlined, size: 17),
                     ),
                   ),
@@ -1003,12 +1042,16 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 key: const Key('remote-primary-action'),
                 onPressed: _starting
                     ? _cancelStart
+                    : _sftpClient != null
+                    ? _disconnectSftp
                     : _running
                     ? _stop
                     : _start,
                 icon: Icon(
                   _starting
                       ? Icons.close_rounded
+                      : _sftpClient != null
+                      ? Icons.stop_rounded
                       : _running
                       ? Icons.stop_rounded
                       : Icons.power_settings_new,
@@ -1017,6 +1060,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 label: Text(
                   _starting
                       ? '取消连接'
+                      : _sftpClient != null
+                      ? '断开 SFTP'
                       : _running
                       ? '断开'
                       : _mode == RemoteSessionMode.localForward
@@ -1037,7 +1082,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               Expanded(
                 child: Text(
                   _mode == RemoteSessionMode.sftp
-                      ? '连接后输入 ls / cd / get / put；路径由 OpenSSH 解析。'
+                      ? '连接后直接在本地/远端双栏拖放；同名文件先确认。'
                       : _mode == RemoteSessionMode.localForward
                       ? '仅监听 127.0.0.1，停止会话即关闭转发。'
                       : '首次连接必须核对服务端主机指纹；不会自动跳过验证。',
@@ -1046,7 +1091,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               ),
             ],
           ),
-          if (_terminalTabs.isNotEmpty) ...<Widget>[
+          if (_sftpClient == null && _terminalTabs.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             SizedBox(
               height: 34,
@@ -1126,64 +1171,71 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           ],
           const SizedBox(height: 10),
           Expanded(
-            child: Container(
-              key: const Key('remote-output'),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: context.vibe.canvas,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: context.vibe.border),
-              ),
-              child: _interactive
-                  ? CallbackShortcuts(
-                      bindings: <ShortcutActivator, VoidCallback>{
-                        const SingleActivator(
-                          LogicalKeyboardKey.keyV,
-                          control: true,
-                        ): () =>
-                            unawaited(_safePaste()),
-                        const SingleActivator(
-                          LogicalKeyboardKey.keyV,
-                          meta: true,
-                        ): () =>
-                            unawaited(_safePaste()),
-                        const SingleActivator(
-                          LogicalKeyboardKey.keyF,
-                          control: true,
-                        ): _toggleTerminalSearch,
-                        const SingleActivator(
-                          LogicalKeyboardKey.keyF,
-                          meta: true,
-                        ): _toggleTerminalSearch,
-                      },
-                      child: TerminalView(
-                        _terminal,
-                        key: const Key('remote-interactive-terminal'),
-                        controller: _activeTab?.controller,
-                        autofocus: true,
-                        padding: const EdgeInsets.all(4),
-                        shortcuts:
-                            Map<ShortcutActivator, Intent>.of(
-                              defaultTerminalShortcuts,
-                            )..removeWhere(
-                              (_, Intent intent) => intent is PasteTextIntent,
-                            ),
-                      ),
-                    )
-                  : SingleChildScrollView(
-                      controller: _outputScroll,
-                      child: SelectableText(
-                        _output.isEmpty ? '会话输出会显示在这里。' : _output,
-                        style: const TextStyle(
-                          fontFamily: 'Cascadia Mono',
-                          fontSize: 12,
-                          height: 1.45,
-                        ),
-                      ),
+            child: _sftpClient != null
+                ? SftpBrowser(
+                    key: const Key('sftp-browser'),
+                    client: _sftpClient!,
+                  )
+                : Container(
+                    key: const Key('remote-output'),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: context.vibe.canvas,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: context.vibe.border),
                     ),
-            ),
+                    child: _interactive
+                        ? CallbackShortcuts(
+                            bindings: <ShortcutActivator, VoidCallback>{
+                              const SingleActivator(
+                                LogicalKeyboardKey.keyV,
+                                control: true,
+                              ): () =>
+                                  unawaited(_safePaste()),
+                              const SingleActivator(
+                                LogicalKeyboardKey.keyV,
+                                meta: true,
+                              ): () =>
+                                  unawaited(_safePaste()),
+                              const SingleActivator(
+                                LogicalKeyboardKey.keyF,
+                                control: true,
+                              ): _toggleTerminalSearch,
+                              const SingleActivator(
+                                LogicalKeyboardKey.keyF,
+                                meta: true,
+                              ): _toggleTerminalSearch,
+                            },
+                            child: TerminalView(
+                              _terminal,
+                              key: const Key('remote-interactive-terminal'),
+                              controller: _activeTab?.controller,
+                              autofocus: true,
+                              padding: const EdgeInsets.all(4),
+                              shortcuts:
+                                  Map<ShortcutActivator, Intent>.of(
+                                    defaultTerminalShortcuts,
+                                  )..removeWhere(
+                                    (_, Intent intent) =>
+                                        intent is PasteTextIntent,
+                                  ),
+                            ),
+                          )
+                        : SingleChildScrollView(
+                            controller: _outputScroll,
+                            child: SelectableText(
+                              _output.isEmpty ? '会话输出会显示在这里。' : _output,
+                              style: const TextStyle(
+                                fontFamily: 'Cascadia Mono',
+                                fontSize: 12,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                  ),
           ),
-          if (_mode != RemoteSessionMode.localForward &&
+          if (_sftpClient == null &&
+              _mode != RemoteSessionMode.localForward &&
               !_interactive) ...<Widget>[
             const SizedBox(height: 8),
             TextField(
