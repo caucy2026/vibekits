@@ -15,7 +15,7 @@
 
 - `flutter analyze`：0 问题。
 - 合并回归：27/27 通过，覆盖界面容量总结、独立 Isolate 进度/取消、真实字节计量、标准/未知分类、深度/大小/年龄过滤、`estlog` 新旧文件过滤和完整 JSON 报告。
-- Windows Debug 构建：待本批次构建完成后记录。
+- Windows Debug 构建成功：`build/windows/x64/runner/Debug/vibekits.exe`，产物 `FileVersion` 与 `ProductVersion` 均为 `1.9.0-dev.19+29`。
 
 ## 安全边界
 
