@@ -25,33 +25,80 @@ class HarnessConversationMessage {
     if (exitCode != null) 'exitCode': exitCode,
     if (stopped) 'stopped': true,
   };
+
+  static HarnessConversationMessage? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final Map<String, Object?> item = Map<String, Object?>.from(value);
+    final String text = item['text'] is String ? item['text']! as String : '';
+    if (text.isEmpty ||
+        text.length > HarnessConversationStore.maxMessageCharacters) {
+      return null;
+    }
+    return HarnessConversationMessage(
+      text: text,
+      user: item['user'] == true,
+      elapsedMs: item['elapsedMs'] is int ? item['elapsedMs']! as int : null,
+      exitCode: item['exitCode'] is int ? item['exitCode']! as int : null,
+      stopped: item['stopped'] == true,
+    );
+  }
 }
 
-class HarnessConversationSnapshot {
-  const HarnessConversationSnapshot({
-    required this.workspace,
+class HarnessConversationSession {
+  const HarnessConversationSession({
+    required this.id,
+    required this.title,
     required this.messages,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String title;
+  final List<HarnessConversationMessage> messages;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  HarnessConversationSession copyWith({
+    String? title,
+    List<HarnessConversationMessage>? messages,
+    DateTime? updatedAt,
+  }) => HarnessConversationSession(
+    id: id,
+    title: title ?? this.title,
+    messages: messages ?? this.messages,
+    createdAt: createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+}
+
+class HarnessConversationProject {
+  const HarnessConversationProject({
+    required this.workspace,
+    required this.sessions,
+    required this.activeSessionId,
     required this.updatedAt,
   });
 
   final String workspace;
-  final List<HarnessConversationMessage> messages;
+  final List<HarnessConversationSession> sessions;
+  final String? activeSessionId;
   final DateTime updatedAt;
 }
 
 typedef HarnessConversationLoader =
-    Future<HarnessConversationSnapshot?> Function(String workspace);
+    Future<HarnessConversationProject?> Function(String workspace);
 typedef HarnessConversationSaver = Future<void> Function(
-  String workspace,
-  List<HarnessConversationMessage> messages,
+  HarnessConversationProject project,
 );
 
 abstract final class HarnessConversationStore {
+  static const int maxSessions = 40;
   static const int maxMessages = 80;
   static const int maxMessageCharacters = 65536;
-  static const int maxFileBytes = 2 * 1024 * 1024;
+  static const int maxFileBytes = 8 * 1024 * 1024;
 
-  static Future<HarnessConversationSnapshot?> load(String workspace) async {
+  static Future<HarnessConversationProject?> load(String workspace) async {
     final String normalized = _normalizeWorkspace(workspace);
     if (normalized.isEmpty) return null;
     final File file = _fileFor(normalized);
@@ -60,82 +107,204 @@ abstract final class HarnessConversationStore {
       if (await file.length() > maxFileBytes) return null;
       final Object? decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map || decoded['workspace'] != normalized) return null;
-      final List<Object?> raw = decoded['messages'] is List
-          ? List<Object?>.from(decoded['messages']! as List)
-          : const <Object?>[];
-      final List<HarnessConversationMessage> messages =
-          <HarnessConversationMessage>[];
-      for (final Object? value in raw.take(maxMessages)) {
-        if (value is! Map) continue;
-        final Map<String, Object?> item = Map<String, Object?>.from(value);
-        final String text = item['text'] is String
-            ? item['text']! as String
-            : '';
-        if (text.isEmpty || text.length > maxMessageCharacters) continue;
-        messages.add(
-          HarnessConversationMessage(
-            text: text,
-            user: item['user'] == true,
-            elapsedMs: item['elapsedMs'] is int
-                ? item['elapsedMs']! as int
-                : null,
-            exitCode: item['exitCode'] is int ? item['exitCode']! as int : null,
-            stopped: item['stopped'] == true,
-          ),
+      final DateTime fileUpdatedAt =
+          DateTime.tryParse('${decoded['updatedAt'] ?? ''}') ??
+          (await file.stat()).modified;
+      if (decoded['sessions'] is List) {
+        final List<HarnessConversationSession> sessions =
+            <HarnessConversationSession>[];
+        for (final Object? raw in (decoded['sessions']! as List).take(
+          maxSessions,
+        )) {
+          final HarnessConversationSession? session = _sessionFromJson(raw);
+          if (session != null) sessions.add(session);
+        }
+        sessions.sort(
+          (HarnessConversationSession left, HarnessConversationSession right) =>
+              right.updatedAt.compareTo(left.updatedAt),
+        );
+        final String requestedActive = '${decoded['activeSessionId'] ?? ''}';
+        final String? active =
+            sessions.any(
+              (HarnessConversationSession session) =>
+                  session.id == requestedActive,
+            )
+            ? requestedActive
+            : sessions.firstOrNull?.id;
+        return HarnessConversationProject(
+          workspace: normalized,
+          sessions: List<HarnessConversationSession>.unmodifiable(sessions),
+          activeSessionId: active,
+          updatedAt: fileUpdatedAt,
         );
       }
-      return HarnessConversationSnapshot(
+      final List<HarnessConversationMessage> messages = _messagesFromJson(
+        decoded['messages'],
+      );
+      if (messages.isEmpty) return null;
+      final HarnessConversationSession migrated = HarnessConversationSession(
+        id: 'legacy-${fileUpdatedAt.microsecondsSinceEpoch}',
+        title: _titleFor(messages),
+        messages: messages,
+        createdAt: fileUpdatedAt,
+        updatedAt: fileUpdatedAt,
+      );
+      return HarnessConversationProject(
         workspace: normalized,
-        messages: List<HarnessConversationMessage>.unmodifiable(messages),
-        updatedAt:
-            DateTime.tryParse('${decoded['updatedAt'] ?? ''}') ??
-            (await file.stat()).modified,
+        sessions: <HarnessConversationSession>[migrated],
+        activeSessionId: migrated.id,
+        updatedAt: fileUpdatedAt,
       );
     } on Object {
       return null;
     }
   }
 
-  static Future<void> save(
-    String workspace,
-    List<HarnessConversationMessage> messages,
-  ) async {
-    final String normalized = _normalizeWorkspace(workspace);
+  static Future<void> save(HarnessConversationProject project) async {
+    final String normalized = _normalizeWorkspace(project.workspace);
     if (normalized.isEmpty) return;
-    final File file = _fileFor(normalized);
-    await file.parent.create(recursive: true);
-    final List<HarnessConversationMessage> bounded = messages
-        .where((HarnessConversationMessage item) => item.text.isNotEmpty)
-        .map(
-          (HarnessConversationMessage item) => HarnessConversationMessage(
-            text: item.text.length <= maxMessageCharacters
-                ? item.text
-                : item.text.substring(item.text.length - maxMessageCharacters),
-            user: item.user,
-            elapsedMs: item.elapsedMs,
-            exitCode: item.exitCode,
-            stopped: item.stopped,
-          ),
-        )
+    final List<HarnessConversationSession> sessions =
+        project.sessions
+            .where(
+              (HarnessConversationSession session) => session.id.isNotEmpty,
+            )
+            .map(_boundedSession)
+            .toList(growable: false)
+          ..sort(
+            (
+              HarnessConversationSession left,
+              HarnessConversationSession right,
+            ) => right.updatedAt.compareTo(left.updatedAt),
+          );
+    final List<HarnessConversationSession> bounded = sessions
+        .take(maxSessions)
         .toList(growable: false);
-    final List<HarnessConversationMessage> tail = bounded.length <= maxMessages
-        ? bounded
-        : bounded.sublist(bounded.length - maxMessages);
+    final String? active =
+        bounded.any(
+          (HarnessConversationSession session) =>
+              session.id == project.activeSessionId,
+        )
+        ? project.activeSessionId
+        : bounded.firstOrNull?.id;
     final String payload = jsonEncode(<String, Object?>{
-      'version': 1,
+      'version': 2,
       'workspace': normalized,
+      'activeSessionId': active,
       'updatedAt': DateTime.now().toUtc().toIso8601String(),
-      'messages': <Map<String, Object?>>[
-        for (final HarnessConversationMessage message in tail) message.toJson(),
+      'sessions': <Map<String, Object?>>[
+        for (final HarnessConversationSession session in bounded)
+          <String, Object?>{
+            'id': session.id,
+            'title': session.title,
+            'createdAt': session.createdAt.toUtc().toIso8601String(),
+            'updatedAt': session.updatedAt.toUtc().toIso8601String(),
+            'messages': <Map<String, Object?>>[
+              for (final HarnessConversationMessage message in session.messages)
+                message.toJson(),
+            ],
+          },
       ],
     });
     if (utf8.encode(payload).length > maxFileBytes) {
-      throw const FileSystemException('Harness 会话记录超过 2 MiB');
+      throw const FileSystemException('Harness 项目会话记录超过 8 MiB');
     }
+    final File file = _fileFor(normalized);
+    await file.parent.create(recursive: true);
     final File temporary = File('${file.path}.tmp');
     await temporary.writeAsString(payload, flush: true);
     if (await file.exists()) await file.delete();
     await temporary.rename(file.path);
+  }
+
+  static HarnessConversationSession? _sessionFromJson(Object? value) {
+    if (value is! Map) return null;
+    final Map<String, Object?> item = Map<String, Object?>.from(value);
+    final String id = '${item['id'] ?? ''}'.trim();
+    final DateTime? createdAt = DateTime.tryParse('${item['createdAt'] ?? ''}');
+    final DateTime? updatedAt = DateTime.tryParse('${item['updatedAt'] ?? ''}');
+    if (id.isEmpty || createdAt == null || updatedAt == null) return null;
+    final List<HarnessConversationMessage> messages = _messagesFromJson(
+      item['messages'],
+    );
+    return HarnessConversationSession(
+      id: id.length <= 100 ? id : id.substring(0, 100),
+      title: _boundedTitle('${item['title'] ?? ''}', messages),
+      messages: messages,
+      createdAt: createdAt.toLocal(),
+      updatedAt: updatedAt.toLocal(),
+    );
+  }
+
+  static List<HarnessConversationMessage> _messagesFromJson(Object? value) {
+    if (value is! List) return const <HarnessConversationMessage>[];
+    final List<HarnessConversationMessage> messages =
+        <HarnessConversationMessage>[];
+    for (final Object? raw in value.take(maxMessages)) {
+      final HarnessConversationMessage? message =
+          HarnessConversationMessage.fromJson(raw);
+      if (message != null) messages.add(message);
+    }
+    return List<HarnessConversationMessage>.unmodifiable(messages);
+  }
+
+  static HarnessConversationSession _boundedSession(
+    HarnessConversationSession session,
+  ) {
+    final List<HarnessConversationMessage> messages = session.messages
+        .where((HarnessConversationMessage message) => message.text.isNotEmpty)
+        .map(
+          (HarnessConversationMessage message) => HarnessConversationMessage(
+            text: message.text.length <= maxMessageCharacters
+                ? message.text
+                : message.text.substring(
+                    message.text.length - maxMessageCharacters,
+                  ),
+            user: message.user,
+            elapsedMs: message.elapsedMs,
+            exitCode: message.exitCode,
+            stopped: message.stopped,
+          ),
+        )
+        .toList(growable: false);
+    final List<HarnessConversationMessage> tail = messages.length <= maxMessages
+        ? messages
+        : messages.sublist(messages.length - maxMessages);
+    return session.copyWith(
+      title: _boundedTitle(session.title, tail),
+      messages: List<HarnessConversationMessage>.unmodifiable(tail),
+    );
+  }
+
+  static String _titleFor(List<HarnessConversationMessage> messages) =>
+      _boundedTitle(
+        messages
+                .where((HarnessConversationMessage message) => message.user)
+                .firstOrNull
+                ?.text ??
+            '新会话',
+        messages,
+      );
+
+  static String _boundedTitle(
+    String value,
+    List<HarnessConversationMessage> messages,
+  ) {
+    final String normalized = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final String fallback = normalized.isEmpty
+        ? _titleForFallback(messages)
+        : normalized;
+    return fallback.length <= 48 ? fallback : '${fallback.substring(0, 48)}…';
+  }
+
+  static String _titleForFallback(List<HarnessConversationMessage> messages) {
+    final String text =
+        messages
+            .where((HarnessConversationMessage message) => message.user)
+            .firstOrNull
+            ?.text
+            .trim() ??
+        '';
+    return text.isEmpty ? '新会话' : text;
   }
 
   static File _fileFor(String workspace) {

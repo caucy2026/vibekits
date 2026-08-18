@@ -80,6 +80,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   final FocusNode _composerFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
   final List<_AgentMessage> _messages = <_AgentMessage>[];
+  final List<HarnessConversationSession> _sessions =
+      <HarnessConversationSession>[];
+  String? _activeSessionId;
   HarnessEnvironmentReport? _environment;
   HarnessAgentHandle? _handle;
   StreamSubscription<String>? _outputSubscription;
@@ -201,6 +204,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     setState(() {
       _workspace.text = target;
       _messages.clear();
+      _sessions.clear();
+      _activeSessionId = null;
       _progressSteps.clear();
     });
     if (notify) await widget.onWorkspaceChanged?.call(target);
@@ -211,9 +216,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final String target = workspace.trim();
     final int epoch = ++_conversationEpoch;
     if (target.isEmpty) return;
-    HarnessConversationSnapshot? snapshot;
+    HarnessConversationProject? project;
     try {
-      snapshot = await widget.loadConversation(target);
+      project = await widget.loadConversation(target);
     } on Object {
       return;
     }
@@ -224,10 +229,20 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       return;
     }
     setState(() {
+      _sessions
+        ..clear()
+        ..addAll(project?.sessions ?? const <HarnessConversationSession>[]);
+      _activeSessionId = project?.activeSessionId;
+      final HarnessConversationSession? active = _sessions
+          .where(
+            (HarnessConversationSession session) =>
+                session.id == _activeSessionId,
+          )
+          .firstOrNull;
       _messages
         ..clear()
         ..addAll(
-          snapshot?.messages.map(
+          active?.messages.map(
                 (HarnessConversationMessage message) => _AgentMessage._(
                   text: message.text,
                   user: message.user,
@@ -245,9 +260,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _persistConversation() async {
-    try {
-      await widget.saveConversation(
-        _workspace.text.trim(),
+    final String workspace = _workspace.text.trim();
+    if (workspace.isEmpty) return;
+    final DateTime now = DateTime.now();
+    final List<HarnessConversationMessage> messages =
         <HarnessConversationMessage>[
           for (final _AgentMessage message in _messages)
             HarnessConversationMessage(
@@ -257,11 +273,74 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               exitCode: message.exitCode,
               stopped: message.stopped,
             ),
-        ],
+        ];
+    final String? activeId = _activeSessionId;
+    final List<HarnessConversationSession> sessions =
+        List<HarnessConversationSession>.of(_sessions);
+    if (activeId != null) {
+      final int index = sessions.indexWhere(
+        (HarnessConversationSession session) => session.id == activeId,
+      );
+      final HarnessConversationSession updated = HarnessConversationSession(
+        id: activeId,
+        title: _conversationTitle(messages),
+        messages: messages,
+        createdAt: index < 0 ? now : sessions[index].createdAt,
+        updatedAt: now,
+      );
+      if (index < 0) {
+        sessions.insert(0, updated);
+      } else {
+        sessions[index] = updated;
+      }
+    }
+    sessions.sort(
+      (HarnessConversationSession left, HarnessConversationSession right) =>
+          right.updatedAt.compareTo(left.updatedAt),
+    );
+    _sessions
+      ..clear()
+      ..addAll(sessions);
+    try {
+      await widget.saveConversation(
+        HarnessConversationProject(
+          workspace: workspace,
+          sessions: sessions,
+          activeSessionId: activeId,
+          updatedAt: now,
+        ),
       );
     } on Object {
       // A read-only workspace must not make the agent UI unusable.
     }
+  }
+
+  String _conversationTitle(List<HarnessConversationMessage> messages) {
+    final String title =
+        messages
+            .where((HarnessConversationMessage message) => message.user)
+            .map((HarnessConversationMessage message) => message.text.trim())
+            .where((String text) => text.isNotEmpty)
+            .firstOrNull ??
+        '新会话';
+    return title.length <= 36 ? title : '${title.substring(0, 36)}…';
+  }
+
+  void _ensureActiveSession(String prompt) {
+    if (_activeSessionId != null) return;
+    final DateTime now = DateTime.now();
+    final String id = 'session-${now.microsecondsSinceEpoch}';
+    _activeSessionId = id;
+    _sessions.insert(
+      0,
+      HarnessConversationSession(
+        id: id,
+        title: prompt.trim().isEmpty ? '新会话' : prompt.trim(),
+        messages: const <HarnessConversationMessage>[],
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
   }
 
   String _contextualPrompt(String prompt) {
@@ -308,6 +387,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final int assistantIndex = _messages.length + 1;
     _runClock = Stopwatch()..start();
     setState(() {
+      _ensureActiveSession(prompt);
       _messages
         ..add(_AgentMessage.user(prompt))
         ..add(const _AgentMessage.assistant(''));
@@ -644,32 +724,59 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _newTask() async {
-    if (_running || _messages.isEmpty) return;
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('开始新任务？'),
-        content: const Text('当前对话会从界面清除，工作区保持不变。'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('新任务'),
-          ),
-        ],
-      ),
+    if (_running || _workspace.text.trim().isEmpty) return;
+    if (_messages.isEmpty && _activeSessionId != null) return;
+    await _persistConversation();
+    if (!mounted) return;
+    final DateTime now = DateTime.now();
+    final HarnessConversationSession session = HarnessConversationSession(
+      id: 'session-${now.microsecondsSinceEpoch}',
+      title: '新会话',
+      messages: const <HarnessConversationMessage>[],
+      createdAt: now,
+      updatedAt: now,
     );
-    if (confirmed == true && mounted) {
-      setState(() {
-        _messages.clear();
-        _progressSteps.clear();
-      });
-      await _persistConversation();
-      _composerFocus.requestFocus();
-    }
+    setState(() {
+      _sessions.insert(0, session);
+      _activeSessionId = session.id;
+      _messages.clear();
+      _progressSteps.clear();
+    });
+    await _persistConversation();
+    _composerFocus.requestFocus();
+  }
+
+  Future<void> _switchSession(String sessionId) async {
+    if (_running || sessionId == _activeSessionId) return;
+    await _persistConversation();
+    if (!mounted) return;
+    final HarnessConversationSession? session = _sessions
+        .where(
+          (HarnessConversationSession candidate) => candidate.id == sessionId,
+        )
+        .firstOrNull;
+    if (session == null) return;
+    setState(() {
+      _activeSessionId = session.id;
+      _messages
+        ..clear()
+        ..addAll(
+          session.messages.map(
+            (HarnessConversationMessage message) => _AgentMessage._(
+              text: message.text,
+              user: message.user,
+              elapsed: message.elapsedMs == null
+                  ? null
+                  : Duration(milliseconds: message.elapsedMs!),
+              exitCode: message.exitCode,
+              stopped: message.stopped,
+            ),
+          ),
+        );
+      _progressSteps.clear();
+    });
+    await _persistConversation();
+    _scrollToEnd(force: true);
   }
 
   bool get _nearBottom =>
@@ -997,12 +1104,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final String workspaceName = workspace.isEmpty
         ? '尚未选择项目'
         : workspace.replaceAll('\\', '/').split('/').last;
-    final String sessionTitle =
-        _messages
-            .where((_AgentMessage message) => message.user)
-            .map((_AgentMessage message) => message.text.trim())
-            .firstOrNull ??
-        '新会话';
     return Material(
       key: const Key('agent-session-sidebar'),
       color: context.vibe.canvas,
@@ -1013,7 +1114,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           children: <Widget>[
             FilledButton.tonalIcon(
               key: const Key('agent-new-session-sidebar'),
-              onPressed: _messages.isEmpty || _running ? null : _newTask,
+              onPressed: workspace.isEmpty || _running ? null : _newTask,
               icon: const Icon(Icons.add, size: 18),
               label: const Text('新建会话'),
             ),
@@ -1058,29 +1159,60 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               ),
             ),
             const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary
-                    .withValues(alpha: 0.09),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.chat_bubble_outline, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      sessionTitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
+            Expanded(
+              child: _sessions.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        workspace.isEmpty ? '选择项目后开始会话' : '暂无会话',
+                        style: TextStyle(
+                          color: context.vibe.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: EdgeInsets.zero,
+                      itemCount: _sessions.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 3),
+                      itemBuilder: (BuildContext context, int index) {
+                        final HarnessConversationSession session =
+                            _sessions[index];
+                        final bool selected = session.id == _activeSessionId;
+                        return ListTile(
+                          key: Key('agent-session-${session.id}'),
+                          dense: true,
+                          selected: selected,
+                          selectedTileColor: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.09),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                          ),
+                          leading: Icon(
+                            selected
+                                ? Icons.chat_bubble
+                                : Icons.chat_bubble_outline,
+                            size: 15,
+                          ),
+                          title: Text(
+                            session.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onTap: _running
+                              ? null
+                              : () => _switchSession(session.id),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                ],
-              ),
             ),
-            const Spacer(),
+            const SizedBox(height: 8),
             ListTile(
               dense: true,
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1196,7 +1328,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           IconButton(
             key: const Key('agent-new-task'),
             tooltip: '新任务',
-            onPressed: _messages.isEmpty || _running ? null : _newTask,
+            onPressed: workspace.isEmpty || _running ? null : _newTask,
             icon: const Icon(Icons.add, size: 20),
           ),
         ],

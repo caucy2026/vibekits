@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_agent_preferences.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_conversation_store.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
@@ -52,6 +53,7 @@ void main() {
     });
     final List<HarnessAgentRequest> launched = <HarnessAgentRequest>[];
     String? savedWorkspace;
+    HarnessConversationProject? savedConversation;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -77,6 +79,10 @@ void main() {
             onWorkspaceChanged: (String path) async {
               savedWorkspace = path;
             },
+            loadConversation: (_) async => savedConversation,
+            saveConversation: (HarnessConversationProject project) async {
+              savedConversation = project;
+            },
           ),
         ),
       ),
@@ -86,9 +92,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(savedWorkspace, workspace.path);
     await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
     await tester.pumpAndSettle();
-    expect(find.text('deepseek-v4-pro'), findsOneWidget);
-    expect(find.text('DeepSeek 官方 V4 模型 · 验证后以 /models 返回为准'), findsOneWidget);
+    expect(find.text('Harness 模型设置'), findsOneWidget);
+    expect(
+      find.text(DeepSeekHarnessService.defaultModel),
+      findsWidgets,
+    );
+    expect(find.byKey(const Key('agent-load-models')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
     await tester.pumpAndSettle();
@@ -127,11 +140,20 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('agent-new-task')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '新任务'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
     await tester.pumpAndSettle();
     expect(find.text('今天要开发什么？'), findsOneWidget);
     expect(find.text('已定位并修复测试。'), findsNothing);
+    expect(savedConversation?.sessions, hasLength(2));
+    expect(
+      savedConversation?.sessions.any(
+        (HarnessConversationSession session) =>
+            session.title == '修复失败的测试',
+      ),
+      isTrue,
+    );
   });
 
   testWidgets('智能体运行中可停止并回到可输入状态', (WidgetTester tester) async {
@@ -331,6 +353,183 @@ void main() {
 
     await handle.complete(0);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('完全访问权限重建后仍生效且不再弹出批准菜单', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 1000);
+    addTearDown(tester.view.reset);
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_full_access_restart_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    HarnessAgentPermissionMode savedMode = HarnessAgentPermissionMode.assisted;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            loadPermissionMode: () async => savedMode,
+            savePermissionMode: (HarnessAgentPermissionMode mode) async {
+              savedMode = mode;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-permission-menu')));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.ensureVisible(find.text('完全访问权限'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('完全访问权限'));
+    await tester.pumpAndSettle();
+    expect(savedMode, HarnessAgentPermissionMode.fullAccess);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    final _FakeAgentHandle restartedHandle = _FakeAgentHandle();
+    addTearDown(restartedHandle.dispose);
+    HarnessAgentRequest? restartedRequest;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            loadPermissionMode: () async => savedMode,
+            savePermissionMode: (HarnessAgentPermissionMode mode) async {
+              savedMode = mode;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+            runAgent: (HarnessAgentRequest request) async {
+              restartedRequest = request;
+              return restartedHandle;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('完全访问权限'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('agent-composer')), '执行工具');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+
+    const HarnessToolDefinition destructiveTool = HarnessToolDefinition(
+      id: 'test.destructive',
+      name: '测试高风险工具',
+      description: '验证完全访问权限',
+      risk: HarnessToolRisk.destructive,
+      inputSchema: <String, Object?>{},
+      available: true,
+    );
+    const HarnessToolApprovalRequest destructiveRequest =
+        HarnessToolApprovalRequest(
+          tool: destructiveTool,
+          target: 'test-target',
+          arguments: <String, Object?>{},
+        );
+    expect(await restartedRequest!.approveTool!(destructiveRequest), isTrue);
+    await tester.pump();
+    expect(find.text('允许 测试高风险工具？'), findsNothing);
+    await restartedHandle.complete(0);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('项目保存多个会话并在重建后恢复活动会话', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+    const String workspace = r'D:\projects\alpha';
+    final DateTime now = DateTime(2026, 8, 18, 12);
+    HarnessConversationProject savedProject = HarnessConversationProject(
+      workspace: workspace,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'session-one',
+          title: '检查 ADB 设备',
+          messages: const <HarnessConversationMessage>[
+            HarnessConversationMessage(text: '检查 ADB 设备', user: true),
+          ],
+          createdAt: now,
+          updatedAt: now,
+        ),
+        HarnessConversationSession(
+          id: 'session-two',
+          title: '分析项目代码',
+          messages: const <HarnessConversationMessage>[
+            HarnessConversationMessage(text: '分析项目代码', user: true),
+          ],
+          createdAt: now,
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+      ],
+      activeSessionId: 'session-one',
+      updatedAt: now,
+    );
+
+    DeepSeekAgentWorkspace workspaceWidget() => DeepSeekAgentWorkspace(
+      initialWorkspace: workspace,
+      credentialReader: (_) async => null,
+      credentialWriter: (_, _) async {},
+      loadConversation: (_) async => savedProject,
+      saveConversation: (HarnessConversationProject project) async {
+        savedProject = project;
+      },
+      checkEnvironment: () async => const HarnessEnvironmentReport(
+        ready: true,
+        nodeVersion: 'v24.18.0',
+        npxVersion: '11.16.0',
+        message: '已就绪',
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: workspaceWidget())),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('检查 ADB 设备'), findsWidgets);
+    expect(find.text('分析项目代码'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('agent-session-session-two')));
+    await tester.pumpAndSettle();
+    expect(find.text('分析项目代码'), findsWidgets);
+    expect(savedProject.activeSessionId, 'session-two');
+
+    await tester.tap(find.byKey(const Key('agent-new-session-sidebar')));
+    await tester.pumpAndSettle();
+    expect(savedProject.sessions, hasLength(3));
+    expect(find.text('检查 ADB 设备'), findsOneWidget);
+    expect(find.text('分析项目代码'), findsOneWidget);
+    expect(find.text('新会话'), findsOneWidget);
+
+    final String? activeAfterNew = savedProject.activeSessionId;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: workspaceWidget())),
+    );
+    await tester.pumpAndSettle();
+    expect(savedProject.activeSessionId, activeAfterNew);
+    expect(find.text('检查 ADB 设备'), findsOneWidget);
+    expect(find.text('分析项目代码'), findsOneWidget);
+    expect(find.text('新会话'), findsOneWidget);
   });
 }
 
