@@ -7,12 +7,17 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 
 void main() {
   test('官方 Harness 使用本地模型端点完成一次真实任务', () async {
+    final Directory workspace = await Directory.systemTemp.createTemp(
+      'vibekits_harness_native_',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
     final HttpServer model = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
       0,
     );
     addTearDown(() => model.close(force: true));
     final List<String> modelRequests = <String>[];
+    int nativeApprovals = 0;
     model.listen((HttpRequest request) async {
       expect(request.uri.path, '/chat/completions');
       expect(
@@ -27,11 +32,36 @@ void main() {
       if (modelRequests.length == 1) {
         expect(modelRequests.first, contains('mcp__vibekits__sha256'));
         request.response.write(
-          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
-          '"id":"call_sha","function":{"name":"mcp__vibekits__sha256",'
-          '"arguments":"{\\"input\\":\\"abc\\"}"}}]},'
-          '"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,'
-          '"completion_tokens":3}}\n\n',
+          'data: ${jsonEncode(<String, Object?>{
+            'choices': <Object?>[
+              <String, Object?>{
+                'delta': <String, Object?>{
+                  'tool_calls': <Object?>[
+                    <String, Object?>{
+                      'index': 0,
+                      'id': 'call_sha',
+                      'function': <String, Object?>{
+                        'name': 'mcp__vibekits__sha256',
+                        'arguments': jsonEncode(<String, Object?>{'input': 'abc'}),
+                      },
+                    },
+                    <String, Object?>{
+                      'index': 1,
+                      'id': 'call_pwsh',
+                      'function': <String, Object?>{
+                        'name': 'pwsh',
+                        'arguments': jsonEncode(<String, Object?>{'command': 'Set-Content -LiteralPath native-approved.txt '
+                            '-Value VIBEKITS_NATIVE_OK', 'description': 'Verify native approval bridge', 'sandbox_permissions': 'danger-full-access', 'justification': 'Verify the App permission selection reaches '
+                            'native Harness tools.'}),
+                      },
+                    },
+                  ],
+                },
+                'finish_reason': 'tool_calls',
+              },
+            ],
+            'usage': <String, Object?>{'prompt_tokens': 12, 'completion_tokens': 7},
+          })}\n\n',
         );
       } else {
         request.response.write(
@@ -46,10 +76,14 @@ void main() {
 
     final HarnessAgentHandle handle = await DeepSeekHarnessService.startAgent(
       HarnessAgentRequest(
-        workspace: Directory.current.path,
+        workspace: workspace.path,
         prompt: '完成最小联调',
         apiKey: 'test-key',
         baseUrl: 'http://127.0.0.1:${model.port}',
+        approveTool: (_) async {
+          nativeApprovals++;
+          return true;
+        },
       ),
     );
     final StringBuffer output = StringBuffer();
@@ -75,6 +109,22 @@ void main() {
           .skip(1)
           .any((String request) => request.contains('ba7816bf8f01cfea')),
       isTrue,
+    );
+    final List<dynamic> finalMessages =
+        (jsonDecode(modelRequests.last) as Map<String, dynamic>)['messages']
+            as List<dynamic>;
+    expect(
+      nativeApprovals,
+      1,
+      reason:
+          '${output.toString()}\n'
+          '${jsonEncode(finalMessages.skip(finalMessages.length - 4).toList())}',
+    );
+    expect(
+      await File(
+        '${workspace.path}${Platform.pathSeparator}native-approved.txt',
+      ).readAsString(),
+      contains('VIBEKITS_NATIVE_OK'),
     );
   }, timeout: const Timeout(Duration(seconds: 75)));
 }

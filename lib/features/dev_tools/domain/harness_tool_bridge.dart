@@ -126,6 +126,9 @@ class VibekitsHarnessToolBridge {
   static const String sqliteInspectId = 'vibekits.sqlite.inspect';
   static const String sqliteQueryId = 'vibekits.sqlite.query';
   static const String gitInspectId = 'vibekits.git.inspect';
+  static const String gitCompareRefsId = 'vibekits.git.compare_refs';
+  static const String gitCreateLocalBranchId =
+      'vibekits.git.create_local_branch';
   static const String fileSearchId = 'vibekits.files.search';
   static const String apiRequestId = 'vibekits.http.request';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
@@ -245,6 +248,29 @@ class VibekitsHarnessToolBridge {
           description: '只读返回分支、状态、diff 和最近提交。',
           properties: <String, Object?>{'path': _string('仓库或其子目录')},
           required: <String>['path'],
+        ),
+        gitCompareRefsId: _definition(
+          id: gitCompareRefsId,
+          name: '对比 Git 两个版本',
+          description: '只读校验两个提交、标签或分支，并返回文件列表、统计和文本差异。',
+          properties: <String, Object?>{
+            'path': _string('仓库或其子目录'),
+            'baseRef': _string('基准提交、标签或分支'),
+            'targetRef': _string('目标提交、标签或分支'),
+          },
+          required: <String>['path', 'baseRef', 'targetRef'],
+        ),
+        gitCreateLocalBranchId: _definition(
+          id: gitCreateLocalBranchId,
+          name: '创建 Git 本地安全分支',
+          description: '从指定版本创建本地分支但不切换工作区；需要按当前权限模式批准。',
+          risk: HarnessToolRisk.writesData,
+          properties: <String, Object?>{
+            'path': _string('仓库或其子目录'),
+            'name': _string('新本地分支名称'),
+            'startPoint': _string('起点提交、标签或分支，默认 HEAD'),
+          },
+          required: <String>['path', 'name'],
         ),
         fileSearchId: _definition(
           id: fileSearchId,
@@ -470,6 +496,8 @@ class VibekitsHarnessToolBridge {
     if (toolId == sqliteInspectId) return _inspectSqlite;
     if (toolId == sqliteQueryId) return _querySqlite;
     if (toolId == gitInspectId) return _inspectGit;
+    if (toolId == gitCompareRefsId) return _compareGitRefs;
+    if (toolId == gitCreateLocalBranchId) return _createGitLocalBranch;
     if (toolId == fileSearchId) return _searchFiles;
     if (toolId == apiRequestId) return _requestHttp;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
@@ -701,6 +729,42 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _compareGitRefs(
+    Map<String, Object?> arguments,
+  ) async {
+    final GitReferenceComparison comparison =
+        await GitRepositoryService.compareRefs(
+          (arguments['path'] ?? '').toString(),
+          baseRef: (arguments['baseRef'] ?? '').toString(),
+          targetRef: (arguments['targetRef'] ?? '').toString(),
+        );
+    return <String, Object?>{
+      'root': comparison.root,
+      'baseRef': comparison.baseRef,
+      'targetRef': comparison.targetRef,
+      'baseCommit': comparison.baseCommit,
+      'targetCommit': comparison.targetCommit,
+      'summary': comparison.summary,
+      'changedFiles': comparison.changedFiles,
+      'diff': comparison.diff,
+    };
+  }
+
+  Future<Map<String, Object?>> _createGitLocalBranch(
+    Map<String, Object?> arguments,
+  ) async {
+    final String branch = await GitRepositoryService.createLocalBranch(
+      (arguments['path'] ?? '').toString(),
+      name: (arguments['name'] ?? '').toString(),
+      startPoint: (arguments['startPoint'] ?? 'HEAD').toString(),
+    );
+    return <String, Object?>{
+      'branch': branch,
+      'switched': false,
+      'message': '本地分支已创建，当前工作区未切换',
+    };
+  }
+
   Future<Map<String, Object?>> _searchFiles(
     Map<String, Object?> arguments,
   ) async {
@@ -852,6 +916,11 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbCommandId) return (arguments['serial'] ?? '').toString();
     if (toolId == serialTransactId) return (arguments['port'] ?? '').toString();
     if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
+    if (toolId == gitInspectId ||
+        toolId == gitCompareRefsId ||
+        toolId == gitCreateLocalBranchId) {
+      return (arguments['path'] ?? '').toString();
+    }
     return (arguments['input'] ?? toolId).toString();
   }
 }

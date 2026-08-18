@@ -34,6 +34,8 @@ void main() {
       VibekitsHarnessToolBridge.sqliteInspectId,
       VibekitsHarnessToolBridge.sqliteQueryId,
       VibekitsHarnessToolBridge.gitInspectId,
+      VibekitsHarnessToolBridge.gitCompareRefsId,
+      VibekitsHarnessToolBridge.gitCreateLocalBranchId,
       VibekitsHarnessToolBridge.fileSearchId,
       VibekitsHarnessToolBridge.apiRequestId,
       VibekitsHarnessToolBridge.githubDiagnosticsId,

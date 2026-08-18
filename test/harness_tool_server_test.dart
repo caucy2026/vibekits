@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_server.dart';
 
 void main() {
@@ -72,6 +73,45 @@ void main() {
       jsonDecode(await utf8.decoder.bind(await invoke.close()).join()) as Map,
     );
     expect(result['cancelled'], isTrue);
+  });
+
+  test('Harness 原生工具授权请求进入统一界面审批器', () async {
+    HarnessToolApprovalRequest? received;
+    final HarnessToolServer server = await HarnessToolServer.start(
+      approve: (HarnessToolApprovalRequest request) async {
+        received = request;
+        return true;
+      },
+    );
+    addTearDown(server.close);
+    final HttpClient client = HttpClient();
+    addTearDown(() => client.close(force: true));
+
+    final HttpClientRequest request = await client.postUrl(
+      server.endpoint.replace(path: '/native-approval'),
+    );
+    request.headers.set(
+      HttpHeaders.authorizationHeader,
+      'Bearer ${server.token}',
+    );
+    request.headers.contentType = ContentType.json;
+    request.write(
+      jsonEncode(<String, Object?>{
+        'toolName': 'PowerShell',
+        'callId': 'call-7',
+        'reason': 'git status',
+        'workspace': r'D:\project',
+      }),
+    );
+    final HttpClientResponse response = await request.close();
+    final Map<String, Object?> payload = Map<String, Object?>.from(
+      jsonDecode(await utf8.decoder.bind(response).join()) as Map,
+    );
+
+    expect(payload['allowed'], isTrue);
+    expect(received?.tool.id, 'harness.native.powershell');
+    expect(received?.arguments['callId'], 'call-7');
+    expect(received?.target, r'D:\project');
   });
 
   test('内置 Node MCP 进程发现并调用 Vibekits 工具', () async {

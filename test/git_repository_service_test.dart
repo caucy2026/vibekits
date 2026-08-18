@@ -9,11 +9,10 @@ void main() {
     addTearDown(() => sandbox.deleteSync(recursive: true));
 
     void git(List<String> arguments) {
-      final ProcessResult result = Process.runSync('git', <String>[
-        '-C',
-        sandbox.path,
-        ...arguments,
-      ]);
+      final ProcessResult result = Process.runSync(
+        GitRepositoryService.bundledExecutable,
+        <String>['-C', sandbox.path, ...arguments],
+      );
       expect(result.exitCode, 0, reason: '${result.stderr}');
     }
 
@@ -38,6 +37,54 @@ void main() {
     expect(snapshot.diff, contains('-before'));
     expect(snapshot.diff, contains('+after'));
     expect(snapshot.log, contains('initial'));
+  });
+
+  test('内置 Git 对比两个版本并创建不切换的本地分支', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_git_compare_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+
+    String git(List<String> arguments) {
+      final ProcessResult result = Process.runSync(
+        GitRepositoryService.bundledExecutable,
+        <String>['-C', sandbox.path, ...arguments],
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      return '${result.stdout}'.trim();
+    }
+
+    git(<String>['init']);
+    git(<String>['config', 'user.name', 'Vibekits Test']);
+    git(<String>['config', 'user.email', 'test@vibekits.local']);
+    final File source = File('${sandbox.path}${Platform.pathSeparator}main.txt')
+      ..writeAsStringSync('one\n');
+    git(<String>['add', 'main.txt']);
+    git(<String>['commit', '-m', 'one']);
+    final String base = git(<String>['rev-parse', 'HEAD']);
+    source.writeAsStringSync('two\n');
+    git(<String>['commit', '-am', 'two']);
+    final String originalBranch = git(<String>['branch', '--show-current']);
+
+    final GitReferenceComparison comparison =
+        await GitRepositoryService.compareRefs(
+          sandbox.path,
+          baseRef: base,
+          targetRef: 'HEAD',
+        );
+    expect(comparison.changedFiles, contains('main.txt'));
+    expect(comparison.diff, contains('+two'));
+
+    final String branch = await GitRepositoryService.createLocalBranch(
+      sandbox.path,
+      name: 'vibekits/checkpoint',
+    );
+    expect(branch, 'vibekits/checkpoint');
+    expect(git(<String>['branch', '--show-current']), originalBranch);
+    expect(
+      git(<String>['show-ref', '--verify', 'refs/heads/vibekits/checkpoint']),
+      isNotEmpty,
+    );
   });
 
   test('非仓库目录返回 Git 的明确错误', () async {

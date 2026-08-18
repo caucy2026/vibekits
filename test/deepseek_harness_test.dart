@@ -61,6 +61,16 @@ void main() {
     expect(agent.arguments, isNot(contains('test-key')));
     expect(agent.baseUrl, DeepSeekHarnessService.defaultBaseUrl);
     expect(agent.model, DeepSeekHarnessService.defaultModel);
+    expect(agent.nativeSandboxMode, 'workspace-write');
+    expect(
+      HarnessAgentRequest(
+        workspace: workspace.path,
+        prompt: 'test',
+        apiKey: 'test-key',
+        permissionMode: HarnessAgentPermissionMode.fullAccess,
+      ).nativeSandboxMode,
+      'danger-full-access',
+    );
   });
 
   testWidgets('智能体选择工作区后在应用内流式运行任务', (WidgetTester tester) async {

@@ -40,6 +40,10 @@ migrate_working_dir/
 # not 32k npm files or the 92 MiB Node executable.
 /native/harness/windows/runtime/
 
+# Prepared official MinGit runtime. The pinned, hash-verified recipe is kept in
+# Git while the extracted redistributable is supplied to Windows packaging.
+/native/git/windows/runtime/
+
 # Local verification output
 /_build*.txt
 /_doctor*.txt

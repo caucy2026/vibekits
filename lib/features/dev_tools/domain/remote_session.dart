@@ -156,6 +156,13 @@ abstract final class RemoteSessionService {
         verifyHostKey: verifyHostKey,
       );
     }
+    if (request.mode == RemoteSessionMode.localForward) {
+      return _DartLocalForwardSession.start(
+        request,
+        secret: secret,
+        verifyHostKey: verifyHostKey,
+      );
+    }
     return _startSystemClient(request);
   }
 
@@ -177,6 +184,132 @@ abstract final class RemoteSessionService {
     }
     return _ProcessRemoteSession(process);
   }
+}
+
+class _DartLocalForwardSession implements RemoteSessionHandle {
+  _DartLocalForwardSession._(
+    this._client,
+    this._server,
+    this._remoteHost,
+    this._remotePort,
+  ) {
+    _output.add(
+      '本地转发已启动：127.0.0.1:${_server.port} → '
+      '$_remoteHost:$_remotePort\n',
+    );
+    _connections = _server.listen(_accept, onError: _onServerError);
+    _client.done.then((_) => _finish(-1));
+  }
+
+  static Future<_DartLocalForwardSession> start(
+    RemoteLaunchRequest request, {
+    String? secret,
+    RemoteHostKeyVerifier? verifyHostKey,
+  }) async {
+    request.buildArguments();
+    final SSHClient client = await RemoteSshConnector.connect(
+      request.profile,
+      secret: secret,
+      verifyHostKey: verifyHostKey,
+    );
+    try {
+      final ServerSocket server = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        request.localPort!,
+        shared: false,
+      );
+      return _DartLocalForwardSession._(
+        client,
+        server,
+        request.targetHost!.trim(),
+        request.targetPort!,
+      );
+    } on Object {
+      client.close();
+      rethrow;
+    }
+  }
+
+  final SSHClient _client;
+  final ServerSocket _server;
+  final String _remoteHost;
+  final int _remotePort;
+  final StreamController<String> _output = StreamController<String>();
+  final Completer<int> _exit = Completer<int>();
+  final Set<Socket> _sockets = <Socket>{};
+  final Set<SSHForwardChannel> _channels = <SSHForwardChannel>{};
+  late final StreamSubscription<Socket> _connections;
+  bool _running = true;
+
+  Future<void> _accept(Socket socket) async {
+    if (!_running) {
+      socket.destroy();
+      return;
+    }
+    _sockets.add(socket);
+    try {
+      final SSHForwardChannel channel = await _client.forwardLocal(
+        _remoteHost,
+        _remotePort,
+        localHost: socket.remoteAddress.address,
+        localPort: socket.remotePort,
+      );
+      if (!_running) {
+        channel.destroy();
+        socket.destroy();
+        return;
+      }
+      _channels.add(channel);
+      unawaited(channel.stream.cast<List<int>>().pipe(socket));
+      unawaited(socket.cast<List<int>>().pipe(channel.sink));
+      unawaited(
+        channel.done.whenComplete(() {
+          _channels.remove(channel);
+          _sockets.remove(socket);
+          socket.destroy();
+        }),
+      );
+    } on Object catch (error) {
+      _sockets.remove(socket);
+      socket.destroy();
+      if (_running) _output.add('转发连接失败：$error\n');
+    }
+  }
+
+  void _onServerError(Object error) {
+    if (_running) _output.add('本地监听失败：$error\n');
+  }
+
+  Future<void> _finish(int code) async {
+    if (!_running) return;
+    _running = false;
+    await _server.close();
+    await _connections.cancel();
+    for (final Socket socket in _sockets.toList()) {
+      socket.destroy();
+    }
+    for (final SSHForwardChannel channel in _channels.toList()) {
+      channel.destroy();
+    }
+    _client.close();
+    if (!_exit.isCompleted) _exit.complete(code);
+    await _output.close();
+  }
+
+  @override
+  Stream<String> get output => _output.stream;
+
+  @override
+  Future<int> get exitCode => _exit.future;
+
+  @override
+  bool get running => _running;
+
+  @override
+  void sendLine(String line) {}
+
+  @override
+  Future<void> stop() => _finish(0);
 }
 
 abstract final class RemoteSshConnector {

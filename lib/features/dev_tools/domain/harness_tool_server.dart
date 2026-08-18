@@ -77,6 +77,36 @@ class HarnessToolServer {
         await _json(request.response, HttpStatus.ok, result.toJson());
         return;
       }
+      if (request.method == 'POST' && request.uri.path == '/native-approval') {
+        final Map<String, Object?> payload = await _readObject(request);
+        final String toolName = '${payload['toolName'] ?? 'native-tool'}';
+        final String reason = '${payload['reason'] ?? ''}';
+        final String workspace = '${payload['workspace'] ?? ''}';
+        final bool allowed = await _approve(
+          HarnessToolApprovalRequest(
+            tool: HarnessToolDefinition(
+              id: 'harness.native.${_safeId(toolName)}',
+              name: 'Harness 原生工具：$toolName',
+              description: reason.isEmpty ? '官方 Harness 请求执行原生工具。' : reason,
+              risk: HarnessToolRisk.writesData,
+              inputSchema: const <String, Object?>{
+                'type': 'object',
+                'properties': <String, Object?>{},
+              },
+              available: true,
+            ),
+            arguments: <String, Object?>{
+              if (reason.isNotEmpty) 'reason': reason,
+              if (payload['callId'] != null) 'callId': '${payload['callId']}',
+            },
+            target: workspace,
+          ),
+        );
+        await _json(request.response, HttpStatus.ok, <String, Object?>{
+          'allowed': allowed,
+        });
+        return;
+      }
       await _json(request.response, HttpStatus.notFound, <String, Object?>{
         'error': 'not_found',
       });
@@ -86,6 +116,24 @@ class HarnessToolServer {
       });
     }
   }
+
+  static Future<Map<String, Object?>> _readObject(HttpRequest request) async {
+    final List<int> bytes = <int>[];
+    await for (final List<int> chunk in request) {
+      bytes.addAll(chunk);
+      if (bytes.length > maxRequestBytes) {
+        throw const FormatException('工具请求超过 1 MiB');
+      }
+    }
+    final Object? decoded = jsonDecode(utf8.decode(bytes));
+    if (decoded is! Map) throw const FormatException('工具请求不是对象');
+    return Map<String, Object?>.from(decoded);
+  }
+
+  static String _safeId(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp('[^a-z0-9._-]+'), '-')
+      .replaceAll(RegExp('^-+|-+\$'), '');
 
   static Future<void> _json(
     HttpResponse response,

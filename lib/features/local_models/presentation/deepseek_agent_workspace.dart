@@ -381,6 +381,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       baseUrl: _baseUrl.text.trim(),
       model: _model.text.trim(),
       debugDirectory: _debugDirectory.text.trim(),
+      permissionMode: _permissionMode,
       approveTool: _approveHarnessTool,
       toolBridge: VibekitsHarnessToolBridge(
         activityRecorder: _recordHarnessToolActivity,
@@ -817,8 +818,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   void _show(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    if (Scaffold.maybeOf(context) == null) return;
+    ScaffoldMessenger.maybeOf(context)
+        ?.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _showSettings() async {

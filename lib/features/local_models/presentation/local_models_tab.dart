@@ -67,6 +67,7 @@ class LocalModelsTab extends StatefulWidget {
     this.harnessCheckEnvironment = DeepSeekHarnessService.checkEnvironment,
     this.harnessRunAgent = DeepSeekHarnessService.startAgent,
     this.harnessPickDirectory,
+    this.harnessCredentialReader,
   });
 
   final String directory;
@@ -92,6 +93,7 @@ class LocalModelsTab extends StatefulWidget {
   final HarnessEnvironmentChecker harnessCheckEnvironment;
   final HarnessAgentRunner harnessRunAgent;
   final AgentDirectoryPicker? harnessPickDirectory;
+  final AgentCredentialReader? harnessCredentialReader;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -694,6 +696,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   checkEnvironment: widget.harnessCheckEnvironment,
                   runAgent: widget.harnessRunAgent,
                   pickDirectory: widget.harnessPickDirectory,
+                  credentialReader: widget.harnessCredentialReader,
                 )
               else
                 const SizedBox.shrink(),

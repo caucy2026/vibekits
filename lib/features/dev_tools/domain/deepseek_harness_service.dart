@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
+import 'harness_agent_preferences.dart';
 
 class HarnessEnvironmentReport {
   const HarnessEnvironmentReport({
@@ -52,6 +53,7 @@ class HarnessAgentRequest {
     this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
     this.model = DeepSeekHarnessService.defaultModel,
     this.debugDirectory = '',
+    this.permissionMode = HarnessAgentPermissionMode.assisted,
     this.approveTool,
     this.toolBridge,
   });
@@ -61,8 +63,14 @@ class HarnessAgentRequest {
   final String baseUrl;
   final String model;
   final String debugDirectory;
+  final HarnessAgentPermissionMode permissionMode;
   final HarnessToolApproval? approveTool;
   final VibekitsHarnessToolBridge? toolBridge;
+  String get nativeSandboxMode => switch (permissionMode) {
+    HarnessAgentPermissionMode.requestApproval ||
+    HarnessAgentPermissionMode.assisted => 'workspace-write',
+    HarnessAgentPermissionMode.fullAccess => 'danger-full-access',
+  };
   List<String> get arguments => <String>[
     '--profile',
     'headless',
@@ -338,7 +346,10 @@ abstract final class DeepSeekHarnessService {
       approve: request.approveTool,
       bridge: request.toolBridge,
     );
-    final Directory harnessHome = await _prepareHarnessHome(request.model);
+    final Directory harnessHome = await _prepareHarnessHome(
+      request.model,
+      runtime.approvalPluginPath,
+    );
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
@@ -352,7 +363,7 @@ abstract final class DeepSeekHarnessService {
               : request.model.trim(),
           'DSH_HOME': harnessHome.path,
           'DSH_TELEMETRY_MODE': 'DISABLED',
-          'DSH_PERMISSION_MODE': 'workspace-write',
+          'DSH_PERMISSION_MODE': request.nativeSandboxMode,
           'DSH_TELEMETRY_DISABLED': '1',
           'DSH_LOG_DIR': debug.logs.path,
           'VIBEKITS_DEBUG_DIR': debug.root.path,
@@ -396,7 +407,10 @@ abstract final class DeepSeekHarnessService {
     }
   }
 
-  static Future<Directory> _prepareHarnessHome(String requestedModel) async {
+  static Future<Directory> _prepareHarnessHome(
+    String requestedModel,
+    String approvalPluginPath,
+  ) async {
     final String model = requestedModel.trim().isEmpty
         ? defaultModel
         : requestedModel.trim();
@@ -435,7 +449,10 @@ abstract final class DeepSeekHarnessService {
       '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
       '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
       '        failOnStartupError: true\n'
-      '        toolCallTimeoutMs: 60000\n',
+      '        toolCallTimeoutMs: 60000\n'
+      '- insert:\n'
+      '    - id: vibekits-native-approval\n'
+      '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n',
       flush: true,
     );
     return home;
@@ -476,12 +493,14 @@ class _HarnessRuntime {
     required this.cliPath,
     required this.version,
     required this.mcpServerPath,
+    required this.approvalPluginPath,
   });
 
   final String nodeExecutable;
   final String cliPath;
   final String version;
   final String mcpServerPath;
+  final String approvalPluginPath;
 }
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
@@ -515,14 +534,24 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         '${root.parent.parent.path}${Platform.pathSeparator}vibekits-mcp-server.mjs',
       ),
     ];
+    final List<File> approvalCandidates = <File>[
+      File('${root.path}${Platform.pathSeparator}vibekits-approval.mjs'),
+      File(
+        '${root.parent.parent.path}${Platform.pathSeparator}vibekits-approval.mjs',
+      ),
+    ];
     final File? mcpServer = mcpCandidates
+        .where((File file) => file.existsSync())
+        .firstOrNull;
+    final File? approvalPlugin = approvalCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
     if (cli.isEmpty ||
         version.isEmpty ||
         !node.existsSync() ||
         !cliFile.existsSync() ||
-        mcpServer == null) {
+        mcpServer == null ||
+        approvalPlugin == null) {
       continue;
     }
     return _HarnessRuntime(
@@ -530,6 +559,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       cliPath: cliFile.path,
       version: version,
       mcpServerPath: mcpServer.path,
+      approvalPluginPath: approvalPlugin.path,
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');

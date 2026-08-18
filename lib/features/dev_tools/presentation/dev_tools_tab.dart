@@ -345,7 +345,11 @@ Set<String> _harnessToolIds(String toolId) => switch (toolId) {
     'vibekits.adb.command',
   },
   'api_workspace' => <String>{'vibekits.http.request'},
-  'git_workspace' => <String>{'vibekits.git.inspect'},
+  'git_workspace' => <String>{
+    'vibekits.git.inspect',
+    'vibekits.git.compare_refs',
+    'vibekits.git.create_local_branch',
+  },
   'github_diagnostics' => <String>{'vibekits.github.diagnose'},
   'file_search' => <String>{'vibekits.files.search'},
   _ => <String>{'vibekits.$toolId'},

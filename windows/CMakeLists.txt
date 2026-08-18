@@ -118,9 +118,24 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-mcp-server.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-approval.mjs"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   message(FATAL_ERROR
     "Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.")
+endif()
+
+# Git for Windows MinGit is explicitly intended for embedding. The application
+# always resolves this private copy and never requires Git on the user's PATH.
+set(GIT_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/git/windows/runtime")
+if(EXISTS "${GIT_RUNTIME_DIR}/vibekits-git-runtime.json")
+  install(DIRECTORY "${GIT_RUNTIME_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/git"
+    COMPONENT Runtime)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR
+    "Bundled Git runtime is missing. Run tool/prepare_git_runtime.ps1 before Release packaging.")
 endif()
 
 # Official Google Android Platform-Tools runtime. Keeping adb and both of its

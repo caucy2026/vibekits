@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'git_repository_service.dart';
+
 enum DiagnosticStatus { ok, warning, failed }
 
 class DiagnosticCheck {
@@ -230,12 +232,11 @@ abstract final class GithubDiagnosticsService {
     }
     try {
       for (final String key in <String>['http.proxy', 'https.proxy']) {
-        final ProcessResult result = await Process.run('git', <String>[
-          'config',
-          '--global',
-          '--get',
-          key,
-        ], runInShell: false).timeout(const Duration(seconds: 3));
+        final ProcessResult result = await Process.run(
+          GitRepositoryService.bundledExecutable,
+          <String>['config', '--global', '--get', key],
+          runInShell: false,
+        ).timeout(const Duration(seconds: 3));
         final String value = '${result.stdout}'.trim();
         if (result.exitCode == 0 && value.isNotEmpty) {
           values.add('git $key=${redactProxy(value)}');

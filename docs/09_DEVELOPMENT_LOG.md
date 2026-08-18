@@ -364,3 +364,11 @@
 - 新增 macOS 清理规则库 v1（26 条），覆盖 Xcode/Simulator、SwiftPM/Homebrew/CocoaPods、主流语言包缓存、浏览器和开发应用明确缓存目录；不扫描项目、模拟器设备数据和用户文档。
 - `flutter analyze` 0 问题；清理界面、规则、扫描、取消、系统盘统计与报告合并回归 27/27 通过。版本更新为 `1.9.0-dev.19+29`。
 - Windows Debug 构建成功，产物 `FileVersion` / `ProductVersion` 均核对为 `1.9.0-dev.19+29`；主窗口启动与版本显示定向冒烟 1/1 通过。
+
+## 2026-08-19 · v1.9.0-dev.20 Harness 原生权限与自包含 Git
+
+- 修正权限菜单只作用于 Vibekits MCP 的缺口：三档权限现在传入官方 Harness 沙箱，原生工具审批通过随机令牌回环接口进入同一 App 审批器，桥不可用时默认拒绝。
+- Windows 引入固定且校验 SHA-256 的官方 MinGit `2.55.0.windows.3`；Git 工作区与 GitHub 诊断只解析 App 私有运行时，Release 缺失时构建失败，不再依赖用户 PATH。
+- Harness 工具目录增加两个版本对比和本地安全分支创建；后者需要权限批准且不会切换当前工作区。SSH 本地端口转发改用编译进 App 的 `dartssh2`，不再调用系统 ssh。
+- `flutter analyze` 0 问题；官方 dsh 同轮 MCP+pwsh 原生审批/真实落盘全栈、权限持久化、会话切换、内置 Git 检查/Diff/分支和远程工作区定向回归通过。
+- Windows Debug/Release 构建成功，二者版本资源为 `1.9.0-dev.20+30`；Release 自包含检查验证 Git/ADB/7-Zip/Harness/Node/串口/ONNX/OCR 共 17 项运行时或模型资产。版本更新为 `1.9.0-dev.20+30`。

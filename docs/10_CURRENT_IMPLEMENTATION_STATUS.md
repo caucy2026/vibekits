@@ -4,7 +4,7 @@
 
 更新日期：2026-08-18
 
-当前版本：`1.9.0-dev.19+29`（系统盘审计与双平台清理规则检查点，非正式发布）
+当前版本：`1.9.0-dev.20+30`（Harness 原生权限与 Windows 自包含 Git 检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -56,7 +56,9 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 - 桌面模式复用会话记录，只保存主机、端口、模式和名称。Windows 调用 `mstsc.exe`，macOS 调用系统 VNC/屏幕共享；不显示或传递远程桌面密码，不经过 shell，系统客户端缺失时显示可行动错误。
 - ADB 独立工作区优先调用随 APP 发布的 Platform-Tools：显示解析后的绝对路径和版本，后台运行 `devices -l` 并区分可用、未授权、离线和未知设备。选中设备后可在右侧终端直接输入命令，普通命令自动补 `shell`，也支持 `install`、`push`、`pull`、`logcat` 等顶层操作；设备序列号由界面锁定，禁止命令覆盖目标。执行过程不占用 UI 线程，终端显示真实退出码、耗时、stdout/stderr，可复制和清空。Harness 与手工入口共用 `AdbService`，由真实 `adb.exe` 进程写入证据日志。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
-- Git 工作区只读展示根目录、分支、状态、暂存/未暂存 Diff 和日志；GitHub 诊断检查 DNS/TLS/HTTPS/代理/hosts/SSH 22 与官方 443 备用方向，不自动改 hosts、证书或代理。
+- Git 工作区使用随包分发并经哈希校验的 MinGit，不依赖用户 PATH；展示根目录、分支、状态、暂存/未暂存 Diff 和日志。Harness 可只读对比任意两个版本，也可经权限审批创建不切换当前工作区的本地安全分支。GitHub 诊断同样复用内置 Git。
+- Harness 三档权限已传入官方原生沙箱：请求批准逐次询问；帮我批准由 App 对普通原生请求自动决定；完全访问使用官方 `danger-full-access` 模式。官方 PowerShell/文件工具的授权请求通过随机令牌回环桥回到 App，不再只控制 Vibekits MCP 外壳。
+- SSH、SFTP 与本地端口转发均由随 App 编译的 `dartssh2` 实现；端口转发不再调用系统 `ssh`。远程桌面、文件定位、系统凭据和截图仍调用 Windows/macOS 自带系统能力，这些不是用户另装依赖。
 
 ### 4.5 微工具融合与 DeepSeek 智能体
 
@@ -103,7 +105,7 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 - R9 ADB 基础：版本/设备解析、Widget 和独立入口 4/4 通过，6 个相关文件定向 Analyze 无问题；本机 ADB `1.0.41`、Platform-Tools `31.0.3-7562133`、server 启动成功，设备与 mDNS 列表为空。
 - `flutter test --reporter expanded`：271/271 通过。
 - `flutter build windows --release`：成功（78.8 秒）。
-- 已发布 EXE 文件/产品版本仍为 `1.8.0+10`；当前源码为 `1.9.0-dev.5+15`，待 R9 退出条件完成后生成新 Release。
+- 当时发布 EXE 为 `1.8.0+10`、源码检查点为 `1.9.0-dev.5+15`；最新版本与构建证据以本文件顶部及对应验收文档为准。
 - Release 真实启动：携带 `README.md` 启动 5 秒未提前退出。
 - Release 产物：`libserialport_plus.dll`、`vibekits_onnx.dll`、`onnxruntime.dll`、`sqlite3.dll`、`tools/7zip/7z.exe`、`tools/7zip/7z.dll` 与内置模型资源均存在。
 - Windows Credential Manager：临时数据库密码写入、Unicode 读取、删除后不存在闭环通过。
