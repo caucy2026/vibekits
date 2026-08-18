@@ -25,6 +25,23 @@ void main() {
     expect(restored.summary, contains('7-E-2'));
   });
 
+  test('串口流控覆盖硬件和软件流控组合', () {
+    expect(SerialFlowControl.dtrDsr.usesDtrDsr, isTrue);
+    expect(SerialFlowControl.rtsCts.usesRtsCts, isTrue);
+    expect(SerialFlowControl.xonXoff.usesXonXoff, isTrue);
+    expect(SerialFlowControl.all.usesDtrDsr, isTrue);
+    expect(SerialFlowControl.all.usesRtsCts, isTrue);
+    expect(SerialFlowControl.all.usesXonXoff, isTrue);
+    final String encoded = const SerialConnectionSettings(
+      portName: 'COM31',
+      flowControl: SerialFlowControl.all,
+    ).encode();
+    expect(
+      SerialConnectionSettings.decode(encoded)?.flowControl,
+      SerialFlowControl.all,
+    );
+  });
+
   test('文本与 HEX 发送编码支持常用行尾和明确错误', () {
     expect(
       SerialCodec.encode(

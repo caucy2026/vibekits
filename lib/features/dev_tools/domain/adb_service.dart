@@ -55,6 +55,15 @@ typedef AdbCommandRunner = Future<AdbCommandResult> Function(
 );
 
 abstract final class AdbService {
+  static String bundledExecutablePath() {
+    final String executableDirectory = File(Platform.resolvedExecutable)
+        .parent
+        .path;
+    return '$executableDirectory${Platform.pathSeparator}tools'
+        '${Platform.pathSeparator}adb${Platform.pathSeparator}'
+        '${Platform.isWindows ? 'adb.exe' : 'adb'}';
+  }
+
   static Future<AdbSnapshot> discoverAndList({
     String? preferredExecutable,
     AdbCommandRunner? runner,
@@ -115,6 +124,42 @@ abstract final class AdbService {
       throw StateError(_commandError('刷新 ADB 设备失败', result));
     }
     return parseDevices(result.stdout);
+  }
+
+  static Future<String> connect(
+    String executable,
+    String address, {
+    AdbCommandRunner? runner,
+  }) async {
+    final String target = normalizeWirelessAddress(address);
+    final AdbCommandResult result = await (runner ?? runCommand)(
+      executable,
+      <String>['connect', target],
+    );
+    final String output = '${result.stdout}\n${result.stderr}'.trim();
+    if (result.exitCode != 0 ||
+        (!output.toLowerCase().contains('connected to') &&
+            !output.toLowerCase().contains('already connected'))) {
+      throw StateError(
+        output.isEmpty ? '连接 ADB 设备失败（exit ${result.exitCode}）' : output,
+      );
+    }
+    return output;
+  }
+
+  static String normalizeWirelessAddress(String value) {
+    final String address = value.trim();
+    if (address.isEmpty || address.contains(RegExp(r'[\s/\\]'))) {
+      throw const FormatException('请输入设备 IP，例如 192.168.3.63');
+    }
+    final int colonCount = ':'.allMatches(address).length;
+    final String target = colonCount == 0 ? '$address:5555' : address;
+    final RegExpMatch? match = RegExp(r'^([A-Za-z0-9.-]+):(\d{1,5})$')
+        .firstMatch(target);
+    if (match == null) throw const FormatException('设备地址格式无效');
+    final int port = int.parse(match.group(2)!);
+    if (port < 1 || port > 65535) throw const FormatException('ADB 端口无效');
+    return target;
   }
 
   static List<AdbDevice> parseDevices(String source) {
@@ -183,6 +228,7 @@ abstract final class AdbService {
 
   static Future<String> _discoverExecutable(AdbCommandRunner runner) async {
     final List<String> candidates = <String>[
+      bundledExecutablePath(),
       for (final String? root in <String?>[
         Platform.environment['ANDROID_SDK_ROOT'],
         Platform.environment['ANDROID_HOME'],
@@ -204,7 +250,7 @@ abstract final class AdbService {
         return File(first).absolute.path;
       }
     }
-    throw StateError('未找到官方 ADB。请安装 Android SDK Platform-Tools，或在设置中选择 adb。');
+    throw StateError('应用内置 ADB 不完整，请重新安装 Vibekits。');
   }
 }
 

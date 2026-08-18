@@ -11,6 +11,8 @@ class AppSettings {
     this.themeMode = ThemeMode.system,
     this.restoreLastTab = true,
     this.lastTab = 0,
+    this.lastWorkspaceId = 'large-model',
+    this.lastLargeModelView = 'agent',
     this.logLevel = AppLogLevel.info,
     this.cacheLimitMb = 512,
     this.modelDirectory = '',
@@ -31,6 +33,8 @@ class AppSettings {
   final ThemeMode themeMode;
   final bool restoreLastTab;
   final int lastTab;
+  final String lastWorkspaceId;
+  final String lastLargeModelView;
   final AppLogLevel logLevel;
   final int cacheLimitMb;
   final String modelDirectory;
@@ -51,6 +55,8 @@ class AppSettings {
     ThemeMode? themeMode,
     bool? restoreLastTab,
     int? lastTab,
+    String? lastWorkspaceId,
+    String? lastLargeModelView,
     AppLogLevel? logLevel,
     int? cacheLimitMb,
     String? modelDirectory,
@@ -70,6 +76,8 @@ class AppSettings {
     themeMode: themeMode ?? this.themeMode,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
     lastTab: lastTab ?? this.lastTab,
+    lastWorkspaceId: lastWorkspaceId ?? this.lastWorkspaceId,
+    lastLargeModelView: lastLargeModelView ?? this.lastLargeModelView,
     logLevel: logLevel ?? this.logLevel,
     cacheLimitMb: cacheLimitMb ?? this.cacheLimitMb,
     modelDirectory: modelDirectory ?? this.modelDirectory,
@@ -95,6 +103,8 @@ class AppSettings {
     'themeMode': themeMode.name,
     'restoreLastTab': restoreLastTab,
     'lastTab': lastTab,
+    'lastWorkspaceId': lastWorkspaceId,
+    'lastLargeModelView': lastLargeModelView,
     'logLevel': logLevel.name,
     'cacheLimitMb': cacheLimitMb,
     'modelDirectory': modelDirectory,
@@ -121,12 +131,39 @@ class AppSettings {
       return value is int && value >= min && value <= max ? value : fallback;
     }
 
+    final int legacyLastTab = boundedInt('lastTab', 0, 0, 4);
+    const List<String> legacyWorkspaceOrder = <String>[
+      'archive',
+      'cleaner',
+      'documents',
+      'dev-tools',
+      'large-model',
+    ];
+    const Set<String> workspaceIds = <String>{
+      'large-model',
+      'archive',
+      'cleaner',
+      'documents',
+      'dev-tools',
+    };
+    final String storedWorkspace = json['lastWorkspaceId'] is String
+        ? json['lastWorkspaceId']! as String
+        : '';
+    final String lastWorkspaceId = workspaceIds.contains(storedWorkspace)
+        ? storedWorkspace
+        : legacyWorkspaceOrder[legacyLastTab];
+    final String lastLargeModelView = json['lastLargeModelView'] == 'ocr'
+        ? 'ocr'
+        : 'agent';
+
     return AppSettings(
       themeMode: enumValue(ThemeMode.values, 'themeMode', ThemeMode.system),
       restoreLastTab: json['restoreLastTab'] is bool
           ? json['restoreLastTab']! as bool
           : true,
-      lastTab: boundedInt('lastTab', 0, 0, 4),
+      lastTab: legacyLastTab,
+      lastWorkspaceId: lastWorkspaceId,
+      lastLargeModelView: lastLargeModelView,
       logLevel: enumValue(AppLogLevel.values, 'logLevel', AppLogLevel.info),
       cacheLimitMb: boundedInt('cacheLimitMb', 512, 64, 8192),
       modelDirectory: json['modelDirectory'] is String
@@ -251,11 +288,33 @@ class AppSettingsStore {
   }
 
   Future<void> save(AppSettings settings) async {
-    await _file.parent.create(recursive: true);
-    final File temporary = File('${_file.path}.tmp');
-    await temporary.writeAsString(jsonEncode(settings.toJson()), flush: true);
-    if (await _file.exists()) await _file.delete();
-    await temporary.rename(_file.path);
+    final List<File> candidates = <File>[
+      _file,
+      File(
+        '${Directory.systemTemp.path}'
+        '${Platform.pathSeparator}Vibekits${Platform.pathSeparator}settings.json',
+      ),
+    ];
+    final String payload = jsonEncode(settings.toJson());
+    Exception? lastError;
+
+    for (final File target in candidates) {
+      try {
+        await target.parent.create(recursive: true);
+        final File temporary = File('${target.path}.tmp');
+        await temporary.writeAsString(payload, flush: true);
+        if (await target.exists()) await target.delete();
+        await temporary.rename(target.path);
+        return;
+      } on Exception catch (error) {
+        lastError = error;
+      }
+    }
+    // Persisting settings is best-effort; avoid blocking startup if host
+    // path permission is unavailable.
+    if (lastError != null) {
+      return;
+    }
   }
 }
 

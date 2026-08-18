@@ -39,27 +39,35 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   static const List<String> _tabTitles = <String>[
+    'Harness（智能体）',
     '解压缩',
     '系统清理',
     '文档阅读',
     '开发工具',
-    '本地模型',
+  ];
+
+  static const List<String> _workspaceIds = <String>[
+    'large-model',
+    'archive',
+    'cleaner',
+    'documents',
+    'dev-tools',
   ];
 
   static const List<IconData> _tabIcons = <IconData>[
+    Icons.auto_awesome_outlined,
     Icons.folder_zip_outlined,
     Icons.cleaning_services_outlined,
     Icons.article_outlined,
     Icons.construction_outlined,
-    Icons.memory_outlined,
   ];
 
   static const List<String> _tabDescriptions = <String>[
+    '开发智能体、任务会话与截图 OCR',
     '安全查看、创建与提取压缩文件',
     '扫描可清理空间并生成可核对报告',
     '快速查看文本、结构化数据与二进制文件',
     '独立开发工作区与转换检查工具',
-    '截图 OCR 与 DeepSeek 智能体',
   ];
 
   int _selectedIndex = 0;
@@ -89,13 +97,13 @@ class _MainShellState extends State<MainShell> {
         ? VibekitsFileKind.unsupported
         : SupportedFileTypes.kindForPath(widget.initialFilePath!);
     _selectedIndex = switch (startupKind) {
-      VibekitsFileKind.archive => 0,
-      VibekitsFileKind.document => 2,
-      VibekitsFileKind.database => 3,
-      VibekitsFileKind.image => 4,
-      VibekitsFileKind.model => 4,
+      VibekitsFileKind.archive => 1,
+      VibekitsFileKind.document => 3,
+      VibekitsFileKind.database => 4,
+      VibekitsFileKind.image => 0,
+      VibekitsFileKind.model => 0,
       VibekitsFileKind.unsupported =>
-        settings.restoreLastTab ? settings.lastTab : 0,
+        settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
     widget.settingsController.addListener(_applySettings);
     if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
@@ -119,9 +127,17 @@ class _MainShellState extends State<MainShell> {
       return;
     }
     final AppSettings settings = widget.settingsController.value;
-    if (settings.restoreLastTab && settings.lastTab != _selectedIndex) {
-      setState(() => _selectedIndex = settings.lastTab);
+    final int restoredIndex = _indexForWorkspace(settings);
+    if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
+      setState(() => _selectedIndex = restoredIndex);
     }
+  }
+
+  static int _indexForWorkspace(AppSettings settings) {
+    final int stableIndex = _workspaceIds.indexOf(settings.lastWorkspaceId);
+    return stableIndex >= 0
+        ? stableIndex
+        : settings.lastTab.clamp(0, 4).toInt();
   }
 
   @override
@@ -141,7 +157,10 @@ class _MainShellState extends State<MainShell> {
     setState(() => _selectedIndex = index);
     if (widget.settingsController.value.restoreLastTab) {
       widget.settingsController.update(
-        widget.settingsController.value.copyWith(lastTab: index),
+        widget.settingsController.value.copyWith(
+          lastTab: index,
+          lastWorkspaceId: _workspaceIds[index],
+        ),
       );
     }
   }
@@ -204,12 +223,12 @@ class _MainShellState extends State<MainShell> {
     final bool database = route.kind == DroppedFileRouteKind.database;
     _selectTab(
       archive
-          ? 0
+          ? 1
           : model || image
-          ? 4
+          ? 0
           : database
-          ? 3
-          : 2,
+          ? 4
+          : 3,
     );
     setState(() {
       if (archive) {
@@ -308,6 +327,38 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final AppSettings settings = widget.settingsController.value;
     final List<Widget> tabPages = <Widget>[
+      LocalModelsTab(
+        key: ValueKey<String>(
+          '${settings.modelDirectory}|$_modelDropSerial|$_imageDropSerial',
+        ),
+        directory: settings.modelDirectory,
+        initialImportPath:
+            _modelDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.model
+                ? widget.initialFilePath
+                : null),
+        initialImagePath:
+            _imageDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.image
+                ? widget.initialFilePath
+                : null),
+        initialLargeModelView: settings.lastLargeModelView,
+        onLargeModelViewChanged: (String view) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                lastLargeModelView: view,
+              ),
+            ),
+        initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
+        onHarnessWorkspaceChanged: (String workspace) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                deepSeekHarnessWorkspace: workspace,
+              ),
+            ),
+      ),
       ArchiveTab(
         key: ValueKey<String>('archive-drop-$_archiveDropSerial'),
         openRequest: _openRequest,
@@ -397,46 +448,21 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
       ),
-      LocalModelsTab(
-        key: ValueKey<String>(
-          '${settings.modelDirectory}|$_modelDropSerial|$_imageDropSerial',
-        ),
-        directory: settings.modelDirectory,
-        initialImportPath:
-            _modelDropPath ??
-            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
-                    VibekitsFileKind.model
-                ? widget.initialFilePath
-                : null),
-        initialImagePath:
-            _imageDropPath ??
-            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
-                    VibekitsFileKind.image
-                ? widget.initialFilePath
-                : null),
-        initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
-        onHarnessWorkspaceChanged: (String workspace) =>
-            widget.settingsController.update(
-              widget.settingsController.value.copyWith(
-                deepSeekHarnessWorkspace: workspace,
-              ),
-            ),
-      ),
     ];
     final Map<ShortcutActivator, VoidCallback> shortcuts =
         AppShortcuts.forShell(
           onSelectTab: _selectTab,
           onOpenSettings: _openSettings,
           onOpen: () {
-            if (_selectedIndex == 0 || _selectedIndex == 2) {
+            if (_selectedIndex == 1 || _selectedIndex == 3) {
               _openRequest.value++;
             }
           },
           onFind: () {
-            if (_selectedIndex == 2) _findRequest.value++;
+            if (_selectedIndex == 3) _findRequest.value++;
           },
           onSave: () {
-            if (_selectedIndex == 2) _saveRequest.value++;
+            if (_selectedIndex == 3) _saveRequest.value++;
           },
         );
 

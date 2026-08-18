@@ -22,18 +22,19 @@ void main() {
     await tester.pumpWidget(const VibekitsApp());
 
     for (final String title in <String>[
+      'Harness（智能体）',
       '解压缩',
       '系统清理',
       '文档阅读',
       '开发工具',
-      '本地模型',
     ]) {
       // 激活 Tab 的标题会同时出现在标签栏和页面标题中，因此至少存在一个。
       expect(find.text(title), findsWidgets);
     }
 
-    // 默认展示 T1 解压缩页面。
-    expect(find.text('打开压缩包'), findsOneWidget);
+    // 默认展示 Harness 智能体工作台。
+    expect(find.text('Harness 智能体'), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     // 其余页面处于离屏状态。
     expect(find.text('开始扫描'), findsNothing);
   });
@@ -48,6 +49,38 @@ void main() {
     expect(find.text('打开压缩包'), findsNothing);
   });
 
+  testWidgets('启动恢复上次一级工作区', (WidgetTester tester) async {
+    final AppSettingsController settings = AppSettingsController();
+    settings.value = const AppSettings(
+      lastTab: 3,
+      lastWorkspaceId: 'documents',
+    );
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(VibekitsApp(settingsController: settings));
+    await tester.pumpAndSettle();
+
+    expect(find.text('文档阅读'), findsWidgets);
+    expect(find.text('打开文件'), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsNothing);
+  });
+
+  testWidgets('启动恢复 Harness 内部 OCR 子页', (WidgetTester tester) async {
+    final AppSettingsController settings = AppSettingsController();
+    settings.value = const AppSettings(
+      lastWorkspaceId: 'large-model',
+      lastLargeModelView: 'ocr',
+    );
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(VibekitsApp(settingsController: settings));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Harness（智能体）'), findsWidgets);
+    expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsNothing);
+  });
+
   testWidgets('Ctrl+数字键切换 Tab', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
@@ -58,18 +91,18 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit3);
+    await pressCtrlWithKey(LogicalKeyboardKey.digit4);
     expect(find.text('打开文件'), findsOneWidget);
     await pressCtrlWithKey(LogicalKeyboardKey.keyF);
     expect(find.byType(TextField), findsOneWidget);
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit4);
+    await pressCtrlWithKey(LogicalKeyboardKey.digit5);
     expect(
       find.byKey(const Key('programmer-calculator-input')),
       findsOneWidget,
     );
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit1);
+    await pressCtrlWithKey(LogicalKeyboardKey.digit2);
     expect(find.text('打开压缩包'), findsOneWidget);
   });
 
@@ -96,7 +129,7 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
     expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
     expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
-    expect(find.textContaining('v1.9.0-dev.5+15'), findsWidgets);
+    expect(find.textContaining('v1.9.0-dev.6+16'), findsWidgets);
     expect(find.text('任务 0'), findsNothing);
   });
 
@@ -119,10 +152,10 @@ void main() {
     await tester.pumpWidget(const VibekitsApp());
 
     for (final String title in <String>[
+      'Harness（智能体）',
       '系统清理',
       '文档阅读',
       '开发工具',
-      '本地模型',
       '解压缩',
     ]) {
       await tester.tap(find.text(title).first);
@@ -290,7 +323,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('本地模型'), findsWidgets);
+    expect(find.text('Harness（智能体）'), findsWidgets);
     expect(
       tester
           .widget<LocalModelsTab>(find.byType(LocalModelsTab))
@@ -375,7 +408,7 @@ void main() {
     );
   });
 
-  testWidgets('模型页只保留截图 OCR 与 DeepSeek 智能体', (WidgetTester tester) async {
+  testWidgets('Harness 页只保留智能体与截图 OCR', (WidgetTester tester) async {
     final Directory sandbox = Directory.systemTemp.createTempSync(
       'vk_models_ui',
     );
@@ -397,13 +430,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('截图 OCR'), findsOneWidget);
-    expect(find.text('DeepSeek 智能体'), findsOneWidget);
+    expect(find.text('Harness 智能体'), findsOneWidget);
     expect(find.text('精选小模型'), findsNothing);
     expect(find.text('语音片段检测'), findsNothing);
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
+    await tester.tap(find.text('截图 OCR'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
     expect(find.byKey(const Key('ocr-pick-image')), findsOneWidget);
     expect(find.byKey(const Key('ocr-run')), findsOneWidget);
-    await tester.tap(find.text('DeepSeek 智能体'));
+    await tester.tap(find.text('Harness 智能体'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     expect(find.byKey(const Key('agent-pick-workspace')), findsOneWidget);
@@ -433,7 +469,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('DeepSeek 智能体'));
+    await tester.tap(find.text('Harness 智能体'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-composer')), '审查项目');
     await tester.tap(find.byKey(const Key('agent-send')));
@@ -445,7 +481,7 @@ void main() {
 
     await tester.tap(find.text('截图 OCR'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('DeepSeek 智能体'));
+    await tester.tap(find.text('Harness 智能体'));
     await tester.pumpAndSettle();
     expect(find.text('会话结果会保留'), findsOneWidget);
   });
@@ -472,7 +508,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('本地模型'), findsWidgets);
+    expect(find.text('Harness（智能体）'), findsWidgets);
     expect(find.byKey(const Key('ocr-image-preview')), findsOneWidget);
     expect(
       tester
@@ -609,6 +645,8 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('截图 OCR'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('ocr-screenshot')));
     await tester.pumpAndSettle();

@@ -17,6 +17,8 @@ void main() {
       themeMode: ThemeMode.dark,
       restoreLastTab: true,
       lastTab: 3,
+      lastWorkspaceId: 'documents',
+      lastLargeModelView: 'ocr',
       logLevel: AppLogLevel.debug,
       cacheLimitMb: 1024,
       modelDirectory: r'D:\Models',
@@ -38,6 +40,15 @@ void main() {
     final AppSettings actual = await store.load();
 
     expect(actual.toJson(), expected.toJson());
+  });
+
+  test('旧版数字页签迁移为稳定页面 ID', () {
+    final AppSettings settings = AppSettings.fromJson(<String, Object?>{
+      'lastTab': 4,
+    });
+
+    expect(settings.lastWorkspaceId, 'large-model');
+    expect(settings.lastLargeModelView, 'agent');
   });
 
   test('设置文件损坏时安全恢复默认值', () async {

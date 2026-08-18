@@ -96,6 +96,33 @@ install(FILES
   DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/7zip"
   COMPONENT Runtime)
 
+# The official DeepSeek Harness is prepared ahead of the Release build by
+# tool/prepare_harness_runtime.ps1. Runtime startup never invokes npm/npx.
+set(HARNESS_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/harness/windows/runtime")
+if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
+  install(DIRECTORY "${HARNESS_RUNTIME_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-mcp-server.mjs"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR
+    "Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.")
+endif()
+
+# Official Google Android Platform-Tools runtime. Keeping adb and both of its
+# Windows DLL dependencies beside each other makes the ADB workspace fully
+# self-contained and avoids relying on ANDROID_HOME or PATH.
+install(FILES
+  "${CMAKE_SOURCE_DIR}/../native/android-platform-tools/windows/adb.exe"
+  "${CMAKE_SOURCE_DIR}/../native/android-platform-tools/windows/AdbWinApi.dll"
+  "${CMAKE_SOURCE_DIR}/../native/android-platform-tools/windows/AdbWinUsbApi.dll"
+  "${CMAKE_SOURCE_DIR}/../native/android-platform-tools/windows/NOTICE.txt"
+  "${CMAKE_SOURCE_DIR}/../native/android-platform-tools/windows/source.properties"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/adb"
+  COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

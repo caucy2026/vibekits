@@ -8,7 +8,16 @@ import 'package:libserialport_plus/libserialport_plus.dart' as native;
 
 enum SerialParity { none, even, odd, mark, space }
 
-enum SerialFlowControl { none, rtsCts, xonXoff }
+enum SerialFlowControl {
+  none,
+  dtrDsr,
+  rtsCts,
+  xonXoff,
+  dtrDsrRtsCts,
+  dtrDsrXonXoff,
+  rtsCtsXonXoff,
+  all,
+}
 
 enum SerialDataMode { text, hex }
 
@@ -27,8 +36,37 @@ extension SerialSettingLabels on SerialParity {
 extension SerialFlowControlLabels on SerialFlowControl {
   String get label => switch (this) {
     SerialFlowControl.none => '无',
+    SerialFlowControl.dtrDsr => 'DTR/DSR',
     SerialFlowControl.rtsCts => 'RTS/CTS',
     SerialFlowControl.xonXoff => 'XON/XOFF',
+    SerialFlowControl.dtrDsrRtsCts => 'DTR/DSR + RTS/CTS',
+    SerialFlowControl.dtrDsrXonXoff => 'DTR/DSR + XON/XOFF',
+    SerialFlowControl.rtsCtsXonXoff => 'RTS/CTS + XON/XOFF',
+    SerialFlowControl.all => '全部流控',
+  };
+
+  bool get usesDtrDsr => switch (this) {
+    SerialFlowControl.dtrDsr ||
+    SerialFlowControl.dtrDsrRtsCts ||
+    SerialFlowControl.dtrDsrXonXoff ||
+    SerialFlowControl.all => true,
+    _ => false,
+  };
+
+  bool get usesRtsCts => switch (this) {
+    SerialFlowControl.rtsCts ||
+    SerialFlowControl.dtrDsrRtsCts ||
+    SerialFlowControl.rtsCtsXonXoff ||
+    SerialFlowControl.all => true,
+    _ => false,
+  };
+
+  bool get usesXonXoff => switch (this) {
+    SerialFlowControl.xonXoff ||
+    SerialFlowControl.dtrDsrXonXoff ||
+    SerialFlowControl.rtsCtsXonXoff ||
+    SerialFlowControl.all => true,
+    _ => false,
   };
 }
 
@@ -526,15 +564,19 @@ native.SerialPortConfig _nativeConfig(SerialConnectionSettings settings) {
     bits: settings.dataBits,
     parity: parity,
     stopBits: settings.stopBits,
-    rts: settings.flowControl == SerialFlowControl.rtsCts
+    rts: settings.flowControl.usesRtsCts
         ? native.SerialPortRts.flowControl
         : native.SerialPortRts.off,
-    cts: settings.flowControl == SerialFlowControl.rtsCts
+    cts: settings.flowControl.usesRtsCts
         ? native.SerialPortCts.flowControl
         : native.SerialPortCts.ignore,
-    dtr: native.SerialPortDtr.on,
-    dsr: native.SerialPortDsr.ignore,
-    xonXoff: settings.flowControl == SerialFlowControl.xonXoff
+    dtr: settings.flowControl.usesDtrDsr
+        ? native.SerialPortDtr.flowControl
+        : native.SerialPortDtr.on,
+    dsr: settings.flowControl.usesDtrDsr
+        ? native.SerialPortDsr.flowControl
+        : native.SerialPortDsr.ignore,
+    xonXoff: settings.flowControl.usesXonXoff
         ? native.SerialPortXonXoff.inputOutput
         : native.SerialPortXonXoff.disabled,
   );

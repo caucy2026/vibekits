@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -7,8 +8,12 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/harness_tool_bridge.dart';
+import '../../dev_tools/domain/platform_credential_store.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
+typedef AgentCredentialReader = Future<String?> Function(String key);
+typedef AgentCredentialWriter = Future<void> Function(String key, String value);
 
 class DeepSeekAgentWorkspace extends StatefulWidget {
   const DeepSeekAgentWorkspace({
@@ -19,6 +24,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.checkEnvironment = DeepSeekHarnessService.checkEnvironment,
     this.runAgent = DeepSeekHarnessService.startAgent,
     this.pickDirectory,
+    this.credentialReader,
+    this.credentialWriter,
   });
 
   final String initialWorkspace;
@@ -27,12 +34,20 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final HarnessEnvironmentChecker checkEnvironment;
   final HarnessAgentRunner runAgent;
   final AgentDirectoryPicker? pickDirectory;
+  final AgentCredentialReader? credentialReader;
+  final AgentCredentialWriter? credentialWriter;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
 }
 
 class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
+  static const String _credentialKey = 'deepseek-api-key';
+  static const List<String> _builtinModels = <String>[
+    'deepseek-v4-pro',
+    'deepseek-v4-flash',
+  ];
+  static const String _customModelValue = '__custom__';
   static const int _maxContextCharacters = 12000;
   static final RegExp _ansiEscape = RegExp(
     r'\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))',
@@ -42,6 +57,13 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     text: widget.initialWorkspace,
   );
   final TextEditingController _composer = TextEditingController();
+  final TextEditingController _apiKey = TextEditingController();
+  final TextEditingController _baseUrl = TextEditingController(
+    text: DeepSeekHarnessService.defaultBaseUrl,
+  );
+  final TextEditingController _model = TextEditingController(
+    text: DeepSeekHarnessService.defaultModel,
+  );
   final FocusNode _composerFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
   final List<_AgentMessage> _messages = <_AgentMessage>[];
@@ -57,7 +79,25 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadSettings());
     _checkEnvironment();
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      if (Platform.environment['FLUTTER_TEST'] == 'true' &&
+          widget.credentialReader == null) {
+        return;
+      }
+      _apiKey.text =
+          await (widget.credentialReader ?? PlatformCredentialStore.read)(
+            _credentialKey,
+          ) ??
+          '';
+      if (mounted) setState(() {});
+    } on Object {
+      // Manual entry remains available when the system store is unavailable.
+    }
   }
 
   @override
@@ -66,6 +106,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _handle?.stop();
     _workspace.dispose();
     _composer.dispose();
+    _apiKey.dispose();
+    _baseUrl.dispose();
+    _model.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -132,11 +175,19 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _run() async {
     final String prompt = _composer.text.trim();
-    if (_running || prompt.isEmpty || _environment?.ready != true) return;
+    if (_running || prompt.isEmpty) return;
     final HarnessAgentRequest request = HarnessAgentRequest(
       workspace: _workspace.text.trim(),
       prompt: _contextualPrompt(prompt),
+      apiKey: _apiKey.text.trim(),
+      baseUrl: _baseUrl.text.trim(),
+      model: _model.text.trim(),
+      approveTool: _approveHarnessTool,
     );
+    if (request.apiKey.isEmpty) {
+      _show('请先点右上角设置并填写 DeepSeek API Key');
+      return;
+    }
     try {
       request.validate();
     } on FormatException catch (error) {
@@ -230,6 +281,50 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     await handle.stop();
   }
 
+  Future<bool> _approveHarnessTool(HarnessToolApprovalRequest request) async {
+    if (!mounted) return false;
+    final bool? approved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('允许 ${request.tool.name}？'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(request.tool.description),
+              const SizedBox(height: 12),
+              Text('目标：${request.target}'),
+              const SizedBox(height: 8),
+              SelectableText(
+                request.arguments.entries
+                    .map(
+                      (MapEntry<String, Object?> item) =>
+                          '${item.key}: ${item.value}',
+                    )
+                    .join('\n'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('拒绝'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('允许一次'),
+          ),
+        ],
+      ),
+    );
+    return approved == true;
+  }
+
   Future<void> _newTask() async {
     if (_running || _messages.isEmpty) return;
     final bool? confirmed = await showDialog<bool>(
@@ -284,120 +379,380 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _showSettings() async {
+    String modelChoice = _builtinModels.contains(_model.text.trim())
+        ? _model.text.trim()
+        : _customModelValue;
+    final TextEditingController customModel = TextEditingController(
+      text: modelChoice == _customModelValue ? _model.text.trim() : '',
+    );
+    final bool? save = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => StatefulBuilder(
+        builder:
+            (
+              BuildContext dialogContext,
+              void Function(void Function()) setStateDialog,
+            ) => AlertDialog(
+              title: const Text('Harness 模型设置'),
+              content: SizedBox(
+                width: 520,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    TextField(
+                      key: const Key('agent-api-key'),
+                      controller: _apiKey,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'API Key',
+                        hintText: 'sk-…',
+                        prefixIcon: Icon(Icons.key_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      key: const Key('agent-base-url'),
+                      controller: _baseUrl,
+                      decoration: const InputDecoration(labelText: 'API 地址'),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      key: const Key('agent-model-select'),
+                      initialValue: modelChoice,
+                      decoration: const InputDecoration(labelText: '模型'),
+                      items: <DropdownMenuItem<String>>[
+                        for (final String model in _builtinModels)
+                          DropdownMenuItem<String>(
+                            value: model,
+                            child: Text(model),
+                          ),
+                        const DropdownMenuItem<String>(
+                          value: _customModelValue,
+                          child: Text('自定义'),
+                        ),
+                      ],
+                      onChanged: (String? value) {
+                        if (value == null) return;
+                        setStateDialog(() {
+                          modelChoice = value;
+                          if (value != _customModelValue) {
+                            _model.text = value;
+                          }
+                        });
+                      },
+                    ),
+                    if (modelChoice == _customModelValue) ...<Widget>[
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('agent-model'),
+                        controller: customModel,
+                        decoration: const InputDecoration(labelText: '自定义模型'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('保存'),
+                ),
+              ],
+            ),
+      ),
+    );
+    if (save != true) return;
+    if (modelChoice == _customModelValue &&
+        customModel.text.trim().isNotEmpty) {
+      _model.text = customModel.text.trim();
+    }
+    if (_model.text.trim().isEmpty) {
+      _model.text = DeepSeekHarnessService.defaultModel;
+      modelChoice = DeepSeekHarnessService.defaultModel;
+    }
+    try {
+      if (Platform.environment['FLUTTER_TEST'] == 'true' &&
+          widget.credentialWriter == null) {
+        if (mounted) setState(() {});
+        return;
+      }
+      await (widget.credentialWriter ?? PlatformCredentialStore.write)(
+        _credentialKey,
+        _apiKey.text.trim(),
+      );
+      if (mounted) setState(() {});
+    } on Object catch (error) {
+      if (mounted) _show('设置仅用于当前会话：$error');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final HarnessEnvironmentReport? environment = _environment;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      child: Column(
-        children: <Widget>[
-          _buildHeader(environment),
-          const SizedBox(height: 10),
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: context.vibe.canvas,
-                border: Border.all(color: context.vibe.border),
-                borderRadius: BorderRadius.circular(12),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool showSessionSidebar = constraints.maxWidth >= 1020;
+        return Row(
+          children: <Widget>[
+            if (showSessionSidebar) ...<Widget>[
+              SizedBox(width: 236, child: _buildSessionSidebar(environment)),
+              VerticalDivider(width: 1, color: context.vibe.border),
+            ],
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                child: _buildChatWorkbench(environment),
               ),
-              child: _messages.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.separated(
-                      key: const Key('agent-conversation'),
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                      itemCount: _messages.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 16),
-                      itemBuilder: (BuildContext context, int index) =>
-                          _MessageBubble(message: _messages[index]),
-                    ),
             ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildChatWorkbench(HarnessEnvironmentReport? environment) {
+    return Column(
+      children: <Widget>[
+        _buildHeader(environment),
+        const SizedBox(height: 10),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: context.vibe.panelRaised,
+              border: Border.all(color: context.vibe.border),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: _messages.isEmpty
+                ? _buildEmptyState()
+                : ListView.separated(
+                    key: const Key('agent-conversation'),
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                    itemCount: _messages.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 16),
+                    itemBuilder: (BuildContext context, int index) =>
+                        _MessageBubble(message: _messages[index]),
+                  ),
           ),
-          const SizedBox(height: 8),
-          if (_running) _buildProgressRow(),
-          _buildComposer(environment),
-        ],
+        ),
+        const SizedBox(height: 8),
+        if (_running) _buildProgressRow(),
+        _buildComposer(environment),
+      ],
+    );
+  }
+
+  Widget _buildSessionSidebar(HarnessEnvironmentReport? environment) {
+    final String workspace = _workspace.text.trim();
+    final String workspaceName = workspace.isEmpty
+        ? '尚未选择项目'
+        : workspace.replaceAll('\\', '/').split('/').last;
+    final String sessionTitle =
+        _messages
+            .where((_AgentMessage message) => message.user)
+            .map((_AgentMessage message) => message.text.trim())
+            .firstOrNull ??
+        '新会话';
+    return Material(
+      key: const Key('agent-session-sidebar'),
+      color: context.vibe.canvas,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            FilledButton.tonalIcon(
+              key: const Key('agent-new-session-sidebar'),
+              onPressed: _messages.isEmpty || _running ? null : _newTask,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('新建会话'),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                '项目',
+                style: TextStyle(
+                  color: context.vibe.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: const Icon(Icons.folder_outlined, size: 18),
+              title: Text(
+                workspaceName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: workspace.isEmpty ? const Text('点击选择工作区') : null,
+              onTap: _running ? null : _pickWorkspace,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                '会话',
+                style: TextStyle(
+                  color: context.vibe.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.chat_bubble_outline, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      sessionTitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: Icon(
+                environment?.ready == true
+                    ? Icons.check_circle_outline
+                    : Icons.error_outline,
+                size: 17,
+              ),
+              title: Text(
+                environment?.ready == true ? 'Harness 已就绪' : '检查连接',
+                style: const TextStyle(fontSize: 12),
+              ),
+              subtitle: Text(
+                _model.text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10),
+              ),
+              onTap: _running ? null : _showSettings,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(9),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildHeader(HarnessEnvironmentReport? environment) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: TextField(
-            key: const Key('agent-workspace'),
-            controller: _workspace,
-            readOnly: true,
-            onTap: _running ? null : _pickWorkspace,
-            decoration: const InputDecoration(
-              labelText: '工作区',
-              hintText: '选择智能体可操作的项目目录',
-              prefixIcon: Icon(Icons.folder_outlined, size: 19),
-              isDense: true,
+    final String workspace = _workspace.text.trim();
+    final String workspaceName = workspace.isEmpty
+        ? '选择工作区'
+        : workspace.replaceAll('\\', '/').split('/').last;
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: <Widget>[
+          Tooltip(
+            message: workspace.isEmpty ? '选择智能体可操作的项目目录' : workspace,
+            child: TextButton.icon(
+              key: const Key('agent-pick-workspace'),
+              onPressed: _running ? null : _pickWorkspace,
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: Text(
+                workspaceName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 7),
-        IconButton.outlined(
-          key: const Key('agent-pick-workspace'),
-          tooltip: '选择工作区',
-          onPressed: _running ? null : _pickWorkspace,
-          icon: const Icon(Icons.folder_open_outlined, size: 19),
-        ),
-        const SizedBox(width: 7),
-        Tooltip(
-          message: environment?.message ?? '正在检查环境',
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-            decoration: BoxDecoration(
-              color: context.vibe.panelRaised,
-              border: Border.all(color: context.vibe.border),
-              borderRadius: BorderRadius.circular(9),
+          if (workspace.isNotEmpty) ...<Widget>[
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                workspace,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: context.vibe.muted),
+              ),
             ),
+          ] else
+            const Spacer(),
+          Tooltip(
+            message: environment?.message ?? '正在检查环境',
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 if (_checking)
                   const SizedBox(
-                    width: 14,
-                    height: 14,
+                    width: 13,
+                    height: 13,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
                   Icon(
-                    environment?.ready == true
-                        ? Icons.check_circle_outline
-                        : Icons.error_outline,
-                    size: 16,
+                    Icons.circle,
+                    size: 8,
                     color: environment?.ready == true
                         ? context.vibe.success
                         : VibekitsColors.warning,
                   ),
-                const SizedBox(width: 5),
+                const SizedBox(width: 6),
                 Text(
                   _checking
                       ? '检查中'
                       : environment?.ready == true
                       ? 'Harness 就绪'
-                      : '环境未就绪',
+                      : '连接未就绪',
                   style: const TextStyle(fontSize: 12),
                 ),
               ],
             ),
           ),
-        ),
-        IconButton(
-          tooltip: '重新检查环境',
-          onPressed: _running ? null : _checkEnvironment,
-          icon: const Icon(Icons.refresh, size: 19),
-        ),
-        IconButton(
-          key: const Key('agent-new-task'),
-          tooltip: '新任务',
-          onPressed: _messages.isEmpty || _running ? null : _newTask,
-          icon: const Icon(Icons.add_comment_outlined, size: 19),
-        ),
-      ],
+          IconButton(
+            tooltip: '重新检查',
+            onPressed: _running ? null : _checkEnvironment,
+            icon: const Icon(Icons.refresh, size: 18),
+          ),
+          IconButton(
+            key: const Key('agent-settings'),
+            tooltip: _apiKey.text.isEmpty ? '设置模型与 API Key' : '模型设置',
+            onPressed: _running ? null : _showSettings,
+            icon: Icon(
+              _apiKey.text.isEmpty ? Icons.key_outlined : Icons.tune_outlined,
+              size: 18,
+            ),
+          ),
+          IconButton(
+            key: const Key('agent-new-task'),
+            tooltip: '新任务',
+            onPressed: _messages.isEmpty || _running ? null : _newTask,
+            icon: const Icon(Icons.add, size: 20),
+          ),
+        ],
+      ),
     );
   }
 
@@ -420,7 +775,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           const SizedBox(width: 8),
           const Expanded(
             child: Text(
-              'DeepSeek 正在工作 · 可切换到其他工具，任务会继续运行',
+              'Harness 正在处理任务 · 可切换到其他工具，任务会继续运行',
               style: TextStyle(fontSize: 12),
             ),
           ),
@@ -436,7 +791,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Widget _buildComposer(HarnessEnvironmentReport? environment) {
-    final bool canRun = !_running && environment?.ready == true;
+    final bool canRun = !_running;
     return Container(
       decoration: BoxDecoration(
         color: context.vibe.panelRaised,
@@ -479,13 +834,28 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ),
           Row(
             children: <Widget>[
+              TextButton.icon(
+                key: const Key('agent-model-button'),
+                onPressed: _running ? null : _showSettings,
+                icon: const Icon(Icons.auto_awesome_outlined, size: 15),
+                label: Text(
+                  _model.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 7),
+                  textStyle: const TextStyle(fontSize: 11),
+                ),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   environment?.ready == true
                       ? _running
                             ? '可以先写下一条要求，当前任务结束后再发送'
                             : 'Enter 运行 · Shift+Enter 换行'
-                      : environment?.message ?? '正在检查 Node.js 与 npx',
+                      : environment?.message ?? '正在检查 Harness 配置',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
@@ -505,57 +875,75 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary
-                    .withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(13),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double minimumHeight = constraints.maxHeight > 32
+            ? constraints.maxHeight - 32
+            : 0;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: minimumHeight),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary
+                            .withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(Icons.terminal, size: 25),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '今天要开发什么？',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '选择工作区后直接描述任务。Harness 会在同一会话中保留上下文、运行过程和结果。',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: context.vibe.muted),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 7,
+                      runSpacing: 7,
+                      children: <Widget>[
+                        ActionChip(
+                          label: const Text('检查并修复失败测试'),
+                          onPressed: () =>
+                              _useSuggestion('检查项目并修复失败的测试，完成后运行全量验证。'),
+                        ),
+                        ActionChip(
+                          label: const Text('审查当前改动'),
+                          onPressed: () =>
+                              _useSuggestion('审查当前 Git 改动，优先指出会影响用户的真实问题。'),
+                        ),
+                        ActionChip(
+                          label: const Text('解释项目结构'),
+                          onPressed: () =>
+                              _useSuggestion('快速阅读项目，说明主要模块、入口和关键数据流。'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              child: const Icon(Icons.terminal, size: 25),
             ),
-            const SizedBox(height: 12),
-            const Text(
-              '把结果交给 DeepSeek',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              '选择工作区，说明目标、边界和完成标准。后续要求会沿用当前对话上下文。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.vibe.muted),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 7,
-              runSpacing: 7,
-              children: <Widget>[
-                ActionChip(
-                  label: const Text('检查并修复失败测试'),
-                  onPressed: () => _useSuggestion('检查项目并修复失败的测试，完成后运行全量验证。'),
-                ),
-                ActionChip(
-                  label: const Text('审查当前改动'),
-                  onPressed: () =>
-                      _useSuggestion('审查当前 Git 改动，优先指出会影响用户的真实问题。'),
-                ),
-                ActionChip(
-                  label: const Text('解释项目结构'),
-                  onPressed: () => _useSuggestion('快速阅读项目，说明主要模块、入口和关键数据流。'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

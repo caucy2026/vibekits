@@ -8,7 +8,7 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
-  test('Harness Web 与智能体参数固定使用官方包', () async {
+  test('Harness 固定官方内置版本且任务参数不包含安装命令', () async {
     final Directory workspace = await Directory.systemTemp.createTemp(
       'vibekits_harness_',
     );
@@ -20,23 +20,18 @@ void main() {
     final HarnessAgentRequest agent = HarnessAgentRequest(
       workspace: workspace.path,
       prompt: '检查失败的测试',
+      apiKey: 'test-key',
     );
     web.validate();
     agent.validate();
-    expect(web.arguments, <String>[
-      '--yes',
-      '@deepseek-ai/dsh@0.1.0-rc.5',
-      'web',
-      '--port',
-      '3080',
-    ]);
-    expect(agent.arguments, <String>[
-      '--yes',
-      '@deepseek-ai/dsh@0.1.0-rc.5',
-      '--profile',
-      'headless',
-      '检查失败的测试',
-    ]);
+    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.0-rc.7');
+    expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
+    expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
+    expect(agent.arguments, isNot(contains('--yes')));
+    expect(agent.arguments, contains('headless'));
+    expect(agent.arguments, isNot(contains('test-key')));
+    expect(agent.baseUrl, DeepSeekHarnessService.defaultBaseUrl);
+    expect(agent.model, DeepSeekHarnessService.defaultModel);
   });
 
   testWidgets('智能体选择工作区后在应用内流式运行任务', (WidgetTester tester) async {
@@ -59,6 +54,8 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.18.0',
@@ -81,10 +78,22 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-pick-workspace')));
     await tester.pumpAndSettle();
     expect(savedWorkspace, workspace.path);
+    await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
+    await tester.tap(find.byKey(const Key('agent-model-select')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('deepseek-v4-flash').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-composer')), '修复失败的测试');
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('agent-send')));
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(launched.single.workspace, workspace.path);
+    expect(launched.single.model, 'deepseek-v4-flash');
     expect(launched.single.prompt, '修复失败的测试');
     expect(find.byKey(const Key('agent-stop')), findsOneWidget);
     handles.first.add('已定位并修复测试。');
@@ -111,7 +120,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '新任务'));
     await tester.pumpAndSettle();
-    expect(find.text('把结果交给 DeepSeek'), findsOneWidget);
+    expect(find.text('今天要开发什么？'), findsOneWidget);
     expect(find.text('已定位并修复测试。'), findsNothing);
   });
 
@@ -126,6 +135,8 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
             initialWorkspace: workspace.path,
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
@@ -139,7 +150,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-composer')), '执行长任务');
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('agent-send')));
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(find.byKey(const Key('agent-progress')), findsOneWidget);
@@ -148,6 +166,36 @@ void main() {
     expect(handle.running, isFalse);
     expect(find.text('任务已停止。'), findsOneWidget);
     expect(find.byKey(const Key('agent-progress')), findsNothing);
+  });
+
+  testWidgets('宽屏显示社区式项目与会话侧栏', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: null,
+              npxVersion: null,
+              model: DeepSeekHarnessService.defaultModel,
+              message: 'DeepSeek 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('agent-session-sidebar')), findsOneWidget);
+    expect(find.text('项目'), findsOneWidget);
+    expect(find.text('会话'), findsOneWidget);
+    expect(find.text('新建会话'), findsOneWidget);
   });
 }
 

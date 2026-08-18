@@ -44,7 +44,7 @@ String defaultModelDirectory() {
   return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Models';
 }
 
-/// T5 本地模型 Tab（模型管理已实现；推理运行时属后续接入）。
+/// Harness 智能体工作台：开发智能体为主入口，OCR 为辅助能力。
 class LocalModelsTab extends StatefulWidget {
   const LocalModelsTab({
     super.key,
@@ -57,6 +57,8 @@ class LocalModelsTab extends StatefulWidget {
     this.assetLoader = loadBundledModelAsset,
     this.ocrBundleInstaller = BundledModelInstaller.installPpOcrV6Tiny,
     this.screenshotCapture = SystemScreenshotCapture.captureRegion,
+    this.initialLargeModelView = 'agent',
+    this.onLargeModelViewChanged,
     this.initialHarnessWorkspace = '',
     this.onHarnessWorkspaceChanged,
     this.harnessCheckEnvironment = DeepSeekHarnessService.checkEnvironment,
@@ -78,6 +80,8 @@ class LocalModelsTab extends StatefulWidget {
   )
   ocrBundleInstaller;
   final ScreenshotCapture screenshotCapture;
+  final String initialLargeModelView;
+  final Future<void> Function(String view)? onLargeModelViewChanged;
   final String initialHarnessWorkspace;
   final Future<void> Function(String workspace)? onHarnessWorkspaceChanged;
   final HarnessEnvironmentChecker harnessCheckEnvironment;
@@ -97,7 +101,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   String? _wavPath;
   VadInferenceResult? _vadResult;
   bool _runningVad = false;
-  _ModelWorkspace _workspace = _ModelWorkspace.ocr;
+  late _ModelWorkspace _workspace;
   String? _imagePath;
   PpOcrResult? _ocrResult;
   bool _runningOcr = false;
@@ -117,6 +121,13 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   void initState() {
     super.initState();
     _imagePath = widget.initialImagePath;
+    _workspace =
+        widget.initialImagePath != null || widget.initialImportPath != null
+        ? _ModelWorkspace.ocr
+        : widget.initialLargeModelView == 'ocr'
+        ? _ModelWorkspace.ocr
+        : _ModelWorkspace.agent;
+    _agentOpened = _workspace == _ModelWorkspace.agent;
     _refresh();
     final String? path = widget.initialImportPath;
     if (path != null) {
@@ -128,9 +139,14 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     final List<ModelInfo> models = await widget.modelLister(_directory);
     if (!mounted) return;
     setState(() => _models = models);
-    if (_imagePath != null && _ocrBundleInstalled && !_autoOcrStarted) {
-      _autoOcrStarted = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _runOcr());
+    if (_imagePath != null && !_autoOcrStarted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!_ocrBundleInstalled) await _downloadOcrBundle();
+        if (mounted && _ocrBundleInstalled && !_autoOcrStarted) {
+          _autoOcrStarted = true;
+          await _runOcr();
+        }
+      });
     }
   }
 
@@ -322,6 +338,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       _portablePreviewAttempted = false;
       _portablePreviewError = null;
     });
+    if (!_ocrBundleInstalled) await _downloadOcrBundle();
     if (_ocrBundleInstalled) await _runOcr();
   }
 
@@ -349,7 +366,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       if (_ocrBundleInstalled) {
         await _runOcr();
       } else {
-        setState(() => _message = '截图已保存，安装 PP-OCRv6 tiny 后即可识别');
+        await _downloadOcrBundle();
+        if (_ocrBundleInstalled) await _runOcr();
       }
     } on Object catch (error) {
       if (mounted) setState(() => _message = '截图失败：$error');
@@ -562,11 +580,6 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                 key: const Key('model-workspace-tabs'),
                 showSelectedIcon: false,
                 segments: <ButtonSegment<_ModelWorkspace>>[
-                  const ButtonSegment<_ModelWorkspace>(
-                    value: _ModelWorkspace.ocr,
-                    icon: Icon(Icons.document_scanner_outlined, size: 17),
-                    label: Text('截图 OCR'),
-                  ),
                   ButtonSegment<_ModelWorkspace>(
                     value: _ModelWorkspace.agent,
                     icon: const Icon(Icons.terminal, size: 17),
@@ -575,9 +588,14 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                       smallSize: 7,
                       child: const Padding(
                         padding: EdgeInsets.only(right: 3),
-                        child: Text('DeepSeek 智能体'),
+                        child: Text('Harness 智能体'),
                       ),
                     ),
+                  ),
+                  const ButtonSegment<_ModelWorkspace>(
+                    value: _ModelWorkspace.ocr,
+                    icon: Icon(Icons.document_scanner_outlined, size: 17),
+                    label: Text('截图 OCR'),
                   ),
                 ],
                 selected: <_ModelWorkspace>{_workspace},
@@ -588,6 +606,9 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                       _agentOpened = true;
                     }
                   });
+                  widget.onLargeModelViewChanged?.call(
+                    _workspace == _ModelWorkspace.agent ? 'agent' : 'ocr',
+                  );
                 },
               ),
               const Spacer(),
@@ -932,7 +953,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                             child: Text(
                               _ocrBundleInstalled
                                   ? '识别结果会显示在这里'
-                                  : '先安装 6.0MB 的 PP-OCRv6 tiny',
+                                  : '首次识别会自动准备内置 PP-OCRv6 tiny',
                               style: TextStyle(color: context.vibe.muted),
                             ),
                           )

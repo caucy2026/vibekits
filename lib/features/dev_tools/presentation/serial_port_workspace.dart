@@ -42,6 +42,32 @@ class SerialPortWorkspace extends StatefulWidget {
 class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
   static const int _maxLogEntries = 2000;
   static const int _maxLogBytes = 2 * 1024 * 1024;
+  static const List<int> _commonBaudRates = <int>[
+    300,
+    600,
+    1200,
+    2400,
+    4800,
+    9600,
+    14400,
+    19200,
+    28800,
+    38400,
+    57600,
+    74880,
+    115200,
+    230400,
+    250000,
+    460800,
+    500000,
+    576000,
+    921600,
+    1000000,
+    1500000,
+    2000000,
+    3000000,
+    4000000,
+  ];
 
   late final SerialConnectionSettings? _restored =
       SerialConnectionSettings.decode(widget.initialSettings);
@@ -78,6 +104,30 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
   int _loggedBytes = 0;
 
   bool get _connected => _session?.isOpen == true;
+
+  List<SerialPortDescriptor> get _selectablePorts {
+    if (!Platform.isWindows) return _ports;
+    final Map<String, SerialPortDescriptor> ports =
+        <String, SerialPortDescriptor>{
+          for (final SerialPortDescriptor port in _ports)
+            port.name.toUpperCase(): port,
+        };
+    for (int index = 1; index <= 256; index++) {
+      final String name = 'COM$index';
+      ports.putIfAbsent(name, () => SerialPortDescriptor(name: name));
+    }
+    final List<SerialPortDescriptor> result = ports.values.toList();
+    result.sort((SerialPortDescriptor a, SerialPortDescriptor b) {
+      int? number(String value) => int.tryParse(
+        value.replaceFirst(RegExp(r'^COM', caseSensitive: false), ''),
+      );
+      final int? left = number(a.name);
+      final int? right = number(b.name);
+      if (left != null && right != null) return left.compareTo(right);
+      return a.name.compareTo(b.name);
+    });
+    return result;
+  }
 
   @override
   void initState() {
@@ -436,23 +486,29 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                     labelText: '串口',
                     hintText: Platform.isWindows ? 'COM3' : '/dev/cu.usbserial',
                     isDense: true,
-                    suffixIcon: _ports.isEmpty
-                        ? null
-                        : PopupMenuButton<String>(
-                            tooltip: '选择检测到的串口',
-                            onSelected: (String value) =>
-                                _portController.text = value,
-                            itemBuilder: (BuildContext context) => _ports
-                                .map(
-                                  (SerialPortDescriptor port) =>
-                                      PopupMenuItem<String>(
-                                        value: port.name,
-                                        child: Text(port.label),
-                                      ),
-                                )
-                                .toList(growable: false),
-                            icon: const Icon(Icons.arrow_drop_down),
-                          ),
+                    suffixIcon: PopupMenuButton<String>(
+                      tooltip: '选择串口（Windows 支持 COM1–COM256）',
+                      onSelected: (String value) =>
+                          _portController.text = value,
+                      itemBuilder: (BuildContext context) => _selectablePorts
+                          .map(
+                            (SerialPortDescriptor port) =>
+                                PopupMenuItem<String>(
+                                  value: port.name,
+                                  child: Text(
+                                    _ports.any(
+                                          (SerialPortDescriptor value) =>
+                                              value.name.toUpperCase() ==
+                                              port.name.toUpperCase(),
+                                        )
+                                        ? '${port.label} · 已检测'
+                                        : port.name,
+                                  ),
+                                ),
+                          )
+                          .toList(growable: false),
+                      icon: const Icon(Icons.arrow_drop_down),
+                    ),
                   ),
                 ),
               ),
@@ -469,9 +525,23 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                   controller: _baudController,
                   enabled: controlsEnabled,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '波特率',
                     isDense: true,
+                    suffixIcon: PopupMenuButton<int>(
+                      tooltip: '选择常用波特率',
+                      onSelected: (int value) =>
+                          _baudController.text = '$value',
+                      itemBuilder: (BuildContext context) => _commonBaudRates
+                          .map(
+                            (int value) => PopupMenuItem<int>(
+                              value: value,
+                              child: Text('$value'),
+                            ),
+                          )
+                          .toList(growable: false),
+                      icon: const Icon(Icons.arrow_drop_down),
+                    ),
                   ),
                 ),
               ),

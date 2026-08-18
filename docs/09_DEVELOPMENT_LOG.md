@@ -287,3 +287,33 @@
 - ADB 命令运行在独立子进程，10 秒超时会终止子进程；界面只接收最终快照，销毁工作区后忽略迟到结果。未授权和离线设备给出可行动提示。
 - 版本/设备解析、基础 Widget 和独立入口 4/4 通过，相关 6 个文件定向 Analyze 无问题。本机真实探测为 ADB `1.0.41` / Platform-Tools `31.0.3-7562133`，绝对路径 `D:\work\allwin\platform-tools\adb.exe`；官方 server 成功启动，当前无 USB/无线设备和 mDNS 服务。
 - 源码版本更新为 `1.9.0-dev.5+15`。本检查点只关闭 ADB-106-A/B 的路径、版本和状态基础层，不宣称 Shell、文件、Logcat、截图、APK、无线配对或智能体审批已完成。
+
+## 2026-08-18 · 大模型首页与 DeepSeek 社区工作台检查点
+
+- 一级导航将“本地模型”改为“大模型”并移动到第 1 项；首次启动默认直接进入 DeepSeek，OCR 作为同页辅助入口。图片或模型文件由系统打开/拖入时仍显式路由到 OCR/模型处理，不被默认页覆盖。
+- 页面恢复从易错的数字下标升级为稳定工作区 ID；旧版 `lastTab` 按原顺序迁移。除一级工作区外，同时保存大模型页的 DeepSeek/OCR 子页，异步加载设置后恢复，不因导航重排打开错误页面。
+- DeepSeek 宽屏工作区按 MIT 社区项目 Kun（原 DeepSeek-GUI）的 Code 工作台习惯重排：项目/会话侧栏、新建会话、工作区切换、当前模型、配置、流式消息、停止和底部输入；窄屏自动收起会话侧栏，空状态可滚动，无最小高度溢出。
+- DeepSeek 正式模型保持 `deepseek-v4-pro` / `deepseek-v4-flash`；定向设置、会话、宽屏侧栏、导航、拖入路由和 OCR 回归 28/28 通过。版本更新为 `1.9.0-dev.6+16`。
+
+## 2026-08-18 · Harness 官方功能基线与 Codex 风格界面检查点
+
+- 纠正上一检查点的参考对象：一级入口由“大模型”改为“Harness（智能体）”，不再以 Kun 桌面客户端作为设计目标；官方 `deepseek-ai/deepseek-harness` Web UI 的工作区、会话、对话、工具、目标/计划、任务、模型、权限、插件和设置成为能力基线。
+- 全局主题改为接近 Codex 的中性色：暖灰画布/侧栏、白色工作面、灰色边界和近黑主操作；移除青绿色大面积强调和点击水波动画。Harness 页面保留 Vibekits 自有布局，压缩顶部工作区栏，空状态改为任务导向，不复制 DeepSeek 宣传官网。
+- 官方 npm registry 查询确认 `@deepseek-ai/dsh@0.1.0-rc.7`。移除把 `/chat/completions` 普通模型流冒充 Harness 的实现，恢复官方 headless 进程适配；Windows 通过 `node.exe + npx-cli.js` 参数数组启动，API Key 仅经子进程环境变量传递，停止时终止完整进程树。
+- 修复 Harness 环境探测在 Flutter 组件测试中残留外部进程计时器的问题：测试环境明确跳过 Node 探测，生产环境仍真实检测 Node 22.19+/24+ 与 npx。
+- `flutter analyze` 0 问题；Harness 与主界面组件测试 25/25 通过，覆盖启动恢复、窄窗口、深色主题、任务流式输出/停止、OCR 切换和文件拖入。版本更新为 `1.9.0-dev.7+17`。
+# 2026-08-18 Harness 编译期运行时与 Vibekits 工具桥
+
+- 将“用户只输入 Key 即可工作”和“Harness 可调用 Vibekits 全部工具”写入产品需求、实施计划和需求台账。
+- 删除 Harness 任务启动中的 `npx --yes` 在线安装路径；改为只读取安装包内 Node、官方 CLI manifest 和预置 profile，缺件时立即报告安装包损坏。
+- 新增 `tool/prepare_harness_runtime.ps1` 和 Windows Release 打包校验。构建机固定准备 `@deepseek-ai/dsh@0.1.0-rc.7`，运行时不依赖用户 Node/npm/PATH。
+- 新增版本化 `vibekits.tools.v1` 工具桥；首批闭环 SHA-256、ADB 设备枚举和 ADB 网络连接，设备控制要求一次性明确审批，未接处理器的功能不会暴露给模型。
+- 定向测试 4/4 通过，相关 Dart 静态检查无问题。官方 npm 资产准备再次运行约 90 秒无输出后主动取消，因此当前仍不能标记“真实 Key 实启完成”。
+
+## 2026-08-18 · Harness 全工具 MCP 闭环检查点
+
+- `vibekits.tools.v1` 从首批 SHA-256/ADB 扩展到所有当前适合无状态自动化的能力：编码/哈希/格式/网络微工具、程序员计算器、文件哈希与搜索、SQLite 检查/只读查询、Git 只读检查、HTTP、GitHub 诊断、串口枚举/一次收发，以及 ADB 枚举/连接/受控通用命令。
+- APP 启动仅绑定 `127.0.0.1` 随机端口的工具服务，使用 256 位随机 Bearer Token；官方 Harness 通过内置 `@deepseek-ai/dsh-mcp-client` 与随包 Node/MCP 服务发现工具。进程结束/停止时强制关闭工具服务。
+- 只读工具直接执行；ADB、串口、HTTP 与文件变更等风险工具在 APP 内显示工具、目标和参数，只允许“拒绝”或“允许一次”。没有 UI 审批器时默认拒绝。SSH/SFTP 与远程数据库不会向模型暴露明文密码，待以保存资料别名和会话句柄设计专用接口。
+- 真实协议闭环已通过：模型请求包含 `mcp__vibekits__sha256` → 官方 dsh 发出 MCP 调用 → APP 计算 `abc` 的 SHA-256 → 工具结果进入下一轮模型请求 → 最终回复 `VIBEKITS_FULL_STACK_OK`，进程退出 0。
+- 桥接领域测试 9/9、回环/MCP 协议测试 3/3、官方 Harness 全栈测试 1/1 通过；版本更新为 `1.9.0-dev.8+18`。

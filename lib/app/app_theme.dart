@@ -2,18 +2,18 @@ import 'package:flutter/material.dart';
 
 /// Stable semantic accents used by feature status indicators.
 abstract final class VibekitsColors {
-  static const Color primary = Color(0xFF0A9F9A);
-  static const Color primaryHover = Color(0xFF087E7A);
-  static const Color info = Color(0xFF2788E8);
+  static const Color primary = Color(0xFF242422);
+  static const Color primaryHover = Color(0xFF111110);
+  static const Color info = Color(0xFF3975C6);
   static const Color warning = Color(0xFFE09A32);
   static const Color danger = Color(0xFFD85B57);
 
   // Legacy light tokens. New layout code should use [VibekitsPalette].
-  static const Color appBackground = Color(0xFFF3F7F9);
+  static const Color appBackground = Color(0xFFF7F7F5);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color textPrimary = Color(0xFF16232D);
-  static const Color textSecondary = Color(0xFF60717D);
-  static const Color divider = Color(0xFFD8E3E8);
+  static const Color textPrimary = Color(0xFF242422);
+  static const Color textSecondary = Color(0xFF6F6F69);
+  static const Color divider = Color(0xFFE1E1DC);
 }
 
 @immutable
@@ -77,58 +77,58 @@ extension VibekitsThemeContext on BuildContext {
       Theme.of(this).extension<VibekitsPalette>() ??
       (Theme.of(this).brightness == Brightness.dark
           ? const VibekitsPalette(
-              canvas: Color(0xFF071119),
-              panel: Color(0xFF0C1821),
-              panelRaised: Color(0xFF11212C),
-              border: Color(0xFF253B47),
-              muted: Color(0xFF91A4AF),
-              success: Color(0xFF4DD5AA),
-              glow: Color(0x3335D1C8),
+              canvas: Color(0xFF1E1E1C),
+              panel: Color(0xFF252523),
+              panelRaised: Color(0xFF2C2C29),
+              border: Color(0xFF41413C),
+              muted: Color(0xFFA5A59F),
+              success: Color(0xFF66B88A),
+              glow: Color(0x00000000),
             )
           : const VibekitsPalette(
-              canvas: Color(0xFFF3F7F9),
-              panel: Color(0xFFF9FCFD),
+              canvas: Color(0xFFF7F7F5),
+              panel: Color(0xFFF1F1EE),
               panelRaised: Color(0xFFFFFFFF),
-              border: Color(0xFFD7E4E9),
-              muted: Color(0xFF60717D),
-              success: Color(0xFF16856B),
-              glow: Color(0x1F0A9F9A),
+              border: Color(0xFFE1E1DC),
+              muted: Color(0xFF6F6F69),
+              success: Color(0xFF277A55),
+              glow: Color(0x00000000),
             ));
 }
 
 abstract final class VibekitsTheme {
   static const VibekitsPalette _lightPalette = VibekitsPalette(
-    canvas: Color(0xFFF3F7F9),
-    panel: Color(0xFFF9FCFD),
+    canvas: Color(0xFFF7F7F5),
+    panel: Color(0xFFF1F1EE),
     panelRaised: Color(0xFFFFFFFF),
-    border: Color(0xFFD7E4E9),
-    muted: Color(0xFF60717D),
-    success: Color(0xFF16856B),
-    glow: Color(0x1F0A9F9A),
+    border: Color(0xFFE1E1DC),
+    muted: Color(0xFF6F6F69),
+    success: Color(0xFF277A55),
+    glow: Color(0x00000000),
   );
 
   static const VibekitsPalette _darkPalette = VibekitsPalette(
-    canvas: Color(0xFF071119),
-    panel: Color(0xFF0C1821),
-    panelRaised: Color(0xFF11212C),
-    border: Color(0xFF253B47),
-    muted: Color(0xFF91A4AF),
-    success: Color(0xFF4DD5AA),
-    glow: Color(0x3335D1C8),
+    canvas: Color(0xFF1E1E1C),
+    panel: Color(0xFF252523),
+    panelRaised: Color(0xFF2C2C29),
+    border: Color(0xFF41413C),
+    muted: Color(0xFFA5A59F),
+    success: Color(0xFF66B88A),
+    glow: Color(0x00000000),
   );
 
   static ThemeData light() => _build(
     brightness: Brightness.light,
     palette: _lightPalette,
-    foreground: const Color(0xFF16232D),
+    foreground: const Color(0xFF242422),
     primary: VibekitsColors.primary,
   );
 
   static ThemeData dark() => _build(
     brightness: Brightness.dark,
     palette: _darkPalette,
-    foreground: const Color(0xFFE7F0F3),
-    primary: const Color(0xFF35D1C8),
+    foreground: const Color(0xFFF2F2EE),
+    primary: const Color(0xFFE7E7E2),
   );
 
   static ThemeData _build({
@@ -156,7 +156,7 @@ abstract final class VibekitsTheme {
       scaffoldBackgroundColor: palette.canvas,
       fontFamily: 'Microsoft YaHei UI',
       extensions: <ThemeExtension<dynamic>>[palette],
-      splashFactory: InkSparkle.splashFactory,
+      splashFactory: NoSplash.splashFactory,
       textTheme: TextTheme(
         headlineSmall: TextStyle(
           color: foreground,

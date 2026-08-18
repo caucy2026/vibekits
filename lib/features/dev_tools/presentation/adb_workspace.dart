@@ -6,21 +6,29 @@ import '../../../app/app_theme.dart';
 import '../domain/adb_service.dart';
 
 typedef AdbWorkspaceLoader = Future<AdbSnapshot> Function();
+typedef AdbWirelessConnector = Future<String> Function(
+  String executable,
+  String address,
+);
 
 class AdbWorkspace extends StatefulWidget {
-  const AdbWorkspace({super.key, this.loadSnapshot});
+  const AdbWorkspace({super.key, this.loadSnapshot, this.connectDevice});
 
   final AdbWorkspaceLoader? loadSnapshot;
+  final AdbWirelessConnector? connectDevice;
 
   @override
   State<AdbWorkspace> createState() => _AdbWorkspaceState();
 }
 
 class _AdbWorkspaceState extends State<AdbWorkspace> {
+  final TextEditingController _wirelessAddress = TextEditingController();
   AdbSnapshot? _snapshot;
   String? _selectedSerial;
   String? _error;
   bool _loading = false;
+  bool _connecting = false;
+  String? _connectionMessage;
   int _generation = 0;
 
   AdbDevice? get _selected => _snapshot?.devices
@@ -65,9 +73,43 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     }
   }
 
+  Future<void> _connect() async {
+    final AdbInstallation? installation = _snapshot?.installation;
+    if (installation == null || _connecting) return;
+    setState(() {
+      _connecting = true;
+      _error = null;
+      _connectionMessage = null;
+    });
+    try {
+      final String message =
+          await (widget.connectDevice?.call(
+                installation.executable,
+                _wirelessAddress.text,
+              ) ??
+              AdbService.connect(
+                installation.executable,
+                _wirelessAddress.text,
+              ));
+      if (!mounted) return;
+      setState(() {
+        _connecting = false;
+        _connectionMessage = message;
+      });
+      await _refresh();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _connecting = false;
+        _error = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
   @override
   void dispose() {
     _generation += 1;
+    _wirelessAddress.dispose();
     super.dispose();
   }
 
@@ -137,6 +179,47 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
               _error!,
               key: const Key('adb-error'),
               style: const TextStyle(color: VibekitsColors.danger),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  key: const Key('adb-wireless-address'),
+                  controller: _wirelessAddress,
+                  enabled: installation != null && !_connecting,
+                  onSubmitted: (_) => _connect(),
+                  decoration: const InputDecoration(
+                    labelText: '无线设备',
+                    hintText: '192.168.3.63（默认端口 5555）',
+                    prefixIcon: Icon(Icons.wifi_rounded, size: 19),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                key: const Key('adb-connect'),
+                onPressed: installation == null || _connecting
+                    ? null
+                    : _connect,
+                icon: _connecting
+                    ? const SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.link_rounded, size: 18),
+                label: Text(_connecting ? '连接中' : '连接'),
+              ),
+            ],
+          ),
+          if (_connectionMessage != null) ...<Widget>[
+            const SizedBox(height: 5),
+            Text(
+              _connectionMessage!,
+              key: const Key('adb-connect-result'),
+              style: TextStyle(fontSize: 12, color: context.vibe.success),
             ),
           ],
           const SizedBox(height: 10),
