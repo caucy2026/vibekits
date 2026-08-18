@@ -332,6 +332,7 @@ abstract final class CleanupScanner {
           await scanDirectoryWithProgress(
             target.path,
             target.category,
+            maxDepth: target.maxDepth,
             cancellationToken: token,
             sourceLabel: target.label,
             onProgress: targetProgress,

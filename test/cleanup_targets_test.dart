@@ -8,7 +8,7 @@ import 'package:vibekits/features/cleaner/domain/windows_cleanup_rule_catalog.da
 void main() {
   test('Windows 规则库 ID 唯一且包含系统与常用软件规则', () {
     final List<WindowsCleanupRule> rules = WindowsCleanupRuleCatalog.rules;
-    expect(rules.length, greaterThanOrEqualTo(20));
+    expect(rules.length, greaterThanOrEqualTo(29));
     expect(
       rules.map((WindowsCleanupRule rule) => rule.id).toSet(),
       hasLength(rules.length),
@@ -21,8 +21,58 @@ void main() {
         'delivery-optimization-cache',
         'vscode-logs',
         'docker-desktop-logs',
+        'jetbrains-crash-heap-dumps',
+        'wslg-rd-client-traces',
+        'gradio-temp-files',
+        'scoop-download-cache',
       ]),
     );
+  });
+
+  test('用户目录顶层规则不会递归误扫项目和个人目录', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_bounded_root_rules_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory nested = Directory(
+      '${sandbox.path}${Platform.pathSeparator}projects',
+    )..createSync();
+    final DateTime old = DateTime.now().subtract(const Duration(days: 10));
+    final File rootDump = File(
+      '${sandbox.path}${Platform.pathSeparator}java_error_in_100.hprof',
+    )..writeAsStringSync('root dump');
+    rootDump.setLastModifiedSync(old);
+    final File rootLog = File(
+      '${sandbox.path}${Platform.pathSeparator}java_error_in_100.log',
+    )..writeAsStringSync('root log');
+    rootLog.setLastModifiedSync(old);
+    final File nestedDump = File(
+      '${nested.path}${Platform.pathSeparator}java_error_in_project.hprof',
+    )..writeAsStringSync('must stay');
+    nestedDump.setLastModifiedSync(old);
+
+    final List<CleanupScanTarget> targets =
+        CleanupTargetDiscovery.discover(
+              environment: <String, String>{'USERPROFILE': sandbox.path},
+              windowsBuild: 22621,
+            )
+            .where((CleanupScanTarget target) {
+              return target.id == 'jetbrains-crash-heap-dumps' ||
+                  target.id == 'jetbrains-crash-logs';
+            })
+            .toList(growable: false);
+
+    expect(targets, hasLength(2));
+    expect(
+      targets.every((CleanupScanTarget target) => target.maxDepth == 0),
+      isTrue,
+    );
+    final CleanupScanResult result = await CleanupScanner.scanTargets(targets);
+    final Set<String> paths = result.candidates
+        .map((CleanupCandidate candidate) => candidate.path)
+        .toSet();
+    expect(paths, containsAll(<String>[rootDump.path, rootLog.path]));
+    expect(paths, isNot(contains(nestedDump.path)));
   });
 
   test('Windows 规则按版本、文件模式和时间阈值生成真实候选', () async {

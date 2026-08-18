@@ -347,3 +347,11 @@
 - 后台扫描从一个工作 Isolate 升级为最多两个有界扫描 Isolate，实时聚合进度、候选、字节数和不可读目录；取消令牌同时终止两个工作线程，仍保留准确的部分结果。
 - 未复制许可不明确的 Winapp2 基础规则或 GPL-3.0 BleachBit 代码；路径依据 Microsoft 官方文档独立实现。
 - `flutter analyze` 0 问题；规则/版本/模式/年龄测试、扫描/取消及双工作线程合并回归 16/16 通过。版本更新为 `1.9.0-dev.17+27`。
+
+## 2026-08-18 · v1.9.0-dev.18 Kudu/constUP/BitCleanerX 算法吸收
+
+- 审阅 Kudu 的 JSON Schema 规则设计、最小保留时间、bounded anchor/direct file allowlist 安全规范，constUP Garbage Cleaner 的详细 dry-run、规则过滤、垃圾预防说明和异常大日志规则，以及 BitCleanerX 的跨平台配置化扫描模型。
+- 规则模型新增 `maxDepth` 并贯穿发现、Isolate 传输和扫描器。用户目录顶层规则固定 `maxDepth: 0`，只检查直接文件名白名单，项目、文档和其他子目录即使存在同名文件也不会进入候选。
+- 规则库升级到 v2/29 条：新增 JetBrains `java_error_in_*.hprof/.log`、WSLg `RdClientAutoTrace-*.etl`、Gradio 临时文件、.NET TelemetryStorageService、Scoop 下载缓存和 Delphi 许可旧日志；大型堆转储/ETL/许可日志保持谨慎且默认不选。
+- 没有复制 Kudu/constUP/BitCleanerX 源码或规则文件；按许可证和安全边界独立实现，保留来源与差异记录。
+- `flutter analyze` 0 问题；清理规则、深度、模式、年龄、取消和双工作线程回归 17/17 通过。版本更新为 `1.9.0-dev.18+28`。

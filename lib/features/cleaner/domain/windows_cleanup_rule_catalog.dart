@@ -1,6 +1,11 @@
 enum WindowsCleanupRuleRisk { safe, cautious, systemManaged }
 
-enum WindowsCleanupRuleCategory { systemCache, logs, applicationCache }
+enum WindowsCleanupRuleCategory {
+  systemCache,
+  logs,
+  applicationCache,
+  developerCache,
+}
 
 class WindowsCleanupRule {
   const WindowsCleanupRule({
@@ -13,6 +18,7 @@ class WindowsCleanupRule {
     this.minimumWindowsBuild = 6000,
     this.maximumWindowsBuild,
     this.minimumAgeHours = 24,
+    this.maxDepth = 8,
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
     this.note = '',
@@ -27,6 +33,7 @@ class WindowsCleanupRule {
   final int minimumWindowsBuild;
   final int? maximumWindowsBuild;
   final int minimumAgeHours;
+  final int maxDepth;
   final List<String> includePatterns;
   final List<String> excludePatterns;
   final String note;
@@ -41,7 +48,7 @@ class WindowsCleanupRule {
 /// 规则只描述明确的瞬态目录，不扫描整盘寻找通用扩展名。系统管理型缓存
 /// 默认关闭；下载目录、Windows.old、驱动包、预取和注册表不在直接删除库中。
 abstract final class WindowsCleanupRuleCatalog {
-  static const int version = 1;
+  static const int version = 2;
 
   static const List<WindowsCleanupRule> rules = <WindowsCleanupRule>[
     WindowsCleanupRule(
@@ -269,6 +276,84 @@ abstract final class WindowsCleanupRuleCatalog {
       minimumWindowsBuild: 7600,
       minimumAgeHours: 168,
       note: '应用运行时可能占用；默认不勾选',
+    ),
+    WindowsCleanupRule(
+      id: 'jetbrains-crash-heap-dumps',
+      label: 'JetBrains Java 崩溃堆转储',
+      pathTemplate: r'%USERPROFILE%',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.cautious,
+      defaultEnabled: false,
+      minimumAgeHours: 24,
+      maxDepth: 0,
+      includePatterns: <String>['java_error_in_*.hprof'],
+      note: '只检查用户目录顶层，不递归；文件可能数 GB，仍可能用于崩溃排障',
+    ),
+    WindowsCleanupRule(
+      id: 'jetbrains-crash-logs',
+      label: 'JetBrains Java 旧崩溃日志',
+      pathTemplate: r'%USERPROFILE%',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.safe,
+      defaultEnabled: true,
+      minimumAgeHours: 168,
+      maxDepth: 0,
+      includePatterns: <String>['java_error_in_*.log'],
+      note: '只检查用户目录顶层的一周前 Java 崩溃日志',
+    ),
+    WindowsCleanupRule(
+      id: 'wslg-rd-client-traces',
+      label: 'WSLg 远程桌面旧跟踪日志',
+      pathTemplate: r'%LOCALAPPDATA%\Temp\DiagOutputDir\RdClientAutoTrace',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.cautious,
+      defaultEnabled: false,
+      minimumWindowsBuild: 19041,
+      minimumAgeHours: 168,
+      includePatterns: <String>['RdClientAutoTrace-*.etl'],
+      note: 'WSLg/Docker 异常时可能增长到数 GB；排障期间保留，默认不勾选',
+    ),
+    WindowsCleanupRule(
+      id: 'gradio-temp-files',
+      label: 'Gradio AI 临时文件',
+      pathTemplate: r'%LOCALAPPDATA%\Temp\gradio',
+      category: WindowsCleanupRuleCategory.developerCache,
+      risk: WindowsCleanupRuleRisk.safe,
+      defaultEnabled: true,
+      minimumAgeHours: 24,
+      note: 'AI/Gradio 应用生成的可再生临时文件',
+    ),
+    WindowsCleanupRule(
+      id: 'dotnet-telemetry-cache',
+      label: '.NET 遥测临时缓存',
+      pathTemplate: r'%USERPROFILE%\.dotnet\TelemetryStorageService',
+      category: WindowsCleanupRuleCategory.developerCache,
+      risk: WindowsCleanupRuleRisk.safe,
+      defaultEnabled: true,
+      minimumAgeHours: 168,
+      note: '不触碰 NuGet 包、SDK、证书或项目文件',
+    ),
+    WindowsCleanupRule(
+      id: 'scoop-download-cache',
+      label: 'Scoop 安装包下载缓存',
+      pathTemplate: r'%USERPROFILE%\scoop\cache',
+      category: WindowsCleanupRuleCategory.developerCache,
+      risk: WindowsCleanupRuleRisk.safe,
+      defaultEnabled: true,
+      minimumAgeHours: 168,
+      note: '仅下载缓存，不触碰已安装应用和 Scoop 配置',
+    ),
+    WindowsCleanupRule(
+      id: 'delphi-license-old-logs',
+      label: 'Delphi 许可服务旧日志',
+      pathTemplate: r'%USERPROFILE%',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.cautious,
+      defaultEnabled: false,
+      minimumAgeHours: 720,
+      maxDepth: 0,
+      includePatterns: <String>['sanct.log', 'regwizard.log'],
+      note: '只检查用户目录顶层；可能含序列号等敏感信息，也可能用于许可排障',
     ),
   ];
 }

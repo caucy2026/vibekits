@@ -20,6 +20,7 @@ class CleanupScanTarget {
     this.strategy = CleanupTargetStrategy.directoryContents,
     this.safetyNote = '',
     this.minimumAgeHours = 0,
+    this.maxDepth = 8,
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
     this.ruleCatalogVersion,
@@ -33,6 +34,7 @@ class CleanupScanTarget {
   final CleanupTargetStrategy strategy;
   final String safetyNote;
   final int minimumAgeHours;
+  final int maxDepth;
   final List<String> includePatterns;
   final List<String> excludePatterns;
   final int? ruleCatalogVersion;
@@ -41,7 +43,7 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 5;
+  static const int catalogVersion = 6;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
@@ -287,7 +289,13 @@ abstract final class CleanupTargetDiscovery {
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
     for (final CleanupScanTarget target in targets) {
       final String? normalized = CleanupWhitelist.normalize(target.path);
-      if (normalized != null) unique[normalized.toLowerCase()] = target;
+      if (normalized != null) {
+        final String pathKey = normalized.toLowerCase();
+        final String key = target.ruleCatalogVersion == null
+            ? pathKey
+            : '$pathKey|${target.id}';
+        unique[key] = target;
+      }
     }
     return unique.values.toList(growable: false);
   }
@@ -314,10 +322,12 @@ abstract final class CleanupTargetDiscovery {
           WindowsCleanupRuleCategory.logs => CleanupCategory.logs,
           WindowsCleanupRuleCategory.applicationCache =>
             CleanupCategory.applicationCache,
+          WindowsCleanupRuleCategory.developerCache => CleanupCategory.devCache,
         },
         defaultEnabled: rule.defaultEnabled,
         safetyNote: rule.note,
         minimumAgeHours: rule.minimumAgeHours,
+        maxDepth: rule.maxDepth,
         includePatterns: rule.includePatterns,
         excludePatterns: rule.excludePatterns,
         ruleCatalogVersion: WindowsCleanupRuleCatalog.version,
@@ -497,6 +507,7 @@ abstract final class CleanupTargetDiscovery {
     CleanupTargetStrategy strategy = CleanupTargetStrategy.directoryContents,
     String safetyNote = '',
     int minimumAgeHours = 0,
+    int maxDepth = 8,
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
     int? ruleCatalogVersion,
@@ -512,6 +523,7 @@ abstract final class CleanupTargetDiscovery {
         strategy: strategy,
         safetyNote: safetyNote,
         minimumAgeHours: minimumAgeHours,
+        maxDepth: maxDepth,
         includePatterns: includePatterns,
         excludePatterns: excludePatterns,
         ruleCatalogVersion: ruleCatalogVersion,
