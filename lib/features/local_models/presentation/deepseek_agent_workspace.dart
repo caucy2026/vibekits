@@ -8,6 +8,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
@@ -31,6 +32,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.credentialWriter,
     this.loadConversation = HarnessConversationStore.load,
     this.saveConversation = HarnessConversationStore.save,
+    this.loadPermissionMode = HarnessAgentPreferencesStore.loadPermissionMode,
+    this.savePermissionMode = HarnessAgentPreferencesStore.savePermissionMode,
   });
 
   final String initialWorkspace;
@@ -44,6 +47,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final AgentCredentialWriter? credentialWriter;
   final HarnessConversationLoader loadConversation;
   final HarnessConversationSaver saveConversation;
+  final HarnessAgentPermissionLoader loadPermissionMode;
+  final HarnessAgentPermissionSaver savePermissionMode;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
@@ -83,8 +88,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _running = false;
   bool _stopping = false;
   bool _stopRequested = false;
-  _AgentApprovalMode _approvalMode = _AgentApprovalMode.session;
-  final Set<String> _sessionApprovals = <String>{};
+  HarnessAgentPermissionMode _permissionMode =
+      HarnessAgentPermissionMode.assisted;
+  final List<_AgentProgressStep> _progressSteps = <_AgentProgressStep>[];
+  bool _progressExpanded = true;
+  int _progressSequence = 0;
   int _conversationEpoch = 0;
 
   @override
@@ -108,6 +116,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _loadSettings() async {
     try {
+      final HarnessAgentPermissionMode permissionMode = await widget
+          .loadPermissionMode();
+      if (mounted) setState(() => _permissionMode = permissionMode);
       if (Platform.environment['FLUTTER_TEST'] == 'true' &&
           widget.credentialReader == null) {
         return;
@@ -190,7 +201,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     setState(() {
       _workspace.text = target;
       _messages.clear();
-      _sessionApprovals.clear();
+      _progressSteps.clear();
     });
     if (notify) await widget.onWorkspaceChanged?.call(target);
     await _restoreConversation(target);
@@ -279,6 +290,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       baseUrl: _baseUrl.text.trim(),
       model: _model.text.trim(),
       approveTool: _approveHarnessTool,
+      toolBridge: VibekitsHarnessToolBridge(
+        activityRecorder: _recordHarnessToolActivity,
+      ),
     );
     if (request.apiKey.isEmpty) {
       _show('请先点右上角设置并填写 DeepSeek API Key');
@@ -301,6 +315,17 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _setRunning(true);
       _stopping = false;
       _stopRequested = false;
+      _progressSteps
+        ..clear()
+        ..add(
+          _AgentProgressStep(
+            id: 'understand',
+            title: '理解任务',
+            detail: '正在分析目标、约束和当前工作区上下文',
+            state: _AgentProgressState.active,
+          ),
+        );
+      _progressExpanded = true;
     });
     unawaited(_persistConversation());
     _scrollToEnd(force: true);
@@ -311,12 +336,38 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         return;
       }
       _handle = handle;
+      _replaceProgress(
+        'understand',
+        state: _AgentProgressState.completed,
+        detail: '目标与上下文已整理，正在规划下一步',
+      );
+      _upsertProgress(
+        const _AgentProgressStep(
+          id: 'plan',
+          title: '规划操作',
+          detail: 'Harness 正在选择回复方式或可用工具',
+          state: _AgentProgressState.active,
+        ),
+      );
       _outputSubscription = handle.output.listen((String chunk) {
         if (!mounted || assistantIndex >= _messages.length) return;
         final String clean = chunk.replaceAll(_ansiEscape, '');
         if (clean.isEmpty) return;
         final bool stickToBottom = _nearBottom;
         setState(() {
+          _replaceProgress(
+            'plan',
+            state: _AgentProgressState.completed,
+            detail: '执行路径已确定',
+          );
+          _upsertProgress(
+            const _AgentProgressStep(
+              id: 'response',
+              title: '生成回复',
+              detail: '正在整理执行结果并流式输出',
+              state: _AgentProgressState.active,
+            ),
+          );
           _messages[assistantIndex] = _messages[assistantIndex].copyWith(
             text: '${_messages[assistantIndex].text}$clean',
           );
@@ -329,6 +380,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       if (!mounted) return;
       _runClock?.stop();
       setState(() {
+        _completeActiveProgress(
+          failed: code != 0 && !_stopRequested,
+          detail: _stopRequested
+              ? '任务已停止'
+              : code == 0
+              ? '回复与工具结果已完成'
+              : 'Harness 退出代码 $code',
+        );
         _setRunning(false);
         _stopping = false;
         _handle = null;
@@ -355,6 +414,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       if (!mounted) return;
       _runClock?.stop();
       setState(() {
+        _completeActiveProgress(failed: true, detail: '启动失败：$error');
         _setRunning(false);
         _stopping = false;
         _handle = null;
@@ -382,8 +442,32 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<bool> _approveHarnessTool(HarnessToolApprovalRequest request) async {
     if (!mounted) return false;
-    final String approvalKey = _approvalKey(request);
-    if (_sessionApprovals.contains(approvalKey)) return true;
+    final String progressId = 'tool:${request.tool.id}:${_progressSequence++}';
+    setState(() {
+      _completeActiveProgress(detail: 'Harness 已选择工具操作');
+      _progressSteps.add(
+        _AgentProgressStep(
+          id: progressId,
+          toolId: request.tool.id,
+          title: '调用 ${request.tool.name}',
+          detail: request.target.isEmpty
+              ? _approvalScope(request)
+              : '${request.target} · ${_approvalScope(request)}',
+          state: _AgentProgressState.active,
+        ),
+      );
+    });
+    if (_permissionMode == HarnessAgentPermissionMode.fullAccess ||
+        (_permissionMode == HarnessAgentPermissionMode.assisted &&
+            request.tool.risk != HarnessToolRisk.destructive)) {
+      setState(() {
+        _replaceProgress(
+          progressId,
+          detail: '${_permissionModeLabel(_permissionMode)} · 正在执行',
+        );
+      });
+      return true;
+    }
     final _ApprovalDecision? decision = await showDialog<_ApprovalDecision>(
       context: context,
       barrierDismissible: false,
@@ -422,13 +506,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 Navigator.pop(dialogContext, _ApprovalDecision.deny),
             child: const Text('拒绝'),
           ),
-          if (_approvalMode == _AgentApprovalMode.session)
-            OutlinedButton(
-              key: const Key('agent-approve-session'),
-              onPressed: () =>
-                  Navigator.pop(dialogContext, _ApprovalDecision.allowSession),
-              child: const Text('本会话允许同类操作'),
-            ),
           FilledButton(
             key: const Key('agent-approve-once'),
             onPressed: () =>
@@ -438,16 +515,123 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ],
       ),
     );
-    if (decision == _ApprovalDecision.allowSession) {
-      _sessionApprovals.add(approvalKey);
-      if (mounted) setState(() {});
-      return true;
+    final bool allowed = decision == _ApprovalDecision.allowOnce;
+    if (mounted) {
+      setState(() {
+        _replaceProgress(
+          progressId,
+          state: allowed
+              ? _AgentProgressState.active
+              : _AgentProgressState.failed,
+          detail: allowed ? '已批准，正在执行' : '用户拒绝执行',
+        );
+      });
     }
-    return decision == _ApprovalDecision.allowOnce;
+    return allowed;
   }
 
-  String _approvalKey(HarnessToolApprovalRequest request) =>
-      '${request.tool.id}\u0000${request.target}\u0000${_approvalScope(request)}';
+  Future<void> _recordHarnessToolActivity({
+    required String toolId,
+    required String toolName,
+    required String target,
+    required Map<String, Object?> arguments,
+    required Object? result,
+    required HarnessToolActivityStatus status,
+    required DateTime startedAt,
+  }) async {
+    await HarnessToolActivityStore.record(
+      toolId: toolId,
+      toolName: toolName,
+      target: target,
+      arguments: arguments,
+      result: result,
+      status: status,
+      startedAt: startedAt,
+    );
+    if (!mounted) return;
+    setState(() {
+      final int index = _progressSteps.lastIndexWhere(
+        (_AgentProgressStep step) =>
+            step.toolId == toolId && step.state == _AgentProgressState.active,
+      );
+      final _AgentProgressState state = switch (status) {
+        HarnessToolActivityStatus.succeeded => _AgentProgressState.completed,
+        HarnessToolActivityStatus.failed ||
+        HarnessToolActivityStatus.denied => _AgentProgressState.failed,
+      };
+      final String detail = <String>[
+        if (target.isNotEmpty) target,
+        switch (status) {
+          HarnessToolActivityStatus.succeeded => '执行成功',
+          HarnessToolActivityStatus.failed => '执行失败',
+          HarnessToolActivityStatus.denied => '未获批准',
+        },
+        '${DateTime.now().difference(startedAt).inMilliseconds} ms',
+      ].join(' · ');
+      if (index >= 0) {
+        _progressSteps[index] = _progressSteps[index].copyWith(
+          state: state,
+          detail: detail,
+        );
+      } else {
+        _progressSteps.add(
+          _AgentProgressStep(
+            id: 'tool:$toolId:${_progressSequence++}',
+            toolId: toolId,
+            title: '调用 $toolName',
+            detail: detail,
+            state: state,
+          ),
+        );
+      }
+      _upsertProgress(
+        const _AgentProgressStep(
+          id: 'continue',
+          title: '继续分析',
+          detail: '正在根据工具结果决定下一步',
+          state: _AgentProgressState.active,
+        ),
+      );
+    });
+  }
+
+  void _upsertProgress(_AgentProgressStep step) {
+    final int index = _progressSteps.indexWhere(
+      (_AgentProgressStep value) => value.id == step.id,
+    );
+    if (index < 0) {
+      _progressSteps.add(step);
+    } else {
+      _progressSteps[index] = step;
+    }
+  }
+
+  void _replaceProgress(
+    String id, {
+    String? detail,
+    _AgentProgressState? state,
+  }) {
+    final int index = _progressSteps.indexWhere(
+      (_AgentProgressStep step) => step.id == id,
+    );
+    if (index < 0) return;
+    _progressSteps[index] = _progressSteps[index].copyWith(
+      detail: detail,
+      state: state,
+    );
+  }
+
+  void _completeActiveProgress({bool failed = false, String? detail}) {
+    for (int index = 0; index < _progressSteps.length; index++) {
+      if (_progressSteps[index].state != _AgentProgressState.active) continue;
+      _progressSteps[index] = _progressSteps[index].copyWith(
+        state: failed
+            ? _AgentProgressState.failed
+            : _AgentProgressState.completed,
+        detail: detail,
+      );
+    }
+  }
 
   String _approvalScope(HarnessToolApprovalRequest request) {
     final Object? rawArguments = request.arguments['arguments'];
@@ -481,7 +665,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     if (confirmed == true && mounted) {
       setState(() {
         _messages.clear();
-        _sessionApprovals.clear();
+        _progressSteps.clear();
       });
       await _persistConversation();
       _composerFocus.requestFocus();
@@ -778,8 +962,26 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                     padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
                     itemCount: _messages.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 16),
-                    itemBuilder: (BuildContext context, int index) =>
-                        _MessageBubble(message: _messages[index]),
+                    itemBuilder: (BuildContext context, int index) {
+                      final bool activeAssistant =
+                          _running &&
+                          index == _messages.length - 1 &&
+                          !_messages[index].user;
+                      return _MessageBubble(
+                        message: _messages[index],
+                        progressSteps: activeAssistant
+                            ? List<_AgentProgressStep>.unmodifiable(
+                                _progressSteps,
+                              )
+                            : const <_AgentProgressStep>[],
+                        progressExpanded: _progressExpanded,
+                        onToggleProgress: activeAssistant
+                            ? () => setState(
+                                () => _progressExpanded = !_progressExpanded,
+                              )
+                            : null,
+                      );
+                    },
                   ),
           ),
         ),
@@ -1140,50 +1342,44 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    PopupMenuButton<_ApprovalMenuAction>(
+                    PopupMenuButton<HarnessAgentPermissionMode>(
                       key: const Key('agent-permission-menu'),
                       tooltip: '工具权限',
-                      onSelected: (_ApprovalMenuAction action) {
-                        setState(() {
-                          switch (action) {
-                            case _ApprovalMenuAction.session:
-                              _approvalMode = _AgentApprovalMode.session;
-                            case _ApprovalMenuAction.alwaysAsk:
-                              _approvalMode = _AgentApprovalMode.alwaysAsk;
-                              _sessionApprovals.clear();
-                            case _ApprovalMenuAction.clear:
-                              _sessionApprovals.clear();
-                          }
-                        });
+                      offset: const Offset(0, -230),
+                      onSelected: (HarnessAgentPermissionMode mode) {
+                        setState(() => _permissionMode = mode);
+                        unawaited(widget.savePermissionMode(mode));
                       },
                       itemBuilder: (BuildContext context) =>
-                          <PopupMenuEntry<_ApprovalMenuAction>>[
-                            const PopupMenuItem<_ApprovalMenuAction>(
-                              value: _ApprovalMenuAction.session,
-                              child: ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.shield_outlined),
-                                title: Text('首次询问'),
-                                subtitle: Text('同一目标的同类操作，本会话只确认一次'),
-                              ),
-                            ),
-                            const PopupMenuItem<_ApprovalMenuAction>(
-                              value: _ApprovalMenuAction.alwaysAsk,
+                          <PopupMenuEntry<HarnessAgentPermissionMode>>[
+                            const PopupMenuItem<HarnessAgentPermissionMode>(
+                              value: HarnessAgentPermissionMode.requestApproval,
+                              height: 72,
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: Icon(Icons.pan_tool_alt_outlined),
-                                title: Text('每次询问'),
-                                subtitle: Text('每个风险操作都单独确认'),
+                                title: Text('请求批准'),
+                                subtitle: Text('执行有副作用的操作前都先询问'),
                               ),
                             ),
-                            const PopupMenuDivider(),
-                            PopupMenuItem<_ApprovalMenuAction>(
-                              value: _ApprovalMenuAction.clear,
-                              enabled: _sessionApprovals.isNotEmpty,
-                              child: const ListTile(
+                            const PopupMenuItem<HarnessAgentPermissionMode>(
+                              value: HarnessAgentPermissionMode.assisted,
+                              height: 72,
+                              child: ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                leading: Icon(Icons.restart_alt),
-                                title: Text('清除本会话授权'),
+                                leading: Icon(Icons.shield_outlined),
+                                title: Text('帮我批准'),
+                                subtitle: Text('普通工具自动执行，仅破坏性操作询问'),
+                              ),
+                            ),
+                            const PopupMenuItem<HarnessAgentPermissionMode>(
+                              value: HarnessAgentPermissionMode.fullAccess,
+                              height: 72,
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.lock_open_outlined),
+                                title: Text('完全访问权限'),
+                                subtitle: Text('注册工具不再询问，底层安全边界仍生效'),
                               ),
                             ),
                           ],
@@ -1199,24 +1395,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
-                            const Icon(Icons.shield_outlined, size: 14),
+                            Icon(
+                              _permissionModeIcon(_permissionMode),
+                              size: 14,
+                            ),
                             const SizedBox(width: 5),
                             Text(
-                              _approvalMode == _AgentApprovalMode.session
-                                  ? '首次询问'
-                                  : '每次询问',
+                              _permissionModeLabel(_permissionMode),
                               style: const TextStyle(fontSize: 12),
                             ),
-                            if (_sessionApprovals.isNotEmpty) ...<Widget>[
-                              const SizedBox(width: 4),
-                              Text(
-                                '${_sessionApprovals.length}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: context.vibe.muted,
-                                ),
-                              ),
-                            ],
                             const Icon(Icons.expand_more, size: 15),
                           ],
                         ),
@@ -1332,11 +1519,46 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 }
 
-enum _AgentApprovalMode { session, alwaysAsk }
+enum _ApprovalDecision { deny, allowOnce }
 
-enum _ApprovalDecision { deny, allowOnce, allowSession }
+String _permissionModeLabel(HarnessAgentPermissionMode mode) => switch (mode) {
+  HarnessAgentPermissionMode.requestApproval => '请求批准',
+  HarnessAgentPermissionMode.assisted => '帮我批准',
+  HarnessAgentPermissionMode.fullAccess => '完全访问权限',
+};
 
-enum _ApprovalMenuAction { session, alwaysAsk, clear }
+IconData _permissionModeIcon(HarnessAgentPermissionMode mode) => switch (mode) {
+  HarnessAgentPermissionMode.requestApproval => Icons.pan_tool_alt_outlined,
+  HarnessAgentPermissionMode.assisted => Icons.shield_outlined,
+  HarnessAgentPermissionMode.fullAccess => Icons.lock_open_outlined,
+};
+
+enum _AgentProgressState { active, completed, failed }
+
+class _AgentProgressStep {
+  const _AgentProgressStep({
+    required this.id,
+    required this.title,
+    required this.detail,
+    required this.state,
+    this.toolId,
+  });
+
+  final String id;
+  final String title;
+  final String detail;
+  final _AgentProgressState state;
+  final String? toolId;
+
+  _AgentProgressStep copyWith({String? detail, _AgentProgressState? state}) =>
+      _AgentProgressStep(
+        id: id,
+        title: title,
+        detail: detail ?? this.detail,
+        state: state ?? this.state,
+        toolId: toolId,
+      );
+}
 
 class _SubmitAgentIntent extends Intent {
   const _SubmitAgentIntent();
@@ -1425,9 +1647,17 @@ class _AgentMessage {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({
+    required this.message,
+    this.progressSteps = const <_AgentProgressStep>[],
+    this.progressExpanded = true,
+    this.onToggleProgress,
+  });
 
   final _AgentMessage message;
+  final List<_AgentProgressStep> progressSteps;
+  final bool progressExpanded;
+  final VoidCallback? onToggleProgress;
 
   Future<void> _copy(BuildContext context) async {
     await Clipboard.setData(ClipboardData(text: message.text));
@@ -1484,20 +1714,28 @@ class _MessageBubble extends StatelessWidget {
               SelectionArea(
                 key: const Key('agent-response'),
                 child: message.text.isEmpty
-                    ? Row(
-                        children: <Widget>[
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '正在分析…',
-                            style: TextStyle(color: context.vibe.muted),
-                          ),
-                        ],
-                      )
+                    ? progressSteps.isEmpty
+                          ? Row(
+                              children: <Widget>[
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '正在分析…',
+                                  style: TextStyle(color: context.vibe.muted),
+                                ),
+                              ],
+                            )
+                          : _AgentProgressView(
+                              steps: progressSteps,
+                              expanded: progressExpanded,
+                              onToggle: onToggleProgress,
+                            )
                     : MarkdownBody(
                         data: message.text,
                         selectable: false,
@@ -1544,4 +1782,125 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
   }
+}
+
+class _AgentProgressView extends StatelessWidget {
+  const _AgentProgressView({
+    required this.steps,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final List<_AgentProgressStep> steps;
+  final bool expanded;
+  final VoidCallback? onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final _AgentProgressStep latest = steps.last;
+    return Container(
+      key: const Key('agent-reasoning-progress'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.vibe.canvas,
+        border: Border.all(color: context.vibe.border),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          InkWell(
+            onTap: onToggle,
+            child: Row(
+              children: <Widget>[
+                _ProgressStateIcon(state: latest.state),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    latest.title,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+          if (expanded) ...<Widget>[
+            const SizedBox(height: 7),
+            for (int index = 0; index < steps.length; index++)
+              Padding(
+                key: Key('agent-progress-step-${steps[index].id}'),
+                padding: EdgeInsets.only(
+                  left: 2,
+                  bottom: index == steps.length - 1 ? 0 : 7,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: _ProgressStateIcon(state: steps[index].state),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            steps[index].title,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            steps[index].detail,
+                            style: TextStyle(
+                              fontSize: 11,
+                              height: 1.3,
+                              color: context.vibe.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ProgressStateIcon extends StatelessWidget {
+  const _ProgressStateIcon({required this.state});
+
+  final _AgentProgressState state;
+
+  @override
+  Widget build(BuildContext context) => switch (state) {
+    _AgentProgressState.active => const SizedBox.square(
+      dimension: 13,
+      child: CircularProgressIndicator(strokeWidth: 1.8),
+    ),
+    _AgentProgressState.completed => Icon(
+      Icons.check_circle_outline,
+      size: 14,
+      color: context.vibe.success,
+    ),
+    _AgentProgressState.failed => const Icon(
+      Icons.error_outline,
+      size: 14,
+      color: VibekitsColors.danger,
+    ),
+  };
 }

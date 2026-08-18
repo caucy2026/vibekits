@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_agent_preferences.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
@@ -55,7 +56,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
-            credentialReader: (_) async => null,
+            credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
@@ -80,9 +81,9 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byKey(const Key('agent-pick-workspace')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(savedWorkspace, workspace.path);
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.pumpAndSettle();
@@ -144,7 +145,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
-            credentialReader: (_) async => null,
+            credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             initialWorkspace: workspace.path,
             checkEnvironment: () async => const HarnessEnvironmentReport(
@@ -159,17 +160,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('agent-settings')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
-    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-composer')), '执行长任务');
     await tester.pump();
     await tester.ensureVisible(find.byKey(const Key('agent-send')));
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(find.byKey(const Key('agent-progress')), findsOneWidget);
+    expect(find.byKey(const Key('agent-reasoning-progress')), findsOneWidget);
+    expect(find.text('规划操作'), findsWidgets);
     await tester.tap(find.byKey(const Key('agent-stop')));
     await tester.pumpAndSettle();
     expect(handle.running, isFalse);
@@ -251,7 +249,10 @@ void main() {
     expect(composer.maxLines, 7);
   });
 
-  testWidgets('同一目标同类工具操作可授权一次并在本会话复用', (WidgetTester tester) async {
+  testWidgets('帮我批准默认自动执行且三档权限可持久选择', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 1000);
+    addTearDown(tester.view.reset);
     final Directory workspace = Directory.systemTemp.createTempSync(
       'vibekits_session_approval_',
     );
@@ -259,6 +260,7 @@ void main() {
     final _FakeAgentHandle handle = _FakeAgentHandle();
     addTearDown(handle.dispose);
     HarnessAgentRequest? launched;
+    HarnessAgentPermissionMode? savedMode;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -266,6 +268,10 @@ void main() {
             initialWorkspace: workspace.path,
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
+            loadPermissionMode: () async => HarnessAgentPermissionMode.assisted,
+            savePermissionMode: (HarnessAgentPermissionMode mode) async {
+              savedMode = mode;
+            },
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.18.0',
@@ -301,18 +307,27 @@ void main() {
         'arguments': <String>['shell', 'getprop', 'ro.product.model'],
       },
     );
-    final Future<bool> first = launched!.approveTool!(getprop);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(find.byKey(const Key('agent-approve-session')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('agent-approve-session')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 350));
-    expect(await first, isTrue);
-
     expect(await launched!.approveTool!(getprop), isTrue);
     await tester.pump();
     expect(find.text('允许 执行 ADB 命令？'), findsNothing);
+    expect(find.text('帮我批准'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('agent-permission-menu')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('请求批准'), findsOneWidget);
+    expect(find.text('完全访问权限'), findsOneWidget);
+    await tester.ensureVisible(find.text('请求批准'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('请求批准'));
+    await tester.pump();
+    expect(savedMode, HarnessAgentPermissionMode.requestApproval);
+
+    final Future<bool> requested = launched!.approveTool!(getprop);
+    await tester.pump();
+    expect(find.text('允许 执行 ADB 命令？'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-approve-once')));
+    await tester.pump();
+    expect(await requested, isTrue);
 
     await handle.complete(0);
     await tester.pumpAndSettle();

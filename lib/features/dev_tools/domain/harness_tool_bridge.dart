@@ -505,10 +505,11 @@ class VibekitsHarnessToolBridge {
     final AdbSnapshot snapshot = await AdbService.discoverAndList(
       preferredExecutable: _adbExecutable ?? AdbService.bundledExecutablePath(),
       runner: _adbRunner,
-      listAudit: const AdbCommandAudit(
+      listAudit: AdbCommandAudit(
         toolId: adbListDevicesId,
         toolName: '列出 ADB 设备',
         target: '',
+        recorder: _activityRecorder,
       ),
     );
     return <String, Object?>{
@@ -540,6 +541,7 @@ class VibekitsHarnessToolBridge {
         toolId: adbConnectId,
         toolName: '连接 ADB 设备',
         target: AdbService.normalizeWirelessAddress(address),
+        recorder: _activityRecorder,
       ),
     );
     return <String, Object?>{
@@ -577,6 +579,7 @@ class VibekitsHarnessToolBridge {
               toolId: adbCommandId,
               toolName: '执行 ADB 命令',
               target: serial,
+              recorder: _activityRecorder,
             ),
           )
         : await _adbRunner(executable, adbArguments);
