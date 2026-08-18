@@ -34,6 +34,7 @@ void main() {
       remoteSessionProfiles: <String>['{"id":"remote-1"}'],
       serialPortSettings: '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
       deepSeekHarnessWorkspace: r'D:\Work\demo',
+      deepSeekHarnessDebugDirectory: r'D:\Vibekits\tmp',
     );
 
     await store.save(expected);

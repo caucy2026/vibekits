@@ -1,11 +1,13 @@
 import 'dart:io';
 
-typedef ScreenshotCapture = Future<String?> Function();
+typedef ScreenshotCapture = Future<String?> Function(String outputDirectory);
 
 abstract final class SystemScreenshotCapture {
-  static Future<String?> captureRegion() async {
+  static Future<String?> captureRegion(String outputDirectory) async {
+    final Directory directory = Directory(outputDirectory);
+    await directory.create(recursive: true);
     final String outputPath =
-        '${Directory.systemTemp.path}'
+        '${directory.path}'
         '${Platform.pathSeparator}vibekits_ocr_'
         '${DateTime.now().microsecondsSinceEpoch}.png';
     if (Platform.isWindows) {

@@ -358,6 +358,13 @@ class _MainShellState extends State<MainShell> {
                 deepSeekHarnessWorkspace: workspace,
               ),
             ),
+        initialHarnessDebugDirectory: settings.deepSeekHarnessDebugDirectory,
+        onHarnessDebugDirectoryChanged: (String directory) =>
+            widget.settingsController.update(
+              widget.settingsController.value.copyWith(
+                deepSeekHarnessDebugDirectory: directory,
+              ),
+            ),
       ),
       ArchiveTab(
         key: ValueKey<String>('archive-drop-$_archiveDropSerial'),

@@ -51,6 +51,7 @@ class HarnessAgentRequest {
     this.apiKey = '',
     this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
     this.model = DeepSeekHarnessService.defaultModel,
+    this.debugDirectory = '',
     this.approveTool,
     this.toolBridge,
   });
@@ -59,6 +60,7 @@ class HarnessAgentRequest {
   final String apiKey;
   final String baseUrl;
   final String model;
+  final String debugDirectory;
   final HarnessToolApproval? approveTool;
   final VibekitsHarnessToolBridge? toolBridge;
   List<String> get arguments => <String>[
@@ -77,7 +79,25 @@ class HarnessAgentRequest {
     if (prompt.trim().isEmpty) {
       throw const FormatException('请输入要交给智能体的任务');
     }
+    if (debugDirectory.trim().isNotEmpty &&
+        !Directory(debugDirectory.trim()).isAbsolute) {
+      throw const FormatException('调试目录必须是绝对路径');
+    }
   }
+}
+
+class HarnessDebugPaths {
+  const HarnessDebugPaths({
+    required this.root,
+    required this.logs,
+    required this.screenshots,
+    required this.temp,
+  });
+
+  final Directory root;
+  final Directory logs;
+  final Directory screenshots;
+  final Directory temp;
 }
 
 abstract interface class HarnessSessionHandle {
@@ -111,6 +131,60 @@ typedef HarnessModelLister = Future<List<String>> Function(
 abstract final class DeepSeekHarnessService {
   static const String defaultBaseUrl = 'https://api.deepseek.com';
   static const String defaultModel = 'deepseek-v4-flash';
+
+  static String defaultDebugDirectory() {
+    final File executable = File(Platform.resolvedExecutable);
+    return '${executable.parent.path}${Platform.pathSeparator}tmp';
+  }
+
+  static String redactSensitiveOutput(String output, Iterable<String> secrets) {
+    String safe = output;
+    for (final String secret in secrets) {
+      if (secret.isNotEmpty) safe = safe.replaceAll(secret, '[REDACTED]');
+    }
+    return safe;
+  }
+
+  static Future<HarnessDebugPaths> prepareDebugDirectory([
+    String configured = '',
+  ]) async {
+    final String path = configured.trim().isEmpty
+        ? defaultDebugDirectory()
+        : configured.trim();
+    final Directory root = Directory(path);
+    if (!root.isAbsolute) {
+      throw const FormatException('调试目录必须是绝对路径');
+    }
+    final Directory logs = Directory(
+      '${root.path}${Platform.pathSeparator}logs',
+    );
+    final Directory screenshots = Directory(
+      '${root.path}${Platform.pathSeparator}screenshots',
+    );
+    final Directory temp = Directory(
+      '${root.path}${Platform.pathSeparator}temp',
+    );
+    try {
+      await Future.wait(<Future<Directory>>[
+        root.create(recursive: true),
+        logs.create(recursive: true),
+        screenshots.create(recursive: true),
+        temp.create(recursive: true),
+      ]);
+    } on FileSystemException catch (error) {
+      throw FileSystemException(
+        '无法创建 Harness 调试目录，请在设置中选择可写目录',
+        path,
+        error.osError,
+      );
+    }
+    return HarnessDebugPaths(
+      root: root,
+      logs: logs,
+      screenshots: screenshots,
+      temp: temp,
+    );
+  }
 
   static Future<List<String>> listModels(String apiKey, String baseUrl) async {
     final String key = apiKey.trim();
@@ -257,6 +331,9 @@ abstract final class DeepSeekHarnessService {
     }
     _validateEndpoint(request.baseUrl);
     final _HarnessRuntime runtime = await _resolveBundledRuntime();
+    final HarnessDebugPaths debug = await prepareDebugDirectory(
+      request.debugDirectory,
+    );
     final HarnessToolServer toolServer = await HarnessToolServer.start(
       approve: request.approveTool,
       bridge: request.toolBridge,
@@ -277,6 +354,12 @@ abstract final class DeepSeekHarnessService {
           'DSH_TELEMETRY_MODE': 'DISABLED',
           'DSH_PERMISSION_MODE': 'workspace-write',
           'DSH_TELEMETRY_DISABLED': '1',
+          'DSH_LOG_DIR': debug.logs.path,
+          'VIBEKITS_DEBUG_DIR': debug.root.path,
+          'VIBEKITS_SCREENSHOT_DIR': debug.screenshots.path,
+          'TEMP': debug.temp.path,
+          'TMP': debug.temp.path,
+          'TMPDIR': debug.temp.path,
           'VIBEKITS_NODE_EXECUTABLE': runtime.nodeExecutable,
           'VIBEKITS_MCP_SERVER': runtime.mcpServerPath,
           'VIBEKITS_TOOL_BRIDGE_URL': toolServer.endpoint.toString(),
@@ -286,7 +369,16 @@ abstract final class DeepSeekHarnessService {
         runInShell: false,
         mode: ProcessStartMode.normal,
       );
-      return _ProcessHarnessAgent(process, toolServer);
+      final File logFile = File(
+        '${debug.logs.path}${Platform.pathSeparator}harness-'
+        '${DateTime.now().toUtc().toIso8601String().replaceAll(':', '-')}.log',
+      );
+      return _ProcessHarnessAgent(
+        process,
+        toolServer,
+        logFile,
+        request.apiKey.trim(),
+      );
     } on ProcessException catch (error) {
       await toolServer.close();
       throw StateError('无法启动官方 Harness 智能体：${error.message}');
@@ -444,17 +536,28 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
 }
 
 class _ProcessHarnessAgent implements HarnessAgentHandle {
-  _ProcessHarnessAgent(this._process, this._toolServer) {
+  _ProcessHarnessAgent(
+    this._process,
+    this._toolServer,
+    File logFile,
+    this._apiKey,
+  ) {
+    _log = logFile.openWrite(mode: FileMode.append);
     _stdout = _process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
-        .listen(_output.add);
+        .listen((String chunk) => _forward('stdout', chunk));
     _stderr = _process.stderr
         .transform(const Utf8Decoder(allowMalformed: true))
-        .listen(_output.add);
+        .listen((String chunk) => _forward('stderr', chunk));
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
       await _stdout.cancel();
       await _stderr.cancel();
+      _log.writeln(
+        '[${DateTime.now().toUtc().toIso8601String()}] exitCode=$code',
+      );
+      await _log.flush();
+      await _log.close();
       await _output.close();
       await _toolServer.close();
       return code;
@@ -463,11 +566,24 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
 
   final Process _process;
   final HarnessToolServer _toolServer;
+  final String _apiKey;
   final StreamController<String> _output = StreamController<String>();
+  late final IOSink _log;
   late final StreamSubscription<String> _stdout;
   late final StreamSubscription<String> _stderr;
   late final Future<int> _exitCode;
   bool _running = true;
+
+  void _forward(String channel, String chunk) {
+    final String safeChunk = DeepSeekHarnessService.redactSensitiveOutput(
+      chunk,
+      <String>[_apiKey],
+    );
+    _log.write(
+      '[${DateTime.now().toUtc().toIso8601String()}][$channel] $safeChunk',
+    );
+    _output.add(safeChunk);
+  }
 
   @override
   Stream<String> get output => _output.stream;

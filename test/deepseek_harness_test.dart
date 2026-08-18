@@ -11,6 +11,32 @@ import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
+  test('Harness 调试目录创建 logs screenshots temp 三个子目录', () async {
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vibekits_harness_debug_',
+    );
+    await root.delete(recursive: true);
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final HarnessDebugPaths paths =
+        await DeepSeekHarnessService.prepareDebugDirectory(root.path);
+    expect(paths.root.path, root.path);
+    expect(await paths.logs.exists(), isTrue);
+    expect(await paths.screenshots.exists(), isTrue);
+    expect(await paths.temp.exists(), isTrue);
+  });
+
+  test('Harness 调试日志输出会移除 API Key', () {
+    const String key = 'sk-vibekits-canary-secret';
+    final String safe = DeepSeekHarnessService.redactSensitiveOutput(
+      'request failed: Authorization Bearer $key',
+      const <String>[key],
+    );
+    expect(safe, isNot(contains(key)));
+    expect(safe, contains('[REDACTED]'));
+  });
+
   test('Harness 固定官方内置版本且任务参数不包含安装命令', () async {
     final Directory workspace = await Directory.systemTemp.createTemp(
       'vibekits_harness_',
@@ -97,19 +123,26 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Harness 模型设置'), findsOneWidget);
-    expect(
-      find.text(DeepSeekHarnessService.defaultModel),
-      findsWidgets,
-    );
+    expect(find.text(DeepSeekHarnessService.defaultModel), findsWidgets);
     expect(find.byKey(const Key('agent-load-models')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
     await tester.pumpAndSettle();
     expect(find.text('来自当前 API 的 /models 实时结果'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('agent-model-deepseek-special')),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.tap(find.byKey(const Key('agent-model-deepseek-special')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, '保存'))
+        .onPressed!();
     await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
     await tester.enterText(find.byKey(const Key('agent-composer')), '修复失败的测试');
     await tester.pump();
     await tester.ensureVisible(find.byKey(const Key('agent-send')));
@@ -149,8 +182,7 @@ void main() {
     expect(savedConversation?.sessions, hasLength(2));
     expect(
       savedConversation?.sessions.any(
-        (HarnessConversationSession session) =>
-            session.title == '修复失败的测试',
+        (HarnessConversationSession session) => session.title == '修复失败的测试',
       ),
       isTrue,
     );
@@ -195,6 +227,74 @@ void main() {
     expect(handle.running, isFalse);
     expect(find.text('任务已停止。'), findsOneWidget);
     expect(find.byKey(const Key('agent-progress')), findsNothing);
+  });
+
+  testWidgets('Harness 调试目录可选择保存并创建真实分类目录', (WidgetTester tester) async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vibekits_debug_setting_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory selected = Directory(
+      '${sandbox.path}${Platform.pathSeparator}selected-debug',
+    );
+    String? savedDirectory;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            debugDirectoryPicker: () async => selected.path,
+            onDebugDirectoryChanged: (String path) async {
+              savedDirectory = path;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-pick-debug-directory')));
+    await tester.pump();
+    final TextField field = tester.widget<TextField>(
+      find.byKey(const Key('agent-debug-directory')),
+    );
+    expect(field.controller?.text, selected.path);
+
+    tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, '保存'))
+        .onPressed!();
+    await tester.pumpAndSettle();
+    for (int attempt = 0; attempt < 20 && savedDirectory == null; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    expect(savedDirectory, selected.path);
+    expect(
+      Directory('${selected.path}${Platform.pathSeparator}logs').existsSync(),
+      isTrue,
+    );
+    expect(
+      Directory('${selected.path}${Platform.pathSeparator}screenshots')
+          .existsSync(),
+      isTrue,
+    );
+    expect(
+      Directory('${selected.path}${Platform.pathSeparator}temp').existsSync(),
+      isTrue,
+    );
   });
 
   testWidgets('宽屏显示社区式项目与会话侧栏', (WidgetTester tester) async {

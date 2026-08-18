@@ -28,6 +28,7 @@ class AppSettings {
     this.remoteSessionProfiles = const <String>[],
     this.serialPortSettings = '',
     this.deepSeekHarnessWorkspace = '',
+    this.deepSeekHarnessDebugDirectory = '',
   });
 
   final ThemeMode themeMode;
@@ -50,6 +51,7 @@ class AppSettings {
   final List<String> remoteSessionProfiles;
   final String serialPortSettings;
   final String deepSeekHarnessWorkspace;
+  final String deepSeekHarnessDebugDirectory;
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -72,6 +74,7 @@ class AppSettings {
     List<String>? remoteSessionProfiles,
     String? serialPortSettings,
     String? deepSeekHarnessWorkspace,
+    String? deepSeekHarnessDebugDirectory,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
@@ -97,6 +100,8 @@ class AppSettings {
     serialPortSettings: serialPortSettings ?? this.serialPortSettings,
     deepSeekHarnessWorkspace:
         deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
+    deepSeekHarnessDebugDirectory:
+        deepSeekHarnessDebugDirectory ?? this.deepSeekHarnessDebugDirectory,
   );
 
   Map<String, Object> toJson() => <String, Object>{
@@ -120,6 +125,7 @@ class AppSettings {
     'remoteSessionProfiles': remoteSessionProfiles,
     'serialPortSettings': serialPortSettings,
     'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
+    'deepSeekHarnessDebugDirectory': deepSeekHarnessDebugDirectory,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -255,6 +261,15 @@ class AppSettings {
               (json['deepSeekHarnessWorkspace']! as String).length <= 32768 &&
               !(json['deepSeekHarnessWorkspace']! as String).contains('\u0000')
           ? json['deepSeekHarnessWorkspace']! as String
+          : '',
+      deepSeekHarnessDebugDirectory:
+          json['deepSeekHarnessDebugDirectory'] is String &&
+              (json['deepSeekHarnessDebugDirectory']! as String).length <=
+                  32768 &&
+              !(json['deepSeekHarnessDebugDirectory']! as String).contains(
+                '\u0000',
+              )
+          ? json['deepSeekHarnessDebugDirectory']! as String
           : '',
     );
   }

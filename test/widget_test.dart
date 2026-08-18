@@ -129,7 +129,7 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
     expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
     expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
-    expect(find.textContaining('v1.9.0-dev.15+25'), findsWidgets);
+    expect(find.textContaining('v1.9.0-dev.16+26'), findsWidgets);
     expect(find.text('任务 0'), findsNothing);
   });
 
@@ -598,11 +598,17 @@ void main() {
       'general_ocr_002.png',
     ).absolute.path;
     int requests = 0;
+    String? screenshotDirectory;
     await tester.pumpWidget(
       MaterialApp(
         home: LocalModelsTab(
           directory: sandbox.path,
-          screenshotCapture: () async => imagePath,
+          initialHarnessDebugDirectory:
+              '${sandbox.path}${Platform.pathSeparator}debug',
+          screenshotCapture: (String directory) async {
+            screenshotDirectory = directory;
+            return imagePath;
+          },
           modelLister: (_) async => const <ModelInfo>[
             ModelInfo(
               fileName: 'ppocrv6_tiny_det.onnx',
@@ -650,8 +656,20 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('ocr-screenshot')));
     await tester.pumpAndSettle();
+    for (int attempt = 0; attempt < 20 && requests == 0; attempt++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
 
     expect(requests, 1);
+    expect(
+      screenshotDirectory,
+      '${sandbox.path}${Platform.pathSeparator}debug'
+      '${Platform.pathSeparator}screenshots',
+    );
     expect(find.text('截图自动识别成功'), findsOneWidget);
     expect(find.byKey(const Key('ocr-image-preview')), findsOneWidget);
   });

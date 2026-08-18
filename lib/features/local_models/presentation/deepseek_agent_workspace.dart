@@ -23,11 +23,14 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     super.key,
     this.initialWorkspace = '',
     this.onWorkspaceChanged,
+    this.initialDebugDirectory = '',
+    this.onDebugDirectoryChanged,
     this.onRunningChanged,
     this.checkEnvironment = DeepSeekHarnessService.checkEnvironment,
     this.runAgent = DeepSeekHarnessService.startAgent,
     this.listModels = DeepSeekHarnessService.listModels,
     this.pickDirectory,
+    this.debugDirectoryPicker,
     this.credentialReader,
     this.credentialWriter,
     this.loadConversation = HarnessConversationStore.load,
@@ -38,11 +41,14 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
 
   final String initialWorkspace;
   final Future<void> Function(String workspace)? onWorkspaceChanged;
+  final String initialDebugDirectory;
+  final Future<void> Function(String directory)? onDebugDirectoryChanged;
   final ValueChanged<bool>? onRunningChanged;
   final HarnessEnvironmentChecker checkEnvironment;
   final HarnessAgentRunner runAgent;
   final HarnessModelLister listModels;
   final AgentDirectoryPicker? pickDirectory;
+  final AgentDirectoryPicker? debugDirectoryPicker;
   final AgentCredentialReader? credentialReader;
   final AgentCredentialWriter? credentialWriter;
   final HarnessConversationLoader loadConversation;
@@ -76,6 +82,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   );
   final TextEditingController _model = TextEditingController(
     text: DeepSeekHarnessService.defaultModel,
+  );
+  late final TextEditingController _debugDirectory = TextEditingController(
+    text: widget.initialDebugDirectory.trim().isEmpty
+        ? DeepSeekHarnessService.defaultDebugDirectory()
+        : widget.initialDebugDirectory.trim(),
   );
   final FocusNode _composerFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
@@ -148,6 +159,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _apiKey.dispose();
     _baseUrl.dispose();
     _model.dispose();
+    _debugDirectory.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -368,6 +380,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       apiKey: _apiKey.text.trim(),
       baseUrl: _baseUrl.text.trim(),
       model: _model.text.trim(),
+      debugDirectory: _debugDirectory.text.trim(),
       approveTool: _approveHarnessTool,
       toolBridge: VibekitsHarnessToolBridge(
         activityRecorder: _recordHarnessToolActivity,
@@ -864,6 +877,38 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       ),
                       const SizedBox(height: 10),
                       TextField(
+                        key: const Key('agent-debug-directory'),
+                        controller: _debugDirectory,
+                        decoration: InputDecoration(
+                          labelText: '调试文件目录',
+                          helperText:
+                              '日志、截图和临时文件分别保存到 logs / screenshots / temp',
+                          suffixIcon: IconButton(
+                            key: const Key('agent-pick-debug-directory'),
+                            tooltip: '选择目录',
+                            onPressed: () async {
+                              final String? selected =
+                                  widget.debugDirectoryPicker == null
+                                  ? await getDirectoryPath(
+                                      initialDirectory: _debugDirectory.text
+                                          .trim(),
+                                    )
+                                  : await widget.debugDirectoryPicker!();
+                              if (selected == null ||
+                                  selected.trim().isEmpty ||
+                                  !dialogContext.mounted) {
+                                return;
+                              }
+                              setStateDialog(
+                                () => _debugDirectory.text = selected.trim(),
+                              );
+                            },
+                            icon: const Icon(Icons.folder_open_outlined),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
                         key: const Key('agent-base-url'),
                         controller: _baseUrl,
                         decoration: const InputDecoration(labelText: 'API 地址'),
@@ -998,6 +1043,17 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ),
     );
     if (save != true) return;
+    try {
+      final HarnessDebugPaths debug =
+          await DeepSeekHarnessService.prepareDebugDirectory(
+            _debugDirectory.text,
+          );
+      _debugDirectory.text = debug.root.path;
+      await widget.onDebugDirectoryChanged?.call(debug.root.path);
+    } on Object catch (error) {
+      if (mounted) _show('调试目录不可用：$error');
+      return;
+    }
     if (loggingEnabled != initialLoggingEnabled) {
       await HarnessToolActivityStore.setLoggingEnabled(loggingEnabled);
     }

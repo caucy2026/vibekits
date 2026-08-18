@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -61,6 +62,8 @@ class LocalModelsTab extends StatefulWidget {
     this.onLargeModelViewChanged,
     this.initialHarnessWorkspace = '',
     this.onHarnessWorkspaceChanged,
+    this.initialHarnessDebugDirectory = '',
+    this.onHarnessDebugDirectoryChanged,
     this.harnessCheckEnvironment = DeepSeekHarnessService.checkEnvironment,
     this.harnessRunAgent = DeepSeekHarnessService.startAgent,
     this.harnessPickDirectory,
@@ -84,6 +87,8 @@ class LocalModelsTab extends StatefulWidget {
   final Future<void> Function(String view)? onLargeModelViewChanged;
   final String initialHarnessWorkspace;
   final Future<void> Function(String workspace)? onHarnessWorkspaceChanged;
+  final String initialHarnessDebugDirectory;
+  final Future<void> Function(String directory)? onHarnessDebugDirectoryChanged;
   final HarnessEnvironmentChecker harnessCheckEnvironment;
   final HarnessAgentRunner harnessRunAgent;
   final AgentDirectoryPicker? harnessPickDirectory;
@@ -96,6 +101,10 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   late final String _directory = widget.directory.trim().isEmpty
       ? defaultModelDirectory()
       : widget.directory.trim();
+  late String _harnessDebugDirectory =
+      widget.initialHarnessDebugDirectory.trim().isEmpty
+      ? DeepSeekHarnessService.defaultDebugDirectory()
+      : widget.initialHarnessDebugDirectory.trim();
   List<ModelInfo> _models = const <ModelInfo>[];
   String _message = '';
   String? _wavPath;
@@ -128,10 +137,24 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         ? _ModelWorkspace.ocr
         : _ModelWorkspace.agent;
     _agentOpened = _workspace == _ModelWorkspace.agent;
+    unawaited(_initializeHarnessDebugDirectory());
     _refresh();
     final String? path = widget.initialImportPath;
     if (path != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _importPath(path));
+    }
+  }
+
+  Future<void> _initializeHarnessDebugDirectory() async {
+    try {
+      await DeepSeekHarnessService.prepareDebugDirectory(
+        _harnessDebugDirectory,
+      );
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _message = '默认调试目录不可写，请在 Harness 模型设置中选择其他目录';
+      });
     }
   }
 
@@ -349,7 +372,13 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       _message = '框选屏幕区域，完成后会立即识别…';
     });
     try {
-      final String? path = await widget.screenshotCapture();
+      final HarnessDebugPaths debug =
+          await DeepSeekHarnessService.prepareDebugDirectory(
+            _harnessDebugDirectory,
+          );
+      final String? path = await widget.screenshotCapture(
+        debug.screenshots.path,
+      );
       if (!mounted) return;
       if (path == null) {
         setState(() => _message = '已取消截图');
@@ -650,6 +679,15 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                 DeepSeekAgentWorkspace(
                   initialWorkspace: widget.initialHarnessWorkspace,
                   onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
+                  initialDebugDirectory: _harnessDebugDirectory,
+                  onDebugDirectoryChanged: (String directory) async {
+                    if (mounted) {
+                      setState(() => _harnessDebugDirectory = directory);
+                    }
+                    await widget.onHarnessDebugDirectoryChanged?.call(
+                      directory,
+                    );
+                  },
                   onRunningChanged: (bool running) {
                     if (mounted) setState(() => _agentRunning = running);
                   },
