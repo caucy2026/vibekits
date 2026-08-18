@@ -19,6 +19,7 @@ class WindowsCleanupRule {
     this.maximumWindowsBuild,
     this.minimumAgeHours = 24,
     this.maxDepth = 8,
+    this.minimumSizeBytes = 0,
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
     this.note = '',
@@ -34,6 +35,7 @@ class WindowsCleanupRule {
   final int? maximumWindowsBuild;
   final int minimumAgeHours;
   final int maxDepth;
+  final int minimumSizeBytes;
   final List<String> includePatterns;
   final List<String> excludePatterns;
   final String note;
@@ -48,9 +50,32 @@ class WindowsCleanupRule {
 /// 规则只描述明确的瞬态目录，不扫描整盘寻找通用扩展名。系统管理型缓存
 /// 默认关闭；下载目录、Windows.old、驱动包、预取和注册表不在直接删除库中。
 abstract final class WindowsCleanupRuleCatalog {
-  static const int version = 2;
+  static const int version = 3;
 
   static const List<WindowsCleanupRule> rules = <WindowsCleanupRule>[
+    WindowsCleanupRule(
+      id: 'system-drive-root-large-diagnostics',
+      label: '系统盘根目录异常大日志',
+      pathTemplate: '%SYSTEMDRIVE%\\',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.cautious,
+      defaultEnabled: false,
+      minimumAgeHours: 24,
+      maxDepth: 0,
+      minimumSizeBytes: 64 * 1024 * 1024,
+      includePatterns: <String>['*.log', '*.etl', '*.dmp', '*.hprof'],
+      note: '只检查系统盘根目录直接文件；至少 64 MiB，默认只提示不勾选',
+    ),
+    WindowsCleanupRule(
+      id: 'est-encryption-old-logs',
+      label: 'EST 加密软件旧日志',
+      pathTemplate: r'%SYSTEMDRIVE%\estlog',
+      category: WindowsCleanupRuleCategory.logs,
+      risk: WindowsCleanupRuleRisk.cautious,
+      defaultEnabled: false,
+      minimumAgeHours: 24,
+      note: r'扫描 C:\estlog 中超过 24 小时的日志；默认只提示，确认后清理',
+    ),
     WindowsCleanupRule(
       id: 'windows-explorer-thumbnail-cache',
       label: 'Windows 缩略图与图标缓存',

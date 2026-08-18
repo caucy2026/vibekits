@@ -355,3 +355,11 @@
 - 规则库升级到 v2/29 条：新增 JetBrains `java_error_in_*.hprof/.log`、WSLg `RdClientAutoTrace-*.etl`、Gradio 临时文件、.NET TelemetryStorageService、Scoop 下载缓存和 Delphi 许可旧日志；大型堆转储/ETL/许可日志保持谨慎且默认不选。
 - 没有复制 Kudu/constUP/BitCleanerX 源码或规则文件；按许可证和安全边界独立实现，保留来源与差异记录。
 - `flutter analyze` 0 问题；清理规则、深度、模式、年龄、取消和双工作线程回归 17/17 通过。版本更新为 `1.9.0-dev.18+28`。
+
+## 2026-08-19 · v1.9.0-dev.19 系统盘审计与 macOS 清理规则
+
+- Windows 清理规则库升级到 v3，增加系统盘根目录大型 `.log/.etl/.dmp/.hprof` 诊断文件的深度 0、64 MiB、24 小时谨慎规则，并对用户确认的 `C:\estlog` 增加递归旧日志候选；两类均默认不选，必须复核后清理。
+- 新增独立 Isolate 系统盘分析器，递归计量每个根目录/文件，识别 Windows、安装程序、用户数据、恢复启动、系统管理文件、日志缓存与未知项；跳过链接/联接，支持取消、I/O 让步、不可读与统计不完整标记。
+- 清理页新增空间分析和清理后自动分析，展示系统盘总量、已用、剩余、已归类和未归类空间；完整 JSON 保存所有根项目、大小、类别、合理性和判断原因，不读取文件正文。
+- 新增 macOS 清理规则库 v1（26 条），覆盖 Xcode/Simulator、SwiftPM/Homebrew/CocoaPods、主流语言包缓存、浏览器和开发应用明确缓存目录；不扫描项目、模拟器设备数据和用户文档。
+- `flutter analyze` 0 问题；清理界面、规则、扫描、取消、系统盘统计与报告合并回归 27/27 通过。版本更新为 `1.9.0-dev.19+29`。

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'cleanup_scanner.dart';
 import 'cleanup_whitelist.dart';
+import 'macos_cleanup_rule_catalog.dart';
 import 'windows_cleanup_rule_catalog.dart';
 
 enum CleanupTargetStrategy {
@@ -21,6 +22,7 @@ class CleanupScanTarget {
     this.safetyNote = '',
     this.minimumAgeHours = 0,
     this.maxDepth = 8,
+    this.minimumSizeBytes = 0,
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
     this.ruleCatalogVersion,
@@ -35,6 +37,7 @@ class CleanupScanTarget {
   final String safetyNote;
   final int minimumAgeHours;
   final int maxDepth;
+  final int minimumSizeBytes;
   final List<String> includePatterns;
   final List<String> excludePatterns;
   final int? ruleCatalogVersion;
@@ -278,7 +281,7 @@ abstract final class CleanupTargetDiscovery {
     }
 
     if (home != null && home.trim().isNotEmpty) {
-      _addMacTargets(targets, home);
+      _addMacTargets(targets, home, _currentMacosMajor(environment != null));
     }
     _addWindowsCatalogTargets(
       targets,
@@ -328,6 +331,7 @@ abstract final class CleanupTargetDiscovery {
         safetyNote: rule.note,
         minimumAgeHours: rule.minimumAgeHours,
         maxDepth: rule.maxDepth,
+        minimumSizeBytes: rule.minimumSizeBytes,
         includePatterns: rule.includePatterns,
         excludePatterns: rule.excludePatterns,
         ruleCatalogVersion: WindowsCleanupRuleCatalog.version,
@@ -368,6 +372,13 @@ abstract final class CleanupTargetDiscovery {
     return versions.isEmpty
         ? 99999
         : versions.reduce((int left, int right) => left > right ? left : right);
+  }
+
+  static int _currentMacosMajor(bool injectedEnvironment) {
+    if (injectedEnvironment && !Platform.isMacOS) return 99;
+    final Match? match = RegExp(r'Version\s+(\d+)')
+        .firstMatch(Platform.operatingSystemVersion);
+    return match == null ? 99 : int.parse(match.group(1)!);
   }
 
   static void _addChromiumProfiles(
@@ -508,6 +519,7 @@ abstract final class CleanupTargetDiscovery {
     String safetyNote = '',
     int minimumAgeHours = 0,
     int maxDepth = 8,
+    int minimumSizeBytes = 0,
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
     int? ruleCatalogVersion,
@@ -524,6 +536,7 @@ abstract final class CleanupTargetDiscovery {
         safetyNote: safetyNote,
         minimumAgeHours: minimumAgeHours,
         maxDepth: maxDepth,
+        minimumSizeBytes: minimumSizeBytes,
         includePatterns: includePatterns,
         excludePatterns: excludePatterns,
         ruleCatalogVersion: ruleCatalogVersion,
@@ -621,54 +634,34 @@ abstract final class CleanupTargetDiscovery {
     }
   }
 
-  static void _addMacTargets(List<CleanupScanTarget> targets, String home) {
-    for (final (String id, String label, List<String> parts)
-        in <(String, String, List<String>)>[
-          (
-            'mac-xcode-derived-data',
-            'Xcode DerivedData',
-            <String>['Library', 'Developer', 'Xcode', 'DerivedData'],
-          ),
-          (
-            'mac-swiftpm-cache',
-            'Swift Package Manager 缓存',
-            <String>['Library', 'Caches', 'org.swift.swiftpm'],
-          ),
-          (
-            'mac-homebrew-cache',
-            'Homebrew 下载缓存',
-            <String>['Library', 'Caches', 'Homebrew'],
-          ),
-          (
-            'mac-cocoapods-cache',
-            'CocoaPods 下载缓存',
-            <String>['Library', 'Caches', 'CocoaPods'],
-          ),
-          (
-            'mac-pip-cache',
-            'Python pip 下载缓存',
-            <String>['Library', 'Caches', 'pip'],
-          ),
-        ]) {
+  static void _addMacTargets(
+    List<CleanupScanTarget> targets,
+    String home,
+    int macosMajor,
+  ) {
+    for (final MacosCleanupRule rule in MacosCleanupRuleCatalog.rules) {
+      if (!rule.supportsMajor(macosMajor)) continue;
       _addExisting(
         targets,
-        id: id,
-        label: label,
-        path: _join(home, parts),
-        category: CleanupCategory.devCache,
-        defaultEnabled: true,
-        safetyNote: '可重新生成或下载；默认不勾选具体文件',
+        id: rule.id,
+        label: rule.label,
+        path: _join(home, rule.relativePath),
+        category: switch (rule.category) {
+          MacosCleanupRuleCategory.browserCache => CleanupCategory.browserCache,
+          MacosCleanupRuleCategory.applicationCache =>
+            CleanupCategory.applicationCache,
+          MacosCleanupRuleCategory.developerCache => CleanupCategory.devCache,
+          MacosCleanupRuleCategory.logs => CleanupCategory.logs,
+        },
+        defaultEnabled: rule.defaultEnabled,
+        safetyNote: rule.note,
+        minimumAgeHours: rule.minimumAgeHours,
+        maxDepth: rule.maxDepth,
+        includePatterns: rule.includePatterns,
+        excludePatterns: rule.excludePatterns,
+        ruleCatalogVersion: MacosCleanupRuleCatalog.version,
       );
     }
-    _addExisting(
-      targets,
-      id: 'mac-diagnostic-reports',
-      label: 'macOS 诊断报告',
-      path: _join(home, <String>['Library', 'Logs', 'DiagnosticReports']),
-      category: CleanupCategory.logs,
-      defaultEnabled: true,
-      safetyNote: '仅本机应用崩溃诊断报告',
-    );
     _addExisting(
       targets,
       id: 'mac-downloads-suggestions',

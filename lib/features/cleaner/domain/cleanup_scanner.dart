@@ -138,6 +138,7 @@ abstract final class CleanupScanner {
     void Function(CleanupScanProgress progress)? onProgress,
     String? sourceLabel,
     int minimumAgeHours = 0,
+    int minimumSizeBytes = 0,
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
   }) async {
@@ -224,6 +225,7 @@ abstract final class CleanupScanner {
           } else if (type == FileSystemEntityType.file) {
             final File file = File(entity.path);
             final int size = await file.length();
+            if (size < minimumSizeBytes) continue;
             final DateTime modified = await file.lastModified();
             final String name = _baseName(entity.path).toLowerCase();
             if (includePatterns.isNotEmpty &&
@@ -337,6 +339,7 @@ abstract final class CleanupScanner {
             sourceLabel: target.label,
             onProgress: targetProgress,
             minimumAgeHours: target.minimumAgeHours,
+            minimumSizeBytes: target.minimumSizeBytes,
             includePatterns: target.includePatterns,
             excludePatterns: target.excludePatterns,
           ),

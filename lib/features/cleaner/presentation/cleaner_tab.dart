@@ -13,6 +13,9 @@ import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
 import '../domain/cleanup_targets.dart';
 import '../domain/cleanup_whitelist.dart';
+import '../domain/system_drive_analysis_runner.dart';
+import '../domain/system_drive_analysis_report.dart';
+import '../domain/system_drive_analyzer.dart';
 
 typedef CleanupScanRunner = Future<CleanupScanResult> Function({
   required CleanupCancellationToken cancellationToken,
@@ -25,6 +28,10 @@ typedef CleanupDeleteRunner = Future<CleanupDeleteResult> Function({
   required void Function(CleanupDeleteProgress progress) onProgress,
 });
 typedef CleanupDiskSnapshotReader = DiskSpaceSnapshot? Function(String path);
+typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
+  required CleanupCancellationToken cancellationToken,
+  required void Function(SystemDriveAnalysisProgress progress) onProgress,
+});
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
@@ -42,6 +49,9 @@ class CleanerTab extends StatefulWidget {
     this.initialCompletedRuns = 0,
     this.onCleanupStatsChanged,
     this.availableTargets,
+    this.driveAnalysisRunner,
+    this.analyzeAfterCleanup = true,
+    this.persistDriveAnalysisReport = true,
   });
 
   final CleanupScanRunner? scanRunner;
@@ -58,6 +68,9 @@ class CleanerTab extends StatefulWidget {
   final Future<void> Function(int totalReleasedBytes, int completedRuns)?
   onCleanupStatsChanged;
   final List<CleanupScanTarget>? availableTargets;
+  final CleanupDriveAnalysisRunner? driveAnalysisRunner;
+  final bool analyzeAfterCleanup;
+  final bool persistDriveAnalysisReport;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -79,8 +92,12 @@ class _CleanerTabState extends State<CleanerTab> {
   CleanupDeleteProgress? _deleteProgress;
   CleanupDeleteResult? _lastResult;
   File? _lastReport;
+  File? _lastDriveAnalysisReport;
   DiskSpaceSnapshot? _diskBefore;
   DiskSpaceSnapshot? _diskAfter;
+  SystemDriveAnalysis? _driveAnalysis;
+  SystemDriveAnalysisProgress? _driveAnalysisProgress;
+  bool _analyzingDrive = false;
   late int _totalReleasedBytes = widget.initialTotalReleasedBytes;
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
@@ -348,6 +365,7 @@ class _CleanerTabState extends State<CleanerTab> {
       _diskBefore = diskBefore;
       _diskAfter = null;
     });
+    bool shouldAnalyze = false;
     try {
       final CleanupDeleteResult result = widget.deleteRunner == null
           ? await CleanupBackgroundRunner.deleteCandidates(
@@ -393,6 +411,7 @@ class _CleanerTabState extends State<CleanerTab> {
         _selected.removeAll(succeededPaths);
         _message = result.cancelled ? '清理已取消，已完成部分见报告' : '清理完成';
       });
+      shouldAnalyze = !result.cancelled && result.items.isNotEmpty;
       try {
         await widget.onCleanupStatsChanged?.call(nextTotal, nextRuns);
       } catch (error) {
@@ -417,6 +436,72 @@ class _CleanerTabState extends State<CleanerTab> {
         setState(() {
           _cleaning = false;
           _message = '清理失败：$error';
+        });
+      }
+    } finally {
+      if (identical(_taskToken, token)) _taskToken = null;
+    }
+    if (shouldAnalyze && widget.analyzeAfterCleanup && mounted) {
+      await _analyzeSystemDrive();
+    }
+  }
+
+  Future<void> _analyzeSystemDrive() async {
+    if (_scanning || _cleaning || _analyzingDrive) return;
+    final CleanupCancellationToken token = CleanupCancellationToken();
+    _taskToken = token;
+    setState(() {
+      _analyzingDrive = true;
+      _driveAnalysisProgress = null;
+      _lastDriveAnalysisReport = null;
+      _message = '正在分析系统盘根目录与空间占用…';
+    });
+    try {
+      final SystemDriveAnalysis analysis = widget.driveAnalysisRunner == null
+          ? await SystemDriveAnalysisRunner.analyze(
+              _systemDiskPath(),
+              cancellationToken: token,
+              onProgress: (SystemDriveAnalysisProgress progress) {
+                if (mounted) {
+                  setState(() => _driveAnalysisProgress = progress);
+                }
+              },
+            )
+          : await widget.driveAnalysisRunner!(
+              cancellationToken: token,
+              onProgress: (SystemDriveAnalysisProgress progress) {
+                if (mounted) {
+                  setState(() => _driveAnalysisProgress = progress);
+                }
+              },
+            );
+      if (!mounted) return;
+      setState(() {
+        _driveAnalysis = analysis;
+        _analyzingDrive = false;
+        _message = analysis.cancelled
+            ? '空间分析已取消，以下为已完成部分'
+            : '空间分析完成：${analysis.entries.length} 个系统盘根项目';
+      });
+      if (widget.persistDriveAnalysisReport) {
+        try {
+          final File report = await SystemDriveAnalysisReportWriter.write(
+            analysis,
+          );
+          if (mounted) setState(() => _lastDriveAnalysisReport = report);
+        } catch (error) {
+          if (mounted) {
+            setState(
+              () => _message = '$_message；详细报告保存失败：${error.runtimeType}',
+            );
+          }
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _analyzingDrive = false;
+          _message = '系统盘空间分析失败：$error';
         });
       }
     } finally {
@@ -709,6 +794,9 @@ class _CleanerTabState extends State<CleanerTab> {
             ),
           ),
         if (_lastResult != null) _buildResultSummary(_lastResult!),
+        if (_analyzingDrive && _driveAnalysisProgress != null)
+          _buildDriveAnalysisProgress(_driveAnalysisProgress!),
+        if (_driveAnalysis != null) _buildDriveAnalysis(_driveAnalysis!),
         Expanded(child: _buildBody()),
       ],
     );
@@ -720,7 +808,7 @@ class _CleanerTabState extends State<CleanerTab> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          final bool veryCompact = constraints.maxWidth < 680;
+          final bool veryCompact = constraints.maxWidth < 820;
           return Row(
             children: <Widget>[
               ElevatedButton.icon(
@@ -748,6 +836,23 @@ class _CleanerTabState extends State<CleanerTab> {
                   label: const Text('取消'),
                 ),
               ],
+              const SizedBox(width: 6),
+              if (veryCompact)
+                IconButton(
+                  tooltip: '系统盘空间分析',
+                  onPressed: _scanning || _cleaning || _analyzingDrive
+                      ? null
+                      : _analyzeSystemDrive,
+                  icon: const Icon(Icons.donut_large, size: 18),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _scanning || _cleaning || _analyzingDrive
+                      ? null
+                      : _analyzeSystemDrive,
+                  icon: const Icon(Icons.donut_large, size: 18),
+                  label: Text(_analyzingDrive ? '分析中…' : '空间分析'),
+                ),
               const SizedBox(width: 6),
               if (veryCompact)
                 IconButton(
@@ -795,6 +900,187 @@ class _CleanerTabState extends State<CleanerTab> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildDriveAnalysisProgress(SystemDriveAnalysisProgress progress) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        children: <Widget>[
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '空间分析 ${progress.completedRootEntries}/${progress.totalRootEntries} · '
+              '已检查 ${progress.visitedEntries} 项 · ${_formatSize(progress.measuredBytes)} · '
+              '${progress.currentPath}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () => _taskToken?.cancel(),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriveAnalysis(SystemDriveAnalysis analysis) {
+    final List<SystemDriveUsageEntry> visible = analysis.entries
+        .take(10)
+        .toList(growable: false);
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 280),
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      decoration: BoxDecoration(
+        color: context.vibe.panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.vibe.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.storage_outlined, size: 18),
+                const SizedBox(width: 8),
+                const Text(
+                  '系统盘空间分析',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '总量 ${_formatSize(analysis.totalBytes)} · '
+                    '已用 ${_formatSize(analysis.usedBytes)} · '
+                    '剩余 ${_formatSize(analysis.freeBytes)} · '
+                    '已归类 ${_formatSize(analysis.measuredBytes)} · '
+                    '未归类/不可读 ${_formatSize(analysis.unaccountedBytes)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '重新分析',
+                  onPressed: _analyzingDrive ? null : _analyzeSystemDrive,
+                  icon: const Icon(Icons.refresh, size: 18),
+                ),
+                if (_lastDriveAnalysisReport != null)
+                  IconButton(
+                    tooltip: '查看完整空间报告',
+                    onPressed: () => _showDriveAnalysisReport(analysis),
+                    icon: const Icon(Icons.description_outlined, size: 18),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: visible.length,
+              separatorBuilder: (BuildContext context, int index) =>
+                  const Divider(height: 1),
+              itemBuilder: (BuildContext context, int index) {
+                final SystemDriveUsageEntry entry = visible[index];
+                return ListTile(
+                  dense: true,
+                  visualDensity: VisualDensity.compact,
+                  leading: Icon(
+                    entry.needsReview
+                        ? Icons.warning_amber_rounded
+                        : Icons.check_circle_outline,
+                    size: 18,
+                    color: entry.needsReview
+                        ? VibekitsColors.warning
+                        : context.vibe.success,
+                  ),
+                  title: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          entry.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        '${entry.complete ? '' : '≥ '}${_formatSize(entry.sizeBytes)}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text(
+                    '${entry.kind.label} · ${entry.needsReview ? '需复核' : '正常'} · ${entry.reason}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDriveAnalysisReport(SystemDriveAnalysis analysis) async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('系统盘详细分析报告'),
+        content: SizedBox(
+          width: 680,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  '总量 ${_formatSize(analysis.totalBytes)} · '
+                  '已用 ${_formatSize(analysis.usedBytes)} · '
+                  '剩余 ${_formatSize(analysis.freeBytes)}',
+                ),
+                const SizedBox(height: 8),
+                for (final SystemDriveUsageEntry entry in analysis.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '${entry.needsReview ? '需复核' : '正常'} · '
+                      '${entry.name} · ${entry.complete ? '' : '≥ '}'
+                      '${_formatSize(entry.sizeBytes)}\n'
+                      '${entry.kind.label}：${entry.reason}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                if (_lastDriveAnalysisReport != null) ...<Widget>[
+                  const Divider(),
+                  SelectableText(
+                    '完整 JSON：${_lastDriveAnalysisReport!.path}',
+                    style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
       ),
     );
   }

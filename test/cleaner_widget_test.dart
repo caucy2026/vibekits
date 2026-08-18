@@ -7,6 +7,7 @@ import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
+import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
 
 void main() {
@@ -126,7 +127,7 @@ void main() {
 
     expect(find.text(protected), findsNothing);
     expect(find.text(similar), findsOneWidget);
-    expect(find.text('白名单（1）'), findsOneWidget);
+    expect(find.byTooltip('白名单（1）'), findsOneWidget);
   });
 
   testWidgets('大量候选按分类折叠并分批显示', (WidgetTester tester) async {
@@ -239,6 +240,7 @@ void main() {
               persistedTotal = total;
               persistedRuns = runs;
             },
+            analyzeAfterCleanup: false,
           ),
         ),
       ),
@@ -260,5 +262,74 @@ void main() {
     expect(find.text('3.0 KB'), findsOneWidget);
     expect(persistedTotal, 3072);
     expect(persistedRuns, 3);
+  });
+
+  testWidgets('空间分析展示总量剩余、占用来源和合理性', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            driveAnalysisRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(SystemDriveAnalysisProgress progress)
+                  onProgress,
+                }) async {
+                  onProgress(
+                    const SystemDriveAnalysisProgress(
+                      currentPath: r'C:\estlog',
+                      visitedEntries: 12,
+                      measuredBytes: 4000,
+                      completedRootEntries: 2,
+                      totalRootEntries: 3,
+                    ),
+                  );
+                  return const SystemDriveAnalysis(
+                    rootPath: r'C:\',
+                    entries: <SystemDriveUsageEntry>[
+                      SystemDriveUsageEntry(
+                        path: r'C:\Windows',
+                        name: 'Windows',
+                        sizeBytes: 6000,
+                        kind: SystemDriveEntryKind.windowsSystem,
+                        reason: 'Windows 系统文件',
+                        isDirectory: true,
+                        complete: true,
+                      ),
+                      SystemDriveUsageEntry(
+                        path: r'C:\estlog',
+                        name: 'estlog',
+                        sizeBytes: 2000,
+                        kind: SystemDriveEntryKind.logsAndCaches,
+                        reason: 'EST 加密软件日志',
+                        isDirectory: true,
+                        complete: true,
+                      ),
+                    ],
+                    cancelled: false,
+                    unreadablePaths: 0,
+                    visitedEntries: 12,
+                    measuredBytes: 8000,
+                    totalBytes: 10000,
+                    freeBytes: 2000,
+                    availableBytes: 2000,
+                  );
+                },
+            persistDriveAnalysisReport: false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('系统盘空间分析'), findsOneWidget);
+    expect(find.textContaining('总量 9.8 KB'), findsOneWidget);
+    expect(find.text('Windows'), findsOneWidget);
+    expect(find.text('estlog'), findsOneWidget);
+    expect(find.textContaining('需复核'), findsOneWidget);
+    expect(find.textContaining('剩余 2.0 KB'), findsOneWidget);
   });
 }

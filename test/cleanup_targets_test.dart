@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
+import 'package:vibekits/features/cleaner/domain/macos_cleanup_rule_catalog.dart';
 import 'package:vibekits/features/cleaner/domain/windows_cleanup_rule_catalog.dart';
 
 void main() {
   test('Windows 规则库 ID 唯一且包含系统与常用软件规则', () {
     final List<WindowsCleanupRule> rules = WindowsCleanupRuleCatalog.rules;
-    expect(rules.length, greaterThanOrEqualTo(29));
+    expect(rules.length, greaterThanOrEqualTo(31));
     expect(
       rules.map((WindowsCleanupRule rule) => rule.id).toSet(),
       hasLength(rules.length),
@@ -25,6 +26,125 @@ void main() {
         'wslg-rd-client-traces',
         'gradio-temp-files',
         'scoop-download-cache',
+        'system-drive-root-large-diagnostics',
+        'est-encryption-old-logs',
+      ]),
+    );
+  });
+
+  test('系统盘根目录只发现超过阈值的旧诊断文件且不递归', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_drive_root_logs_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory nested = Directory(
+      '${sandbox.path}${Platform.pathSeparator}project',
+    )..createSync();
+    final Directory estlog = Directory(
+      '${sandbox.path}${Platform.pathSeparator}estlog',
+    )..createSync();
+    final File largeLog = File(
+      '${sandbox.path}${Platform.pathSeparator}est.log',
+    );
+    final RandomAccessFile largeWriter = largeLog.openSync(
+      mode: FileMode.write,
+    );
+    largeWriter.setPositionSync(65 * 1024 * 1024);
+    largeWriter.writeByteSync(0);
+    largeWriter.closeSync();
+    largeLog.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 2)),
+    );
+    final File smallLog = File(
+      '${sandbox.path}${Platform.pathSeparator}small.log',
+    )..writeAsStringSync('small');
+    smallLog.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 2)),
+    );
+    final File nestedLog = File(
+      '${nested.path}${Platform.pathSeparator}nested.log',
+    );
+    final RandomAccessFile nestedWriter = nestedLog.openSync(
+      mode: FileMode.write,
+    );
+    nestedWriter.setPositionSync(65 * 1024 * 1024);
+    nestedWriter.writeByteSync(0);
+    nestedWriter.closeSync();
+    nestedLog.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 2)),
+    );
+    final File oldEstLog = File(
+      '${estlog.path}${Platform.pathSeparator}encrypt-service.log',
+    )..writeAsStringSync('old encrypted product log');
+    oldEstLog.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 2)),
+    );
+    final File newEstLog = File(
+      '${estlog.path}${Platform.pathSeparator}current.log',
+    )..writeAsStringSync('active log');
+
+    final CleanupScanTarget target =
+        CleanupTargetDiscovery.discover(
+          environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
+          windowsBuild: 22621,
+        ).singleWhere(
+          (CleanupScanTarget item) =>
+              item.id == 'system-drive-root-large-diagnostics',
+        );
+    expect(target.maxDepth, 0);
+    expect(target.minimumSizeBytes, 64 * 1024 * 1024);
+    expect(target.defaultEnabled, isFalse);
+
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[target],
+    );
+    final Set<String> paths = result.candidates
+        .map((CleanupCandidate item) => item.path)
+        .toSet();
+    expect(paths, contains(largeLog.path));
+    expect(paths, isNot(contains(smallLog.path)));
+    expect(paths, isNot(contains(nestedLog.path)));
+
+    final CleanupScanTarget estTarget =
+        CleanupTargetDiscovery.discover(
+          environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
+          windowsBuild: 22621,
+        ).singleWhere(
+          (CleanupScanTarget item) => item.id == 'est-encryption-old-logs',
+        );
+    expect(estTarget.defaultEnabled, isFalse);
+    expect(estTarget.minimumAgeHours, 24);
+    final CleanupScanResult estResult = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[estTarget],
+    );
+    expect(
+      estResult.candidates.map((CleanupCandidate item) => item.path),
+      contains(oldEstLog.path),
+    );
+    expect(
+      estResult.candidates.map((CleanupCandidate item) => item.path),
+      isNot(contains(newEstLog.path)),
+    );
+  });
+
+  test('macOS 规则库覆盖开发链、应用、浏览器和日志且 ID 唯一', () {
+    final List<MacosCleanupRule> rules = MacosCleanupRuleCatalog.rules;
+    expect(rules.length, greaterThanOrEqualTo(26));
+    expect(
+      rules.map((MacosCleanupRule rule) => rule.id).toSet(),
+      hasLength(rules.length),
+    );
+    expect(
+      rules.map((MacosCleanupRule rule) => rule.id),
+      containsAll(<String>[
+        'mac-xcode-derived-data',
+        'mac-core-simulator-cache',
+        'mac-homebrew-cache',
+        'mac-gradle-cache',
+        'mac-vscode-cache',
+        'mac-docker-old-logs',
+        'mac-chrome-cache',
+        'mac-diagnostic-reports',
       ]),
     );
   });
@@ -515,7 +635,7 @@ void main() {
     );
   });
 
-  test('macOS 开发缓存与下载建议只发现已存在的明确目录', () {
+  test('macOS 规则只发现明确目录并按年龄过滤旧日志', () async {
     final Directory sandbox = Directory.systemTemp.createTempSync(
       'vk_mac_targets',
     );
@@ -531,8 +651,32 @@ void main() {
       sandbox.path,
       'Downloads',
     ].join(Platform.pathSeparator);
+    final String diagnosticReports = <String>[
+      sandbox.path,
+      'Library',
+      'Logs',
+      'DiagnosticReports',
+    ].join(Platform.pathSeparator);
+    final String chromeCache = <String>[
+      sandbox.path,
+      'Library',
+      'Caches',
+      'Google',
+      'Chrome',
+    ].join(Platform.pathSeparator);
     Directory(derivedData).createSync(recursive: true);
     Directory(downloads).createSync(recursive: true);
+    Directory(diagnosticReports).createSync(recursive: true);
+    Directory(chromeCache).createSync(recursive: true);
+    final File oldCrash = File(
+      '$diagnosticReports${Platform.pathSeparator}old.crash',
+    )..writeAsStringSync('old crash');
+    oldCrash.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 10)),
+    );
+    final File newCrash = File(
+      '$diagnosticReports${Platform.pathSeparator}new.crash',
+    )..writeAsStringSync('new crash');
 
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{'HOME': sandbox.path},
@@ -546,11 +690,27 @@ void main() {
       targets.map((target) => target.id),
       contains('mac-downloads-suggestions'),
     );
+    expect(targets.map((target) => target.id), contains('mac-chrome-cache'));
     expect(
       targets
           .singleWhere((target) => target.id == 'mac-downloads-suggestions')
           .safetyNote,
       contains('永不默认勾选'),
+    );
+    final CleanupScanTarget reports = targets.singleWhere(
+      (CleanupScanTarget target) => target.id == 'mac-diagnostic-reports',
+    );
+    expect(reports.minimumAgeHours, 168);
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[reports],
+    );
+    expect(
+      result.candidates.map((CleanupCandidate item) => item.path),
+      contains(oldCrash.path),
+    );
+    expect(
+      result.candidates.map((CleanupCandidate item) => item.path),
+      isNot(contains(newCrash.path)),
     );
   });
 }
