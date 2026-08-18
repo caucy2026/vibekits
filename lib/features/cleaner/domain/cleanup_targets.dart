@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'cleanup_scanner.dart';
 import 'cleanup_whitelist.dart';
+import 'windows_cleanup_rule_catalog.dart';
 
 enum CleanupTargetStrategy {
   directoryContents,
@@ -18,6 +19,10 @@ class CleanupScanTarget {
     required this.defaultEnabled,
     this.strategy = CleanupTargetStrategy.directoryContents,
     this.safetyNote = '',
+    this.minimumAgeHours = 0,
+    this.includePatterns = const <String>[],
+    this.excludePatterns = const <String>[],
+    this.ruleCatalogVersion,
   });
 
   final String id;
@@ -27,14 +32,21 @@ class CleanupScanTarget {
   final bool defaultEnabled;
   final CleanupTargetStrategy strategy;
   final String safetyNote;
+  final int minimumAgeHours;
+  final List<String> includePatterns;
+  final List<String> excludePatterns;
+  final int? ruleCatalogVersion;
 
   bool get highRisk => category.highRisk;
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 4;
+  static const int catalogVersion = 5;
 
-  static List<CleanupScanTarget> discover({Map<String, String>? environment}) {
+  static List<CleanupScanTarget> discover({
+    Map<String, String>? environment,
+    int? windowsBuild,
+  }) {
     final Map<String, String> env = environment ?? Platform.environment;
     final List<CleanupScanTarget> targets = <CleanupScanTarget>[];
     final String? temp = env['TEMP'];
@@ -201,14 +213,6 @@ abstract final class CleanupTargetDiscovery {
       _addJetBrainsCaches(targets, local);
       _addExisting(
         targets,
-        id: 'windows-error-reports',
-        label: 'Windows 错误报告',
-        path: _join(local, <String>['Microsoft', 'Windows', 'WER']),
-        category: CleanupCategory.logs,
-        defaultEnabled: true,
-      );
-      _addExisting(
-        targets,
         id: 'npm-cache',
         label: 'npm 下载缓存',
         path: _join(local, <String>['npm-cache']),
@@ -274,6 +278,11 @@ abstract final class CleanupTargetDiscovery {
     if (home != null && home.trim().isNotEmpty) {
       _addMacTargets(targets, home);
     }
+    _addWindowsCatalogTargets(
+      targets,
+      env,
+      windowsBuild ?? _currentWindowsBuild(environment != null),
+    );
 
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
     for (final CleanupScanTarget target in targets) {
@@ -281,6 +290,74 @@ abstract final class CleanupTargetDiscovery {
       if (normalized != null) unique[normalized.toLowerCase()] = target;
     }
     return unique.values.toList(growable: false);
+  }
+
+  static void _addWindowsCatalogTargets(
+    List<CleanupScanTarget> targets,
+    Map<String, String> environment,
+    int windowsBuild,
+  ) {
+    for (final WindowsCleanupRule rule in WindowsCleanupRuleCatalog.rules) {
+      if (!rule.supportsBuild(windowsBuild)) continue;
+      final String? path = _expandEnvironmentPath(
+        rule.pathTemplate,
+        environment,
+      );
+      if (path == null) continue;
+      _addExisting(
+        targets,
+        id: rule.id,
+        label: rule.label,
+        path: path,
+        category: switch (rule.category) {
+          WindowsCleanupRuleCategory.systemCache => CleanupCategory.systemCache,
+          WindowsCleanupRuleCategory.logs => CleanupCategory.logs,
+          WindowsCleanupRuleCategory.applicationCache =>
+            CleanupCategory.applicationCache,
+        },
+        defaultEnabled: rule.defaultEnabled,
+        safetyNote: rule.note,
+        minimumAgeHours: rule.minimumAgeHours,
+        includePatterns: rule.includePatterns,
+        excludePatterns: rule.excludePatterns,
+        ruleCatalogVersion: WindowsCleanupRuleCatalog.version,
+      );
+    }
+  }
+
+  static String? _expandEnvironmentPath(
+    String template,
+    Map<String, String> environment,
+  ) {
+    final Map<String, String> normalized = <String, String>{
+      for (final MapEntry<String, String> entry in environment.entries)
+        entry.key.toUpperCase(): entry.value,
+    };
+    bool missing = false;
+    final String expanded = template.replaceAllMapped(RegExp(r'%([^%]+)%'), (
+      Match match,
+    ) {
+      final String? value = normalized[match.group(1)!.toUpperCase()];
+      if (value == null || value.trim().isEmpty) {
+        missing = true;
+        return match.group(0)!;
+      }
+      return value.trim();
+    });
+    if (missing) return null;
+    return expanded
+        .replaceAll('\\', Platform.pathSeparator)
+        .replaceAll('/', Platform.pathSeparator);
+  }
+
+  static int _currentWindowsBuild(bool injectedEnvironment) {
+    if (injectedEnvironment && !Platform.isWindows) return 99999;
+    final Iterable<int> versions = RegExp(r'\d{4,6}')
+        .allMatches(Platform.operatingSystemVersion)
+        .map((Match match) => int.parse(match.group(0)!));
+    return versions.isEmpty
+        ? 99999
+        : versions.reduce((int left, int right) => left > right ? left : right);
   }
 
   static void _addChromiumProfiles(
@@ -419,6 +496,10 @@ abstract final class CleanupTargetDiscovery {
     required bool defaultEnabled,
     CleanupTargetStrategy strategy = CleanupTargetStrategy.directoryContents,
     String safetyNote = '',
+    int minimumAgeHours = 0,
+    List<String> includePatterns = const <String>[],
+    List<String> excludePatterns = const <String>[],
+    int? ruleCatalogVersion,
   }) {
     if (!Directory(path).existsSync()) return;
     targets.add(
@@ -430,6 +511,10 @@ abstract final class CleanupTargetDiscovery {
         defaultEnabled: defaultEnabled,
         strategy: strategy,
         safetyNote: safetyNote,
+        minimumAgeHours: minimumAgeHours,
+        includePatterns: includePatterns,
+        excludePatterns: excludePatterns,
+        ruleCatalogVersion: ruleCatalogVersion,
       ),
     );
   }

@@ -137,6 +137,9 @@ abstract final class CleanupScanner {
     CleanupCancellationToken? cancellationToken,
     void Function(CleanupScanProgress progress)? onProgress,
     String? sourceLabel,
+    int minimumAgeHours = 0,
+    List<String> includePatterns = const <String>[],
+    List<String> excludePatterns = const <String>[],
   }) async {
     final CleanupCancellationToken token =
         cancellationToken ?? CleanupCancellationToken();
@@ -203,7 +206,10 @@ abstract final class CleanupScanner {
             await walk(entity.path, depth + 1);
             if (token.isCancelled) return;
             // 目录为空且非根时，作为空目录候选。
-            if (depth > 0 && Directory(entity.path).listSync().isEmpty) {
+            if (depth > 0 &&
+                includePatterns.isEmpty &&
+                minimumAgeHours == 0 &&
+                Directory(entity.path).listSync().isEmpty) {
               candidates.add(
                 CleanupCandidate(
                   path: entity.path,
@@ -219,6 +225,22 @@ abstract final class CleanupScanner {
             final File file = File(entity.path);
             final int size = await file.length();
             final DateTime modified = await file.lastModified();
+            final String name = _baseName(entity.path).toLowerCase();
+            if (includePatterns.isNotEmpty &&
+                !includePatterns.any(
+                  (String pattern) => _wildcardMatches(name, pattern),
+                )) {
+              continue;
+            }
+            if (excludePatterns.any(
+              (String pattern) => _wildcardMatches(name, pattern),
+            )) {
+              continue;
+            }
+            if (minimumAgeHours > 0 &&
+                DateTime.now().difference(modified).inHours < minimumAgeHours) {
+              continue;
+            }
             candidateBytes += size;
             candidates.add(
               CleanupCandidate(
@@ -313,6 +335,9 @@ abstract final class CleanupScanner {
             cancellationToken: token,
             sourceLabel: target.label,
             onProgress: targetProgress,
+            minimumAgeHours: target.minimumAgeHours,
+            includePatterns: target.includePatterns,
+            excludePatterns: target.excludePatterns,
           ),
         CleanupTargetStrategy.downloadSuggestions =>
           await _scanDownloadSuggestions(
@@ -344,6 +369,22 @@ abstract final class CleanupScanner {
       visitedEntries: visitedOffset,
       candidateBytes: bytesOffset,
     );
+  }
+
+  static bool _wildcardMatches(String value, String wildcard) {
+    final StringBuffer pattern = StringBuffer('^');
+    for (final int rune in wildcard.toLowerCase().runes) {
+      final String character = String.fromCharCode(rune);
+      if (character == '*') {
+        pattern.write('.*');
+      } else if (character == '?') {
+        pattern.write('.');
+      } else {
+        pattern.write(RegExp.escape(character));
+      }
+    }
+    pattern.write(r'$');
+    return RegExp(pattern.toString()).hasMatch(value);
   }
 
   static Future<CleanupScanResult> _scanDownloadSuggestions(

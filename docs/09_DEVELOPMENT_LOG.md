@@ -339,3 +339,11 @@
 - 保存时真实创建 `logs`、`screenshots`、`temp`。Harness 子进程注入专用日志/截图目录以及 `TEMP/TMP/TMPDIR`；stdout/stderr 同步写入按 UTC 时间命名的日志，进程结束追加真实退出码。
 - 截图 OCR 复用同一配置并写入 `screenshots`，不再写系统临时目录。API Key 仍仅经子进程环境变量传递，日志转发只接收进程输出。
 - `flutter analyze` 0 问题；设置持久化、目录领域层、日志 Key 脱敏、目录选择保存、完整 Harness 与截图自动 OCR 回归合计 15/15 通过。版本更新为 `1.9.0-dev.16+26`。
+
+## 2026-08-18 · v1.9.0-dev.17 Windows 智能清理规则库与有界并行扫描
+
+- 新增 Vibekits 自有 Windows 清理规则库 v1，共 22 条明确路径规则，覆盖 Explorer 缩略图/图标缓存、WER、CBS/DISM/Panther 日志、Windows Update/传递优化候选及 VS Code、Cursor、Windsurf、Docker Desktop、GitHub Desktop、Postman、Slack、Discord、Teams、NVIDIA 等常用软件日志或缓存。
+- 规则按 Windows build、风险、默认选择、最小年龄、文件名包含/排除模式和说明执行。Downloads、Windows.old、驱动包、Prefetch、注册表及系统托管缓存不做默认删除；不以通用扩展名扫描整盘。
+- 后台扫描从一个工作 Isolate 升级为最多两个有界扫描 Isolate，实时聚合进度、候选、字节数和不可读目录；取消令牌同时终止两个工作线程，仍保留准确的部分结果。
+- 未复制许可不明确的 Winapp2 基础规则或 GPL-3.0 BleachBit 代码；路径依据 Microsoft 官方文档独立实现。
+- `flutter analyze` 0 问题；规则/版本/模式/年龄测试、扫描/取消及双工作线程合并回归 16/16 通过。版本更新为 `1.9.0-dev.17+27`。

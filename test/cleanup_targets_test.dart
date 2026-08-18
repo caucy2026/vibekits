@@ -3,8 +3,138 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
+import 'package:vibekits/features/cleaner/domain/windows_cleanup_rule_catalog.dart';
 
 void main() {
+  test('Windows 规则库 ID 唯一且包含系统与常用软件规则', () {
+    final List<WindowsCleanupRule> rules = WindowsCleanupRuleCatalog.rules;
+    expect(rules.length, greaterThanOrEqualTo(20));
+    expect(
+      rules.map((WindowsCleanupRule rule) => rule.id).toSet(),
+      hasLength(rules.length),
+    );
+    expect(
+      rules.map((WindowsCleanupRule rule) => rule.id),
+      containsAll(<String>[
+        'windows-explorer-thumbnail-cache',
+        'windows-wer-machine-archive',
+        'delivery-optimization-cache',
+        'vscode-logs',
+        'docker-desktop-logs',
+      ]),
+    );
+  });
+
+  test('Windows 规则按版本、文件模式和时间阈值生成真实候选', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_windows_catalog_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final String local = '${sandbox.path}${Platform.pathSeparator}Local';
+    final String roaming = '${sandbox.path}${Platform.pathSeparator}Roaming';
+    final String windows = '${sandbox.path}${Platform.pathSeparator}Windows';
+    final String explorer = <String>[
+      local,
+      'Microsoft',
+      'Windows',
+      'Explorer',
+    ].join(Platform.pathSeparator);
+    final String codeLogs = <String>[
+      roaming,
+      'Code',
+      'logs',
+    ].join(Platform.pathSeparator);
+    final String delivery = <String>[
+      windows,
+      'ServiceProfiles',
+      'NetworkService',
+      'AppData',
+      'Local',
+      'Microsoft',
+      'Windows',
+      'DeliveryOptimization',
+      'Cache',
+    ].join(Platform.pathSeparator);
+    Directory(explorer).createSync(recursive: true);
+    Directory(codeLogs).createSync(recursive: true);
+    Directory(delivery).createSync(recursive: true);
+    final DateTime old = DateTime.now().subtract(const Duration(days: 10));
+    final File oldThumb = File(
+      '$explorer${Platform.pathSeparator}thumbcache_256.db',
+    )..writeAsStringSync('old thumbnail');
+    oldThumb.setLastModifiedSync(old);
+    final File unrelated = File(
+      '$explorer${Platform.pathSeparator}settings.dat',
+    )..writeAsStringSync('keep');
+    unrelated.setLastModifiedSync(old);
+    File('$explorer${Platform.pathSeparator}iconcache_32.db')
+        .writeAsStringSync('new cache');
+    final File oldLog = File('$codeLogs${Platform.pathSeparator}renderer.log')
+      ..writeAsStringSync('old log');
+    oldLog.setLastModifiedSync(old);
+    File('$codeLogs${Platform.pathSeparator}current.log')
+        .writeAsStringSync('new log');
+
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: <String, String>{
+        'LOCALAPPDATA': local,
+        'APPDATA': roaming,
+        'WINDIR': windows,
+      },
+      windowsBuild: 22621,
+    );
+    final Set<String> ids = targets
+        .map((CleanupScanTarget target) => target.id)
+        .toSet();
+    expect(
+      ids,
+      containsAll(<String>[
+        'windows-explorer-thumbnail-cache',
+        'delivery-optimization-cache',
+        'vscode-logs',
+      ]),
+    );
+    expect(
+      targets
+          .singleWhere(
+            (CleanupScanTarget target) =>
+                target.id == 'delivery-optimization-cache',
+          )
+          .defaultEnabled,
+      isFalse,
+    );
+
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      targets
+          .where(
+            (CleanupScanTarget target) =>
+                target.id == 'windows-explorer-thumbnail-cache' ||
+                target.id == 'vscode-logs',
+          )
+          .toList(growable: false),
+    );
+    final Set<String> candidatePaths = result.candidates
+        .map((CleanupCandidate candidate) => candidate.path)
+        .toSet();
+    expect(candidatePaths, contains(oldThumb.path));
+    expect(candidatePaths, contains(oldLog.path));
+    expect(candidatePaths, isNot(contains(unrelated.path)));
+    expect(
+      candidatePaths,
+      isNot(contains('$explorer${Platform.pathSeparator}iconcache_32.db')),
+    );
+
+    final Set<String> legacyIds = CleanupTargetDiscovery.discover(
+      environment: <String, String>{
+        'LOCALAPPDATA': local,
+        'APPDATA': roaming,
+        'WINDIR': windows,
+      },
+      windowsBuild: 7601,
+    ).map((CleanupScanTarget target) => target.id).toSet();
+    expect(legacyIds, isNot(contains('delivery-optimization-cache')));
+  });
+
   test('发现临时目录、浏览器缓存和崩溃转储扫描范围', () {
     final Directory sandbox = Directory.systemTemp.createTempSync('vk_targets');
     addTearDown(() => sandbox.deleteSync(recursive: true));

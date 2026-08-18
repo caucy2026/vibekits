@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'cleanup_deleter.dart';
@@ -11,6 +12,10 @@ import 'cleanup_targets.dart';
 /// Cancellation is forwarded through a dedicated send port, so pressing stop
 /// remains responsive even while the worker is enumerating many files.
 abstract final class CleanupBackgroundRunner {
+  /// Two workers keep directory enumeration responsive without saturating the
+  /// system disk or competing aggressively with foreground applications.
+  static const int maxScanWorkers = 2;
+
   static Future<List<CleanupScanTarget>> discoverTargets() => Isolate.run(
     CleanupTargetDiscovery.discover,
     debugName: 'vibekits-cleanup-target-discovery',
@@ -20,19 +25,98 @@ abstract final class CleanupBackgroundRunner {
     List<CleanupScanTarget> targets, {
     required CleanupCancellationToken cancellationToken,
     required void Function(CleanupScanProgress progress) onProgress,
-  }) {
-    return _runWorker<CleanupScanResult>(
-      cancellationToken: cancellationToken,
-      onProgress: (Object progress) =>
-          onProgress(progress as CleanupScanProgress),
-      spawn: (SendPort resultPort, SendPort errorPort, SendPort exitPort) =>
-          Isolate.spawn<_ScanRequest>(
-            _scanEntry,
-            _ScanRequest(resultPort: resultPort, targets: targets),
-            debugName: 'vibekits-cleanup-scan',
-            onError: errorPort,
-            onExit: exitPort,
+  }) async {
+    if (targets.isEmpty) {
+      return const CleanupScanResult(
+        candidates: <CleanupCandidate>[],
+        cancelled: false,
+        unreadablePaths: 0,
+      );
+    }
+    final int workerCount = targets.length < maxScanWorkers
+        ? targets.length
+        : maxScanWorkers;
+    final List<List<CleanupScanTarget>> chunks =
+        List<List<CleanupScanTarget>>.generate(
+          workerCount,
+          (_) => <CleanupScanTarget>[],
+        );
+    for (int index = 0; index < targets.length; index++) {
+      chunks[index % workerCount].add(targets[index]);
+    }
+
+    final List<CleanupScanProgress?> latest = List<CleanupScanProgress?>.filled(
+      workerCount,
+      null,
+    );
+    void report(int worker, CleanupScanProgress progress) {
+      latest[worker] = progress;
+      onProgress(
+        CleanupScanProgress(
+          currentPath: progress.currentPath,
+          visitedEntries: latest.fold<int>(
+            0,
+            (int total, CleanupScanProgress? item) =>
+                total + (item?.visitedEntries ?? 0),
           ),
+          candidateCount: latest.fold<int>(
+            0,
+            (int total, CleanupScanProgress? item) =>
+                total + (item?.candidateCount ?? 0),
+          ),
+          candidateBytes: latest.fold<int>(
+            0,
+            (int total, CleanupScanProgress? item) =>
+                total + (item?.candidateBytes ?? 0),
+          ),
+        ),
+      );
+    }
+
+    final List<CleanupScanResult> results = await Future.wait(
+      List<Future<CleanupScanResult>>.generate(workerCount, (int worker) {
+        return _runWorker<CleanupScanResult>(
+          cancellationToken: cancellationToken,
+          onProgress: (Object progress) =>
+              report(worker, progress as CleanupScanProgress),
+          spawn: (SendPort resultPort, SendPort errorPort, SendPort exitPort) =>
+              Isolate.spawn<_ScanRequest>(
+                _scanEntry,
+                _ScanRequest(resultPort: resultPort, targets: chunks[worker]),
+                debugName: 'vibekits-cleanup-scan-${worker + 1}',
+                onError: errorPort,
+                onExit: exitPort,
+              ),
+        );
+      }),
+    );
+    final Map<String, CleanupCandidate> candidates =
+        <String, CleanupCandidate>{};
+    for (final CleanupScanResult result in results) {
+      for (final CleanupCandidate candidate in result.candidates) {
+        final String key = Platform.isWindows
+            ? candidate.path.toLowerCase()
+            : candidate.path;
+        candidates[key] = candidate;
+      }
+    }
+    return CleanupScanResult(
+      candidates: candidates.values.toList(growable: false),
+      cancelled:
+          cancellationToken.isCancelled ||
+          results.any((CleanupScanResult result) => result.cancelled),
+      unreadablePaths: results.fold<int>(
+        0,
+        (int total, CleanupScanResult result) => total + result.unreadablePaths,
+      ),
+      visitedEntries: results.fold<int>(
+        0,
+        (int total, CleanupScanResult result) => total + result.visitedEntries,
+      ),
+      candidateBytes: candidates.values.fold<int>(
+        0,
+        (int total, CleanupCandidate candidate) => total + candidate.size,
+      ),
     );
   }
 

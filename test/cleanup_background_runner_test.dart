@@ -49,4 +49,53 @@ void main() {
     expect(progressEvents, greaterThan(0));
     expect(result.candidates.length, lessThan(800));
   });
+
+  test('两个有界工作线程合并候选和进度', () async {
+    expect(CleanupBackgroundRunner.maxScanWorkers, 2);
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vibekits_parallel_scan_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory first = Directory(
+      '${sandbox.path}${Platform.pathSeparator}first',
+    )..createSync();
+    final Directory second = Directory(
+      '${sandbox.path}${Platform.pathSeparator}second',
+    )..createSync();
+    for (int index = 0; index < 40; index++) {
+      File('${first.path}${Platform.pathSeparator}$index.log')
+          .writeAsStringSync('first-$index');
+      File('${second.path}${Platform.pathSeparator}$index.log')
+          .writeAsStringSync('second-$index');
+    }
+    final List<int> visitedProgress = <int>[];
+    final CleanupScanResult result = await CleanupBackgroundRunner.scanTargets(
+      <CleanupScanTarget>[
+        CleanupScanTarget(
+          id: 'parallel-first',
+          label: '并行一',
+          path: first.path,
+          category: CleanupCategory.logs,
+          defaultEnabled: true,
+        ),
+        CleanupScanTarget(
+          id: 'parallel-second',
+          label: '并行二',
+          path: second.path,
+          category: CleanupCategory.logs,
+          defaultEnabled: true,
+        ),
+      ],
+      cancellationToken: CleanupCancellationToken(),
+      onProgress: (CleanupScanProgress progress) {
+        visitedProgress.add(progress.visitedEntries);
+      },
+    );
+
+    expect(result.cancelled, isFalse);
+    expect(result.candidates, hasLength(80));
+    expect(result.visitedEntries, 80);
+    expect(visitedProgress, isNotEmpty);
+    expect(visitedProgress.last, 80);
+  });
 }

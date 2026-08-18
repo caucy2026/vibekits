@@ -49,6 +49,7 @@ ADB 不随当前 Release 打包或静默下载：只检测用户已安装的 Goo
 
 ## 开源借鉴边界
 
+- Windows 清理规则研究参考 Microsoft Known Folders、Storage Sense、Disk Cleanup、WER 与 Delivery Optimization 官方文档，并审阅 Winapp2 与 BleachBit。Vibekits 使用独立编写的版本化规则库：未复制 Winapp2 规则（仓库基础规则许可不明确），未移植 GPL-3.0 的 BleachBit 源码/cleaner definitions。
 - Harness 工作台以 DeepSeek 官方社区 Web UI 的功能模块为基线（工作区、会话、对话、工具、目标/计划、任务、模型、权限、插件与设置），使用 Vibekits 自有 Flutter 信息架构和接近 Codex 的中性色视觉；没有嵌入官方 React 产物或品牌素材。
 - Zed、Geany、OpenSSH、Git 和 GitHub 文档只用于工作流与操作习惯研究，没有复制 GPL 项目代码。
 - SSH 交互终端、SFTP 和端口转发使用 `dartssh2`，终端渲染使用 `xterm`；主机密钥必须经用户确认或与已绑定指纹一致。转发连接和数据泵运行在后台 Isolate；不自行实现密码学。
