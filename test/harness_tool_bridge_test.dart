@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
 
 void main() {
   test('导出版本化可执行工具目录且不暴露未接工具', () {
@@ -59,6 +60,41 @@ void main() {
       result.data?['output'],
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
+  });
+
+  test('Harness 工具完成后写入对应工具审计记录', () async {
+    final List<Map<String, Object?>> records = <Map<String, Object?>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      activityRecorder:
+          ({
+            required String toolId,
+            required String toolName,
+            required String target,
+            required Map<String, Object?> arguments,
+            required Object? result,
+            required HarnessToolActivityStatus status,
+            required DateTime startedAt,
+          }) async {
+            records.add(<String, Object?>{
+              'toolId': toolId,
+              'toolName': toolName,
+              'arguments': arguments,
+              'result': result,
+              'status': status,
+            });
+          },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: 'vibekits.sha256',
+      arguments: <String, Object?>{'input': 'abc'},
+      approve: (_) async => true,
+    );
+
+    expect(result.ok, isTrue);
+    expect(records, hasLength(1));
+    expect(records.single['toolId'], 'vibekits.sha256');
+    expect(records.single['status'], HarnessToolActivityStatus.succeeded);
   });
 
   test('ADB 连接先展示规范化目标并取得一次性批准', () async {

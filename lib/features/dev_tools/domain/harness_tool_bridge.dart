@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'adb_service.dart';
@@ -6,6 +7,7 @@ import 'api_request_service.dart';
 import 'file_search_service.dart';
 import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
+import 'harness_tool_activity_store.dart';
 import 'programmer_calculator.dart';
 import 'serial_port_service.dart';
 import 'sqlite_database_service.dart';
@@ -100,12 +102,19 @@ class VibekitsHarnessToolBridge {
         const <String, HarnessToolHandler>{},
     AdbCommandRunner? adbRunner,
     String? adbExecutable,
-  }) => VibekitsHarnessToolBridge._(handlers, adbRunner, adbExecutable);
+    HarnessToolActivityRecorder? activityRecorder,
+  }) => VibekitsHarnessToolBridge._(
+    handlers,
+    adbRunner,
+    adbExecutable,
+    activityRecorder,
+  );
 
   VibekitsHarnessToolBridge._(
     this._customHandlers,
     this._adbRunner,
     this._adbExecutable,
+    this._activityRecorder,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -125,6 +134,7 @@ class VibekitsHarnessToolBridge {
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
   final String? _adbExecutable;
+  final HarnessToolActivityRecorder? _activityRecorder;
 
   late final Map<String, HarnessToolDefinition> _definitions =
       <String, HarnessToolDefinition>{
@@ -329,6 +339,7 @@ class VibekitsHarnessToolBridge {
     required Map<String, Object?> arguments,
     required HarnessToolApproval approve,
   }) async {
+    final DateTime startedAt = DateTime.now();
     final HarnessToolDefinition? definition = _definitions[toolId];
     if (definition == null) {
       return HarnessToolCallResult.failure('未知 Vibekits 工具：$toolId');
@@ -346,12 +357,82 @@ class VibekitsHarnessToolBridge {
           target: target,
         ),
       );
-      if (!allowed) return const HarnessToolCallResult.cancelled();
+      if (!allowed) {
+        await _recordActivity(
+          toolId: toolId,
+          toolName: definition.name,
+          target: target,
+          arguments: arguments,
+          result: '用户拒绝',
+          status: HarnessToolActivityStatus.denied,
+          startedAt: startedAt,
+        );
+        return const HarnessToolCallResult.cancelled();
+      }
     }
     try {
-      return HarnessToolCallResult.success(await handler(arguments));
+      final Map<String, Object?> data = await handler(arguments);
+      if (!_adbExecutionIsAuditedByService(toolId)) {
+        await _recordActivity(
+          toolId: toolId,
+          toolName: definition.name,
+          target: target,
+          arguments: arguments,
+          result: data,
+          status: HarnessToolActivityStatus.succeeded,
+          startedAt: startedAt,
+        );
+      }
+      return HarnessToolCallResult.success(data);
     } on Object catch (error) {
+      if (!_adbExecutionIsAuditedByService(toolId)) {
+        await _recordActivity(
+          toolId: toolId,
+          toolName: definition.name,
+          target: target,
+          arguments: arguments,
+          result: '$error',
+          status: HarnessToolActivityStatus.failed,
+          startedAt: startedAt,
+        );
+      }
       return HarnessToolCallResult.failure('$error');
+    }
+  }
+
+  bool _adbExecutionIsAuditedByService(String toolId) =>
+      _adbRunner == null &&
+      (toolId == adbListDevicesId ||
+          toolId == adbConnectId ||
+          toolId == adbCommandId);
+
+  Future<void> _recordActivity({
+    required String toolId,
+    required String toolName,
+    required String target,
+    required Map<String, Object?> arguments,
+    required Object? result,
+    required HarnessToolActivityStatus status,
+    required DateTime startedAt,
+  }) async {
+    if (_activityRecorder == null &&
+        Platform.environment['FLUTTER_TEST'] == 'true') {
+      return;
+    }
+    try {
+      await (_activityRecorder ?? HarnessToolActivityStore.record)(
+        toolId: toolId,
+        toolName: toolName,
+        target: target,
+        arguments: arguments,
+        result: result,
+        status: status,
+        startedAt: startedAt,
+      );
+    } on Object {
+      // An audit storage failure must not turn a completed tool call into a
+      // model-visible tool failure. The UI will still show the storage error
+      // when it attempts to load the activity file.
     }
   }
 
@@ -424,6 +505,11 @@ class VibekitsHarnessToolBridge {
     final AdbSnapshot snapshot = await AdbService.discoverAndList(
       preferredExecutable: _adbExecutable ?? AdbService.bundledExecutablePath(),
       runner: _adbRunner,
+      listAudit: const AdbCommandAudit(
+        toolId: adbListDevicesId,
+        toolName: '列出 ADB 设备',
+        target: '',
+      ),
     );
     return <String, Object?>{
       'adbVersion': snapshot.installation.version,
@@ -450,6 +536,11 @@ class VibekitsHarnessToolBridge {
       executable,
       address,
       runner: _adbRunner,
+      audit: AdbCommandAudit(
+        toolId: adbConnectId,
+        toolName: '连接 ADB 设备',
+        target: AdbService.normalizeWirelessAddress(address),
+      ),
     );
     return <String, Object?>{
       'address': AdbService.normalizeWirelessAddress(address),
@@ -475,10 +566,20 @@ class VibekitsHarnessToolBridge {
     if (forbidden.contains(command.first.toLowerCase())) {
       throw const FormatException('该 ADB 管理命令未开放，请使用专用工具');
     }
-    final AdbCommandResult result = await (_adbRunner ?? AdbService.runCommand)(
-      _adbExecutable ?? AdbService.bundledExecutablePath(),
-      <String>['-s', serial, ...command],
-    );
+    final String executable =
+        _adbExecutable ?? AdbService.bundledExecutablePath();
+    final List<String> adbArguments = <String>['-s', serial, ...command];
+    final AdbCommandResult result = _adbRunner == null
+        ? await AdbService.runCommand(
+            executable,
+            adbArguments,
+            audit: AdbCommandAudit(
+              toolId: adbCommandId,
+              toolName: '执行 ADB 命令',
+              target: serial,
+            ),
+          )
+        : await _adbRunner(executable, adbArguments);
     if (result.exitCode != 0) {
       throw StateError(
         result.stderr.trim().isEmpty

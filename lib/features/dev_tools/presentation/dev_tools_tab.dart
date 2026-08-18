@@ -11,6 +11,7 @@ import 'file_hash_workspace.dart';
 import 'file_search_workspace.dart';
 import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
+import 'harness_tool_activity_dialog.dart';
 import 'programmer_calculator_workspace.dart';
 import 'remote_workspace.dart';
 import 'serial_port_workspace.dart';
@@ -228,6 +229,20 @@ class _DevToolsTabState extends State<DevToolsTab> {
               ],
             ),
           ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: OutlinedButton.icon(
+              key: const Key('current-tool-harness-activity'),
+              onPressed: () => showHarnessToolActivityDialog(
+                context,
+                toolName: _selected.name,
+                toolIds: _harnessToolIds(_selected.id),
+              ),
+              icon: const Icon(Icons.history_rounded, size: 18),
+              label: const Text('当前工具的 Harness 记录'),
+            ),
+          ),
         ],
       ),
     );
@@ -313,3 +328,25 @@ class _DevToolsTabState extends State<DevToolsTab> {
     return const Center(child: Text('该工具暂不可用'));
   }
 }
+
+Set<String> _harnessToolIds(String toolId) => switch (toolId) {
+  'programmer_calculator' => <String>{'vibekits.calculator.programmer'},
+  'database_manager' => <String>{
+    'vibekits.sqlite.inspect',
+    'vibekits.sqlite.query',
+  },
+  'serial_port' => <String>{
+    'vibekits.serial.list_ports',
+    'vibekits.serial.transact',
+  },
+  'adb_workspace' => <String>{
+    'vibekits.adb.list_devices',
+    'vibekits.adb.connect',
+    'vibekits.adb.command',
+  },
+  'api_workspace' => <String>{'vibekits.http.request'},
+  'git_workspace' => <String>{'vibekits.git.inspect'},
+  'github_diagnostics' => <String>{'vibekits.github.diagnose'},
+  'file_search' => <String>{'vibekits.files.search'},
+  _ => <String>{'vibekits.$toolId'},
+};

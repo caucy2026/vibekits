@@ -52,6 +52,7 @@ class HarnessAgentRequest {
     this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
     this.model = DeepSeekHarnessService.defaultModel,
     this.approveTool,
+    this.toolBridge,
   });
   final String workspace;
   final String prompt;
@@ -59,6 +60,7 @@ class HarnessAgentRequest {
   final String baseUrl;
   final String model;
   final HarnessToolApproval? approveTool;
+  final VibekitsHarnessToolBridge? toolBridge;
   List<String> get arguments => <String>[
     '--profile',
     'headless',
@@ -108,7 +110,7 @@ typedef HarnessModelLister = Future<List<String>> Function(
 
 abstract final class DeepSeekHarnessService {
   static const String defaultBaseUrl = 'https://api.deepseek.com';
-  static const String defaultModel = 'deepseek-chat';
+  static const String defaultModel = 'deepseek-v4-flash';
 
   static Future<List<String>> listModels(String apiKey, String baseUrl) async {
     final String key = apiKey.trim();
@@ -257,6 +259,7 @@ abstract final class DeepSeekHarnessService {
     final _HarnessRuntime runtime = await _resolveBundledRuntime();
     final HarnessToolServer toolServer = await HarnessToolServer.start(
       approve: request.approveTool,
+      bridge: request.toolBridge,
     );
     final Directory harnessHome = await _prepareHarnessHome(request.model);
     try {

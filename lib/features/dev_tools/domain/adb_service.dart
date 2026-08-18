@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'harness_tool_activity_store.dart';
+
 enum AdbDeviceState { device, unauthorized, offline, unknown }
 
 class AdbDevice {
@@ -49,6 +51,20 @@ class AdbCommandResult {
   final String stderr;
 }
 
+class AdbCommandAudit {
+  const AdbCommandAudit({
+    required this.toolId,
+    required this.toolName,
+    required this.target,
+    this.recorder,
+  });
+
+  final String toolId;
+  final String toolName;
+  final String target;
+  final HarnessToolActivityRecorder? recorder;
+}
+
 typedef AdbCommandRunner = Future<AdbCommandResult> Function(
   String executable,
   List<String> arguments,
@@ -67,6 +83,7 @@ abstract final class AdbService {
   static Future<AdbSnapshot> discoverAndList({
     String? preferredExecutable,
     AdbCommandRunner? runner,
+    AdbCommandAudit? listAudit,
   }) async {
     final AdbCommandRunner execute = runner ?? runCommand;
     final String executable = preferredExecutable?.trim().isNotEmpty == true
@@ -78,7 +95,8 @@ abstract final class AdbService {
     );
     final List<AdbDevice> devices = await listDevices(
       installation.executable,
-      runner: execute,
+      runner: runner,
+      audit: runner == null ? listAudit : null,
     );
     return AdbSnapshot(installation: installation, devices: devices);
   }
@@ -115,11 +133,11 @@ abstract final class AdbService {
   static Future<List<AdbDevice>> listDevices(
     String executable, {
     AdbCommandRunner? runner,
+    AdbCommandAudit? audit,
   }) async {
-    final AdbCommandResult result = await (runner ?? runCommand)(
-      executable,
-      <String>['devices', '-l'],
-    );
+    final AdbCommandResult result = runner == null
+        ? await runCommand(executable, <String>['devices', '-l'], audit: audit)
+        : await runner(executable, <String>['devices', '-l']);
     if (result.exitCode != 0) {
       throw StateError(_commandError('刷新 ADB 设备失败', result));
     }
@@ -130,12 +148,15 @@ abstract final class AdbService {
     String executable,
     String address, {
     AdbCommandRunner? runner,
+    AdbCommandAudit? audit,
   }) async {
     final String target = normalizeWirelessAddress(address);
-    final AdbCommandResult result = await (runner ?? runCommand)(
-      executable,
-      <String>['connect', target],
-    );
+    final AdbCommandResult result = runner == null
+        ? await runCommand(executable, <String>[
+            'connect',
+            target,
+          ], audit: audit)
+        : await runner(executable, <String>['connect', target]);
     final String output = '${result.stdout}\n${result.stderr}'.trim();
     if (result.exitCode != 0 ||
         (!output.toLowerCase().contains('connected to') &&
@@ -160,6 +181,75 @@ abstract final class AdbService {
     final int port = int.parse(match.group(2)!);
     if (port < 1 || port > 65535) throw const FormatException('ADB 端口无效');
     return target;
+  }
+
+  static List<String> parseUserCommand(String source) {
+    final String input = source.trim();
+    if (input.isEmpty) throw const FormatException('请输入 ADB 命令');
+    final List<String> arguments = <String>[];
+    final StringBuffer current = StringBuffer();
+    String? quote;
+    void commit() {
+      if (current.isEmpty) return;
+      arguments.add(current.toString());
+      current.clear();
+    }
+
+    for (final int rune in input.runes) {
+      final String character = String.fromCharCode(rune);
+      if (quote != null) {
+        if (character == quote) {
+          quote = null;
+        } else {
+          current.write(character);
+        }
+      } else if (character == '"' || character == "'") {
+        quote = character;
+      } else if (character.trim().isEmpty) {
+        commit();
+      } else {
+        current.write(character);
+      }
+    }
+    if (quote != null) throw const FormatException('命令中的引号没有闭合');
+    commit();
+    if (arguments.isEmpty) throw const FormatException('请输入 ADB 命令');
+    final String operation = arguments.first.toLowerCase();
+    if (const <String>{'-s', '-d', '-e'}.contains(operation)) {
+      throw const FormatException('设备已由列表锁定，不要在命令中再次指定设备');
+    }
+    if (const <String>{
+      'start-server',
+      'kill-server',
+      'server',
+      'connect',
+      'disconnect',
+    }.contains(operation)) {
+      throw const FormatException('该管理命令请使用页面上的连接或刷新操作');
+    }
+    const Set<String> adbOperations = <String>{
+      'shell',
+      'exec-out',
+      'install',
+      'uninstall',
+      'push',
+      'pull',
+      'logcat',
+      'bugreport',
+      'reboot',
+      'root',
+      'unroot',
+      'remount',
+      'forward',
+      'reverse',
+      'tcpip',
+      'sync',
+      'sideload',
+      'emu',
+    };
+    return adbOperations.contains(operation)
+        ? arguments
+        : <String>['shell', ...arguments];
   }
 
   static List<AdbDevice> parseDevices(String source) {
@@ -198,8 +288,10 @@ abstract final class AdbService {
 
   static Future<AdbCommandResult> runCommand(
     String executable,
-    List<String> arguments,
-  ) async {
+    List<String> arguments, {
+    AdbCommandAudit? audit,
+  }) async {
+    final DateTime startedAt = DateTime.now();
     final Process process = await Process.start(
       executable,
       arguments,
@@ -219,11 +311,33 @@ abstract final class AdbService {
       process.kill();
       throw StateError('ADB 命令 10 秒未完成，已终止');
     }
-    return AdbCommandResult(
+    final AdbCommandResult result = AdbCommandResult(
       exitCode: exitCode,
       stdout: await stdout,
       stderr: await stderr,
     );
+    if (audit != null) {
+      await (audit.recorder ?? HarnessToolActivityStore.record)(
+        toolId: audit.toolId,
+        toolName: audit.toolName,
+        target: audit.target,
+        arguments: <String, Object?>{
+          'executable': File(executable).absolute.path,
+          'arguments': List<String>.unmodifiable(arguments),
+        },
+        result: <String, Object?>{
+          'exitCode': result.exitCode,
+          'stdout': result.stdout,
+          'stderr': result.stderr,
+          'evidenceSource': 'adb-process',
+        },
+        status: result.exitCode == 0
+            ? HarnessToolActivityStatus.succeeded
+            : HarnessToolActivityStatus.failed,
+        startedAt: startedAt,
+      );
+    }
+    return result;
   }
 
   static Future<String> _discoverExecutable(AdbCommandRunner runner) async {

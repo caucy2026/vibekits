@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
@@ -85,12 +86,13 @@ void main() {
     expect(savedWorkspace, workspace.path);
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.pumpAndSettle();
+    expect(find.text('deepseek-v4-pro'), findsOneWidget);
+    expect(find.text('DeepSeek 官方 V4 模型 · 验证后以 /models 返回为准'), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('agent-model-select')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('deepseek-special').last);
+    expect(find.text('来自当前 API 的 /models 实时结果'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-model-deepseek-special')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '保存'));
     await tester.pumpAndSettle();
@@ -203,6 +205,117 @@ void main() {
     expect(find.text('项目'), findsOneWidget);
     expect(find.text('会话'), findsOneWidget);
     expect(find.text('新建会话'), findsOneWidget);
+  });
+
+  testWidgets('设置异步恢复后工作区和 Codex 风格输入框立即更新', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_restore_workspace_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final ValueNotifier<String> restored = ValueNotifier<String>('');
+    addTearDown(restored.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ValueListenableBuilder<String>(
+            valueListenable: restored,
+            builder: (BuildContext context, String path, Widget? child) =>
+                DeepSeekAgentWorkspace(
+                  initialWorkspace: path,
+                  credentialReader: (_) async => null,
+                  credentialWriter: (_, _) async {},
+                  checkEnvironment: () async => const HarnessEnvironmentReport(
+                    ready: true,
+                    nodeVersion: 'v24.18.0',
+                    npxVersion: '11.16.0',
+                    message: '已就绪',
+                  ),
+                ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('选择工作区'), findsOneWidget);
+    restored.value = workspace.path;
+    await tester.pumpAndSettle();
+    expect(find.text(workspace.path), findsOneWidget);
+
+    final TextField composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.decoration?.filled, isFalse);
+    expect(composer.decoration?.fillColor, Colors.transparent);
+    expect(composer.decoration?.hintText, '向 Harness 描述任务…');
+    expect(composer.minLines, 1);
+    expect(composer.maxLines, 7);
+  });
+
+  testWidgets('同一目标同类工具操作可授权一次并在本会话复用', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_session_approval_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final _FakeAgentHandle handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    HarnessAgentRequest? launched;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+            runAgent: (HarnessAgentRequest request) async {
+              launched = request;
+              return handle;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-composer')), '检查设备');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+
+    const HarnessToolDefinition tool = HarnessToolDefinition(
+      id: VibekitsHarnessToolBridge.adbCommandId,
+      name: '执行 ADB 命令',
+      description: '执行受限 ADB 参数',
+      risk: HarnessToolRisk.controlsDevice,
+      inputSchema: <String, Object?>{},
+      available: true,
+    );
+    const HarnessToolApprovalRequest getprop = HarnessToolApprovalRequest(
+      tool: tool,
+      target: '192.168.3.63:5555',
+      arguments: <String, Object?>{
+        'serial': '192.168.3.63:5555',
+        'arguments': <String>['shell', 'getprop', 'ro.product.model'],
+      },
+    );
+    final Future<bool> first = launched!.approveTool!(getprop);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.byKey(const Key('agent-approve-session')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-approve-session')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(await first, isTrue);
+
+    expect(await launched!.approveTool!(getprop), isTrue);
+    await tester.pump();
+    expect(find.text('允许 执行 ADB 命令？'), findsNothing);
+
+    await handle.complete(0);
+    await tester.pumpAndSettle();
   });
 }
 

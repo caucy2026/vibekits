@@ -8,6 +8,8 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/harness_conversation_store.dart';
+import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 
@@ -27,6 +29,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.pickDirectory,
     this.credentialReader,
     this.credentialWriter,
+    this.loadConversation = HarnessConversationStore.load,
+    this.saveConversation = HarnessConversationStore.save,
   });
 
   final String initialWorkspace;
@@ -38,6 +42,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final AgentDirectoryPicker? pickDirectory;
   final AgentCredentialReader? credentialReader;
   final AgentCredentialWriter? credentialWriter;
+  final HarnessConversationLoader loadConversation;
+  final HarnessConversationSaver saveConversation;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
@@ -46,8 +52,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
 class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
   static const List<String> _builtinModels = <String>[
-    'deepseek-chat',
-    'deepseek-reasoner',
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
   ];
   static const String _customModelValue = '__custom__';
   static const int _maxContextCharacters = 12000;
@@ -77,12 +83,27 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _running = false;
   bool _stopping = false;
   bool _stopRequested = false;
+  _AgentApprovalMode _approvalMode = _AgentApprovalMode.session;
+  final Set<String> _sessionApprovals = <String>{};
+  int _conversationEpoch = 0;
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadSettings());
+    unawaited(_restoreConversation(widget.initialWorkspace));
     _checkEnvironment();
+  }
+
+  @override
+  void didUpdateWidget(covariant DeepSeekAgentWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final String restored = widget.initialWorkspace.trim();
+    if (!_running &&
+        restored != oldWidget.initialWorkspace.trim() &&
+        restored != _workspace.text.trim()) {
+      unawaited(_adoptWorkspace(restored, notify: false));
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -104,6 +125,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   @override
   void dispose() {
+    unawaited(_persistConversation());
+    _conversationEpoch++;
     _outputSubscription?.cancel();
     _handle?.stop();
     _workspace.dispose();
@@ -154,9 +177,80 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           )
         : await widget.pickDirectory!();
     if (path == null || path.trim().isEmpty || !mounted) return;
-    setState(() => _workspace.text = path.trim());
-    await widget.onWorkspaceChanged?.call(path.trim());
+    await _adoptWorkspace(path.trim());
+    if (!mounted) return;
     _composerFocus.requestFocus();
+  }
+
+  Future<void> _adoptWorkspace(String workspace, {bool notify = true}) async {
+    final String target = workspace.trim();
+    if (_running || target == _workspace.text.trim()) return;
+    await _persistConversation();
+    if (!mounted) return;
+    setState(() {
+      _workspace.text = target;
+      _messages.clear();
+      _sessionApprovals.clear();
+    });
+    if (notify) await widget.onWorkspaceChanged?.call(target);
+    await _restoreConversation(target);
+  }
+
+  Future<void> _restoreConversation(String workspace) async {
+    final String target = workspace.trim();
+    final int epoch = ++_conversationEpoch;
+    if (target.isEmpty) return;
+    HarnessConversationSnapshot? snapshot;
+    try {
+      snapshot = await widget.loadConversation(target);
+    } on Object {
+      return;
+    }
+    if (!mounted ||
+        epoch != _conversationEpoch ||
+        target != _workspace.text.trim() ||
+        _running) {
+      return;
+    }
+    setState(() {
+      _messages
+        ..clear()
+        ..addAll(
+          snapshot?.messages.map(
+                (HarnessConversationMessage message) => _AgentMessage._(
+                  text: message.text,
+                  user: message.user,
+                  elapsed: message.elapsedMs == null
+                      ? null
+                      : Duration(milliseconds: message.elapsedMs!),
+                  exitCode: message.exitCode,
+                  stopped: message.stopped,
+                ),
+              ) ??
+              const <_AgentMessage>[],
+        );
+    });
+    _scrollToEnd(force: true);
+  }
+
+  Future<void> _persistConversation() async {
+    try {
+      await widget.saveConversation(
+        _workspace.text.trim(),
+        <HarnessConversationMessage>[
+          for (final _AgentMessage message in _messages)
+            HarnessConversationMessage(
+              text: message.text,
+              user: message.user,
+              elapsedMs: message.elapsed?.inMilliseconds,
+              exitCode: message.exitCode,
+              stopped: message.stopped,
+            ),
+        ],
+      );
+    } on Object {
+      // A read-only workspace must not make the agent UI unusable.
+    }
   }
 
   String _contextualPrompt(String prompt) {
@@ -208,6 +302,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _stopping = false;
       _stopRequested = false;
     });
+    unawaited(_persistConversation());
     _scrollToEnd(force: true);
     try {
       final HarnessAgentHandle handle = await widget.runAgent(request);
@@ -255,6 +350,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           stopped: _stopRequested,
         );
       });
+      await _persistConversation();
     } on Object catch (error) {
       if (!mounted) return;
       _runClock?.stop();
@@ -268,6 +364,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           exitCode: -1,
         );
       });
+      await _persistConversation();
     }
     _scrollToEnd(force: true);
     _composerFocus.requestFocus();
@@ -285,7 +382,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<bool> _approveHarnessTool(HarnessToolApprovalRequest request) async {
     if (!mounted) return false;
-    final bool? approved = await showDialog<bool>(
+    final String approvalKey = _approvalKey(request);
+    if (_sessionApprovals.contains(approvalKey)) return true;
+    final _ApprovalDecision? decision = await showDialog<_ApprovalDecision>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -299,6 +398,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               Text(request.tool.description),
               const SizedBox(height: 12),
               Text('目标：${request.target}'),
+              const SizedBox(height: 6),
+              Text(
+                '授权范围：${_approvalScope(request)}',
+                style: TextStyle(color: context.vibe.muted, fontSize: 12),
+              ),
               const SizedBox(height: 8),
               SelectableText(
                 request.arguments.entries
@@ -314,17 +418,45 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () =>
+                Navigator.pop(dialogContext, _ApprovalDecision.deny),
             child: const Text('拒绝'),
           ),
+          if (_approvalMode == _AgentApprovalMode.session)
+            OutlinedButton(
+              key: const Key('agent-approve-session'),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _ApprovalDecision.allowSession),
+              child: const Text('本会话允许同类操作'),
+            ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            key: const Key('agent-approve-once'),
+            onPressed: () =>
+                Navigator.pop(dialogContext, _ApprovalDecision.allowOnce),
             child: const Text('允许一次'),
           ),
         ],
       ),
     );
-    return approved == true;
+    if (decision == _ApprovalDecision.allowSession) {
+      _sessionApprovals.add(approvalKey);
+      if (mounted) setState(() {});
+      return true;
+    }
+    return decision == _ApprovalDecision.allowOnce;
+  }
+
+  String _approvalKey(HarnessToolApprovalRequest request) =>
+      '${request.tool.id}\u0000${request.target}\u0000${_approvalScope(request)}';
+
+  String _approvalScope(HarnessToolApprovalRequest request) {
+    final Object? rawArguments = request.arguments['arguments'];
+    if (rawArguments is List && rawArguments.isNotEmpty) {
+      return rawArguments.take(2).map((Object? value) => '$value').join(' ');
+    }
+    final String method = '${request.arguments['method'] ?? ''}'.trim();
+    if (method.isNotEmpty) return method.toUpperCase();
+    return request.tool.name;
   }
 
   Future<void> _newTask() async {
@@ -347,7 +479,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ),
     );
     if (confirmed == true && mounted) {
-      setState(_messages.clear);
+      setState(() {
+        _messages.clear();
+        _sessionApprovals.clear();
+      });
+      await _persistConversation();
       _composerFocus.requestFocus();
     }
   }
@@ -382,6 +518,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _showSettings() async {
+    final bool initialLoggingEnabled =
+        await HarnessToolActivityStore.loadLoggingEnabled();
+    if (!mounted) return;
+    bool loggingEnabled = initialLoggingEnabled;
     String modelChoice = _builtinModels.contains(_model.text.trim())
         ? _model.text.trim()
         : _customModelValue;
@@ -395,6 +535,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         _model.text.trim(),
     ];
     bool loadingModels = false;
+    bool loadedFromEndpoint = false;
     String? modelError;
     final bool? save = await showDialog<bool>(
       context: context,
@@ -406,119 +547,150 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             ) => AlertDialog(
               title: const Text('Harness 模型设置'),
               content: SizedBox(
-                width: 520,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    TextField(
-                      key: const Key('agent-api-key'),
-                      controller: _apiKey,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'API Key',
-                        hintText: 'sk-…',
-                        prefixIcon: Icon(Icons.key_outlined),
+                width: 560,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      TextField(
+                        key: const Key('agent-api-key'),
+                        controller: _apiKey,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'API Key',
+                          hintText: 'sk-…',
+                          prefixIcon: Icon(Icons.key_outlined),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      key: const Key('agent-base-url'),
-                      controller: _baseUrl,
-                      decoration: const InputDecoration(labelText: 'API 地址'),
-                    ),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        key: const Key('agent-load-models'),
-                        onPressed: loadingModels
-                            ? null
-                            : () async {
-                                setStateDialog(() {
-                                  loadingModels = true;
-                                  modelError = null;
-                                });
-                                try {
-                                  final List<String> models = await widget
-                                      .listModels(
-                                        _apiKey.text.trim(),
-                                        _baseUrl.text.trim(),
-                                      );
-                                  if (!dialogContext.mounted) return;
-                                  setStateDialog(() {
-                                    availableModels = models;
-                                    loadingModels = false;
-                                    if (!models.contains(modelChoice)) {
-                                      modelChoice = models.first;
-                                      _model.text = models.first;
-                                    }
-                                  });
-                                } on Object catch (error) {
-                                  if (!dialogContext.mounted) return;
-                                  setStateDialog(() {
-                                    loadingModels = false;
-                                    modelError = '$error';
-                                  });
-                                }
-                              },
-                        icon: loadingModels
-                            ? const SizedBox.square(
-                                dimension: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.refresh, size: 17),
-                        label: Text(loadingModels ? '正在验证' : '验证 Key 并加载模型'),
+                      SwitchListTile(
+                        key: const Key('agent-tool-logging'),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('记录工具调用'),
+                        subtitle: const Text('默认开启；可在对应工具中查看和删除记录'),
+                        value: loggingEnabled,
+                        onChanged: (bool value) =>
+                            setStateDialog(() => loggingEnabled = value),
                       ),
-                    ),
-                    if (modelError != null)
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('agent-base-url'),
+                        controller: _baseUrl,
+                        decoration: const InputDecoration(labelText: 'API 地址'),
+                      ),
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          key: const Key('agent-load-models'),
+                          onPressed: loadingModels
+                              ? null
+                              : () async {
+                                  setStateDialog(() {
+                                    loadingModels = true;
+                                    modelError = null;
+                                  });
+                                  try {
+                                    final List<String> models = await widget
+                                        .listModels(
+                                          _apiKey.text.trim(),
+                                          _baseUrl.text.trim(),
+                                        );
+                                    if (!dialogContext.mounted) return;
+                                    setStateDialog(() {
+                                      availableModels = models;
+                                      loadingModels = false;
+                                      loadedFromEndpoint = true;
+                                      if (!models.contains(modelChoice)) {
+                                        modelChoice = models.first;
+                                        _model.text = models.first;
+                                      }
+                                    });
+                                  } on Object catch (error) {
+                                    if (!dialogContext.mounted) return;
+                                    setStateDialog(() {
+                                      loadingModels = false;
+                                      modelError = '$error';
+                                    });
+                                  }
+                                },
+                          icon: loadingModels
+                              ? const SizedBox.square(
+                                  dimension: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.refresh, size: 17),
+                          label: Text(loadingModels ? '正在验证' : '验证 Key 并加载模型'),
+                        ),
+                      ),
+                      if (modelError != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            modelError!,
+                            key: const Key('agent-model-error'),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
-                          modelError!,
-                          key: const Key('agent-model-error'),
+                          loadedFromEndpoint
+                              ? '来自当前 API 的 /models 实时结果'
+                              : 'DeepSeek 官方 V4 模型 · 验证后以 /models 返回为准',
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+                            color: context.vibe.muted,
                             fontSize: 12,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<String>(
-                      key: const Key('agent-model-select'),
-                      initialValue: modelChoice,
-                      decoration: const InputDecoration(labelText: '模型'),
-                      items: <DropdownMenuItem<String>>[
-                        for (final String model in availableModels)
-                          DropdownMenuItem<String>(
-                            value: model,
-                            child: Text(model),
-                          ),
-                        const DropdownMenuItem<String>(
-                          value: _customModelValue,
-                          child: Text('自定义'),
+                      const SizedBox(height: 7),
+                      Container(
+                        key: const Key('agent-model-select'),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: context.vibe.border),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            for (final String model in availableModels)
+                              _ModelChoiceTile(
+                                key: Key('agent-model-$model'),
+                                label: model,
+                                selected: modelChoice == model,
+                                onTap: () => setStateDialog(() {
+                                  modelChoice = model;
+                                  _model.text = model;
+                                }),
+                              ),
+                            _ModelChoiceTile(
+                              key: const Key('agent-model-custom'),
+                              label: '自定义模型 ID',
+                              selected: modelChoice == _customModelValue,
+                              onTap: () => setStateDialog(
+                                () => modelChoice = _customModelValue,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (modelChoice == _customModelValue) ...<Widget>[
+                        const SizedBox(height: 10),
+                        TextField(
+                          key: const Key('agent-model'),
+                          controller: customModel,
+                          decoration: const InputDecoration(labelText: '自定义模型'),
                         ),
                       ],
-                      onChanged: (String? value) {
-                        if (value == null) return;
-                        setStateDialog(() {
-                          modelChoice = value;
-                          if (value != _customModelValue) {
-                            _model.text = value;
-                          }
-                        });
-                      },
-                    ),
-                    if (modelChoice == _customModelValue) ...<Widget>[
-                      const SizedBox(height: 10),
-                      TextField(
-                        key: const Key('agent-model'),
-                        controller: customModel,
-                        decoration: const InputDecoration(labelText: '自定义模型'),
-                      ),
                     ],
-                  ],
+                  ),
                 ),
               ),
               actions: <Widget>[
@@ -535,6 +707,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ),
     );
     if (save != true) return;
+    if (loggingEnabled != initialLoggingEnabled) {
+      await HarnessToolActivityStore.setLoggingEnabled(loggingEnabled);
+    }
     if (modelChoice == _customModelValue &&
         customModel.text.trim().isNotEmpty) {
       _model.text = customModel.text.trim();
@@ -745,14 +920,17 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         children: <Widget>[
           Tooltip(
             message: workspace.isEmpty ? '选择智能体可操作的项目目录' : workspace,
-            child: TextButton.icon(
-              key: const Key('agent-pick-workspace'),
-              onPressed: _running ? null : _pickWorkspace,
-              icon: const Icon(Icons.folder_open_outlined, size: 18),
-              label: Text(
-                workspaceName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: TextButton.icon(
+                key: const Key('agent-pick-workspace'),
+                onPressed: _running ? null : _pickWorkspace,
+                icon: const Icon(Icons.folder_open_outlined, size: 18),
+                label: Text(
+                  workspaceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ),
@@ -860,84 +1038,222 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Widget _buildComposer(HarnessEnvironmentReport? environment) {
     final bool canRun = !_running;
-    return Container(
-      decoration: BoxDecoration(
-        color: context.vibe.panelRaised,
-        border: Border.all(color: context.vibe.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 6, 8, 7),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Shortcuts(
-            shortcuts: const <ShortcutActivator, Intent>{
-              SingleActivator(LogicalKeyboardKey.enter): _SubmitAgentIntent(),
-            },
-            child: Actions(
-              actions: <Type, Action<Intent>>{
-                _SubmitAgentIntent: CallbackAction<_SubmitAgentIntent>(
-                  onInvoke: (_) {
-                    if (canRun) unawaited(_run());
-                    return null;
-                  },
-                ),
-              },
-              child: TextField(
-                key: const Key('agent-composer'),
-                controller: _composer,
-                focusNode: _composerFocus,
-                minLines: 1,
-                maxLines: 6,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: '描述目标、约束和验证方式…',
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(vertical: 8),
-                ),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 820),
+        child: AnimatedBuilder(
+          animation: _composerFocus,
+          builder: (BuildContext context, Widget? child) => AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: context.vibe.panelRaised,
+              border: Border.all(
+                color: _composerFocus.hasFocus
+                    ? Theme.of(context).colorScheme.primary
+                          .withValues(alpha: 0.55)
+                    : context.vibe.border,
               ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.055),
+                  blurRadius: 16,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 11, 10, 9),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Shortcuts(
+                  shortcuts: const <ShortcutActivator, Intent>{
+                    SingleActivator(LogicalKeyboardKey.enter):
+                        _SubmitAgentIntent(),
+                  },
+                  child: Actions(
+                    actions: <Type, Action<Intent>>{
+                      _SubmitAgentIntent: CallbackAction<_SubmitAgentIntent>(
+                        onInvoke: (_) {
+                          if (canRun) unawaited(_run());
+                          return null;
+                        },
+                      ),
+                    },
+                    child: TextField(
+                      key: const Key('agent-composer'),
+                      controller: _composer,
+                      focusNode: _composerFocus,
+                      minLines: 1,
+                      maxLines: 7,
+                      textInputAction: TextInputAction.newline,
+                      style: const TextStyle(fontSize: 15, height: 1.42),
+                      decoration: const InputDecoration(
+                        hintText: '向 Harness 描述任务…',
+                        filled: false,
+                        fillColor: Colors.transparent,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.fromLTRB(0, 2, 4, 12),
+                      ),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: <Widget>[
+                    Material(
+                      color: context.vibe.canvas,
+                      borderRadius: BorderRadius.circular(999),
+                      child: InkWell(
+                        key: const Key('agent-model-button'),
+                        onTap: _running ? null : _showSettings,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 7,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              const Icon(Icons.auto_awesome_outlined, size: 14),
+                              const SizedBox(width: 6),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 190,
+                                ),
+                                child: Text(
+                                  _model.text,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                              const SizedBox(width: 3),
+                              const Icon(Icons.expand_more, size: 15),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    PopupMenuButton<_ApprovalMenuAction>(
+                      key: const Key('agent-permission-menu'),
+                      tooltip: '工具权限',
+                      onSelected: (_ApprovalMenuAction action) {
+                        setState(() {
+                          switch (action) {
+                            case _ApprovalMenuAction.session:
+                              _approvalMode = _AgentApprovalMode.session;
+                            case _ApprovalMenuAction.alwaysAsk:
+                              _approvalMode = _AgentApprovalMode.alwaysAsk;
+                              _sessionApprovals.clear();
+                            case _ApprovalMenuAction.clear:
+                              _sessionApprovals.clear();
+                          }
+                        });
+                      },
+                      itemBuilder: (BuildContext context) =>
+                          <PopupMenuEntry<_ApprovalMenuAction>>[
+                            const PopupMenuItem<_ApprovalMenuAction>(
+                              value: _ApprovalMenuAction.session,
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.shield_outlined),
+                                title: Text('首次询问'),
+                                subtitle: Text('同一目标的同类操作，本会话只确认一次'),
+                              ),
+                            ),
+                            const PopupMenuItem<_ApprovalMenuAction>(
+                              value: _ApprovalMenuAction.alwaysAsk,
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.pan_tool_alt_outlined),
+                                title: Text('每次询问'),
+                                subtitle: Text('每个风险操作都单独确认'),
+                              ),
+                            ),
+                            const PopupMenuDivider(),
+                            PopupMenuItem<_ApprovalMenuAction>(
+                              value: _ApprovalMenuAction.clear,
+                              enabled: _sessionApprovals.isNotEmpty,
+                              child: const ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.restart_alt),
+                                title: Text('清除本会话授权'),
+                              ),
+                            ),
+                          ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.vibe.canvas,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            const Icon(Icons.shield_outlined, size: 14),
+                            const SizedBox(width: 5),
+                            Text(
+                              _approvalMode == _AgentApprovalMode.session
+                                  ? '首次询问'
+                                  : '每次询问',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            if (_sessionApprovals.isNotEmpty) ...<Widget>[
+                              const SizedBox(width: 4),
+                              Text(
+                                '${_sessionApprovals.length}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: context.vibe.muted,
+                                ),
+                              ),
+                            ],
+                            const Icon(Icons.expand_more, size: 15),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        environment?.ready == true
+                            ? _running
+                                  ? '任务运行中，可随时停止'
+                                  : 'Enter 发送 · Shift+Enter 换行'
+                            : environment?.message ?? '正在检查 Harness 配置',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.vibe.muted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox.square(
+                      dimension: 36,
+                      child: IconButton.filled(
+                        key: const Key('agent-send'),
+                        tooltip: '发送任务 (Enter)',
+                        onPressed: canRun ? _run : null,
+                        icon: const Icon(Icons.arrow_upward, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-          Row(
-            children: <Widget>[
-              TextButton.icon(
-                key: const Key('agent-model-button'),
-                onPressed: _running ? null : _showSettings,
-                icon: const Icon(Icons.auto_awesome_outlined, size: 15),
-                label: Text(
-                  _model.text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 7),
-                  textStyle: const TextStyle(fontSize: 11),
-                ),
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  environment?.ready == true
-                      ? _running
-                            ? '可以先写下一条要求，当前任务结束后再发送'
-                            : 'Enter 运行 · Shift+Enter 换行'
-                      : environment?.message ?? '正在检查 Harness 配置',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
-                ),
-              ),
-              IconButton.filled(
-                key: const Key('agent-send'),
-                tooltip: '运行任务 (Enter)',
-                onPressed: canRun ? _run : null,
-                icon: const Icon(Icons.arrow_upward, size: 19),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1016,8 +1332,64 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 }
 
+enum _AgentApprovalMode { session, alwaysAsk }
+
+enum _ApprovalDecision { deny, allowOnce, allowSession }
+
+enum _ApprovalMenuAction { session, alwaysAsk, clear }
+
 class _SubmitAgentIntent extends Intent {
   const _SubmitAgentIntent();
+}
+
+class _ModelChoiceTile extends StatelessWidget {
+  const _ModelChoiceTile({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            if (selected)
+              Icon(
+                Icons.check_circle,
+                size: 18,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _AgentMessage {
