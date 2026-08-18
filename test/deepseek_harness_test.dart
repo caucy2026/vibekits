@@ -63,6 +63,11 @@ void main() {
               message: '运行环境已就绪',
             ),
             pickDirectory: () async => workspace.path,
+            listModels: (_, _) async => <String>[
+              'deepseek-chat',
+              'deepseek-reasoner',
+              'deepseek-special',
+            ],
             runAgent: (HarnessAgentRequest request) async {
               launched.add(request);
               return handles[launched.length - 1];
@@ -81,9 +86,11 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
+    await tester.tap(find.byKey(const Key('agent-load-models')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('agent-model-select')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('deepseek-v4-flash').last);
+    await tester.tap(find.text('deepseek-special').last);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '保存'));
     await tester.pumpAndSettle();
@@ -93,7 +100,7 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(launched.single.workspace, workspace.path);
-    expect(launched.single.model, 'deepseek-v4-flash');
+    expect(launched.single.model, 'deepseek-special');
     expect(launched.single.prompt, '修复失败的测试');
     expect(find.byKey(const Key('agent-stop')), findsOneWidget);
     handles.first.add('已定位并修复测试。');

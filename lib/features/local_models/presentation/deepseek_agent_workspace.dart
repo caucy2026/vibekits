@@ -23,6 +23,7 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.onRunningChanged,
     this.checkEnvironment = DeepSeekHarnessService.checkEnvironment,
     this.runAgent = DeepSeekHarnessService.startAgent,
+    this.listModels = DeepSeekHarnessService.listModels,
     this.pickDirectory,
     this.credentialReader,
     this.credentialWriter,
@@ -33,6 +34,7 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final ValueChanged<bool>? onRunningChanged;
   final HarnessEnvironmentChecker checkEnvironment;
   final HarnessAgentRunner runAgent;
+  final HarnessModelLister listModels;
   final AgentDirectoryPicker? pickDirectory;
   final AgentCredentialReader? credentialReader;
   final AgentCredentialWriter? credentialWriter;
@@ -44,8 +46,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
 class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
   static const List<String> _builtinModels = <String>[
-    'deepseek-v4-pro',
-    'deepseek-v4-flash',
+    'deepseek-chat',
+    'deepseek-reasoner',
   ];
   static const String _customModelValue = '__custom__';
   static const int _maxContextCharacters = 12000;
@@ -386,6 +388,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final TextEditingController customModel = TextEditingController(
       text: modelChoice == _customModelValue ? _model.text.trim() : '',
     );
+    List<String> availableModels = <String>[
+      ..._builtinModels,
+      if (_model.text.trim().isNotEmpty &&
+          !_builtinModels.contains(_model.text.trim()))
+        _model.text.trim(),
+    ];
+    bool loadingModels = false;
+    String? modelError;
     final bool? save = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
@@ -417,12 +427,70 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       decoration: const InputDecoration(labelText: 'API 地址'),
                     ),
                     const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        key: const Key('agent-load-models'),
+                        onPressed: loadingModels
+                            ? null
+                            : () async {
+                                setStateDialog(() {
+                                  loadingModels = true;
+                                  modelError = null;
+                                });
+                                try {
+                                  final List<String> models = await widget
+                                      .listModels(
+                                        _apiKey.text.trim(),
+                                        _baseUrl.text.trim(),
+                                      );
+                                  if (!dialogContext.mounted) return;
+                                  setStateDialog(() {
+                                    availableModels = models;
+                                    loadingModels = false;
+                                    if (!models.contains(modelChoice)) {
+                                      modelChoice = models.first;
+                                      _model.text = models.first;
+                                    }
+                                  });
+                                } on Object catch (error) {
+                                  if (!dialogContext.mounted) return;
+                                  setStateDialog(() {
+                                    loadingModels = false;
+                                    modelError = '$error';
+                                  });
+                                }
+                              },
+                        icon: loadingModels
+                            ? const SizedBox.square(
+                                dimension: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh, size: 17),
+                        label: Text(loadingModels ? '正在验证' : '验证 Key 并加载模型'),
+                      ),
+                    ),
+                    if (modelError != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          modelError!,
+                          key: const Key('agent-model-error'),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
                       key: const Key('agent-model-select'),
                       initialValue: modelChoice,
                       decoration: const InputDecoration(labelText: '模型'),
                       items: <DropdownMenuItem<String>>[
-                        for (final String model in _builtinModels)
+                        for (final String model in availableModels)
                           DropdownMenuItem<String>(
                             value: model,
                             child: Text(model),

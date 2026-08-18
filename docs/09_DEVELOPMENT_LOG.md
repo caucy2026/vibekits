@@ -317,3 +317,11 @@
 - 只读工具直接执行；ADB、串口、HTTP 与文件变更等风险工具在 APP 内显示工具、目标和参数，只允许“拒绝”或“允许一次”。没有 UI 审批器时默认拒绝。SSH/SFTP 与远程数据库不会向模型暴露明文密码，待以保存资料别名和会话句柄设计专用接口。
 - 真实协议闭环已通过：模型请求包含 `mcp__vibekits__sha256` → 官方 dsh 发出 MCP 调用 → APP 计算 `abc` 的 SHA-256 → 工具结果进入下一轮模型请求 → 最终回复 `VIBEKITS_FULL_STACK_OK`，进程退出 0。
 - 桥接领域测试 9/9、回环/MCP 协议测试 3/3、官方 Harness 全栈测试 1/1 通过；版本更新为 `1.9.0-dev.8+18`。
+
+## 2026-08-18 · DeepSeek Key 与真实模型发现检查点
+
+- 删除设置页写死的 `deepseek-v4-pro/deepseek-v4-flash` 当前选项，默认改为 DeepSeek 兼容 API 的 `deepseek-chat`，并保留 `deepseek-reasoner` 与自定义模型入口。
+- 新增“验证 Key 并加载模型”：使用当前 Key 和 API 地址请求有界 `/models`，401/403、超时、超大响应、空列表和不兼容 JSON 都给出明确原因；Key 只进入 Authorization 请求头，不写日志或项目文件。
+- 模型列表按端点真实返回值去重排序，用户选择后原样传给官方 Harness。端点解析/鉴权测试 1/1、设置页加载和选择、Harness 全栈回归 5/5 通过，`flutter analyze` 0 问题。
+- 版本更新为 `1.9.0-dev.9+19`。
+- Harness 运行时原先由 CMake 逐文件安装，增量 Release 在 3.2 万文件扫描阶段超过 10 分钟；改为 Windows `robocopy` 增量复制后同一 Release 构建 12.2 秒完成，失败码大于 7 才终止构建。

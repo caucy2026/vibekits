@@ -100,9 +100,21 @@ install(FILES
 # tool/prepare_harness_runtime.ps1. Runtime startup never invokes npm/npx.
 set(HARNESS_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/harness/windows/runtime")
 if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
-  install(DIRECTORY "${HARNESS_RUNTIME_DIR}/"
-    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
-    COMPONENT Runtime)
+  # CMake's per-file install walker takes many minutes for Harness' 32k npm
+  # files on Windows. Robocopy performs the same incremental directory copy
+  # substantially faster and treats exit codes 0..7 as success.
+  file(TO_CMAKE_PATH "$ENV{SystemRoot}/System32/robocopy.exe" ROBOCOPY_EXECUTABLE)
+  install(CODE "
+    execute_process(
+      COMMAND \"${ROBOCOPY_EXECUTABLE}\"
+        \"${HARNESS_RUNTIME_DIR}\"
+        \"$<TARGET_FILE_DIR:${BINARY_NAME}>/tools/harness\"
+        /E /NFL /NDL /NJH /NJS /NP
+      RESULT_VARIABLE HARNESS_COPY_RESULT)
+    if(HARNESS_COPY_RESULT GREATER 7)
+      message(FATAL_ERROR \"Harness runtime copy failed: \${HARNESS_COPY_RESULT}\")
+    endif()
+  " COMPONENT Runtime)
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-mcp-server.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)

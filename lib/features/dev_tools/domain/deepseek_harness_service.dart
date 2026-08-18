@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
@@ -100,10 +101,76 @@ typedef HarnessBrowserOpener = Future<void> Function(Uri url);
 typedef HarnessAgentRunner = Future<HarnessAgentHandle> Function(
   HarnessAgentRequest request,
 );
+typedef HarnessModelLister = Future<List<String>> Function(
+  String apiKey,
+  String baseUrl,
+);
 
 abstract final class DeepSeekHarnessService {
   static const String defaultBaseUrl = 'https://api.deepseek.com';
-  static const String defaultModel = 'deepseek-v4-flash';
+  static const String defaultModel = 'deepseek-chat';
+
+  static Future<List<String>> listModels(String apiKey, String baseUrl) async {
+    final String key = apiKey.trim();
+    if (key.isEmpty) throw StateError('请先填写 DeepSeek API Key');
+    _validateEndpoint(baseUrl);
+    final String base =
+        (baseUrl.trim().isEmpty ? defaultBaseUrl : baseUrl.trim()).replaceFirst(
+          RegExp(r'/+$'),
+          '',
+        );
+    final HttpClient client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final HttpClientRequest request = await client
+          .getUrl(Uri.parse('$base/models'))
+          .timeout(const Duration(seconds: 8));
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $key');
+      request.headers.set(HttpHeaders.acceptHeader, ContentType.json.mimeType);
+      final HttpClientResponse response = await request.close().timeout(
+        const Duration(seconds: 12),
+      );
+      final BytesBuilder bytes = BytesBuilder(copy: false);
+      int length = 0;
+      await for (final List<int> chunk in response.timeout(
+        const Duration(seconds: 12),
+      )) {
+        length += chunk.length;
+        if (length > 1024 * 1024) {
+          throw const FormatException('模型列表响应超过 1 MiB');
+        }
+        bytes.add(chunk);
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError(
+          response.statusCode == 401 || response.statusCode == 403
+              ? 'API Key 无效或无权访问该端点'
+              : '读取模型列表失败（HTTP ${response.statusCode}）',
+        );
+      }
+      final Object? decoded = jsonDecode(
+        utf8.decode(bytes.takeBytes(), allowMalformed: true),
+      );
+      if (decoded is! Map || decoded['data'] is! List) {
+        throw const FormatException('模型列表格式不兼容');
+      }
+      final List<String> models =
+          (decoded['data']! as List)
+              .whereType<Map>()
+              .map((Map item) => '${item['id'] ?? ''}'.trim())
+              .where((String id) => id.isNotEmpty && id.length <= 200)
+              .toSet()
+              .toList(growable: false)
+            ..sort();
+      if (models.isEmpty) throw const FormatException('端点没有返回可用模型');
+      return models;
+    } on TimeoutException {
+      throw TimeoutException('读取模型列表超时');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   static Future<HarnessEnvironmentReport> checkEnvironment() async {
     if (Platform.environment['FLUTTER_TEST'] == 'true') {
       return const HarnessEnvironmentReport(
