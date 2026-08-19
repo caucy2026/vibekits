@@ -2,6 +2,14 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-20 · v1.9.0-dev.42 Android arm64 真机检查点
+
+- 新增 Android 工程、INTERNET 权限和可复现构建环境准备脚本，固定 JDK 17、Android platform/build-tools 36 与 NDK 28.2。
+- 修复 Windows 跨盘 Kotlin 增量缓存错误和 sqlite3 arm64 原生资产构建阻塞；Release APK 成功产出。
+- Android 首次启动避开桌面专属 DSH Web 入口，直接进入可操作的开发工具；用户手动切换和页面恢复逻辑仍保留。
+- 使用项目随包 ADB 在 `192.168.3.63:5555` 真机完成安装、冷启动、热恢复和程序员计算器实际输入；未发现 FATAL/ANR。
+- 版本更新为 `1.9.0-dev.42+52`；详细证据见 `docs/acceptance/V1_9_0_DEV42_ANDROID_DEVICE_2026-08-20.md`。
+
 ## 2026-08-20 · v1.9.0-dev.41 网络代理与轻量虚拟机
 
 - 开发工具新增“网络与虚拟化”融合工作区，右侧使用 Clash Verge/轻量虚拟机两个 Tab；Clash 配置、虚拟磁盘和 ISO 均使用原生文件选择器，启动与停止不阻塞 UI。

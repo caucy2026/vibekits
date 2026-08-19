@@ -74,6 +74,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _selectedIndex = 0;
+  bool _hasUserSelectedTab = false;
   late final Set<int> _loadedTabs;
   final ValueNotifier<int> _openRequest = ValueNotifier<int>(0);
   final ValueNotifier<int> _findRequest = ValueNotifier<int>(0);
@@ -113,6 +114,14 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
+    // Harness currently ships a desktop Node/DSH runtime. On Android, open a
+    // genuinely usable offline workspace instead of presenting a broken
+    // desktop-runtime warning as the first experience.
+    if (Platform.isAndroid &&
+        startupKind == VibekitsFileKind.unsupported &&
+        _selectedIndex == 0) {
+      _selectedIndex = 4;
+    }
     _loadedTabs = <int>{_selectedIndex};
     widget.settingsController.addListener(_applySettings);
     if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
@@ -136,7 +145,10 @@ class _MainShellState extends State<MainShell> {
       return;
     }
     final AppSettings settings = widget.settingsController.value;
-    final int restoredIndex = _indexForWorkspace(settings);
+    int restoredIndex = _indexForWorkspace(settings);
+    if (Platform.isAndroid && !_hasUserSelectedTab && restoredIndex == 0) {
+      restoredIndex = 4;
+    }
     if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
       setState(() {
         _selectedIndex = restoredIndex;
@@ -166,6 +178,7 @@ class _MainShellState extends State<MainShell> {
     if (index < 0 || index >= _tabTitles.length) {
       return;
     }
+    _hasUserSelectedTab = true;
     final bool needsLoad = !_loadedTabs.contains(index);
     setState(() => _selectedIndex = index);
     if (needsLoad) {
