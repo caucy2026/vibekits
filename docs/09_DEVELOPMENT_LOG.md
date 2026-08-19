@@ -413,3 +413,10 @@
 - Windows 官方 Web 启动不再注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，也不再由 Vibekits 首次写入默认模型；Key、端点、模型目录和默认模型恢复由官方设置链路持久化及热更新。
 - 旧版 Windows Credential Manager / macOS Keychain 中的 Key 仅迁移一次：不覆盖官方已存值，迁移落盘后删除旧副本；密钥不进入代码、安装包或日志。
 - 修正 App 内常量仍停留在 `dev.21+31` 的版本显示问题，版本统一更新为 `1.9.0-dev.25+35`。
+
+## 2026-08-19 · v1.9.0-dev.26 Harness 输入与二级选择闭环
+
+- 为嵌入式官方 Web 增加 Ctrl+V/Cmd+V 粘贴转发：读取系统文本剪贴板后只写入当前获得焦点且可编辑的 input/textarea，通过原生 `input` 事件进入 React 状态；内容不写日志、不进入 App 设置。
+- 定位模型/推理等级二级菜单在 WebView2 中点击即关闭的根因：焦点迁移的 `relatedTarget` 为空，官方组件在 `onClick` 前执行了关闭。兼容补丁不再把空焦点误判为外部点击；有明确外部焦点时仍正常关闭，保留官方两级菜单行为。
+- 官方权限内部值保持 `read-only`、`workspace-write`、`danger-full-access`，中文界面显示为“只读”“工作区读写”“完全访问”，完全访问风险确认同步中文化。
+- 新增可重复执行且遇到上游结构变化会失败的 `tool/patch_harness_runtime.mjs`，运行时准备脚本自动应用补丁，避免只修改本机构建缓存。

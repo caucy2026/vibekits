@@ -43,6 +43,9 @@ Copy-Item -LiteralPath (Join-Path $staging 'node_modules') -Destination $target 
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-mcp-server.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval.mjs') -Destination $target
 
+& (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
+if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }
+
 @{
   version = "@deepseek-ai/dsh@$packageVersion"
   cli = $cliRelative

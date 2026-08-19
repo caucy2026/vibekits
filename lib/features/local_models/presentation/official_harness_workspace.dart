@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import '../../dev_tools/domain/deepseek_harness_service.dart';
@@ -264,6 +266,54 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     }
   }
 
+  Future<void> _pasteIntoFocusedWebField() async {
+    final String? text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    if (text == null || text.isEmpty || !_webviewReady) return;
+    final String value = jsonEncode(text);
+    await _webview.executeScript('''
+(() => {
+  const element = document.activeElement;
+  if (!(element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement) ||
+      element.disabled || element.readOnly) return false;
+  const start = element.selectionStart ?? element.value.length;
+  const end = element.selectionEnd ?? start;
+  const pasted = $value;
+  const next = element.value.slice(0, start) + pasted + element.value.slice(end);
+  const prototype = element instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  if (setter) setter.call(element, next);
+  else element.value = next;
+  element.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertFromPaste',
+    data: pasted,
+  }));
+  element.setSelectionRange(start + pasted.length, start + pasted.length);
+  return true;
+})()
+''');
+  }
+
+  Future<WebviewPermissionDecision> _handleWebPermission(
+    String url,
+    WebviewPermissionKind kind,
+    bool isUserInitiated,
+  ) async {
+    final Uri? origin = Uri.tryParse(url);
+    final bool loopback =
+        origin != null &&
+        (origin.host == '127.0.0.1' || origin.host == 'localhost');
+    if (loopback &&
+        isUserInitiated &&
+        kind == WebviewPermissionKind.clipboardRead) {
+      return WebviewPermissionDecision.allow;
+    }
+    return WebviewPermissionDecision.deny;
+  }
+
   @override
   void dispose() {
     _outputSubscription?.cancel();
@@ -321,7 +371,17 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         ),
       );
     }
-    return Webview(_webview);
+    final ShortcutActivator paste = SingleActivator(
+      LogicalKeyboardKey.keyV,
+      control: !Platform.isMacOS,
+      meta: Platform.isMacOS,
+    );
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        paste: () => unawaited(_pasteIntoFocusedWebField()),
+      },
+      child: Webview(_webview, permissionRequested: _handleWebPermission),
+    );
   }
 }
 
