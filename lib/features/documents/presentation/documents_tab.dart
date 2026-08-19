@@ -770,6 +770,125 @@ class _DocumentsTabState extends State<DocumentsTab> {
     }
   }
 
+  Future<void> _closeDocument() async {
+    if (_path == null && _mode == DocViewMode.empty) return;
+    if (_editing && _dirty && !await _confirmDiscardEdits()) return;
+    setState(() {
+      _path = null;
+      _name = '';
+      _bytes = null;
+      _text = '';
+      _lines = const <String>[];
+      _mode = DocViewMode.empty;
+      _error = '';
+      _query = '';
+      _matchLines.clear();
+      _activeMatch = -1;
+      _tree = null;
+      _csvTable = null;
+      _structuredSource = false;
+      _expanded.clear();
+      _webHtml = '';
+      _epubBook = null;
+      _epubChapter = 0;
+      _svgText = '';
+      _streamIndex = null;
+      _language = null;
+      _savedText = '';
+      _editing = false;
+      _dirty = false;
+      _saving = false;
+      _loadedSize = 0;
+      _loadedModified = null;
+      _hexWindowOffset = 0;
+      _hexFileSize = 0;
+      _hexBusy = false;
+      _searchOpen = false;
+      _searchController.clear();
+      _editorController.clear();
+    });
+  }
+
+  Future<void> _showSupportedFormats() async {
+    const Set<String> markdown = <String>{'md', 'markdown'};
+    const Set<String> structured = <String>{'csv', 'tsv', 'json', 'xml'};
+    const Set<String> web = <String>{'html', 'htm', 'epub', 'svg', 'svgz'};
+    const Set<String> binary = <String>{'bin'};
+    final List<String> sourceAndText = SupportedFileTypes.documentExtensions
+        .where(
+          (String extension) =>
+              !markdown.contains(extension) &&
+              !structured.contains(extension) &&
+              !web.contains(extension) &&
+              !binary.contains(extension),
+        )
+        .toList(growable: false);
+    final List<(String, Iterable<String>)> sections =
+        <(String, Iterable<String>)>[
+          ('文本、配置与源码', sourceAndText),
+          ('Markdown 预览', markdown),
+          ('结构化数据', structured),
+          ('网页、电子书与矢量图', web),
+          ('二进制十六进制', binary),
+          ('无后缀常用文件名', SupportedFileTypes.specialDocumentFileNames),
+        ];
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(
+          '支持的文档格式（${SupportedFileTypes.documentExtensions.length} 种后缀）',
+        ),
+        content: SizedBox(
+          width: 680,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '未列出的文件也会读取文件头，自动尝试以文本或十六进制打开。',
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                ),
+                const SizedBox(height: 14),
+                for (final (String title, Iterable<String> values) in sections)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        SelectableText(
+                          values
+                              .map(
+                                (String value) =>
+                                    title == '无后缀常用文件名' ? value : '.$value',
+                              )
+                              .join('  '),
+                          style: const TextStyle(fontSize: 12, height: 1.7),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSidebar() {
     return SizedBox(
       width: 220,
@@ -837,9 +956,13 @@ class _DocumentsTabState extends State<DocumentsTab> {
           ),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Text(
-              '支持：txt/log/md/配置/Diff/Bin\nCSV/JSON/HTML/EPUB 等将在 M3 支持',
-              style: TextStyle(fontSize: 11, color: context.vibe.muted),
+            child: OutlinedButton.icon(
+              key: const Key('document-supported-formats'),
+              onPressed: _showSupportedFormats,
+              icon: const Icon(Icons.description_outlined, size: 16),
+              label: Text(
+                '支持格式（${SupportedFileTypes.documentExtensions.length}）',
+              ),
             ),
           ),
         ],
@@ -1079,6 +1202,13 @@ class _DocumentsTabState extends State<DocumentsTab> {
                   onPressed: () => setState(() => _showInfo = !_showInfo),
                 ),
               ],
+              if (_mode != DocViewMode.empty)
+                IconButton(
+                  key: const Key('document-close'),
+                  tooltip: '关闭当前文档',
+                  onPressed: _saving ? null : _closeDocument,
+                  icon: const Icon(Icons.close, size: 19),
+                ),
             ],
           );
         },
@@ -1138,10 +1268,20 @@ class _DocumentsTabState extends State<DocumentsTab> {
     switch (_mode) {
       case DocViewMode.empty:
         return Center(
-          child: Text(
-            '打开一个文档开始阅读\n支持文本、日志、Markdown、配置、Diff 与二进制',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: context.vibe.muted),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                '打开一个文档开始阅读\n支持文本、源码、Markdown、结构化数据、网页、EPUB、SVG 与二进制',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.vibe.muted),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: _showSupportedFormats,
+                child: const Text('查看全部支持格式'),
+              ),
+            ],
           ),
         );
       case DocViewMode.text:
