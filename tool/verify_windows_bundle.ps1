@@ -1,7 +1,7 @@
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
-  [string]$ExpectedVersion = '1.9.0-dev.35+45'
+  [string]$ExpectedVersion = '1.9.0-dev.36+46'
 )
 
 $ErrorActionPreference = 'Stop'

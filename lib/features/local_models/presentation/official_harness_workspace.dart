@@ -32,6 +32,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     this.credentialDeleter,
     this.remoteWorkspaceLauncher,
     this.screenshotOcrRunner,
+    this.externalPrompt = '',
+    this.externalPromptSerial = 0,
     this.startWeb = DeepSeekHarnessService.startWebAgent,
     this.findPort = DeepSeekHarnessService.findFreeLoopbackPort,
   });
@@ -43,6 +45,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
   final OfficialHarnessCredentialDeleter? credentialDeleter;
   final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
   final HarnessScreenshotOcrRunner? screenshotOcrRunner;
+  final String externalPrompt;
+  final int externalPromptSerial;
   final OfficialHarnessWebStarter startWeb;
   final Future<int> Function() findPort;
 
@@ -69,6 +73,15 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   void initState() {
     super.initState();
     unawaited(_initialize());
+  }
+
+  @override
+  void didUpdateWidget(covariant OfficialHarnessWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.externalPromptSerial != oldWidget.externalPromptSerial &&
+        _webviewReady) {
+      unawaited(_injectExternalPrompt());
+    }
   }
 
   Future<void> _initialize() async {
@@ -178,6 +191,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
       }
       await _webview.loadUrl(session.url.toString());
+      unawaited(_injectExternalPrompt());
       setState(() {
         _starting = false;
         _loading = false;
@@ -351,6 +365,57 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   return true;
 })()
 ''');
+  }
+
+  Future<void> _injectExternalPrompt() async {
+    final String prompt = widget.externalPrompt.trim();
+    if (prompt.isEmpty || !_webviewReady) return;
+    final String value = jsonEncode(prompt);
+    for (int attempt = 0; attempt < 30; attempt++) {
+      if (!mounted || !_webviewReady) return;
+      try {
+        final dynamic inserted = await _webview.executeScript('''
+(() => {
+  const visible = (element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return rect.width > 80 && rect.height > 20 &&
+      style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const candidates = Array.from(document.querySelectorAll(
+    'textarea:not([disabled]):not([readonly]), [contenteditable="true"]'
+  )).filter(visible).sort((left, right) =>
+    left.getBoundingClientRect().bottom - right.getBoundingClientRect().bottom
+  );
+  const element = candidates.at(-1);
+  if (!element) return false;
+  const prompt = $value;
+  if (element instanceof HTMLTextAreaElement) {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype, 'value'
+    )?.set;
+    if (setter) setter.call(element, prompt);
+    else element.value = prompt;
+  } else {
+    element.textContent = prompt;
+  }
+  element.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertText',
+    data: prompt,
+  }));
+  element.focus();
+  return true;
+})()
+''');
+        if (inserted == true || inserted.toString().toLowerCase() == 'true') {
+          return;
+        }
+      } on Object {
+        // The official app may still be replacing its initial loading DOM.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   Future<WebviewPermissionDecision> _handleWebPermission(

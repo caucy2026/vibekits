@@ -6,6 +6,7 @@ import '../../../app/app_settings.dart';
 import '../../cleaner/domain/cleanup_task.dart';
 import '../../cleaner/domain/system_drive_analysis_runner.dart';
 import '../../cleaner/domain/system_drive_analyzer.dart';
+import '../../cleaner/domain/system_drive_insights.dart';
 import 'adb_service.dart';
 import 'api_request_service.dart';
 import 'duplicate_file_background_runner.dart';
@@ -543,7 +544,7 @@ class VibekitsHarnessToolBridge {
         systemDriveAnalyzeId: _definition(
           id: systemDriveAnalyzeId,
           name: '分析磁盘占用',
-          description: '在独立后台线程分析指定磁盘根目录，返回总量、已用、剩余和主要占用；不删除任何文件。',
+          description: '在独立后台线程分析指定磁盘根目录，按系统、软件和用户数据解释占用是否合理并给出安全建议；不删除任何文件。',
           properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
           required: <String>['root'],
         ),
@@ -1520,6 +1521,7 @@ class VibekitsHarnessToolBridge {
           cancellationToken: CleanupCancellationToken(),
           onProgress: (_) {},
         );
+    final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
     Map<String, Object?> entry(SystemDriveUsageEntry value) =>
         <String, Object?>{
           'path': value.path,
@@ -1545,6 +1547,25 @@ class VibekitsHarnessToolBridge {
       'logicalOvercountBytes': analysis.logicalOvercountBytes,
       'visitedEntries': analysis.visitedEntries,
       'unreadablePaths': analysis.unreadablePaths,
+      'storagePressure': <String, Object?>{
+        'level': insights.storagePressure.name,
+        'label': insights.storagePressure.label,
+        'summary': insights.storagePressureSummary,
+      },
+      'systemBaseline': insights.systemBaseline,
+      'categoryTotals': <String, int>{
+        for (final MapEntry<SystemDriveEntryKind, int> item
+            in insights.categoryTotals.entries)
+          item.key.name: item.value,
+      },
+      'priorities': insights.priorities
+          .take(100)
+          .map((SystemDriveEntryAssessment item) => item.toJson())
+          .toList(growable: false),
+      'softwareOwners': insights.softwareOwners
+          .take(100)
+          .map((SystemDriveEntryAssessment item) => item.toJson())
+          .toList(growable: false),
       'entries': analysis.entries.take(500).map(entry).toList(growable: false),
       'breakdownEntries': analysis.breakdownEntries
           .take(500)

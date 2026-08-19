@@ -37,6 +37,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.saveConversation = HarnessConversationStore.save,
     this.loadPermissionMode = HarnessAgentPreferencesStore.loadPermissionMode,
     this.savePermissionMode = HarnessAgentPreferencesStore.savePermissionMode,
+    this.externalPrompt = '',
+    this.externalPromptSerial = 0,
   });
 
   final String initialWorkspace;
@@ -55,6 +57,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final HarnessConversationSaver saveConversation;
   final HarnessAgentPermissionLoader loadPermissionMode;
   final HarnessAgentPermissionSaver savePermissionMode;
+  final String externalPrompt;
+  final int externalPromptSerial;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
@@ -112,6 +116,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   @override
   void initState() {
     super.initState();
+    _adoptExternalPrompt();
     unawaited(_loadSettings());
     unawaited(_restoreConversation(widget.initialWorkspace));
     _checkEnvironment();
@@ -126,6 +131,20 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         restored != _workspace.text.trim()) {
       unawaited(_adoptWorkspace(restored, notify: false));
     }
+    if (widget.externalPromptSerial != oldWidget.externalPromptSerial) {
+      _adoptExternalPrompt();
+    }
+  }
+
+  void _adoptExternalPrompt() {
+    final String prompt = widget.externalPrompt.trim();
+    if (prompt.isEmpty) return;
+    _composer
+      ..text = prompt
+      ..selection = TextSelection.collapsed(offset: prompt.length);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _composerFocus.requestFocus();
+    });
   }
 
   Future<void> _loadSettings() async {

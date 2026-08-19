@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "policy": "A feature is releasable only when its user workflow, automated coverage and any required real-environment evidence are all named here.",
+  "workflows": [
+    {
+      "id": "harness-ssh-sftp-one-auth",
+      "name": "Harness 打开 SSH，一次认证后复用同一会话进入 SFTP",
+      "risk": "remote-control",
+      "tests": ["test/remote_workspace_widget_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV35_INTEGRATED_WORKFLOWS_2026-08-19.md"]
+    },
+    {
+      "id": "cleaner-scan-assess-delete-rescan",
+      "name": "后台扫描、容量解释、安全清理、复扫和报告",
+      "risk": "destructive",
+      "tests": ["test/system_drive_analyzer_test.dart", "test/real_system_drive_smoke_test.dart", "test/cleanup_scanner_test.dart", "test/cleanup_deleter_report_test.dart", "test/cleaner_widget_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV36_QUALITY_CLEANER_2026-08-19.md"]
+    },
+    {
+      "id": "harness-screenshot-ocr",
+      "name": "Harness 框选截图、本地 OCR 和结构化回传",
+      "risk": "screen-capture",
+      "tests": ["test/harness_tool_bridge_test.dart", "test/pp_ocr_v6_test.dart", "test/deepseek_agent_ui_snapshot_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV35_INTEGRATED_WORKFLOWS_2026-08-19.md"]
+    },
+    {
+      "id": "adb-connect-command-audit",
+      "name": "内置 ADB 连接、执行命令、停止和真实审计记录",
+      "risk": "device-control",
+      "tests": ["test/adb_service_test.dart", "test/harness_tool_bridge_test.dart", "test/harness_tool_server_test.dart"],
+      "evidence": ["docs/acceptance/R9_ADB_FOUNDATION_DEV_2026-08-17.md"]
+    },
+    {
+      "id": "serial-open-transact-log",
+      "name": "枚举串口、配置参数、收发、停止和审计记录",
+      "risk": "device-control",
+      "tests": ["test/serial_port_service_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_8_0_MYSQL_SERIAL_2026-08-17.md"]
+    },
+    {
+      "id": "remote-database-saved-credential-query",
+      "name": "保存远程数据库会话、系统凭据和只读查询",
+      "risk": "remote-control",
+      "tests": ["test/remote_database_service_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_8_0_MYSQL_SERIAL_2026-08-17.md"]
+    },
+    {
+      "id": "archive-open-preview-extract",
+      "name": "识别压缩格式、预览、安全校验和解压",
+      "risk": "filesystem-write",
+      "tests": ["test/archive_service_test.dart", "test/archive_widget_test.dart"],
+      "evidence": ["docs/acceptance/P0_ARCHIVE_2026-08-15.md"]
+    },
+    {
+      "id": "document-open-preview-close-history",
+      "name": "拖入文档、友好预览、源码切换、关闭和历史清理",
+      "risk": "read-only",
+      "tests": ["test/documents_recent_test.dart", "test/supported_file_types_test.dart", "test/hex_view_test.dart"],
+      "evidence": ["docs/acceptance/M2_2026-08-15.md"]
+    },
+    {
+      "id": "developer-tools-harness-parity",
+      "name": "开发工具界面入口与 Harness 可执行适配器保持一致",
+      "risk": "mixed",
+      "tests": ["test/harness_tool_bridge_test.dart", "test/dev_tools_widget_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV34_HARNESS_TOOL_CLOSURE_2026-08-19.md"]
+    },
+    {
+      "id": "offline-release-runtime",
+      "name": "断网启动非网络功能并校验全部内置运行时",
+      "risk": "release",
+      "tests": ["test/seven_zip_test.dart", "test/curated_model_bundle_test.dart", "test/app_settings_test.dart"],
+      "evidence": ["tool/verify_windows_bundle.ps1"]
+    }
+  ]
+}

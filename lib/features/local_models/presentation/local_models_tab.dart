@@ -80,6 +80,8 @@ class LocalModelsTab extends StatefulWidget {
     this.harnessPickDirectory,
     this.harnessCredentialReader,
     this.remoteWorkspaceLauncher,
+    this.externalHarnessPrompt = '',
+    this.externalHarnessPromptSerial = 0,
   });
 
   final String directory;
@@ -108,6 +110,8 @@ class LocalModelsTab extends StatefulWidget {
   final AgentDirectoryPicker? harnessPickDirectory;
   final AgentCredentialReader? harnessCredentialReader;
   final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
+  final String externalHarnessPrompt;
+  final int externalHarnessPromptSerial;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -164,6 +168,22 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     final String? path = widget.initialImportPath;
     if (path != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _importPath(path));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LocalModelsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.externalHarnessPromptSerial !=
+        oldWidget.externalHarnessPromptSerial) {
+      setState(() {
+        _workspace = _ModelWorkspace.agent;
+        _agentOpened = true;
+      });
+      final Future<void>? update = widget.onLargeModelViewChanged?.call(
+        'agent',
+      );
+      if (update != null) unawaited(update);
     }
   }
 
@@ -775,6 +795,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                     credentialReader: widget.harnessCredentialReader,
                     remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
                     screenshotOcrRunner: _captureScreenshotForHarness,
+                    externalPrompt: widget.externalHarnessPrompt,
+                    externalPromptSerial: widget.externalHarnessPromptSerial,
                   )
                 else
                   DeepSeekAgentWorkspace(
@@ -796,6 +818,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                     runAgent: widget.harnessRunAgent,
                     pickDirectory: widget.harnessPickDirectory,
                     credentialReader: widget.harnessCredentialReader,
+                    externalPrompt: widget.externalHarnessPrompt,
+                    externalPromptSerial: widget.externalHarnessPromptSerial,
                   )
               else
                 const SizedBox.shrink(),

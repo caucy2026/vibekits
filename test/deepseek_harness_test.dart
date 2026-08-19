@@ -679,6 +679,42 @@ void main() {
     expect(find.text('分析项目代码'), findsOneWidget);
     expect(find.text('新会话'), findsOneWidget);
   });
+
+  testWidgets('外部工具结果可切入智能体输入框继续分析', (WidgetTester tester) async {
+    Widget workspace(String prompt, int serial) => MaterialApp(
+      home: Scaffold(
+        body: DeepSeekAgentWorkspace(
+          key: const ValueKey<String>('external-prompt-workspace'),
+          externalPrompt: prompt,
+          externalPromptSerial: serial,
+          credentialReader: (_) async => null,
+          credentialWriter: (_, _) async {},
+          loadConversation: (_) async => null,
+          saveConversation: (_) async {},
+          checkEnvironment: () async => const HarnessEnvironmentReport(
+            ready: true,
+            nodeVersion: 'v24.18.0',
+            npxVersion: '11.16.0',
+            message: '已就绪',
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(workspace('分析 C 盘占用', 1));
+    await tester.pumpAndSettle();
+    TextField composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.controller?.text, '分析 C 盘占用');
+
+    await tester.pumpWidget(workspace('解释 ESTLOG 是否合理', 2));
+    await tester.pumpAndSettle();
+    composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.controller?.text, '解释 ESTLOG 是否合理');
+  });
 }
 
 class _FakeAgentHandle implements HarnessAgentHandle {

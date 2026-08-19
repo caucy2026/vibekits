@@ -666,6 +666,9 @@ void main() {
     expect(drive.ok, isTrue);
     expect(drive.data?['totalBytes'], greaterThan(0));
     expect(drive.data?['entries'].toString(), contains('first.bin'));
+    expect(drive.data?['storagePressure'], isA<Map<String, Object?>>());
+    expect(drive.data?['systemBaseline'].toString(), contains('20–40 GiB'));
+    expect(drive.data?['priorities'], isA<List<Object?>>());
     expect(approvals, 0);
   });
 }

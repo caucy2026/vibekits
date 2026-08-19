@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'system_drive_analyzer.dart';
+import 'system_drive_insights.dart';
 
 abstract final class SystemDriveAnalysisReportWriter {
   static Future<File> write(
@@ -24,8 +25,9 @@ abstract final class SystemDriveAnalysisReportWriter {
         ifAbsent: () => entry.sizeBytes,
       );
     }
+    final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
     final Map<String, Object?> report = <String, Object?>{
-      'version': 2,
+      'version': 3,
       'generatedAt': timestamp.toUtc().toIso8601String(),
       'rootPath': analysis.rootPath,
       'cancelled': analysis.cancelled,
@@ -50,6 +52,20 @@ abstract final class SystemDriveAnalysisReportWriter {
         'unreadablePaths': analysis.unreadablePaths,
       },
       'totalsByKind': totalsByKind,
+      'insights': <String, Object?>{
+        'storagePressure': insights.storagePressure.name,
+        'storagePressureLabel': insights.storagePressure.label,
+        'storagePressureSummary': insights.storagePressureSummary,
+        'systemBaseline': insights.systemBaseline,
+        'priorities': insights.priorities
+            .take(100)
+            .map((SystemDriveEntryAssessment item) => item.toJson())
+            .toList(growable: false),
+        'softwareOwners': insights.softwareOwners
+            .take(100)
+            .map((SystemDriveEntryAssessment item) => item.toJson())
+            .toList(growable: false),
+      },
       'entries': <Map<String, Object?>>[
         for (final SystemDriveUsageEntry entry in analysis.entries)
           _entryJson(entry),

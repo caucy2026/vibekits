@@ -303,6 +303,7 @@ void main() {
   });
 
   testWidgets('空间分析展示总量剩余、占用来源和合理性', (WidgetTester tester) async {
+    String? harnessPrompt;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -355,6 +356,9 @@ void main() {
                   );
                 },
             persistDriveAnalysisReport: false,
+            onAskHarness: (String prompt) async {
+              harnessPrompt = prompt;
+            },
           ),
         ),
       ),
@@ -369,6 +373,10 @@ void main() {
     expect(find.text('estlog'), findsOneWidget);
     expect(find.textContaining('需复核'), findsOneWidget);
     expect(find.textContaining('剩余 2.0 KB'), findsOneWidget);
+    await tester.tap(find.text('让 Harness 解释'));
+    await tester.pump();
+    expect(harnessPrompt, contains('vibekits.cleaner.analyze_drive'));
+    expect(harnessPrompt, contains(r'C:\'));
   });
 
   testWidgets('空间分析未完成时逐项显示已完成的软件占用', (WidgetTester tester) async {

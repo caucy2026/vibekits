@@ -17,6 +17,7 @@ import '../domain/cleanup_whitelist.dart';
 import '../domain/system_drive_analysis_runner.dart';
 import '../domain/system_drive_analysis_report.dart';
 import '../domain/system_drive_analyzer.dart';
+import '../domain/system_drive_insights.dart';
 
 typedef CleanupScanRunner = Future<CleanupScanResult> Function({
   required CleanupCancellationToken cancellationToken,
@@ -34,6 +35,7 @@ typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
   required void Function(SystemDriveAnalysisProgress progress) onProgress,
 });
 typedef CleanupDriveEntryRecycler = Future<bool> Function(String path);
+typedef CleanupHarnessLauncher = Future<void> Function(String prompt);
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
@@ -56,6 +58,7 @@ class CleanerTab extends StatefulWidget {
     this.analyzeAfterCleanup = true,
     this.persistDriveAnalysisReport = true,
     this.harnessDebugDirectory = '',
+    this.onAskHarness,
   });
 
   final CleanupScanRunner? scanRunner;
@@ -77,6 +80,7 @@ class CleanerTab extends StatefulWidget {
   final bool analyzeAfterCleanup;
   final bool persistDriveAnalysisReport;
   final String harnessDebugDirectory;
+  final CleanupHarnessLauncher? onAskHarness;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -974,6 +978,12 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Widget _buildDriveAnalysis(SystemDriveAnalysis analysis) {
+    final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
+    final Map<String, SystemDriveEntryAssessment> assessmentsByPath =
+        <String, SystemDriveEntryAssessment>{
+          for (final SystemDriveEntryAssessment item in insights.assessments)
+            item.entry.path: item,
+        };
     final Map<SystemDriveEntryKind, int> totals = <SystemDriveEntryKind, int>{};
     for (final SystemDriveUsageEntry entry in analysis.entries) {
       totals.update(
@@ -1046,6 +1056,21 @@ class _CleanerTabState extends State<CleanerTab> {
                           color: context.vibe.muted,
                         ),
                       ),
+                      Text(
+                        '${insights.storagePressure.label} · '
+                        '${insights.storagePressureSummary}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              insights.storagePressure ==
+                                  SystemDriveAssessmentLevel.normal
+                              ? context.vibe.success
+                              : VibekitsColors.warning,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1060,6 +1085,12 @@ class _CleanerTabState extends State<CleanerTab> {
                     onPressed: () => _showDriveAnalysisReport(analysis),
                     icon: const Icon(Icons.description_outlined, size: 18),
                   ),
+                if (widget.onAskHarness != null)
+                  TextButton.icon(
+                    onPressed: () => _askHarnessAboutDrive(analysis),
+                    icon: const Icon(Icons.auto_awesome_outlined, size: 17),
+                    label: const Text('让 Harness 解释'),
+                  ),
               ],
             ),
           ),
@@ -1072,7 +1103,10 @@ class _CleanerTabState extends State<CleanerTab> {
                   const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {
                 final SystemDriveUsageEntry entry = visible[index];
-                return _buildDriveEntryTile(entry);
+                return _buildDriveEntryTile(
+                  entry,
+                  assessment: assessmentsByPath[entry.path],
+                );
               },
             ),
           ),
@@ -1132,7 +1166,19 @@ class _CleanerTabState extends State<CleanerTab> {
     );
   }
 
-  Widget _buildDriveEntryTile(SystemDriveUsageEntry entry) => ListTile(
+  Future<void> _askHarnessAboutDrive(SystemDriveAnalysis analysis) async {
+    final String prompt =
+        '请调用 vibekits.cleaner.analyze_drive 分析 ${analysis.rootPath}。'
+        '请按 Windows 系统、已安装软件、软件数据、用户数据、日志缓存和未知目录说明各占多少，'
+        '解释哪些属于常见范围、哪些异常、判断依据和最安全的处理顺序。'
+        '不要直接删除任何内容；需要清理时先列出具体路径、影响和恢复方式，等待我确认。';
+    await widget.onAskHarness?.call(prompt);
+  }
+
+  Widget _buildDriveEntryTile(
+    SystemDriveUsageEntry entry, {
+    SystemDriveEntryAssessment? assessment,
+  }) => ListTile(
     dense: true,
     visualDensity: VisualDensity.compact,
     leading: Icon(
@@ -1150,10 +1196,17 @@ class _CleanerTabState extends State<CleanerTab> {
     ),
     title: Text(entry.name, overflow: TextOverflow.ellipsis),
     subtitle: Text(
-      '${entry.kind.label} · '
-      '${entry.canDelete ? '可清理' : entry.needsReview ? '需复核' : '正常'} · '
-      '${entry.ownerLabel.isEmpty ? entry.reason : '${entry.ownerLabel} · ${entry.reason}'}',
-      maxLines: 1,
+      assessment == null
+          ? '${entry.kind.label} · '
+                '${entry.canDelete
+                    ? '可清理'
+                    : entry.needsReview
+                    ? '需复核'
+                    : '正常'} · '
+                '${entry.ownerLabel.isEmpty ? entry.reason : '${entry.ownerLabel} · ${entry.reason}'}'
+          : '${entry.kind.label} · ${assessment.level.label} · '
+                '${assessment.summary}\n${assessment.suggestedAction}',
+      maxLines: assessment == null ? 1 : 2,
       overflow: TextOverflow.ellipsis,
     ),
     trailing: Row(
@@ -1236,6 +1289,7 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Future<void> _showDriveAnalysisReport(SystemDriveAnalysis analysis) async {
+    final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
     await showDialog<void>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -1263,14 +1317,28 @@ class _CleanerTabState extends State<CleanerTab> {
                   style: TextStyle(fontSize: 12, color: context.vibe.muted),
                 ),
                 const SizedBox(height: 8),
-                for (final SystemDriveUsageEntry entry in analysis.entries)
+                Text(
+                  '${insights.storagePressure.label}：${insights.storagePressureSummary}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  insights.systemBaseline,
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                ),
+                const SizedBox(height: 10),
+                for (final SystemDriveEntryAssessment item
+                    in insights.assessments.where(
+                      (SystemDriveEntryAssessment item) =>
+                          !item.entry.isBreakdown,
+                    ))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      '${entry.needsReview ? '需复核' : '正常'} · '
-                      '${entry.name} · ${entry.complete ? '' : '≥ '}'
-                      '${_formatSize(entry.sizeBytes)}\n'
-                      '${entry.kind.label}：${entry.reason}',
+                      '${item.level.label} · ${item.entry.name} · '
+                      '${item.entry.complete ? '' : '≥ '}'
+                      '${_formatSize(item.entry.sizeBytes)}\n'
+                      '${item.summary}；${item.suggestedAction}',
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),

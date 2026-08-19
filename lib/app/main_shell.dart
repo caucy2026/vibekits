@@ -91,6 +91,8 @@ class _MainShellState extends State<MainShell> {
   int _databaseDropSerial = 0;
   RemoteWorkspaceIntent? _remoteWorkspaceIntent;
   int _remoteWorkspaceIntentSerial = 0;
+  String _harnessExternalPrompt = '';
+  int _harnessExternalPromptSerial = 0;
   int _dropGeneration = 0;
   List<DroppedFileRoute> _dropBatch = const <DroppedFileRoute>[];
   StreamSubscription<List<String>>? _dropSubscription;
@@ -180,6 +182,15 @@ class _MainShellState extends State<MainShell> {
         ),
       );
     }
+  }
+
+  Future<void> _openHarnessWithPrompt(String prompt) async {
+    _selectTab(0);
+    if (!mounted) return;
+    setState(() {
+      _harnessExternalPrompt = prompt;
+      _harnessExternalPromptSerial++;
+    });
   }
 
   void _openSettings() {
@@ -396,6 +407,8 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
         remoteWorkspaceLauncher: _openRemoteWorkspace,
+        externalHarnessPrompt: _harnessExternalPrompt,
+        externalHarnessPromptSerial: _harnessExternalPromptSerial,
       ),
       ArchiveTab(
         key: ValueKey<String>('archive-drop-$_archiveDropSerial'),
@@ -411,6 +424,7 @@ class _MainShellState extends State<MainShell> {
       ),
       CleanerTab(
         harnessDebugDirectory: settings.deepSeekHarnessDebugDirectory,
+        onAskHarness: _openHarnessWithPrompt,
         initialWhitelist: settings.cleanupWhitelist,
         initialTargetIds: settings.cleanupScanTargets,
         initialTargetCatalogVersion: settings.cleanupTargetCatalogVersion,
