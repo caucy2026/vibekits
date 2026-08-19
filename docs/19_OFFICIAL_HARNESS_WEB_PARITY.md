@@ -2,7 +2,7 @@
 
 更新日期：2026-08-19
 
-适用版本：`1.9.0-dev.26+36`
+适用版本：`1.9.0-dev.27+37`
 
 ## 1. 唯一行为基线
 
@@ -75,7 +75,7 @@ Windows 运行器为每个 Harness 子进程创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB
 | 官方 Web server 本机 HTTP 200 启停 | 已验收 |
 | 项目/会话/侧边栏/设置改为官方单一数据源 | 已切换 |
 | Vibekits MCP 服务器随官方 Web profile 启动 | 已接入，继续做真 Key/ADB 实机回归 |
-| Settings → Models 填写/修改 Key | 已恢复官方可写凭据链路，Windows Release 实机验收中 |
+| Settings → Models 填写/修改 Key | 已恢复官方可写凭据链路；Windows Release 已验证 Ctrl+V 写入受控测试值且未保存 |
 | macOS 官方 WebView 容器与运行时 | 未完成，不宣称双平台已闭环 |
 
 ## 7. 逐项差异审计
@@ -87,7 +87,7 @@ Windows 运行器为每个 Harness 子进程创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB
 | 工作区—会话 | 一个工作区管理有序多会话；移除工作区不删文件或会话日志 | 直接使用官方 Web/Host 状态，无 Flutter 副本 |
 | 重启恢复 | 官方存储恢复工作区、会话、设置 | Windows 实机已验证恢复 |
 | 会话归档 | 隐藏会话但保留日志、工作区槽位和取消归档恢复能力 | 保持官方语义，不用假删除替代 |
-| 永久删除会话 | 当前 RC.7 没有 `workspace.deleteSession` Host API 和官方菜单 | 未伪造 UI；若产品必须永久删除，应作为明确扩展补齐持久化、索引、运行态与确认闭环 |
+| 永久删除会话 | 当前 RC.7 没有 `workspace.deleteSession` Host API 和官方菜单 | 作为明确 Vibekits 扩展：独立“删除会话”菜单、二次确认、停止运行态后精确删除会话目录，并同步工作区索引与投影缓存；不把归档改名伪装成删除 |
 | 权限预设 | `read-only`、`workspace-write`、`danger-full-access`；官方动态显示名含英文 | 内部标识和审批行为保持官方；中文界面显示为“只读 / 工作区读写 / 完全访问” |
 | 模型二级菜单 | 根菜单进入模型目录或推理等级目录 | 保留官方两级结构；WebView2 返回空焦点时不再误判为外部点击 |
 | API Key 粘贴 | 浏览器输入框支持系统粘贴 | WebView 内增加 Ctrl+V/Cmd+V 安全转发，只写入当前可编辑字段，不记录剪贴板内容 |

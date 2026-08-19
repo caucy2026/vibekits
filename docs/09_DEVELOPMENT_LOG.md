@@ -420,3 +420,10 @@
 - 定位模型/推理等级二级菜单在 WebView2 中点击即关闭的根因：焦点迁移的 `relatedTarget` 为空，官方组件在 `onClick` 前执行了关闭。兼容补丁不再把空焦点误判为外部点击；有明确外部焦点时仍正常关闭，保留官方两级菜单行为。
 - 官方权限内部值保持 `read-only`、`workspace-write`、`danger-full-access`，中文界面显示为“只读”“工作区读写”“完全访问”，完全访问风险确认同步中文化。
 - 新增可重复执行且遇到上游结构变化会失败的 `tool/patch_harness_runtime.mjs`，运行时准备脚本自动应用补丁，避免只修改本机构建缓存。
+
+## 2026-08-19 · v1.9.0-dev.27 Harness 可操作性与会话删除闭环
+
+- Key 粘贴由 WebView 外层兜底改为官方 Models 输入控件内直接处理 Ctrl+V/Cmd+V，避免焦点进入 Web 内容后快捷键丢失；Windows Release 用虚假测试 Key 实机粘贴成功，截图后取消编辑，未写入真实凭据。
+- 官方模型菜单实机显示 `DeepSeek-V4-Flash` / `DeepSeek-V4-Pro`，推理等级实机显示 Off / Low / High / Max；权限入口保持官方内部标识，中文界面显示“只读 / 工作区读写 / 完全访问”。
+- 保留官方“归档会话”的可恢复语义，新增独立“删除会话”操作。删除前二次确认并停止 Harness 运行态，只允许规范会话 ID，随后精确移除会话目录、`workspace.json` 引用和 `session_projcache.json` 投影；路径穿越拒绝和真实索引删除夹具 2/2 通过。
+- 定向 Analyze 0 问题；Windows Release 构建成功，自包含校验 17/17 通过；EXE 与界面版本均为 `1.9.0-dev.27+37`，Release 已打开供人工测试。

@@ -101,6 +101,90 @@ await replaceOnce(
 \t\t}`,
 );
 
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\t\t{
+\t\t\t\t\tid: "archive",
+\t\t\t\t\tlabel: t("menu.archiveSession"),
+\t\t\t\t\ticon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 })
+\t\t\t\t}
+\t\t\t];`,
+  `\t\t\t\t{
+\t\t\t\t\tid: "archive",
+\t\t\t\t\tlabel: t("menu.archiveSession"),
+\t\t\t\t\ticon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconArchiveOutline20, { size: 16 })
+\t\t\t\t},
+\t\t\t\t{
+\t\t\t\t\tid: "delete",
+\t\t\t\t\tlabel: t("menu.deleteSession"),
+\t\t\t\t\ticon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconTrashOutline16, {})
+\t\t\t\t}
+\t\t\t];`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\t\t\t\t\t\t\tif (id === "archive") onArchive(node.id);`,
+  `\t\t\t\t\t\t\t\t\tif (id === "archive") onArchive(node.id);
+\t\t\t\t\t\t\t\t\tif (id === "delete") window.chrome?.webview?.postMessage({
+\t\t\t\t\t\t\t\t\t\ttype: "vibekits.deleteSession",
+\t\t\t\t\t\t\t\t\t\tsessionId: node.id,
+\t\t\t\t\t\t\t\t\t\ttitle
+\t\t\t\t\t\t\t\t\t});`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\t"menu.archiveSession": "归档会话",`,
+  `\t\t\t"menu.archiveSession": "归档会话",
+\t\t\t"menu.deleteSession": "删除会话",`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\t"menu.archiveSession": "Archive session",`,
+  `\t\t\t"menu.archiveSession": "Archive session",
+\t\t\t"menu.deleteSession": "Delete session",`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-settings-models/lib/client.js',
+  `\t\t\t\t\t\t\tdisabled: disabled || keyLocked,
+\t\t\t\t\t\t\tonChange: (event) => {
+\t\t\t\t\t\t\t\tsetKeyDraft(event.target.value);
+\t\t\t\t\t\t\t}`,
+  `\t\t\t\t\t\t\tdisabled: disabled || keyLocked,
+\t\t\t\t\t\t\tonKeyDown: (event) => {
+\t\t\t\t\t\t\t\tif (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "v") return;
+\t\t\t\t\t\t\t\tevent.preventDefault();
+\t\t\t\t\t\t\t\tnavigator.clipboard.readText().then((text) => {
+\t\t\t\t\t\t\t\t\tsetKeyDraft(text);
+\t\t\t\t\t\t\t\t}).catch(() => {});
+\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\tonChange: (event) => {
+\t\t\t\t\t\t\t\tsetKeyDraft(event.target.value);
+\t\t\t\t\t\t\t}`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-settings-models/lib/client.js',
+  `\t\t\t\t\t\t\t\tdisabled,
+\t\t\t\t\t\t\t\tonChange: (event) => {
+\t\t\t\t\t\t\t\t\tsetKeyDraft(event.target.value);
+\t\t\t\t\t\t\t\t}`,
+  `\t\t\t\t\t\t\t\tdisabled,
+\t\t\t\t\t\t\t\tonKeyDown: (event) => {
+\t\t\t\t\t\t\t\t\tif (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "v") return;
+\t\t\t\t\t\t\t\t\tevent.preventDefault();
+\t\t\t\t\t\t\t\t\tnavigator.clipboard.readText().then((text) => {
+\t\t\t\t\t\t\t\t\t\tsetKeyDraft(text);
+\t\t\t\t\t\t\t\t\t}).catch(() => {});
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tonChange: (event) => {
+\t\t\t\t\t\t\t\t\tsetKeyDraft(event.target.value);
+\t\t\t\t\t\t\t\t}`,
+);
+
 const permissionFile =
   'node_modules/@deepseek-ai/dsh-client-ui-permission-presets/lib/client.js';
 for (const [before, after] of [
