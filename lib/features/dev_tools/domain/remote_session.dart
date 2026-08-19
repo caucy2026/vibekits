@@ -138,6 +138,13 @@ abstract interface class RemoteInteractiveSessionHandle
   void resize(int columns, int rows, int pixelWidth, int pixelHeight);
 }
 
+/// An authenticated SSH session that can open additional subsystems without
+/// asking the user to authenticate again.
+abstract interface class RemoteSftpSessionHandle
+    implements RemoteInteractiveSessionHandle {
+  Future<SftpClient> openSftp();
+}
+
 typedef RemoteHostKeyVerifier = Future<bool> Function(
   String type,
   String fingerprint,
@@ -359,7 +366,7 @@ abstract final class RemoteSshConnector {
   }
 }
 
-class _DartSshRemoteSession implements RemoteInteractiveSessionHandle {
+class _DartSshRemoteSession implements RemoteSftpSessionHandle {
   _DartSshRemoteSession._(this._client, this._session) {
     _stdout = _session.stdout
         .cast<List<int>>()
@@ -431,6 +438,12 @@ class _DartSshRemoteSession implements RemoteInteractiveSessionHandle {
   void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
     if (!_running || columns < 1 || rows < 1) return;
     _session.resizeTerminal(columns, rows, pixelWidth, pixelHeight);
+  }
+
+  @override
+  Future<SftpClient> openSftp() {
+    if (!_running) throw StateError('SSH 会话已断开');
+    return _client.sftp();
   }
 
   @override

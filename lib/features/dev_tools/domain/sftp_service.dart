@@ -69,6 +69,16 @@ abstract interface class RemoteFileClient {
 }
 
 abstract final class RemoteFileService {
+  /// Opens SFTP as another channel of an already authenticated SSH client.
+  /// The returned browser owns only the SFTP channel; closing it keeps the
+  /// interactive terminal alive.
+  static Future<RemoteFileClient> connectAuthenticated(
+    RemoteSftpSessionHandle session,
+  ) async {
+    final SftpClient sftp = await session.openSftp();
+    return _DartSftpClient(null, sftp);
+  }
+
   static Future<RemoteFileClient> connect(
     RemoteConnectionProfile profile, {
     String? secret,
@@ -92,7 +102,7 @@ abstract final class RemoteFileService {
 class _DartSftpClient implements RemoteFileClient {
   _DartSftpClient(this._ssh, this._sftp);
 
-  final SSHClient _ssh;
+  final SSHClient? _ssh;
   final SftpClient _sftp;
   bool _closed = false;
 
@@ -251,7 +261,7 @@ class _DartSftpClient implements RemoteFileClient {
     if (_closed) return;
     _closed = true;
     await _sftp.close();
-    _ssh.close();
+    _ssh?.close();
   }
 }
 

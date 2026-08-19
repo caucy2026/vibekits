@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/port_forward_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_desktop_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
+import 'package:vibekits/features/dev_tools/domain/sftp_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 import 'package:vibekits/features/dev_tools/presentation/remote_workspace.dart';
 
@@ -403,6 +404,60 @@ void main() {
     expect(find.text('0 个匹配'), findsOneWidget);
   });
 
+  testWidgets('SSH 登录后绿色按钮复用当前会话直接打开 SFTP', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final _FakeInteractiveRemoteSession session =
+        _FakeInteractiveRemoteSession();
+    final _FakeRemoteFileClient files = _FakeRemoteFileClient();
+    RemoteSessionHandle? reusedSession;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            startSession: (RemoteLaunchRequest request) async => session,
+            connectAuthenticatedRemoteFiles:
+                (RemoteSessionHandle activeSession) async {
+                  reusedSession = activeSession;
+                  return files;
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('remote-host')),
+      'files.example.com',
+    );
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('remote-open-session-sftp')), findsOneWidget);
+    expect(find.text('SFTP 文件'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('remote-open-session-sftp')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(reusedSession, same(session));
+    expect(session.running, isTrue);
+    expect(find.byKey(const Key('sftp-browser')), findsOneWidget);
+    expect(find.byKey(const Key('remote-session-secret')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(files.closed, isTrue);
+    expect(session.running, isTrue);
+    expect(
+      find.byKey(const Key('remote-interactive-terminal')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('连接中可立即取消且迟到会话自动释放', (WidgetTester tester) async {
     final Completer<RemoteSessionHandle> pending =
         Completer<RemoteSessionHandle>();
@@ -611,6 +666,39 @@ class _FakeInteractiveRemoteSession extends _FakeRemoteSession
   void resize(int columns, int rows, int pixelWidth, int pixelHeight) {
     sizes.add((columns, rows));
   }
+}
+
+class _FakeRemoteFileClient implements RemoteFileClient {
+  bool closed = false;
+
+  @override
+  Future<String> absolute(String path) async => '/';
+
+  @override
+  Future<List<RemoteFileEntry>> listDirectory(String path) async =>
+      const <RemoteFileEntry>[];
+
+  @override
+  Future<void> upload(
+    String localPath,
+    String remotePath, {
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {}
+
+  @override
+  Future<void> download(
+    String remotePath,
+    String localPath, {
+    required int total,
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {}
+
+  @override
+  Future<void> close() async => closed = true;
 }
 
 class _FakePortForwardConnection implements PortForwardConnection {

@@ -57,7 +57,7 @@
 | DEV-101 | 计算 | 程序员计算器 | 对齐 Windows Programmer 模式：进制、QWORD/DWORD/WORD/BYTE、按位/移位键盘、无效键禁用、键盘输入 | Windows 风格主路径与 Widget 测试已闭环 |
 | DEV-102 | 数据库 | 数据库管理器 | SQLite 拖入即开；PostgreSQL/MySQL/MariaDB 远程连接；对象/分页/SQL；连接记录；密码进系统凭据 | 四类数据库只读主路径已实现；MySQL/MariaDB 成功连接待真实服务补证 |
 | DEV-103 | 源码/Shell | 轻量源码工作区 | 常用语言/脚本/配置自动识别，快速查看、查找、编辑、原子保存 | 已闭环 |
-| DEV-104 | 远程 | 融合远程工作台 | SSH 终端、SFTP 双栏、端口转发、会话记录、系统凭据；对齐 Xshell/Xftp/Tabby 习惯 | SSH/SFTP/本地转发均使用内置 Dart 实现，不依赖系统 ssh；统一体验继续优化 |
+| DEV-104 | 远程 | 融合远程工作台 | SSH 终端、SFTP 双栏、端口转发、会话记录、系统凭据；对齐 Xshell/Xftp/Tabby 习惯 | SSH 登录后可用绿色按钮在同一已认证连接直达 SFTP，不再输入密码；SSH/SFTP/本地转发均使用内置 Dart 实现，不依赖系统 ssh |
 | DEV-105 | API | API 调试工作区 | HTTP 方法、URL、头、体、超时、响应限制、取消；历史脱敏后续 | 主路径已闭环 |
 | DEV-106 | Git | Git 工作区 | 状态、Diff、分支/日志；危险操作不默认执行 | 内置 MinGit 完成状态/Diff/日志、两版本对比和不切换的本地安全分支；写操作进入统一审批 |
 | DEV-107 | 网络 | GitHub/网络诊断 | DNS/TLS/HTTPS/代理/hosts/SSH 443 诊断；建议可审计、可恢复 | 已闭环 |

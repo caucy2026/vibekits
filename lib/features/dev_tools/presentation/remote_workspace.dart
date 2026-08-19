@@ -34,6 +34,9 @@ typedef RemoteFileConnector = Future<RemoteFileClient> Function(
   String? secret,
   RemoteHostKeyVerifier verifyHostKey,
 );
+typedef AuthenticatedRemoteFileConnector = Future<RemoteFileClient> Function(
+  RemoteSessionHandle session,
+);
 typedef PortForwardConnector = Future<PortForwardConnection> Function(
   RemoteConnectionProfile profile,
   String? secret,
@@ -56,6 +59,7 @@ class RemoteWorkspace extends StatefulWidget {
     this.profileIdGenerator,
     this.readClipboard,
     this.connectRemoteFiles,
+    this.connectAuthenticatedRemoteFiles,
     this.connectPortForwards,
     this.launchRemoteDesktop,
   });
@@ -70,6 +74,7 @@ class RemoteWorkspace extends StatefulWidget {
   final String Function()? profileIdGenerator;
   final RemoteClipboardReader? readClipboard;
   final RemoteFileConnector? connectRemoteFiles;
+  final AuthenticatedRemoteFileConnector? connectAuthenticatedRemoteFiles;
   final PortForwardConnector? connectPortForwards;
   final RemoteDesktopLauncher? launchRemoteDesktop;
 
@@ -104,6 +109,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   String? _error;
   String? _desktopStatus;
   bool _starting = false;
+  bool _openingSessionFiles = false;
   int _connectGeneration = 0;
   late final List<RemoteConnectionRecord> _profiles =
       RemoteConnectionRecord.decodeMany(widget.initialProfiles);
@@ -116,6 +122,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   bool get _connected =>
       _running || _sftpClient != null || _forwardConnection != null;
   bool get _interactive => _session is RemoteInteractiveSessionHandle;
+  bool get _canOpenSessionFiles =>
+      _sftpClient == null &&
+      _session?.running == true &&
+      (widget.connectAuthenticatedRemoteFiles != null ||
+          _session is RemoteSftpSessionHandle);
   _RemoteTerminalTab? get _activeTab =>
       _activeTerminalTab >= 0 && _activeTerminalTab < _terminalTabs.length
       ? _terminalTabs[_activeTerminalTab]
@@ -1034,6 +1045,42 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     await client.close();
   }
 
+  Future<void> _openSftpFromActiveSession() async {
+    final RemoteSessionHandle? session = _activeTab?.session ?? _session;
+    if (session == null || !session.running || _openingSessionFiles) return;
+    if (widget.connectAuthenticatedRemoteFiles == null &&
+        session is! RemoteSftpSessionHandle) {
+      return;
+    }
+    setState(() {
+      _openingSessionFiles = true;
+      _error = null;
+    });
+    try {
+      final RemoteFileClient client =
+          await (widget.connectAuthenticatedRemoteFiles != null
+              ? widget.connectAuthenticatedRemoteFiles!(session)
+              : RemoteFileService.connectAuthenticated(
+                  session as RemoteSftpSessionHandle,
+                ));
+      if (!mounted || !session.running || session != _session) {
+        await client.close();
+        return;
+      }
+      setState(() {
+        _sftpClient = client;
+        _openingSessionFiles = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _openingSessionFiles = false;
+        _error =
+            '打开当前会话的 SFTP 失败：${error.toString().replaceFirst('Bad state: ', '')}';
+      });
+    }
+  }
+
   Future<void> _closeTerminalTab(int index) async {
     if (index < 0 || index >= _terminalTabs.length) return;
     final _RemoteTerminalTab tab = _terminalTabs[index];
@@ -1412,10 +1459,34 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
               ),
             ),
           ],
-          if (_interactive) ...<Widget>[
+          if (_sftpClient == null && _interactive) ...<Widget>[
             const SizedBox(height: 6),
             Row(
               children: <Widget>[
+                if (_canOpenSessionFiles) ...<Widget>[
+                  FilledButton.icon(
+                    key: const Key('remote-open-session-sftp'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.vibe.success,
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _openingSessionFiles
+                        ? null
+                        : _openSftpFromActiveSession,
+                    icon: _openingSessionFiles
+                        ? const SizedBox.square(
+                            dimension: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.folder_copy_outlined, size: 17),
+                    label: const Text('SFTP 文件'),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 IconButton(
                   key: const Key('remote-terminal-search-toggle'),
                   tooltip: '搜索 (Ctrl+F)',
