@@ -4,7 +4,7 @@
 
 更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.37+47`（任意文件 Diff、Harness 调用与分模块审计检查点，非正式发布）
+当前版本：`1.9.0-dev.38+48`（统一能力清单、智能体自动发现与首批开源微能力融合检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -65,6 +65,10 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 ### 4.5 微工具融合与 DeepSeek 智能体
 
 Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
+
+“转换与检查”新增安全只读 JSON 路径查询和后台代码统计：前者支持 `.users[0].name`、`.items[*].id` 等有界提取；后者统计语言、文件、代码、注释和空白行并跳过依赖/构建目录。两项均由 `ToolSpec` 自动进入 Harness 可执行目录、模型选择描述和当前模块审计，不增加独立左侧入口。
+
+工具能力注册已收敛为单一清单：复杂工作区的 Harness IDs 写在 `ToolSpec.harnessToolIds`，界面日志和合同测试直接复用；带 `run/runAsync` 的微工具自动得到 `vibekits.<id>`、参数 Schema、“适合/不适合/本地优先”描述和 MCP 调用入口。最高准则见 `22_CAPABILITY_INTEGRATION_STANDARD.md`。
 
 Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.0-rc.7` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
 

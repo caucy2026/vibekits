@@ -717,7 +717,13 @@ class VibekitsHarnessToolBridge {
     return HarnessToolDefinition(
       id: id,
       name: spec.name,
-      description: spec.description,
+      description: <String>[
+        spec.description,
+        '适合：${spec.aiUseWhen ?? '用户明确需要“${spec.name}”结果时。'}',
+        '不适合：${spec.aiAvoidWhen ?? '输入或目标不符合说明时；不要猜测参数。'}',
+        if (spec.aiExamples.isNotEmpty) '示例：${spec.aiExamples.join('；')}',
+        '本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。',
+      ].join(' '),
       risk: _riskFor(spec.id),
       inputSchema: <String, Object?>{
         'type': 'object',

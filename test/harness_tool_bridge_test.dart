@@ -22,6 +22,11 @@ void main() {
       tools.any((dynamic tool) => tool['id'] == 'vibekits.sha256'),
       isTrue,
     );
+    final dynamic jsonQuery = tools.firstWhere(
+      (dynamic tool) => tool['id'] == 'vibekits.json_query',
+    );
+    expect(jsonQuery['description'], contains('本地优先'));
+    expect(jsonQuery['description'], contains('适合：'));
     expect(
       tools.any((dynamic tool) => tool['id'] == 'vibekits.database_manager'),
       isFalse,
@@ -63,49 +68,24 @@ void main() {
   });
 
   test('开发工具左侧每个入口都有至少一个 Harness 可执行适配器', () {
-    final Set<String> executable = VibekitsHarnessToolBridge().executableCatalog
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    final Set<String> declared = bridge.fullCatalog
         .map((HarnessToolDefinition tool) => tool.id)
         .toSet();
-    final Map<String, Set<String>> adapters = <String, Set<String>>{
-      'programmer_calculator': <String>{
-        VibekitsHarnessToolBridge.programmerCalculatorId,
-      },
-      'database_manager': <String>{
-        VibekitsHarnessToolBridge.sqliteInspectId,
-        VibekitsHarnessToolBridge.sqliteQueryId,
-        VibekitsHarnessToolBridge.remoteDatabaseInspectId,
-        VibekitsHarnessToolBridge.remoteDatabaseQueryId,
-      },
-      'remote_workspace': <String>{
-        VibekitsHarnessToolBridge.remoteSshExecId,
-        VibekitsHarnessToolBridge.remoteSftpListId,
-        VibekitsHarnessToolBridge.remoteSftpUploadId,
-        VibekitsHarnessToolBridge.remoteSftpDownloadId,
-      },
-      'serial_port': <String>{VibekitsHarnessToolBridge.serialTransactId},
-      'adb_workspace': <String>{VibekitsHarnessToolBridge.adbCommandId},
-      'api_workspace': <String>{VibekitsHarnessToolBridge.apiRequestId},
-      'git_workspace': <String>{VibekitsHarnessToolBridge.gitInspectId},
-      'github_diagnostics': <String>{
-        VibekitsHarnessToolBridge.githubDiagnosticsId,
-      },
-      'file_hash': <String>{'vibekits.file_hash'},
-      'file_diff': <String>{VibekitsHarnessToolBridge.fileDiffId},
-      'file_search': <String>{VibekitsHarnessToolBridge.fileSearchId},
-      'batch_rename': <String>{'vibekits.batch_rename'},
-      'duplicate_files': <String>{VibekitsHarnessToolBridge.duplicateScanId},
-      'utility_collection': <String>{
-        for (final ToolSpec tool in utilityToolRegistry) 'vibekits.${tool.id}',
-      },
-    };
-
+    final Set<String> executable = bridge.executableCatalog
+        .map((HarnessToolDefinition tool) => tool.id)
+        .toSet();
     for (final ToolSpec workspace in devToolRegistry) {
-      final Set<String>? toolIds = adapters[workspace.id];
-      expect(toolIds, isNotNull, reason: '未声明 ${workspace.id} 的 Harness 适配器');
+      final Set<String> toolIds = harnessToolIdsFor(workspace);
       expect(
-        toolIds!.any(executable.contains),
+        toolIds.every(declared.contains),
         isTrue,
-        reason: '${workspace.id} 没有进入 Harness 可执行目录',
+        reason: '${workspace.id} 存在未进入 Harness 完整目录的声明',
+      );
+      expect(
+        toolIds.any(executable.contains),
+        isTrue,
+        reason: '${workspace.id} 没有当前环境可执行的 Harness 适配器',
       );
     }
   });
@@ -127,6 +107,26 @@ void main() {
       result.data?['output'],
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
+  });
+
+  test('新增微工具由能力清单自动进入 Harness 并可直接调用', () async {
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    int approvals = 0;
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: 'vibekits.json_query',
+      arguments: <String, Object?>{
+        'input': '{"items":[{"id":7}]}',
+        'params': '.items[0].id',
+      },
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['output'], '7');
+    expect(approvals, 0);
   });
 
   test('Harness 工具完成后写入对应工具审计记录', () async {

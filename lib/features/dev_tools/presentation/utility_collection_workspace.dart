@@ -1,3 +1,4 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -131,6 +132,16 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
     }
   }
 
+  Future<void> _pickCodeRoot() async {
+    final String? path = await getDirectoryPath(confirmButtonText: '选择项目目录');
+    if (path == null || !mounted) return;
+    setState(() {
+      _input.text = path;
+      _output.clear();
+      _outputIsError = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -206,6 +217,18 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
             selected.description,
             style: TextStyle(color: context.vibe.muted),
           ),
+          if (selected.id == 'code_statistics') ...<Widget>[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const Key('code-statistics-pick-directory'),
+                onPressed: _executing ? null : _pickCodeRoot,
+                icon: const Icon(Icons.folder_open_outlined, size: 18),
+                label: const Text('选择项目目录'),
+              ),
+            ),
+          ],
           if (selected.paramLabel != null) ...<Widget>[
             const SizedBox(height: 10),
             SizedBox(

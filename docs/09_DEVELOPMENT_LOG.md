@@ -502,3 +502,11 @@
 - Harness 新增只读 `vibekits.file_diff`，与手工界面共用 `FileDiffService`；调用结果结构化返回，审计日志只记录路径、统计和截断标记，不保存文件正文。
 - Harness 工具日志由全局开关扩展为“全局 + 当前模块”策略：默认开启，可单独关闭某一工具模块，ADB/串口/SSH/Diff 等互不影响；现有记录仍可逐条或按模块删除。
 - 静态分析 0 问题；真实文件、界面、日志策略、Harness 桥与开发工具目录合同定向测试 30/30 通过。完整 Release 门禁 8/8 项 PASS，11 条任务链清单有效，自包含资产 17/17；EXE SHA-256 为 `B8819E2EFEDB8A8E51AC2B734273B4A6626CA967DA9B35497057E911ACDA0618`。
+
+## 2026-08-20 · v1.9.0-dev.38 能力自动发现与开源微能力融合
+
+- 建立 `22_CAPABILITY_INTEGRATION_STANDARD.md` 最高准则：新增能力必须统一注册、自动向 Harness 描述使用/禁用场景、共用领域服务、具备上下游、默认后台有界并进入分模块审计。
+- `ToolSpec` 成为界面搜索、Harness IDs、模型选择描述和日志模块的单一来源；删除 `dev_tools_tab.dart` 中重复维护的 Harness ID switch。复杂工具显式声明 IDs，同构微工具随 `run/runAsync` 自动进入 MCP 工具目录。
+- 复核 ripgrep、fd、jq、delta、yq、ast-grep、tokei 和 hyperfine 的任务模型与许可证。首批融合安全只读 JSON 路径查询和 Tokei 风格代码统计；不复制第三方源码/UI，不开放 hyperfine 式任意命令执行。
+- 代码统计在 Isolate 中执行，最多 50000 个源码文件、单文件 8 MiB，跳过 `.git`、依赖和构建目录；JSON 查询只支持确定性的点路径、数组下标和通配，不执行任意表达式。
+- 定向与全量 Analyze 0 问题；领域、界面、自动工具发现、真实 Harness 调用和日志合同回归通过。完整 Release 门禁 9/9 项 PASS，13 条任务链清单有效，自包含资产 17/17；EXE SHA-256 为 `01A81BA10AE603EE54B8F2D422008986A76AAE623B3153060F170898C27688EB`。

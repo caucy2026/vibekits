@@ -3,6 +3,20 @@
   "policy": "A feature is releasable only when its user workflow, automated coverage and any required real-environment evidence are all named here.",
   "workflows": [
     {
+      "id": "capability-auto-discovery",
+      "name": "ToolSpec 单一注册、模型选择描述、Harness 自动发现和模块审计",
+      "risk": "platform",
+      "tests": ["test/harness_tool_bridge_test.dart", "test/dev_tools_widget_test.dart", "test/harness_tool_activity_store_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV38_CAPABILITY_AUTO_DISCOVERY_2026-08-20.md"]
+    },
+    {
+      "id": "code-statistics-json-query",
+      "name": "后台代码统计与安全 JSON 路径查询",
+      "risk": "read-only",
+      "tests": ["test/code_statistics_service_test.dart", "test/format_tools_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV38_CAPABILITY_AUTO_DISCOVERY_2026-08-20.md"]
+    },
+    {
       "id": "harness-ssh-sftp-one-auth",
       "name": "Harness 打开 SSH，一次认证后复用同一会话进入 SFTP",
       "risk": "remote-control",

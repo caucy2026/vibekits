@@ -24,6 +24,10 @@
 18. [第三方组件、模型与供应链记录](16_THIRD_PARTY_COMPONENTS.md)
 19. [发布完成清单](17_RELEASE_COMPLETION_CHECKLIST.md)——当前唯一执行与验收清单
 20. [无歧义原子验收动作](18_ATOMIC_ACCEPTANCE_CASES.md)——前置、动作、唯一预期、失败判定与证据
+21. [官方 Harness Web 对齐基线](19_OFFICIAL_HARNESS_WEB_PARITY.md)
+22. [跨工具开发工作流](20_INTEGRATED_DEVELOPER_WORKFLOWS.md)
+23. [发布质量门禁](21_RELEASE_QUALITY_GATE.md)
+24. [能力融合与智能体自动发现最高准则](22_CAPABILITY_INTEGRATION_STANDARD.md)——新增或移植任何工具时必须遵循
 
 ## 完成定义
 

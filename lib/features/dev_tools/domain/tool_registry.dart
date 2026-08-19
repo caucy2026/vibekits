@@ -1,4 +1,5 @@
 import 'crypto_tools.dart';
+import 'code_statistics_service.dart';
 import 'encoding_tools.dart';
 import 'file_tools.dart';
 import 'format_tools.dart';
@@ -32,6 +33,10 @@ class ToolSpec {
     this.runAsync,
     this.offline = true,
     this.paramLabel,
+    this.aiUseWhen,
+    this.aiAvoidWhen,
+    this.aiExamples = const <String>[],
+    this.harnessToolIds = const <String>[],
   });
 
   final String id;
@@ -40,6 +45,10 @@ class ToolSpec {
   final String description;
   final bool offline;
   final String? paramLabel;
+  final String? aiUseWhen;
+  final String? aiAvoidWhen;
+  final List<String> aiExamples;
+  final List<String> harnessToolIds;
   final ToolResult Function(String input, String params)? run;
   final Future<ToolResult> Function(String input, String params)? runAsync;
 }
@@ -51,24 +60,44 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     name: '程序员计算器',
     group: ToolGroups.calculate,
     description: '整数表达式、进制转换、位运算和有符号/无符号解释。',
+    harnessToolIds: <String>['vibekits.calculator.programmer'],
   ),
   const ToolSpec(
     id: 'database_manager',
     name: '数据库管理器',
     group: ToolGroups.database,
     description: '拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。',
+    harnessToolIds: <String>[
+      'vibekits.sqlite.inspect',
+      'vibekits.sqlite.query',
+      'vibekits.database.remote_list_profiles',
+      'vibekits.database.remote_inspect',
+      'vibekits.database.remote_query',
+    ],
   ),
   const ToolSpec(
     id: 'remote_workspace',
     name: 'SSH / SFTP',
     group: ToolGroups.remote,
     description: '统一管理安全终端、双栏文件和本地/远程/SOCKS5 端口转发。',
+    harnessToolIds: <String>[
+      'vibekits.remote.list_profiles',
+      'vibekits.remote.open_interactive',
+      'vibekits.remote.ssh_exec',
+      'vibekits.remote.sftp_list',
+      'vibekits.remote.sftp_upload',
+      'vibekits.remote.sftp_download',
+    ],
   ),
   const ToolSpec(
     id: 'serial_port',
     name: '串口调试',
     group: ToolGroups.remote,
     description: '打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。',
+    harnessToolIds: <String>[
+      'vibekits.serial.list_ports',
+      'vibekits.serial.transact',
+    ],
   ),
   const ToolSpec(
     id: 'adb_workspace',
@@ -76,6 +105,11 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     group: ToolGroups.remote,
     description: '管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。',
     offline: false,
+    harnessToolIds: <String>[
+      'vibekits.adb.list_devices',
+      'vibekits.adb.connect',
+      'vibekits.adb.command',
+    ],
   ),
   const ToolSpec(
     id: 'api_workspace',
@@ -83,18 +117,25 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     group: ToolGroups.network,
     description: '发送有界 HTTP 请求，查看状态、响应头、耗时和正文。',
     offline: false,
+    harnessToolIds: <String>['vibekits.http.request'],
   ),
   const ToolSpec(
     id: 'git_workspace',
     name: 'Git 工作区',
     group: ToolGroups.sourceControl,
     description: '只读查看仓库根目录、分支、工作区变更、Diff 和最近提交。',
+    harnessToolIds: <String>[
+      'vibekits.git.inspect',
+      'vibekits.git.compare_refs',
+      'vibekits.git.create_local_branch',
+    ],
   ),
   const ToolSpec(
     id: 'file_diff',
     name: '文件 Diff',
     group: ToolGroups.file,
     description: '选择任意两个文本或源码文件，自动识别编码并按行比较、复制或保存差异。',
+    harnessToolIds: <String>['vibekits.file_diff'],
   ),
   const ToolSpec(
     id: 'github_diagnostics',
@@ -102,6 +143,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     group: ToolGroups.network,
     description: '只读检查 GitHub 的 DNS、TLS、HTTPS、代理、hosts 与 SSH 端口。',
     offline: false,
+    harnessToolIds: <String>['vibekits.github.diagnose'],
   ),
   ToolSpec(
     id: 'base64_encode',
@@ -262,6 +304,17 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     run: (String input, String params) => FormatTools.jsonValidate(input),
   ),
   ToolSpec(
+    id: 'json_query',
+    name: 'JSON 路径查询',
+    group: ToolGroups.format,
+    description: '用安全的点路径和数组下标提取 JSON，例如 .users[0].name 或 .items[*].id。',
+    paramLabel: '查询路径',
+    aiUseWhen: '需要从 JSON 响应、配置或日志中精确提取字段时，优先于读取整段文本。',
+    aiAvoidWhen: '需要执行任意 jq 表达式、修改源文件或处理非 JSON 数据时不要使用。',
+    aiExamples: <String>['从 API 响应提取 .data.items[*].id'],
+    run: (String input, String params) => FormatTools.jsonQuery(input, params),
+  ),
+  ToolSpec(
     id: 'url_parse',
     name: 'URL 分解',
     group: ToolGroups.network,
@@ -310,6 +363,18 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     ),
   ),
   ToolSpec(
+    id: 'code_statistics',
+    name: '代码统计',
+    group: ToolGroups.file,
+    description: '后台统计项目或单文件的语言、文件数、代码、注释和空白行，自动跳过依赖与构建目录。',
+    paramLabel: '可选扩展名，如 dart,ts,rs',
+    aiUseWhen: '需要快速了解项目规模、主要语言、代码与注释构成时，优先于逐文件读取。',
+    aiAvoidWhen: '需要语义分析、复杂度、安全漏洞判断或精确编译器 AST 结果时不要使用。',
+    aiExamples: <String>['统计当前工作区主要语言和代码行数'],
+    runAsync: (String input, String params) =>
+        CodeStatisticsService.analyze(input, extensions: params),
+  ),
+  ToolSpec(
     id: 'batch_rename',
     name: '批量重命名',
     group: ToolGroups.file,
@@ -329,12 +394,14 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     name: '重复文件',
     group: ToolGroups.file,
     description: '按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。',
+    harnessToolIds: <String>['vibekits.files.duplicate_scan'],
   ),
   const ToolSpec(
     id: 'file_search',
     name: '文件搜索',
     group: ToolGroups.file,
     description: '按文件名或内容快速搜索，结果可定位、复制路径并继续计算哈希。',
+    harnessToolIds: <String>['vibekits.files.search'],
   ),
 ];
 
@@ -360,6 +427,19 @@ const ToolSpec utilityCollectionTool = ToolSpec(
   group: ToolGroups.format,
   description: '编码、哈希、格式化、时间、正则和网络小工具集中在右侧 Tab。',
 );
+
+/// UI、审计记录与 Harness 合同共同使用的唯一工具 ID 来源。
+Set<String> harnessToolIdsFor(ToolSpec tool) {
+  if (tool.id == utilityCollectionTool.id) {
+    return <String>{
+      for (final ToolSpec utility in utilityToolRegistry)
+        ...harnessToolIdsFor(utility),
+    };
+  }
+  return tool.harnessToolIds.isEmpty
+      ? <String>{'vibekits.${tool.id}'}
+      : tool.harnessToolIds.toSet();
+}
 
 /// 左侧只保留具有独立任务流的工作区。
 final List<ToolSpec> devToolRegistry = <ToolSpec>[

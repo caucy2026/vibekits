@@ -19,7 +19,7 @@ void main() {
     await tester.enterText(search, 'Base64');
     await tester.pump();
     expect(find.text('Base64 编码'), findsNothing);
-    await tester.tap(find.text('转换与检查'));
+    await tester.tap(find.widgetWithText(ListTile, '转换与检查'));
     await tester.pumpAndSettle();
     expect(find.text('Base64 编码'), findsOneWidget);
     return find.byKey(const Key('utility-input'));
@@ -96,6 +96,25 @@ void main() {
     await tester.tap(find.byTooltip('清空'));
     await tester.pump();
     expect(find.text('SGVsbG8='), findsNothing);
+  });
+
+  testWidgets('代码统计融合在转换与检查并提供目录选择', (WidgetTester tester) async {
+    await pumpTools(tester);
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '代码统计');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '转换与检查'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('代码统计'), findsWidgets);
+    expect(
+      find.byKey(const Key('code-statistics-pick-directory')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('utility-run')), findsOneWidget);
   });
 
   testWidgets('重复文件入口打开专用扫描工作区', (WidgetTester tester) async {

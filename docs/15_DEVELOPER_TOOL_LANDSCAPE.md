@@ -1,7 +1,7 @@
 # 程序员工具版图与移植决策
 
-版本：0.3
-更新日期：2026-08-17
+版本：0.4
+更新日期：2026-08-20
 
 ## 1. 信息架构决策
 
@@ -58,3 +58,20 @@
 | D9 | 串口调试 | 极简打开流程、完整帧格式、文本/HEX、发送历史、日志保存；原生会话独立 Isolate；真实设备回环待补 |
 
 每个批次完成后更新本文件的固定上游、许可证和实际采用/拒绝原因，并在 `09_DEVELOPMENT_LOG.md` 记录验证命令与结果。
+
+## 5. 2026-08-20 高评分开源工具复核
+
+Star 数只作为社区采用度信号，不作为接入授权；最终决策以任务融合、安全边界和许可证为准。
+
+| 项目 | 复核时约 Star | 许可证 | 有价值能力 | 融合决策 |
+|---|---:|---|---|---|
+| BurntSushi/ripgrep | 64.3k | MIT / Unlicense | Unicode 正则、ignore 语义、并行有界搜索 | 不新增入口；继续增强现有文件搜索并供 Harness 优先定位 |
+| sharkdp/fd | 43.1k | MIT / Apache-2.0 | 友好的文件名搜索、smart case、隐藏/ignore 默认值 | 合并进现有文件搜索筛选，不重复打包同类 UI |
+| jqlang/jq | 34.8k | MIT | JSON 提取、过滤、结构化输出 | 首批加入安全只读“JSON 路径查询”；不开放任意表达式执行 |
+| dandavison/delta | 31k | MIT | 行号、易读 Diff、Git/grep 结果衔接 | 现有文件 Diff/Git Diff 吸收交互原则，不再引入孤立 pager |
+| mikefarah/yq | 15.5k | MIT（依赖需单列复核） | YAML/JSON/XML/TOML 统一查询 | 下一批扩展同一个结构化查询，不新增左侧入口 |
+| ast-grep/ast-grep | 14.2k | MIT | 基于 AST 的结构化搜索、Lint、改写 | 下一批先做只读结构搜索；改写走预览与批准 |
+| XAMPPRocky/tokei | 高采用度 | MIT / Apache-2.0 | 多语言代码/注释/空白统计、结构化输出 | 首批加入后台“代码统计”，结果给文件搜索和 Harness 复用 |
+| sharkdp/hyperfine | 高采用度 | MIT / Apache-2.0 | 多轮统计基准、预热、异常值 | 暂不开放任意命令；待设计受限命令模板和资源上限 |
+
+本轮没有复制上述仓库源码或 UI；采用的是任务模型和安全边界，自研 Dart 领域实现。自动发现与融合规则见 `22_CAPABILITY_INTEGRATION_STANDARD.md`。

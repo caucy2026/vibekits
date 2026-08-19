@@ -44,4 +44,27 @@ void main() {
       expect(FormatTools.jsonValidate('{'), isA<ToolFailure>());
     });
   });
+
+  group('JSON 路径查询', () {
+    test('提取嵌套数组字段', () {
+      final ToolResult result = FormatTools.jsonQuery(
+        '{"users":[{"name":"Ada"},{"name":"Linus"}]}',
+        '.users[1].name',
+      );
+      expect((result as ToolSuccess).output, '"Linus"');
+    });
+
+    test('通配数组输出有界 JSON 列表', () {
+      final ToolResult result = FormatTools.jsonQuery(
+        '{"items":[{"id":1},{"id":2}]}',
+        '.items[*].id',
+      );
+      expect((result as ToolSuccess).output, contains('1'));
+      expect(result.output, contains('2'));
+    });
+
+    test('不存在字段明确失败', () {
+      expect(FormatTools.jsonQuery('{"a":1}', '.b'), isA<ToolFailure>());
+    });
+  });
 }

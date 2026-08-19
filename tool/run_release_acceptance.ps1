@@ -45,6 +45,11 @@ $commands.Add([pscustomobject]@{
   executable = $flutter
   arguments = @('test', 'test\file_diff_service_test.dart', 'test\file_diff_widget_test.dart', 'test\harness_tool_activity_store_test.dart')
 })
+$commands.Add([pscustomobject]@{
+  name = 'capability auto discovery'
+  executable = $flutter
+  arguments = @('test', 'test\format_tools_test.dart', 'test\code_statistics_service_test.dart', 'test\dev_tools_widget_test.dart')
+})
 if ($Tier -eq 'release') {
   $commands.Add([pscustomobject]@{
     name = 'Flutter analyze'

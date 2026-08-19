@@ -266,7 +266,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
               onPressed: () => showHarnessToolActivityDialog(
                 context,
                 toolName: _selected.name,
-                toolIds: _harnessToolIds(_selected.id),
+                toolIds: harnessToolIdsFor(_selected),
               ),
               icon: const Icon(Icons.history_rounded, size: 18),
               label: const Text('当前工具的 Harness 记录'),
@@ -365,30 +365,3 @@ class _DevToolsTabState extends State<DevToolsTab> {
     return const Center(child: Text('该工具暂不可用'));
   }
 }
-
-Set<String> _harnessToolIds(String toolId) => switch (toolId) {
-  'programmer_calculator' => <String>{'vibekits.calculator.programmer'},
-  'database_manager' => <String>{
-    'vibekits.sqlite.inspect',
-    'vibekits.sqlite.query',
-  },
-  'serial_port' => <String>{
-    'vibekits.serial.list_ports',
-    'vibekits.serial.transact',
-  },
-  'adb_workspace' => <String>{
-    'vibekits.adb.list_devices',
-    'vibekits.adb.connect',
-    'vibekits.adb.command',
-  },
-  'api_workspace' => <String>{'vibekits.http.request'},
-  'git_workspace' => <String>{
-    'vibekits.git.inspect',
-    'vibekits.git.compare_refs',
-    'vibekits.git.create_local_branch',
-  },
-  'file_diff' => <String>{'vibekits.file_diff'},
-  'github_diagnostics' => <String>{'vibekits.github.diagnose'},
-  'file_search' => <String>{'vibekits.files.search'},
-  _ => <String>{'vibekits.$toolId'},
-};
