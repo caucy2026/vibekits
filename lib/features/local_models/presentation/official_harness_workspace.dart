@@ -56,6 +56,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _loading = true;
   bool _starting = false;
   bool _webviewReady = false;
+  bool _restartOverlay = false;
   String _status = '正在准备官方 Harness…';
   String _diagnostics = '';
   final Set<String> _sessionApprovedToolIds = <String>{};
@@ -81,7 +82,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     }
   }
 
-  Future<void> _start() async {
+  Future<void> _start({int retries = 0, bool preserveWebview = false}) async {
     if (_starting) return;
     final String preferredWorkspace = widget.initialWorkspace.trim();
     final String workspace =
@@ -93,6 +94,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       _sessionApprovedToolIds.clear();
       _starting = true;
       _loading = true;
+      _restartOverlay = preserveWebview;
       _status = '正在启动官方 DSH Web…';
       _diagnostics = '';
     });
@@ -160,6 +162,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       setState(() {
         _starting = false;
         _loading = false;
+        _restartOverlay = false;
         _status = '官方 Harness 已就绪';
       });
     } on Object catch (error) {
@@ -168,9 +171,20 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       if (session != null && session.running) await session.stop();
       widget.onRunningChanged?.call(false);
       if (!mounted) return;
+      if (retries > 0) {
+        setState(() {
+          _starting = false;
+          _status = '正在重新连接官方 Harness…';
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        if (!mounted) return;
+        await _start(retries: retries - 1, preserveWebview: preserveWebview);
+        return;
+      }
       setState(() {
         _starting = false;
         _loading = false;
+        _restartOverlay = false;
         _status = '启动失败：$error';
       });
     }
@@ -360,6 +374,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     setState(() {
       _starting = true;
       _loading = true;
+      _restartOverlay = true;
       _status = '正在删除会话…';
     });
     try {
@@ -369,12 +384,13 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       widget.onRunningChanged?.call(false);
       await HarnessSessionStore().deleteSession(sessionId);
       _starting = false;
-      await _start();
+      await _start(retries: 1, preserveWebview: true);
     } on Object catch (error) {
       if (!mounted) return;
       setState(() {
         _starting = false;
         _loading = false;
+        _restartOverlay = false;
         _status = '删除会话失败：$error';
       });
     }
@@ -393,6 +409,38 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   @override
   Widget build(BuildContext context) {
+    if (_webviewReady && _restartOverlay) {
+      return Stack(
+        children: <Widget>[
+          Webview(_webview, permissionRequested: _handleWebPermission),
+          const Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: LinearProgressIndicator(minHeight: 2),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 16,
+            child: IgnorePointer(
+              child: Material(
+                elevation: 2,
+                borderRadius: BorderRadius.circular(10),
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Text(_status, textAlign: TextAlign.center),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     if (!_webviewReady || _loading || _session == null) {
       return Center(
         child: SizedBox(
