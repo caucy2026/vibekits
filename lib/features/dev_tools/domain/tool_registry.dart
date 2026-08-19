@@ -91,6 +91,12 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     description: '只读查看仓库根目录、分支、工作区变更、Diff 和最近提交。',
   ),
   const ToolSpec(
+    id: 'file_diff',
+    name: '文件 Diff',
+    group: ToolGroups.file,
+    description: '选择任意两个文本或源码文件，自动识别编码并按行比较、复制或保存差异。',
+  ),
+  const ToolSpec(
     id: 'github_diagnostics',
     name: 'GitHub 网络诊断',
     group: ToolGroups.network,
@@ -340,6 +346,7 @@ const Set<String> _standaloneToolIds = <String>{
   'adb_workspace',
   'api_workspace',
   'git_workspace',
+  'file_diff',
   'github_diagnostics',
   'file_hash',
   'file_search',

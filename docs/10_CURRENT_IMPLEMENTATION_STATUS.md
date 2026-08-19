@@ -4,7 +4,7 @@
 
 更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.36+46`（发布质量门禁与智能清理解释层检查点，非正式发布）
+当前版本：`1.9.0-dev.37+47`（任意文件 Diff、Harness 调用与分模块审计检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -57,8 +57,9 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 - ADB 独立工作区优先调用随 APP 发布的 Platform-Tools：显示解析后的绝对路径和版本，后台运行 `devices -l` 并区分可用、未授权、离线和未知设备。选中设备后可在右侧终端直接输入命令，普通命令自动补 `shell`，也支持 `install`、`push`、`pull`、`logcat` 等顶层操作；设备序列号由界面锁定，禁止命令覆盖目标。执行过程不占用 UI 线程，终端显示真实退出码、耗时、stdout/stderr，可复制和清空。Harness 与手工入口共用 `AdbService`，由真实 `adb.exe` 进程写入证据日志。
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区使用随包分发并经哈希校验的 MinGit，不依赖用户 PATH；展示根目录、分支、状态、暂存/未暂存 Diff 和日志。Harness 可只读对比任意两个版本，也可经权限审批创建不切换当前工作区的本地安全分支。GitHub 诊断同样复用内置 Git。
+- 新增独立“文件 Diff”，可选择或输入任意两个文本/源码文件，自动识别编码，按行显示左右行号、新增/删除/未变统计，支持忽略空白、忽略大小写、只看差异、复制统一 Diff 和保存 `.diff/.patch`。比较在独立 Isolate 中执行；单文件限制 8 MiB/50000 行，超大差异使用有界块算法避免二次方内存。
 - Harness 三档权限已传入官方原生沙箱：请求批准逐次询问；帮我批准由 App 对普通原生请求自动决定；完全访问使用官方 `danger-full-access` 模式。官方 PowerShell/文件工具的授权请求通过随机令牌回环桥回到 App，不再只控制 Vibekits MCP 外壳。
-- Harness 可从保存记录列出并调用 SSH/SFTP 和 PostgreSQL/MySQL/MariaDB；凭据只从 Credential Manager/Keychain 读取，主机严格匹配已确认指纹。文件哈希、重复文件扫描和磁盘占用分析均运行在独立 Isolate，工具返回与失败进入同一可删除审计记录。
+- Harness 可从保存记录列出并调用 SSH/SFTP 和 PostgreSQL/MySQL/MariaDB；凭据只从 Credential Manager/Keychain 读取，主机严格匹配已确认指纹。文件哈希、任意文件 Diff、重复文件扫描和磁盘占用分析均运行在独立 Isolate，工具返回与失败进入同一可删除审计记录。每个工具模块的调用日志默认开启，可在该模块记录面板单独关闭或重新开启；Diff 审计只保存路径和统计，不保存文件正文。
 - SSH、SFTP 与本地端口转发均由随 App 编译的 `dartssh2` 实现；端口转发不再调用系统 `ssh`。远程桌面、文件定位、系统凭据和截图仍调用 Windows/macOS 自带系统能力，这些不是用户另装依赖。
 
 ### 4.5 微工具融合与 DeepSeek 智能体

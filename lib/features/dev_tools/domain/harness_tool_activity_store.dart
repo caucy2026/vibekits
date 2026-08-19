@@ -89,38 +89,111 @@ typedef HarnessToolActivityRecorder = Future<void> Function({
   required DateTime startedAt,
 });
 
+class HarnessToolLoggingPolicy {
+  const HarnessToolLoggingPolicy({
+    this.globalEnabled = true,
+    this.disabledToolIds = const <String>{},
+  });
+
+  final bool globalEnabled;
+  final Set<String> disabledToolIds;
+
+  bool enabledFor(Set<String> toolIds) =>
+      globalEnabled &&
+      (toolIds.isEmpty ||
+          toolIds.every((String toolId) => !disabledToolIds.contains(toolId)));
+
+  HarnessToolLoggingPolicy setEnabled(
+    bool enabled, {
+    Set<String> toolIds = const <String>{},
+  }) {
+    if (toolIds.isEmpty) {
+      return HarnessToolLoggingPolicy(
+        globalEnabled: enabled,
+        disabledToolIds: disabledToolIds,
+      );
+    }
+    final Set<String> disabled = disabledToolIds.toSet();
+    if (enabled) {
+      disabled.removeAll(toolIds);
+    } else {
+      disabled.addAll(
+        toolIds.where((String value) => value.startsWith('vibekits.')),
+      );
+    }
+    return HarnessToolLoggingPolicy(
+      globalEnabled: globalEnabled,
+      disabledToolIds: Set<String>.unmodifiable(disabled),
+    );
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'version': 2,
+    'enabled': globalEnabled,
+    'disabledToolIds': disabledToolIds.toList()..sort(),
+  };
+
+  factory HarnessToolLoggingPolicy.fromJson(Object? decoded) {
+    final bool enabled = decoded is Map && decoded['enabled'] is bool
+        ? decoded['enabled']! as bool
+        : true;
+    final Set<String> disabled =
+        decoded is Map && decoded['disabledToolIds'] is List
+        ? (decoded['disabledToolIds']! as List)
+              .map((Object? value) => '$value')
+              .where((String value) => value.startsWith('vibekits.'))
+              .take(1000)
+              .toSet()
+        : <String>{};
+    return HarnessToolLoggingPolicy(
+      globalEnabled: enabled,
+      disabledToolIds: Set<String>.unmodifiable(disabled),
+    );
+  }
+}
+
 abstract final class HarnessToolActivityStore {
   static const int maxEntries = 500;
   static const int maxFileBytes = 2 * 1024 * 1024;
   static final StreamController<void> _changes =
       StreamController<void>.broadcast();
   static Future<void> _writeTail = Future<void>.value();
-  static bool? _loggingEnabled;
+  static HarnessToolLoggingPolicy? _loggingPolicy;
 
   static Stream<void> get changes => _changes.stream;
 
-  static Future<bool> loadLoggingEnabled() async {
-    if (_loggingEnabled case final bool cached) return cached;
+  static Future<bool> loadLoggingEnabled([
+    Set<String> toolIds = const <String>{},
+  ]) async {
+    await _loadLoggingSettings();
+    return _loggingPolicy!.enabledFor(toolIds);
+  }
+
+  static Future<void> _loadLoggingSettings() async {
+    if (_loggingPolicy != null) return;
     try {
       final File file = _settingsFile();
-      if (!await file.exists()) return _loggingEnabled = true;
+      if (!await file.exists()) {
+        _loggingPolicy = const HarnessToolLoggingPolicy();
+        return;
+      }
       final Object? decoded = jsonDecode(await file.readAsString());
-      return _loggingEnabled = decoded is Map && decoded['enabled'] is bool
-          ? decoded['enabled']! as bool
-          : true;
+      _loggingPolicy = HarnessToolLoggingPolicy.fromJson(decoded);
     } on Object {
-      return _loggingEnabled = true;
+      _loggingPolicy = const HarnessToolLoggingPolicy();
     }
   }
 
-  static Future<void> setLoggingEnabled(bool enabled) async {
-    _loggingEnabled = enabled;
+  static Future<void> setLoggingEnabled(
+    bool enabled, {
+    Set<String> toolIds = const <String>{},
+  }) async {
+    await _loadLoggingSettings();
+    _loggingPolicy = _loggingPolicy!.setEnabled(enabled, toolIds: toolIds);
     final File file = _settingsFile();
     await file.parent.create(recursive: true);
     final File temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(
-      jsonEncode(<String, bool>{'enabled': enabled}),
-    );
+    await temporary.writeAsString(jsonEncode(_loggingPolicy!.toJson()));
     if (await file.exists()) await file.delete();
     await temporary.rename(file.path);
     if (!_changes.isClosed) _changes.add(null);
@@ -145,7 +218,7 @@ abstract final class HarnessToolActivityStore {
     required HarnessToolActivityStatus status,
     required DateTime startedAt,
   }) async {
-    if (!await loadLoggingEnabled()) return;
+    if (!await loadLoggingEnabled(<String>{toolId})) return;
     return _enqueue(() async {
       final List<HarnessToolActivity> entries = await _readAll();
       entries.insert(

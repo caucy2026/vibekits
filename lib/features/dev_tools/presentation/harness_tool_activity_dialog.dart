@@ -11,7 +11,9 @@ Future<void> showHarnessToolActivityDialog(
   List<HarnessToolActivity> entries = await HarnessToolActivityStore.load(
     toolIds,
   );
-  bool loggingEnabled = await HarnessToolActivityStore.loadLoggingEnabled();
+  bool loggingEnabled = await HarnessToolActivityStore.loadLoggingEnabled(
+    toolIds,
+  );
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
@@ -40,16 +42,19 @@ Future<void> showHarnessToolActivityDialog(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   title: const Text(
-                    '记录 Harness 工具调用',
+                    '记录当前工具的 Harness 调用',
                     style: TextStyle(fontSize: 13),
                   ),
                   subtitle: const Text(
-                    '默认开启；关闭后不再写入新记录，已有记录保留',
+                    '默认开启；只关闭当前模块，不影响其他工具，已有记录保留',
                     style: TextStyle(fontSize: 11.5),
                   ),
                   value: loggingEnabled,
                   onChanged: (bool value) async {
-                    await HarnessToolActivityStore.setLoggingEnabled(value);
+                    await HarnessToolActivityStore.setLoggingEnabled(
+                      value,
+                      toolIds: toolIds,
+                    );
                     if (dialogContext.mounted) {
                       setDialogState(() => loggingEnabled = value);
                     }

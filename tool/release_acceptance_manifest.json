@@ -59,6 +59,13 @@
       "evidence": ["docs/acceptance/M2_2026-08-15.md"]
     },
     {
+      "id": "file-diff-harness-audit",
+      "name": "任意两个文件比较、统一 Diff、Harness 调用与分模块审计开关",
+      "risk": "read-only",
+      "tests": ["test/file_diff_service_test.dart", "test/file_diff_widget_test.dart", "test/harness_tool_activity_store_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV37_FILE_DIFF_LOGGING_2026-08-19.md"]
+    },
+    {
       "id": "developer-tools-harness-parity",
       "name": "开发工具界面入口与 Harness 可执行适配器保持一致",
       "risk": "mixed",

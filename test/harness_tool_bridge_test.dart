@@ -55,6 +55,7 @@ void main() {
       VibekitsHarnessToolBridge.remoteDatabaseInspectId,
       VibekitsHarnessToolBridge.remoteDatabaseQueryId,
       VibekitsHarnessToolBridge.duplicateScanId,
+      VibekitsHarnessToolBridge.fileDiffId,
       VibekitsHarnessToolBridge.systemDriveAnalyzeId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
@@ -89,6 +90,7 @@ void main() {
         VibekitsHarnessToolBridge.githubDiagnosticsId,
       },
       'file_hash': <String>{'vibekits.file_hash'},
+      'file_diff': <String>{VibekitsHarnessToolBridge.fileDiffId},
       'file_search': <String>{VibekitsHarnessToolBridge.fileSearchId},
       'batch_rename': <String>{'vibekits.batch_rename'},
       'duplicate_files': <String>{VibekitsHarnessToolBridge.duplicateScanId},
@@ -624,6 +626,57 @@ void main() {
       <String>['1'],
     ]);
     expect(approvals, 2);
+  });
+
+  test('Harness 比较两个真实文件且审计日志不记录文件正文', () async {
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vibekits_harness_diff_',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final File left = await File(
+      '${sandbox.path}${Platform.pathSeparator}before.txt',
+    ).writeAsString('private-left-line\nshared\n');
+    final File right = await File(
+      '${sandbox.path}${Platform.pathSeparator}after.txt',
+    ).writeAsString('private-right-line\nshared\n');
+    Object? auditResult;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      activityRecorder:
+          ({
+            required String toolId,
+            required String toolName,
+            required String target,
+            required Map<String, Object?> arguments,
+            required Object? result,
+            required HarnessToolActivityStatus status,
+            required DateTime startedAt,
+          }) async {
+            expect(toolId, VibekitsHarnessToolBridge.fileDiffId);
+            auditResult = result;
+          },
+    );
+    int approvals = 0;
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.fileDiffId,
+      arguments: <String, Object?>{
+        'leftPath': left.path,
+        'rightPath': right.path,
+      },
+      approve: (HarnessToolApprovalRequest request) async {
+        approvals += 1;
+        return true;
+      },
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['addedLines'], 1);
+    expect(result.data?['removedLines'], 1);
+    expect(result.data?['unifiedDiff'], contains('+private-right-line'));
+    expect(approvals, 0);
+    expect(auditResult.toString(), contains('addedLines: 1'));
+    expect(auditResult.toString(), isNot(contains('private-left-line')));
+    expect(auditResult.toString(), isNot(contains('private-right-line')));
   });
 
   test('Harness 在后台线程完成文件哈希和重复文件扫描', () async {

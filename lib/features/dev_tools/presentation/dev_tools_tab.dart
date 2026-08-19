@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
 import '../domain/remote_session.dart';
+import '../domain/file_diff_service.dart';
 import 'batch_rename_workspace.dart';
 import 'adb_workspace.dart';
 import 'api_workspace.dart';
 import 'database_workspace.dart';
 import 'duplicate_files_workspace.dart';
 import 'file_hash_workspace.dart';
+import 'file_diff_workspace.dart';
 import 'file_search_workspace.dart';
 import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
@@ -27,6 +29,8 @@ class DevToolsTab extends StatefulWidget {
     super.key,
     this.fileHashPickFiles,
     this.fileHashCalculator,
+    this.fileDiffPicker,
+    this.fileDiffComparer,
     this.fileSearchDirectoryPicker,
     this.fileSearchRunner,
     this.fileSearchReveal,
@@ -59,6 +63,8 @@ class DevToolsTab extends StatefulWidget {
 
   final FileHashPicker? fileHashPickFiles;
   final FileHashCalculator? fileHashCalculator;
+  final FileDiffPicker? fileDiffPicker;
+  final FileDiffComparer? fileDiffComparer;
   final FileSearchDirectoryPicker? fileSearchDirectoryPicker;
   final FileSearchRunner? fileSearchRunner;
   final FileSearchReveal? fileSearchReveal;
@@ -350,6 +356,12 @@ class _DevToolsTabState extends State<DevToolsTab> {
         initialPaths: _hashInitialPaths,
       );
     }
+    if (tool.id == 'file_diff') {
+      return FileDiffWorkspace(
+        pickFile: widget.fileDiffPicker,
+        compare: widget.fileDiffComparer ?? FileDiffService.compare,
+      );
+    }
     return const Center(child: Text('该工具暂不可用'));
   }
 }
@@ -375,6 +387,7 @@ Set<String> _harnessToolIds(String toolId) => switch (toolId) {
     'vibekits.git.compare_refs',
     'vibekits.git.create_local_branch',
   },
+  'file_diff' => <String>{'vibekits.file_diff'},
   'github_diagnostics' => <String>{'vibekits.github.diagnose'},
   'file_search' => <String>{'vibekits.files.search'},
   _ => <String>{'vibekits.$toolId'},

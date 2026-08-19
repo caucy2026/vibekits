@@ -13,6 +13,7 @@ import 'duplicate_file_background_runner.dart';
 import 'duplicate_file_scanner.dart';
 import 'file_hash_background_runner.dart';
 import 'file_hash_service.dart';
+import 'file_diff_service.dart';
 import 'file_search_service.dart';
 import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
@@ -217,6 +218,7 @@ class VibekitsHarnessToolBridge {
       'vibekits.database.remote_inspect';
   static const String remoteDatabaseQueryId = 'vibekits.database.remote_query';
   static const String duplicateScanId = 'vibekits.files.duplicate_scan';
+  static const String fileDiffId = 'vibekits.file_diff';
   static const String systemDriveAnalyzeId = 'vibekits.cleaner.analyze_drive';
   static const String screenshotOcrId = 'vibekits.ocr.capture_screen';
 
@@ -541,6 +543,18 @@ class VibekitsHarnessToolBridge {
           },
           required: <String>['root'],
         ),
+        fileDiffId: _definition(
+          id: fileDiffId,
+          name: '比较两个文件',
+          description: '在独立后台线程读取两个有界文本或源码文件，自动识别编码并返回行级差异；不修改文件。',
+          properties: <String, Object?>{
+            'leftPath': _string('左侧原文件路径'),
+            'rightPath': _string('右侧新文件路径'),
+            'ignoreWhitespace': <String, Object?>{'type': 'boolean'},
+            'ignoreCase': <String, Object?>{'type': 'boolean'},
+          },
+          required: <String>['leftPath', 'rightPath'],
+        ),
         systemDriveAnalyzeId: _definition(
           id: systemDriveAnalyzeId,
           name: '分析磁盘占用',
@@ -640,7 +654,7 @@ class VibekitsHarnessToolBridge {
           toolName: definition.name,
           target: target,
           arguments: arguments,
-          result: data,
+          result: _activityResult(toolId, data),
           status: HarnessToolActivityStatus.succeeded,
           startedAt: startedAt,
         );
@@ -749,6 +763,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == remoteDatabaseInspectId) return _inspectRemoteDatabase;
     if (toolId == remoteDatabaseQueryId) return _queryRemoteDatabase;
     if (toolId == duplicateScanId) return _scanDuplicateFiles;
+    if (toolId == fileDiffId) return _diffFiles;
     if (toolId == systemDriveAnalyzeId) return _analyzeSystemDrive;
     if (toolId == screenshotOcrId) return _captureScreenAndOcr;
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
@@ -1577,6 +1592,23 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _diffFiles(
+    Map<String, Object?> arguments,
+  ) async {
+    final FileDiffResult result = await FileDiffService.compare(
+      leftPath: (arguments['leftPath'] ?? '').toString(),
+      rightPath: (arguments['rightPath'] ?? '').toString(),
+      ignoreWhitespace: arguments['ignoreWhitespace'] == true,
+      ignoreCase: arguments['ignoreCase'] == true,
+    );
+    final Map<String, Object?> data = result.toJson();
+    final String unified = result.unifiedText;
+    data['unifiedDiff'] = unified.length <= 200000
+        ? unified
+        : '${unified.substring(0, 200000)}\n…差异输出已截断';
+    return data;
+  }
+
   Future<Map<String, Object?>> _captureScreenAndOcr(
     Map<String, Object?> arguments,
   ) async {
@@ -1616,6 +1648,19 @@ class VibekitsHarnessToolBridge {
   static List<String> _stringList(Object? value) => value is List
       ? value.map((Object? item) => '$item').toList(growable: false)
       : const <String>[];
+
+  static Object? _activityResult(String toolId, Map<String, Object?> result) {
+    if (toolId != fileDiffId) return result;
+    return <String, Object?>{
+      'leftPath': result['leftPath'],
+      'rightPath': result['rightPath'],
+      'identical': result['identical'],
+      'addedLines': result['addedLines'],
+      'removedLines': result['removedLines'],
+      'unchangedLines': result['unchangedLines'],
+      'truncated': result['truncated'],
+    };
+  }
 
   static Map<String, Object?> _string(String description) => <String, Object?>{
     'type': 'string',
@@ -1664,6 +1709,10 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == duplicateScanId || toolId == systemDriveAnalyzeId) {
       return (arguments['root'] ?? '').toString();
+    }
+    if (toolId == fileDiffId) {
+      return '${arguments['leftPath'] ?? ''} ↔ '
+          '${arguments['rightPath'] ?? ''}';
     }
     if (toolId == remoteSshExecId ||
         toolId == remoteSftpListId ||
