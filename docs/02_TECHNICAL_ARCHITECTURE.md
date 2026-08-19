@@ -152,6 +152,13 @@ void vk_string_free(char* value);
 - 模型会话在后台线程创建；释放时等待当前推理结束或取消后销毁。
 - 输入文件和输出默认保留在用户选择位置，不写入遥测。
 
+### 6.6 开发对象、Harness 状态与远程分享
+
+- `DevelopmentObjectRouter` 统一识别源码、日志、压缩包、数据库、Git 仓库、ADB 设备、串口、SSH、API、截图和清理报告，每类默认只返回最多三个高价值下一步。
+- `vibekits.next_action_recommendation` 由 `ToolSpec` 自动进入 Harness 及模块审计，不新增左侧工具孤岛。
+- `HarnessWorkStatusHub` 投影有界脱敏快照；工具桥在审批前、执行中和完成后更新状态。
+- `RustDeskHarnessShareService` 只调用官方 RustDesk 客户端，自动发现可执行文件、读取 ID 并打开 Web Client。它不实现 RustDesk 密码学，不直接处理远程密码，不将 `hbbr` 曲解为通用数据通道。
+
 ## 7. 数据和目录
 
 | 数据 | 默认位置 |

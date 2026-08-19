@@ -61,6 +61,8 @@ class LocalModelsTab extends StatefulWidget {
     super.key,
     this.directory = '',
     this.toolDownloadDirectory = '',
+    this.rustDeskExecutable = '',
+    this.rustDeskWebClientUrl = '',
     this.initialImportPath,
     this.initialImagePath,
     this.ocrRunner = runPpOcr,
@@ -86,6 +88,8 @@ class LocalModelsTab extends StatefulWidget {
 
   final String directory;
   final String toolDownloadDirectory;
+  final String rustDeskExecutable;
+  final String rustDeskWebClientUrl;
   final String? initialImportPath;
   final String? initialImagePath;
   final Future<PpOcrResult> Function(PpOcrRequest request) ocrRunner;
@@ -797,6 +801,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                     screenshotOcrRunner: _captureScreenshotForHarness,
                     externalPrompt: widget.externalHarnessPrompt,
                     externalPromptSerial: widget.externalHarnessPromptSerial,
+                    rustDeskExecutable: widget.rustDeskExecutable,
+                    rustDeskWebClientUrl: widget.rustDeskWebClientUrl,
                   )
                 else
                   DeepSeekAgentWorkspace(

@@ -18,6 +18,7 @@ import 'file_search_service.dart';
 import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
 import 'harness_tool_activity_store.dart';
+import 'harness_work_status.dart';
 import 'programmer_calculator.dart';
 import 'platform_credential_store.dart';
 import 'remote_connection_record.dart';
@@ -626,6 +627,13 @@ class VibekitsHarnessToolBridge {
     }
     final String target = _targetSummary(toolId, arguments);
     if (definition.risk != HarnessToolRisk.readOnly) {
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.waitingApproval,
+        message: '等待批准 ${definition.name}',
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+      );
       final bool allowed = await approve(
         HarnessToolApprovalRequest(
           tool: definition,
@@ -643,9 +651,23 @@ class VibekitsHarnessToolBridge {
           status: HarnessToolActivityStatus.denied,
           startedAt: startedAt,
         );
+        HarnessWorkStatusHub.publish(
+          phase: HarnessWorkPhase.ready,
+          message: '已拒绝 ${definition.name}',
+          toolId: toolId,
+          toolName: definition.name,
+          target: target,
+        );
         return const HarnessToolCallResult.cancelled();
       }
     }
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.runningTool,
+      message: '正在执行 ${definition.name}',
+      toolId: toolId,
+      toolName: definition.name,
+      target: target,
+    );
     try {
       final Map<String, Object?> data = await handler(arguments);
       if (!_adbExecutionIsAuditedByService(toolId)) {
@@ -659,6 +681,13 @@ class VibekitsHarnessToolBridge {
           startedAt: startedAt,
         );
       }
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.ready,
+        message: '${definition.name} 执行成功',
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+      );
       return HarnessToolCallResult.success(data);
     } on Object catch (error) {
       if (!_adbExecutionIsAuditedByService(toolId)) {
@@ -672,6 +701,13 @@ class VibekitsHarnessToolBridge {
           startedAt: startedAt,
         );
       }
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.failed,
+        message: '${definition.name} 执行失败',
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+      );
       return HarnessToolCallResult.failure('$error');
     }
   }

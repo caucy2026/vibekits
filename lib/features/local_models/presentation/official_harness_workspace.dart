@@ -9,7 +9,9 @@ import 'package:webview_windows/webview_windows.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
+import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
+import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
 
 typedef OfficialHarnessCredentialReader = Future<String?> Function(String key);
 typedef OfficialHarnessCredentialDeleter = Future<void> Function(String key);
@@ -36,6 +38,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     this.externalPromptSerial = 0,
     this.startWeb = DeepSeekHarnessService.startWebAgent,
     this.findPort = DeepSeekHarnessService.findFreeLoopbackPort,
+    this.rustDeskExecutable = '',
+    this.rustDeskWebClientUrl = '',
   });
 
   final String initialWorkspace;
@@ -49,6 +53,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
   final int externalPromptSerial;
   final OfficialHarnessWebStarter startWeb;
   final Future<int> Function() findPort;
+  final String rustDeskExecutable;
+  final String rustDeskWebClientUrl;
 
   @override
   State<OfficialHarnessWorkspace> createState() =>
@@ -117,6 +123,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       _status = '正在启动官方 DSH Web…';
       _diagnostics = '';
     });
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.starting,
+      message: '正在启动本地 Harness',
+      target: workspace,
+    );
     try {
       final String key =
           await (widget.credentialReader ?? PlatformCredentialStore.read)(
@@ -176,6 +187,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             _loading = false;
             _status = '官方 Harness 已退出（代码 $code）';
           });
+          HarnessWorkStatusHub.publish(
+            phase: HarnessWorkPhase.stopped,
+            message: 'Harness 已退出（代码 $code）',
+          );
         }),
       );
       await _waitUntilReady(session.url);
@@ -198,6 +213,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         _restartOverlay = false;
         _status = '官方 Harness 已就绪';
       });
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.ready,
+        message: 'Harness 已就绪',
+        target: workspace,
+      );
     } on Object catch (error) {
       final HarnessSessionHandle? session = _session;
       _session = null;
@@ -224,6 +244,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         _restartOverlay = false;
         _status = '启动失败：$error';
       });
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.failed,
+        message: 'Harness 启动失败',
+      );
     }
   }
 
@@ -507,6 +531,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
     widget.onRunningChanged?.call(false);
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.stopped,
+      message: 'Harness 工作区已关闭',
+    );
     _webview.dispose();
     super.dispose();
   }
@@ -599,9 +627,218 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       bindings: <ShortcutActivator, VoidCallback>{
         paste: () => unawaited(_pasteIntoFocusedWebField()),
       },
-      child: Webview(_webview, permissionRequested: _handleWebPermission),
+      child: Stack(
+        children: <Widget>[
+          Webview(_webview, permissionRequested: _handleWebPermission),
+          Positioned(
+            right: 12,
+            top: 10,
+            child: StreamBuilder<HarnessWorkSnapshot>(
+              stream: HarnessWorkStatusHub.changes,
+              initialData: HarnessWorkStatusHub.latest,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<HarnessWorkSnapshot> snapshot,
+                  ) {
+                    final HarnessWorkSnapshot status =
+                        snapshot.data ?? HarnessWorkStatusHub.latest;
+                    return Material(
+                      color: Theme.of(context).colorScheme.surface
+                          .withValues(alpha: 0.94),
+                      elevation: 2,
+                      borderRadius: BorderRadius.circular(20),
+                      child: InkWell(
+                        key: const Key('harness-remote-share'),
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _showRemoteShare,
+                        child: Tooltip(
+                          message: status.busy
+                              ? status.message
+                              : 'Harness 远程分享',
+                          child: SizedBox(
+                            width: 36,
+                            height: 36,
+                            child: Icon(
+                              status.busy
+                                  ? Icons.sync_rounded
+                                  : Icons.screen_share_outlined,
+                              size: 17,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+            ),
+          ),
+        ],
+      ),
     );
   }
+
+  Future<void> _showRemoteShare() => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => _HarnessRemoteShareDialog(
+      configuredExecutable: widget.rustDeskExecutable,
+      webClientUrl: widget.rustDeskWebClientUrl,
+    ),
+  );
+}
+
+class _HarnessRemoteShareDialog extends StatefulWidget {
+  const _HarnessRemoteShareDialog({
+    required this.configuredExecutable,
+    required this.webClientUrl,
+  });
+
+  final String configuredExecutable;
+  final String webClientUrl;
+
+  @override
+  State<_HarnessRemoteShareDialog> createState() =>
+      _HarnessRemoteShareDialogState();
+}
+
+class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
+  late final Future<RustDeskHostInfo> _host =
+      RustDeskHarnessShareService.inspect(
+        configuredExecutable: widget.configuredExecutable,
+      );
+  String _message = '';
+  String _resolvedWebClientUrl = '';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_resolveWebClientUrl());
+  }
+
+  Future<void> _resolveWebClientUrl() async {
+    final String configured = widget.webClientUrl.trim();
+    final String resolved = configured.isNotEmpty
+        ? configured
+        : await RustDeskHarnessShareService.discoverWebClientUrl();
+    if (mounted) setState(() => _resolvedWebClientUrl = resolved);
+  }
+
+  Future<void> _launchHost(RustDeskHostInfo host) async {
+    try {
+      await RustDeskHarnessShareService.launchHost(host.executable);
+      if (mounted) setState(() => _message = 'RustDesk 已启动');
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '启动失败：$error');
+    }
+  }
+
+  Future<void> _openWeb() async {
+    try {
+      await RustDeskHarnessShareService.openWebClient(_resolvedWebClientUrl);
+      if (mounted) setState(() => _message = '已打开 RustDesk 网页端');
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '打开失败：$error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Harness 远程分享'),
+    content: SizedBox(
+      width: 520,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          StreamBuilder<HarnessWorkSnapshot>(
+            stream: HarnessWorkStatusHub.changes,
+            initialData: HarnessWorkStatusHub.latest,
+            builder:
+                (
+                  BuildContext context,
+                  AsyncSnapshot<HarnessWorkSnapshot> snapshot,
+                ) {
+                  final HarnessWorkSnapshot status =
+                      snapshot.data ?? HarnessWorkStatusHub.latest;
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      status.busy ? Icons.sync_rounded : Icons.task_alt_rounded,
+                    ),
+                    title: Text(status.message),
+                    subtitle: Text(
+                      status.target.isEmpty ? '只分享阶段、工具名和脱敏目标' : status.target,
+                    ),
+                  );
+                },
+          ),
+          const Divider(),
+          FutureBuilder<RustDeskHostInfo>(
+            future: _host,
+            builder:
+                (
+                  BuildContext context,
+                  AsyncSnapshot<RustDeskHostInfo> snapshot,
+                ) {
+                  if (!snapshot.hasData) {
+                    return const LinearProgressIndicator();
+                  }
+                  final RustDeskHostInfo host = snapshot.data!;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      SelectableText(host.message),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: <Widget>[
+                          FilledButton.icon(
+                            onPressed: host.available
+                                ? () => _launchHost(host)
+                                : null,
+                            icon: const Icon(Icons.desktop_windows_outlined),
+                            label: const Text('启动 RustDesk'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _resolvedWebClientUrl.isEmpty
+                                ? null
+                                : _openWeb,
+                            icon: const Icon(Icons.open_in_browser_outlined),
+                            label: const Text('打开网页端'),
+                          ),
+                        ],
+                      ),
+                      if (_resolvedWebClientUrl.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          '网页端：$_resolvedWebClientUrl',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'RustDesk 网页端通过 hbbs/hbbr 查看并操作本机 Vibekits。'
+            'hbbr 不是通用 JSON 中继，因此不会把 API Key、提示词或文件正文发送给它。',
+            style: TextStyle(fontSize: 12),
+          ),
+          if (_message.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(_message),
+          ],
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('关闭'),
+      ),
+    ],
+  );
 }
 
 enum _ToolApprovalDecision { deny, allowOnce, allowSession }

@@ -36,6 +36,8 @@ void main() {
       serialPortSettings: '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
       deepSeekHarnessWorkspace: r'D:\Work\demo',
       deepSeekHarnessDebugDirectory: r'D:\Vibekits\tmp',
+      rustDeskExecutable: r'C:\Program Files\RustDesk\RustDesk.exe',
+      rustDeskWebClientUrl: 'https://remote.example.com/web',
     );
 
     await store.save(expected);

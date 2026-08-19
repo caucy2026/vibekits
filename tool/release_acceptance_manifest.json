@@ -3,6 +3,20 @@
   "policy": "A feature is releasable only when its user workflow, automated coverage and any required real-environment evidence are all named here.",
   "workflows": [
     {
+      "id": "harness-rustdesk-remote-share",
+      "name": "Harness 脱敏工作状态、RustDesk 主机发现、网页端查看和远程交互",
+      "risk": "remote-control",
+      "tests": ["test/harness_work_status_test.dart", "test/rustdesk_harness_share_service_test.dart", "test/app_settings_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV40_RUSTDESK_WORK_STATUS_2026-08-20.md"]
+    },
+    {
+      "id": "development-object-next-action",
+      "name": "统一开发对象识别、三项下一步建议与 Harness 自动发现",
+      "risk": "read-only",
+      "tests": ["test/development_object_router_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV40_RUSTDESK_WORK_STATUS_2026-08-20.md"]
+    },
+    {
       "id": "structured-query-code-search-benchmark",
       "name": "多格式结构化查询、代码声明搜索、ignore 搜索与安全性能基准",
       "risk": "read-only",

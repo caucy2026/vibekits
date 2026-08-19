@@ -30,6 +30,8 @@ class AppSettings {
     this.serialPortSettings = '',
     this.deepSeekHarnessWorkspace = '',
     this.deepSeekHarnessDebugDirectory = '',
+    this.rustDeskExecutable = '',
+    this.rustDeskWebClientUrl = '',
   });
 
   final ThemeMode themeMode;
@@ -54,6 +56,8 @@ class AppSettings {
   final String serialPortSettings;
   final String deepSeekHarnessWorkspace;
   final String deepSeekHarnessDebugDirectory;
+  final String rustDeskExecutable;
+  final String rustDeskWebClientUrl;
 
   AppSettings copyWith({
     ThemeMode? themeMode,
@@ -78,6 +82,8 @@ class AppSettings {
     String? serialPortSettings,
     String? deepSeekHarnessWorkspace,
     String? deepSeekHarnessDebugDirectory,
+    String? rustDeskExecutable,
+    String? rustDeskWebClientUrl,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
@@ -106,6 +112,8 @@ class AppSettings {
         deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
     deepSeekHarnessDebugDirectory:
         deepSeekHarnessDebugDirectory ?? this.deepSeekHarnessDebugDirectory,
+    rustDeskExecutable: rustDeskExecutable ?? this.rustDeskExecutable,
+    rustDeskWebClientUrl: rustDeskWebClientUrl ?? this.rustDeskWebClientUrl,
   );
 
   Map<String, Object> toJson() => <String, Object>{
@@ -131,6 +139,8 @@ class AppSettings {
     'serialPortSettings': serialPortSettings,
     'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
     'deepSeekHarnessDebugDirectory': deepSeekHarnessDebugDirectory,
+    'rustDeskExecutable': rustDeskExecutable,
+    'rustDeskWebClientUrl': rustDeskWebClientUrl,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -281,6 +291,18 @@ class AppSettings {
                 '\u0000',
               )
           ? json['deepSeekHarnessDebugDirectory']! as String
+          : '',
+      rustDeskExecutable:
+          json['rustDeskExecutable'] is String &&
+              (json['rustDeskExecutable']! as String).length <= 32768 &&
+              !(json['rustDeskExecutable']! as String).contains('\u0000')
+          ? json['rustDeskExecutable']! as String
+          : '',
+      rustDeskWebClientUrl:
+          json['rustDeskWebClientUrl'] is String &&
+              (json['rustDeskWebClientUrl']! as String).length <= 2048 &&
+              !(json['rustDeskWebClientUrl']! as String).contains('\u0000')
+          ? json['rustDeskWebClientUrl']! as String
           : '',
     );
   }

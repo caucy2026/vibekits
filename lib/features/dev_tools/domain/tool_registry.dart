@@ -1,4 +1,5 @@
 import 'crypto_tools.dart';
+import 'development_object_router.dart';
 import 'code_statistics_service.dart';
 import 'code_structure_search_service.dart';
 import 'encoding_tools.dart';
@@ -146,6 +147,17 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     description: '只读检查 GitHub 的 DNS、TLS、HTTPS、代理、hosts 与 SSH 端口。',
     offline: false,
     harnessToolIds: <String>['vibekits.github.diagnose'],
+  ),
+  ToolSpec(
+    id: 'next_action_recommendation',
+    name: '下一步建议',
+    group: ToolGroups.ai,
+    description: '识别文件、设备、连接或报告，返回最有价值的下一步工具动作。',
+    paramLabel: '可选对象类型',
+    aiUseWhen: '当用户给出一个对象但没有指定操作，或当前工具已产生结果时。',
+    aiAvoidWhen: '用户已明确指定工具和操作时不要增加额外步骤。',
+    aiExamples: <String>['为 adb://192.168.3.63:5555 推荐下一步'],
+    run: DevelopmentObjectRouter.recommend,
   ),
   ToolSpec(
     id: 'base64_encode',

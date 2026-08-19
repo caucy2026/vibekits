@@ -55,6 +55,11 @@ $commands.Add([pscustomobject]@{
   executable = $flutter
   arguments = @('test', 'test\format_tools_test.dart', 'test\code_structure_search_service_test.dart', 'test\file_search_service_test.dart', 'test\micro_benchmark_service_test.dart')
 })
+$commands.Add([pscustomobject]@{
+  name = 'remote work status and next actions'
+  executable = $flutter
+  arguments = @('test', 'test\harness_work_status_test.dart', 'test\rustdesk_harness_share_service_test.dart', 'test\development_object_router_test.dart', 'test\app_settings_test.dart')
+})
 if ($Tier -eq 'release') {
   $commands.Add([pscustomobject]@{
     name = 'Flutter analyze'

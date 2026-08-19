@@ -373,6 +373,8 @@ class _MainShellState extends State<MainShell> {
         ),
         directory: settings.modelDirectory,
         toolDownloadDirectory: settings.toolDownloadDirectory,
+        rustDeskExecutable: settings.rustDeskExecutable,
+        rustDeskWebClientUrl: settings.rustDeskWebClientUrl,
         initialImportPath:
             _modelDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
@@ -1005,6 +1007,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       TextEditingController(text: _value.deepSeekHarnessDebugDirectory);
   late final TextEditingController _toolDownloadDirectory =
       TextEditingController(text: _value.toolDownloadDirectory);
+  late final TextEditingController _rustDeskExecutable = TextEditingController(
+    text: _value.rustDeskExecutable,
+  );
+  late final TextEditingController _rustDeskWebClientUrl =
+      TextEditingController(text: _value.rustDeskWebClientUrl);
 
   String get _defaultDebugDirectory =>
       '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp';
@@ -1029,11 +1036,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     }
   }
 
+  Future<void> _pickRustDeskExecutable() async {
+    final XFile? selected = await openFile(
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(label: 'RustDesk 客户端', extensions: <String>['exe']),
+      ],
+    );
+    if (selected != null && mounted) {
+      setState(() => _rustDeskExecutable.text = selected.path);
+    }
+  }
+
   @override
   void dispose() {
     _modelDirectory.dispose();
     _harnessDebugDirectory.dispose();
     _toolDownloadDirectory.dispose();
+    _rustDeskExecutable.dispose();
+    _rustDeskWebClientUrl.dispose();
     super.dispose();
   }
 
@@ -1138,6 +1158,30 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ),
               const SizedBox(height: 12),
+              TextField(
+                key: const Key('rustdesk-executable'),
+                controller: _rustDeskExecutable,
+                decoration: InputDecoration(
+                  labelText: 'RustDesk 客户端路径',
+                  helperText: '留空时自动查找已安装的 RustDesk',
+                  suffixIcon: IconButton(
+                    tooltip: '选择 RustDesk.exe',
+                    onPressed: _pickRustDeskExecutable,
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('rustdesk-web-client-url'),
+                controller: _rustDeskWebClientUrl,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'RustDesk 网页端地址',
+                  helperText: '留空自动从 RustDesk 推导 /web；不保存远程控制密码',
+                ),
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1191,6 +1235,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 deepSeekHarnessDebugDirectory: _harnessDebugDirectory.text
                     .trim(),
                 toolDownloadDirectory: _toolDownloadDirectory.text.trim(),
+                rustDeskExecutable: _rustDeskExecutable.text.trim(),
+                rustDeskWebClientUrl: _rustDeskWebClientUrl.text.trim(),
               ),
             );
             if (mounted) navigator.pop();
