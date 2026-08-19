@@ -46,11 +46,20 @@ String defaultModelDirectory() {
   return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Models';
 }
 
+String defaultToolDownloadDirectory() {
+  final String base =
+      Platform.environment['LOCALAPPDATA'] ??
+      Platform.environment['APPDATA'] ??
+      Directory.current.path;
+  return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}downloads';
+}
+
 /// Harness 智能体工作台：开发智能体为主入口，OCR 为辅助能力。
 class LocalModelsTab extends StatefulWidget {
   const LocalModelsTab({
     super.key,
     this.directory = '',
+    this.toolDownloadDirectory = '',
     this.initialImportPath,
     this.initialImagePath,
     this.ocrRunner = runPpOcr,
@@ -72,6 +81,7 @@ class LocalModelsTab extends StatefulWidget {
   });
 
   final String directory;
+  final String toolDownloadDirectory;
   final String? initialImportPath;
   final String? initialImagePath;
   final Future<PpOcrResult> Function(PpOcrRequest request) ocrRunner;
@@ -104,11 +114,17 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   late final String _directory = widget.directory.trim().isEmpty
       ? defaultModelDirectory()
       : widget.directory.trim();
+  late final String _downloadDirectory =
+      widget.toolDownloadDirectory.trim().isEmpty
+      ? defaultToolDownloadDirectory()
+      : widget.toolDownloadDirectory.trim();
   late String _harnessDebugDirectory =
       widget.initialHarnessDebugDirectory.trim().isEmpty
       ? DeepSeekHarnessService.defaultDebugDirectory()
       : widget.initialHarnessDebugDirectory.trim();
   List<ModelInfo> _models = const <ModelInfo>[];
+  bool _modelsLoaded = false;
+  bool _modelsLoading = false;
   String _message = '';
   String? _wavPath;
   VadInferenceResult? _vadResult;
@@ -141,7 +157,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         : _ModelWorkspace.agent;
     _agentOpened = _workspace == _ModelWorkspace.agent;
     unawaited(_initializeHarnessDebugDirectory());
-    _refresh();
+    if (_workspace == _ModelWorkspace.ocr) unawaited(_refresh());
     final String? path = widget.initialImportPath;
     if (path != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _importPath(path));
@@ -162,17 +178,26 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
   }
 
   Future<void> _refresh() async {
-    final List<ModelInfo> models = await widget.modelLister(_directory);
-    if (!mounted) return;
-    setState(() => _models = models);
-    if (_imagePath != null && !_autoOcrStarted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!_ocrBundleInstalled) await _downloadOcrBundle();
-        if (mounted && _ocrBundleInstalled && !_autoOcrStarted) {
-          _autoOcrStarted = true;
-          await _runOcr();
-        }
+    if (_modelsLoading) return;
+    _modelsLoading = true;
+    try {
+      final List<ModelInfo> models = await widget.modelLister(_directory);
+      if (!mounted) return;
+      setState(() {
+        _models = models;
+        _modelsLoaded = true;
       });
+      if (_imagePath != null && !_autoOcrStarted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!_ocrBundleInstalled) await _downloadOcrBundle();
+          if (mounted && _ocrBundleInstalled && !_autoOcrStarted) {
+            _autoOcrStarted = true;
+            await _runOcr();
+          }
+        });
+      }
+    } finally {
+      _modelsLoading = false;
     }
   }
 
@@ -203,11 +228,13 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
 
   Future<void> _download(CuratedModel model) async {
     if (_downloadingId != null) return;
-    final Directory temp = Directory.systemTemp.createTempSync(
-      'vibekits_model',
-    );
+    final bool retainDownload = model.bundleAssetPath == null;
+    final Directory staging = retainDownload
+        ? Directory(_downloadDirectory)
+        : Directory.systemTemp.createTempSync('vibekits_model');
+    await staging.create(recursive: true);
     final File downloaded = File(
-      '${temp.path}${Platform.pathSeparator}${model.fileName}',
+      '${staging.path}${Platform.pathSeparator}${model.fileName}.part',
     );
     HttpClient? client;
     setState(() {
@@ -257,8 +284,16 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       if (digest != model.sha256) {
         throw const FormatException('模型 SHA-256 校验失败，文件不会安装');
       }
+      File installSource = downloaded;
+      if (retainDownload) {
+        final File retained = File(
+          '${staging.path}${Platform.pathSeparator}${model.fileName}',
+        );
+        if (await retained.exists()) await retained.delete();
+        installSource = await downloaded.rename(retained.path);
+      }
       final ModelInfo installed = await ModelStore.import(
-        downloaded.path,
+        installSource.path,
         _directory,
       );
       if (!mounted) return;
@@ -269,7 +304,11 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     } finally {
       client?.close(force: true);
       _downloadClient = null;
-      if (temp.existsSync()) temp.deleteSync(recursive: true);
+      if (!retainDownload && staging.existsSync()) {
+        staging.deleteSync(recursive: true);
+      } else if (downloaded.existsSync()) {
+        downloaded.deleteSync();
+      }
       if (mounted) {
         setState(() {
           _downloadingId = null;
@@ -641,6 +680,9 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   widget.onLargeModelViewChanged?.call(
                     _workspace == _ModelWorkspace.agent ? 'agent' : 'ocr',
                   );
+                  if (_workspace == _ModelWorkspace.ocr && !_modelsLoaded) {
+                    unawaited(_refresh());
+                  }
                 },
               ),
               const Spacer(),

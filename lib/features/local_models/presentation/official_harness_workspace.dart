@@ -69,10 +69,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
-      await _webview.initialize();
-      _webviewReady = true;
-      _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
-      await _start();
+      final Future<void> webviewInitialization = _webview.initialize();
+      await _start(webviewInitialization: webviewInitialization);
     } on Object catch (error) {
       if (!mounted) return;
       setState(() {
@@ -82,7 +80,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     }
   }
 
-  Future<void> _start({int retries = 0, bool preserveWebview = false}) async {
+  Future<void> _start({
+    int retries = 0,
+    bool preserveWebview = false,
+    Future<void>? webviewInitialization,
+  }) async {
     if (_starting) return;
     final String preferredWorkspace = widget.initialWorkspace.trim();
     final String workspace =
@@ -158,6 +160,16 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       );
       await _waitUntilReady(session.url);
       if (!mounted || !identical(_session, session)) return;
+      if (!_webviewReady) {
+        if (webviewInitialization == null) {
+          await _webview.initialize();
+        } else {
+          await webviewInitialization;
+        }
+        if (!mounted || !identical(_session, session)) return;
+        _webviewReady = true;
+        _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
+      }
       await _webview.loadUrl(session.url.toString());
       setState(() {
         _starting = false;
@@ -178,7 +190,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         });
         await Future<void>.delayed(const Duration(milliseconds: 800));
         if (!mounted) return;
-        await _start(retries: retries - 1, preserveWebview: preserveWebview);
+        await _start(
+          retries: retries - 1,
+          preserveWebview: preserveWebview,
+          webviewInitialization: webviewInitialization,
+        );
         return;
       }
       setState(() {

@@ -22,6 +22,7 @@ void main() {
       logLevel: AppLogLevel.debug,
       cacheLimitMb: 1024,
       modelDirectory: r'D:\Models',
+      toolDownloadDirectory: r'D:\Vibekits\Downloads',
       archiveMaxEntries: 50000,
       archiveMaxFileMb: 4096,
       cleanupWhitelist: <String>[r'D:\Keep'],

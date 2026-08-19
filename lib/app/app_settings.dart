@@ -16,6 +16,7 @@ class AppSettings {
     this.logLevel = AppLogLevel.info,
     this.cacheLimitMb = 512,
     this.modelDirectory = '',
+    this.toolDownloadDirectory = '',
     this.archiveMaxEntries = 100000,
     this.archiveMaxFileMb = 2048,
     this.cleanupWhitelist = const <String>[],
@@ -39,6 +40,7 @@ class AppSettings {
   final AppLogLevel logLevel;
   final int cacheLimitMb;
   final String modelDirectory;
+  final String toolDownloadDirectory;
   final int archiveMaxEntries;
   final int archiveMaxFileMb;
   final List<String> cleanupWhitelist;
@@ -62,6 +64,7 @@ class AppSettings {
     AppLogLevel? logLevel,
     int? cacheLimitMb,
     String? modelDirectory,
+    String? toolDownloadDirectory,
     int? archiveMaxEntries,
     int? archiveMaxFileMb,
     List<String>? cleanupWhitelist,
@@ -84,6 +87,7 @@ class AppSettings {
     logLevel: logLevel ?? this.logLevel,
     cacheLimitMb: cacheLimitMb ?? this.cacheLimitMb,
     modelDirectory: modelDirectory ?? this.modelDirectory,
+    toolDownloadDirectory: toolDownloadDirectory ?? this.toolDownloadDirectory,
     archiveMaxEntries: archiveMaxEntries ?? this.archiveMaxEntries,
     archiveMaxFileMb: archiveMaxFileMb ?? this.archiveMaxFileMb,
     cleanupWhitelist: cleanupWhitelist ?? this.cleanupWhitelist,
@@ -113,6 +117,7 @@ class AppSettings {
     'logLevel': logLevel.name,
     'cacheLimitMb': cacheLimitMb,
     'modelDirectory': modelDirectory,
+    'toolDownloadDirectory': toolDownloadDirectory,
     'archiveMaxEntries': archiveMaxEntries,
     'archiveMaxFileMb': archiveMaxFileMb,
     'cleanupWhitelist': cleanupWhitelist,
@@ -174,6 +179,12 @@ class AppSettings {
       cacheLimitMb: boundedInt('cacheLimitMb', 512, 64, 8192),
       modelDirectory: json['modelDirectory'] is String
           ? json['modelDirectory']! as String
+          : '',
+      toolDownloadDirectory:
+          json['toolDownloadDirectory'] is String &&
+              (json['toolDownloadDirectory']! as String).length <= 32768 &&
+              !(json['toolDownloadDirectory']! as String).contains('\u0000')
+          ? json['toolDownloadDirectory']! as String
           : '',
       archiveMaxEntries: boundedInt('archiveMaxEntries', 100000, 1000, 1000000),
       archiveMaxFileMb: boundedInt('archiveMaxFileMb', 2048, 64, 102400),

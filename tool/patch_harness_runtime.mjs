@@ -166,6 +166,18 @@ await replaceOnce(
 \t\t\t\t\t\t\t}`,
 );
 
+// Keep the official interaction model while making menus, popovers and panels
+// feel immediate inside the desktop WebView.
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-theme/lib/styles/base.css',
+  `  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;`,
+  `  --ds-transition-duration: 0.08s;
+  --ds-transition-duration-fast: 0.06s;
+  --ds-transition-duration-slow: 0.12s;`,
+);
+
 await replaceOnce(
   'node_modules/@deepseek-ai/dsh-client-ui-settings-models/lib/client.js',
   `\t\t\t\t\t\t\t\tdisabled,

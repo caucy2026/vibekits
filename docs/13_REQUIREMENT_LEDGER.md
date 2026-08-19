@@ -75,6 +75,7 @@
 | DEV-121 | 项目绑定多会话 | 完整复制官方 Workspace → ordered sessions 关系；支持添加/重命名/排序/移除工作区和重命名/排序/Fork/Archive/Delete 会话；持久化由官方 Host 拥有 | Windows 已改为官方 Web 单一数据源；归档保留数据可恢复，删除有独立菜单和二次确认，并移除会话目录、工作区索引和投影缓存；删除服务夹具已闭环 |
 | DEV-122 | Harness 调试目录 | 设置中指定日志、截图和临时文件根目录；默认 EXE 同级 `tmp`；跨重启保存；实际分流到 `logs/screenshots/temp`；日志不得含 Key | AppSettings 持久化、目录选择/创建、OCR 截图路由、Harness TEMP/TMP/日志环境与 stdout/stderr 文件落盘已接入；Windows 构建和实机目录检查见 dev.16 验收 |
 | DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows Git/ADB/7-Zip/Harness/Node 已随包；SSH/SFTP/转发为编译依赖；Release 对 Git/Harness 缺失执行构建失败；macOS Git/Harness/OCR 运行时仍待准备和实机验收 |
+| DEV-124 | 下载目录可配置 | 设置中显示并可选择工具与模型下载目录；默认 `%LOCALAPPDATA%\Vibekits\downloads`；下载使用 `.part` 暂存、哈希通过后原子改名；设置跨重启保存 | Windows 设置、持久化和模型下载路由已接入；随包工具固定在 Release 同级 `tools`，不与运行时下载混用 |
 
 ## 5. 本地智能与开源移植
 

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
@@ -71,6 +73,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _selectedIndex = 0;
+  late final Set<int> _loadedTabs;
   final ValueNotifier<int> _openRequest = ValueNotifier<int>(0);
   final ValueNotifier<int> _findRequest = ValueNotifier<int>(0);
   final ValueNotifier<int> _saveRequest = ValueNotifier<int>(0);
@@ -105,6 +108,7 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
+    _loadedTabs = <int>{_selectedIndex};
     widget.settingsController.addListener(_applySettings);
     if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
     _dropSubscription = (widget.droppedFiles ?? WindowsFileDrop.instance.files)
@@ -129,7 +133,10 @@ class _MainShellState extends State<MainShell> {
     final AppSettings settings = widget.settingsController.value;
     final int restoredIndex = _indexForWorkspace(settings);
     if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
-      setState(() => _selectedIndex = restoredIndex);
+      setState(() {
+        _selectedIndex = restoredIndex;
+        _loadedTabs.add(restoredIndex);
+      });
     }
   }
 
@@ -154,7 +161,14 @@ class _MainShellState extends State<MainShell> {
     if (index < 0 || index >= _tabTitles.length) {
       return;
     }
+    final bool needsLoad = !_loadedTabs.contains(index);
     setState(() => _selectedIndex = index);
+    if (needsLoad) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _selectedIndex != index) return;
+        setState(() => _loadedTabs.add(index));
+      });
+    }
     if (widget.settingsController.value.restoreLastTab) {
       widget.settingsController.update(
         widget.settingsController.value.copyWith(
@@ -326,12 +340,15 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final AppSettings settings = widget.settingsController.value;
-    final List<Widget> tabPages = <Widget>[
+    final List<Widget> allTabPages = <Widget>[
       LocalModelsTab(
         key: ValueKey<String>(
-          '${settings.modelDirectory}|$_modelDropSerial|$_imageDropSerial',
+          '${settings.modelDirectory}|${settings.toolDownloadDirectory}|'
+          '${settings.deepSeekHarnessDebugDirectory}|$_modelDropSerial|'
+          '$_imageDropSerial',
         ),
         directory: settings.modelDirectory,
+        toolDownloadDirectory: settings.toolDownloadDirectory,
         initialImportPath:
             _modelDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
@@ -457,6 +474,13 @@ class _MainShellState extends State<MainShell> {
             ),
       ),
     ];
+    final List<Widget> tabPages = List<Widget>.generate(
+      allTabPages.length,
+      (int index) => _loadedTabs.contains(index)
+          ? allTabPages[index]
+          : const _DeferredWorkspace(),
+      growable: false,
+    );
     final Map<ShortcutActivator, VoidCallback> shortcuts =
         AppShortcuts.forShell(
           onSelectTab: _selectTab,
@@ -883,6 +907,18 @@ class _NavigationItem extends StatelessWidget {
   }
 }
 
+class _DeferredWorkspace extends StatelessWidget {
+  const _DeferredWorkspace();
+
+  @override
+  Widget build(BuildContext context) => const Center(
+    child: SizedBox.square(
+      dimension: 22,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    ),
+  );
+}
+
 class _StatusPill extends StatelessWidget {
   const _StatusPill({
     required this.icon,
@@ -935,10 +971,39 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _modelDirectory = TextEditingController(
     text: _value.modelDirectory,
   );
+  late final TextEditingController _harnessDebugDirectory =
+      TextEditingController(text: _value.deepSeekHarnessDebugDirectory);
+  late final TextEditingController _toolDownloadDirectory =
+      TextEditingController(text: _value.toolDownloadDirectory);
+
+  String get _defaultDebugDirectory =>
+      '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp';
+
+  String get _defaultToolDownloadDirectory {
+    final String base =
+        Platform.environment['LOCALAPPDATA'] ??
+        Platform.environment['APPDATA'] ??
+        Directory.current.path;
+    return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}downloads';
+  }
+
+  Future<void> _pickDirectory(TextEditingController controller) async {
+    final String? selected = await getDirectoryPath(
+      initialDirectory: controller.text.trim().isEmpty
+          ? null
+          : controller.text.trim(),
+      confirmButtonText: '使用此目录',
+    );
+    if (selected != null && mounted) {
+      setState(() => controller.text = selected);
+    }
+  }
 
   @override
   void dispose() {
     _modelDirectory.dispose();
+    _harnessDebugDirectory.dispose();
+    _toolDownloadDirectory.dispose();
     super.dispose();
   }
 
@@ -1015,6 +1080,34 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 decoration: const InputDecoration(labelText: '模型目录（留空使用默认目录）'),
               ),
               const SizedBox(height: 12),
+              TextField(
+                key: const Key('harness-debug-directory'),
+                controller: _harnessDebugDirectory,
+                decoration: InputDecoration(
+                  labelText: 'Harness 调试临时目录',
+                  helperText: '默认：$_defaultDebugDirectory',
+                  suffixIcon: IconButton(
+                    tooltip: '选择目录',
+                    onPressed: () => _pickDirectory(_harnessDebugDirectory),
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('tool-download-directory'),
+                controller: _toolDownloadDirectory,
+                decoration: InputDecoration(
+                  labelText: '工具与模型下载目录',
+                  helperText: '默认：$_defaultToolDownloadDirectory',
+                  suffixIcon: IconButton(
+                    tooltip: '选择目录',
+                    onPressed: () => _pickDirectory(_toolDownloadDirectory),
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: <Widget>[
                   Expanded(
@@ -1063,7 +1156,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           onPressed: () async {
             final NavigatorState navigator = Navigator.of(context);
             await widget.onSave(
-              _value.copyWith(modelDirectory: _modelDirectory.text.trim()),
+              _value.copyWith(
+                modelDirectory: _modelDirectory.text.trim(),
+                deepSeekHarnessDebugDirectory: _harnessDebugDirectory.text
+                    .trim(),
+                toolDownloadDirectory: _toolDownloadDirectory.text.trim(),
+              ),
             );
             if (mounted) navigator.pop();
           },

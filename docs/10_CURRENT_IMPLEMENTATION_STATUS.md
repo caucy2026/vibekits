@@ -4,7 +4,7 @@
 
 更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.28+38`（Harness 会话删除体验与自动重连检查点，非正式发布）
+当前版本：`1.9.0-dev.29+39`（目录配置与交互响应优化检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -71,6 +71,8 @@ Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.0-rc.7` �
 官方 Web 可在没有环境 Key 时正常启动，用户按 Settings → Models 录入 Key，保存后立即可用；旧版系统凭据中已有 Key 时仅作为子进程环境初值。Vibekits MCP 以官方 MCP client 插件接入，ADB/串口/Git/文件等仍共用 App 领域服务和真实审计日志；官方原生工具使用官方权限 UI。
 
 Harness 设置页提供“调试文件目录”，默认解析为 `vibekits.exe` 同目录下的 `tmp`，可选择其他绝对路径并跨重启保存。保存时创建 `logs`、`screenshots`、`temp`：Harness stdout/stderr 同步写入按 UTC 时间命名的日志，OCR/截图写入 `screenshots`，子进程 `TEMP/TMP/TMPDIR` 指向 `temp`；DeepSeek Key 只在子进程环境变量中传递，不写日志文件名或正文。
+
+全局设置同时提供“Harness 调试临时目录”和“工具与模型下载目录”。下载目录默认 `%LOCALAPPDATA%\Vibekits\downloads`，外部模型先写入 `.part`、校验 SHA-256 后原子改名并保留原包；内置 ADB、Git、7-Zip、Node 与 Harness 位于 Release 同级 `tools`，仍随包发布且不受下载目录设置影响。
 
 内置官方 server 已以 `dsh web --port 31999` 真实启动并返回 HTTP 200，停止正常；本机不需要 npm/npx 下载。该项目仍为开发者预览，真实 DeepSeek Key + ADB MCP 任务和 macOS 实机仍待本轮后续验收。
 
