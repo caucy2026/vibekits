@@ -52,6 +52,7 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 
 - Windows 清理规则研究参考 Microsoft Known Folders、Storage Sense、Disk Cleanup、WER 与 Delivery Optimization 官方文档，并审阅 Winapp2 与 BleachBit。Vibekits 使用独立编写的版本化规则库：未复制 Winapp2 规则（仓库基础规则许可不明确），未移植 GPL-3.0 的 BleachBit 源码/cleaner definitions。
 - 2026-08-18 继续审阅 [Kudu](https://github.com/AdventDevInc/kudu)（MIT）、[constUP Garbage Cleaner](https://github.com/constup-foss/garbage-cleaner-powershell)（MPL-2.0）与 [BitCleanerX](https://github.com/paulocoutinhox/bitcleanerx)（MIT）。Vibekits 没有嵌入上游源码或规则文件；独立实现了最小年龄、最大扫描深度、直接文件名白名单和 dry-run 候选模型，并根据公开路径语义增加 JetBrains/WSLg/Gradio/.NET/Scoop 等受限规则。MPL 上游实现未复制，因此不引入其文件级许可证传播要求。
+- 2026-08-19 再次复核 [BleachBit CleanerML](https://github.com/bleachbit/cleanerml)（GPL-3.0-or-later）、[Winapp2](https://github.com/MoscaDotTo/Winapp2)（仓库当前标注 CC-BY-SA-4.0）与 [Czkawka](https://github.com/qarmin/czkawka)（MIT）。仅吸收声明式规则、Detect/Exclude/Warning、发布前验证、dry-run、排除路径、停止标记和进度等通用设计；未复制 CleanerML/Winapp2 规则、源码或文本。Vibekits 独立实现系统盘 `.log` 高风险清单、Harness 调试产物保留期和 v2 本地审计日志。
 - 2026-08-19 将上述安全模型扩展到 macOS 明确缓存/日志目录，并新增 Windows 系统盘只读空间审计。空间审计只统计元数据和容量，不复制第三方源码、不读取文件正文，也不把未知根目录自动变为删除规则。
 - Harness 工作台以 DeepSeek 官方社区 Web UI 的功能模块为基线（工作区、会话、对话、工具、目标/计划、任务、模型、权限、插件与设置），使用 Vibekits 自有 Flutter 信息架构和接近 Codex 的中性色视觉；没有嵌入官方 React 产物或品牌素材。
 - Zed、Geany、OpenSSH 和 GitHub 文档只用于工作流与操作习惯研究。Git 执行采用官方 MinGit 二进制分发，按 GPL-2.0-only 及归档组件许可证履行随附义务，不复制修改其源码。

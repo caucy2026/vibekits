@@ -771,4 +771,72 @@ void main() {
       isNot(contains(newCrash.path)),
     );
   });
+
+  test('Harness 调试日志和截图超过 24 小时才进入清理候选', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_harness_cleanup',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory logs = Directory(
+      '${sandbox.path}${Platform.pathSeparator}logs',
+    )..createSync();
+    final Directory screenshots = Directory(
+      '${sandbox.path}${Platform.pathSeparator}screenshots',
+    )..createSync();
+    Directory('${sandbox.path}${Platform.pathSeparator}temp').createSync();
+    final File oldLog = File('${logs.path}${Platform.pathSeparator}old.log')
+      ..writeAsStringSync('old');
+    final File newLog = File('${logs.path}${Platform.pathSeparator}new.log')
+      ..writeAsStringSync('new');
+    final File oldShot = File(
+      '${screenshots.path}${Platform.pathSeparator}old.png',
+    )..writeAsBytesSync(<int>[1, 2, 3]);
+    final DateTime old = DateTime.now().subtract(const Duration(days: 2));
+    oldLog.setLastModifiedSync(old);
+    oldShot.setLastModifiedSync(old);
+
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: const <String, String>{},
+      harnessDebugDirectory: sandbox.path,
+    );
+    final List<CleanupScanTarget> harness = targets
+        .where((CleanupScanTarget target) => target.id.startsWith('harness-'))
+        .toList();
+    expect(harness, hasLength(3));
+    final CleanupScanResult result = await CleanupScanner.scanTargets(harness);
+    final Set<String> paths = result.candidates
+        .map((CleanupCandidate candidate) => candidate.path)
+        .toSet();
+    expect(paths, containsAll(<String>[oldLog.path, oldShot.path]));
+    expect(paths, isNot(contains(newLog.path)));
+    expect(result.candidates.every((item) => item.defaultSelected), isTrue);
+  });
+
+  test('系统盘任意旧 log 可发现但未知用途默认不选择', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_all_log_inventory',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory nested = Directory(
+      '${sandbox.path}${Platform.pathSeparator}unknown-app',
+    )..createSync();
+    final File oldLog = File('${nested.path}${Platform.pathSeparator}app.log')
+      ..writeAsStringSync('diagnostic');
+    oldLog.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(days: 8)),
+    );
+
+    final CleanupScanTarget target = CleanupTargetDiscovery.discover(
+      environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
+    ).singleWhere((item) => item.id == 'system-drive-log-inventory');
+    expect(target.maxEntries, 25000);
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[target],
+    );
+    final CleanupCandidate candidate = result.candidates.singleWhere(
+      (item) => item.path == oldLog.path,
+    );
+    expect(candidate.highRisk, isTrue);
+    expect(candidate.defaultSelected, isFalse);
+  });
 }

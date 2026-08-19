@@ -58,7 +58,7 @@ void main() {
     expect(result.releasedBytes, 4);
   });
 
-  test('报告不持久化候选路径或文件内容', () async {
+  test('清理日志持久化真实路径并支持读取和删除', () async {
     final Directory sandbox = Directory.systemTemp.createTempSync(
       'vk_clean_report',
     );
@@ -87,9 +87,22 @@ void main() {
     );
     final String contents = await report.readAsString();
 
-    expect(contents, isNot(contains(privatePath)));
+    expect(contents, contains(privatePath.replaceAll(r'\', r'\\')));
     expect(contents, contains('访问被拒绝'));
     expect(contents, contains('"failed": 1'));
+    expect(contents, contains('"version": 2'));
+
+    final List<CleanupReportEntry> entries = await CleanupReportWriter.list(
+      directory: sandbox,
+    );
+    expect(entries, hasLength(1));
+    expect(entries.single.items.single['path'], privatePath);
+    expect(entries.single.failed, 1);
+    expect(
+      await CleanupReportWriter.delete(entries.single.file, directory: sandbox),
+      isTrue,
+    );
+    expect(await CleanupReportWriter.list(directory: sandbox), isEmpty);
   });
 
   test('清理取消与失败状态分离', () async {

@@ -52,6 +52,7 @@ class CleanerTab extends StatefulWidget {
     this.driveAnalysisRunner,
     this.analyzeAfterCleanup = true,
     this.persistDriveAnalysisReport = true,
+    this.harnessDebugDirectory = '',
   });
 
   final CleanupScanRunner? scanRunner;
@@ -71,6 +72,7 @@ class CleanerTab extends StatefulWidget {
   final CleanupDriveAnalysisRunner? driveAnalysisRunner;
   final bool analyzeAfterCleanup;
   final bool persistDriveAnalysisReport;
+  final String harnessDebugDirectory;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -116,8 +118,12 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _discoverTargets() async {
     try {
-      final List<CleanupScanTarget> targets =
-          await CleanupBackgroundRunner.discoverTargets();
+      final List<CleanupScanTarget>
+      targets = await CleanupBackgroundRunner.discoverTargets(
+        harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
+            ? '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
+            : widget.harnessDebugDirectory.trim(),
+      );
       if (mounted) _applyDiscoveredTargets(targets);
     } on Object catch (error) {
       if (!mounted) return;
@@ -839,6 +845,19 @@ class _CleanerTabState extends State<CleanerTab> {
               const SizedBox(width: 6),
               if (veryCompact)
                 IconButton(
+                  tooltip: '清理日志',
+                  onPressed: _showCleanupHistory,
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _showCleanupHistory,
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  label: const Text('清理日志'),
+                ),
+              const SizedBox(width: 6),
+              if (veryCompact)
+                IconButton(
                   tooltip: '系统盘空间分析',
                   onPressed: _scanning || _cleaning || _analyzingDrive
                       ? null
@@ -1293,6 +1312,119 @@ class _CleanerTabState extends State<CleanerTab> {
         ],
       ),
     );
+  }
+
+  Future<void> _showCleanupHistory() async {
+    List<CleanupReportEntry> reports = await CleanupReportWriter.list();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setDialogState) => AlertDialog(
+          title: const Text('清理日志'),
+          content: SizedBox(
+            width: 720,
+            height: 480,
+            child: reports.isEmpty
+                ? const Center(child: Text('还没有清理记录'))
+                : ListView.separated(
+                    itemCount: reports.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (BuildContext context, int index) {
+                      final CleanupReportEntry report = reports[index];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          report.failed > 0 || report.unreadable
+                              ? Icons.error_outline
+                              : report.cancelled
+                              ? Icons.pause_circle_outline
+                              : Icons.check_circle_outline,
+                          size: 20,
+                        ),
+                        title: Text(
+                          '${_formatLocalTime(report.finishedAt)} · '
+                          '${_formatSize(report.releasedBytes)}',
+                        ),
+                        subtitle: Text(
+                          report.unreadable
+                              ? '日志损坏或无法读取'
+                              : '成功 ${report.succeeded} · 跳过 ${report.skipped} · 失败 ${report.failed}'
+                                    '${report.cancelled ? ' · 已取消' : ''}',
+                        ),
+                        onTap: report.unreadable
+                            ? null
+                            : () => _showStoredReport(report),
+                        trailing: IconButton(
+                          tooltip: '删除这条记录',
+                          icon: const Icon(Icons.delete_outline, size: 19),
+                          onPressed: () async {
+                            final bool deleted =
+                                await CleanupReportWriter.delete(report.file);
+                            if (deleted) {
+                              reports = List<CleanupReportEntry>.of(reports)
+                                ..removeAt(index);
+                              setDialogState(() {});
+                            }
+                          },
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showStoredReport(CleanupReportEntry report) => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text('清理明细 · ${_formatLocalTime(report.finishedAt)}'),
+      content: SizedBox(
+        width: 760,
+        height: 460,
+        child: ListView.separated(
+          itemCount: report.items.length,
+          separatorBuilder: (_, _) => const Divider(height: 1),
+          itemBuilder: (BuildContext context, int index) {
+            final Map<String, Object?> item = report.items[index];
+            return ListTile(
+              dense: true,
+              title: SelectableText(
+                item['path'] as String? ?? '旧版日志未记录路径',
+                style: const TextStyle(fontSize: 12),
+              ),
+              subtitle: Text(
+                '${item['status'] ?? 'unknown'} · '
+                '${_formatSize(item['size'] is int ? item['size']! as int : 0)} · '
+                '${item['reason'] ?? ''}',
+                style: const TextStyle(fontSize: 11),
+              ),
+            );
+          },
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('关闭'),
+        ),
+      ],
+    ),
+  );
+
+  String _formatLocalTime(DateTime value) {
+    final DateTime local = value.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
   }
 
   Widget _buildCategory(

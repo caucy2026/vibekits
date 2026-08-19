@@ -379,6 +379,7 @@ class _MainShellState extends State<MainShell> {
         maxSingleExpandedBytes: settings.archiveMaxFileMb * 1024 * 1024,
       ),
       CleanerTab(
+        harnessDebugDirectory: settings.deepSeekHarnessDebugDirectory,
         initialWhitelist: settings.cleanupWhitelist,
         initialTargetIds: settings.cleanupScanTargets,
         initialTargetCatalogVersion: settings.cleanupTargetCatalogVersion,

@@ -16,8 +16,12 @@ abstract final class CleanupBackgroundRunner {
   /// system disk or competing aggressively with foreground applications.
   static const int maxScanWorkers = 2;
 
-  static Future<List<CleanupScanTarget>> discoverTargets() => Isolate.run(
-    CleanupTargetDiscovery.discover,
+  static Future<List<CleanupScanTarget>> discoverTargets({
+    String harnessDebugDirectory = '',
+  }) => Isolate.run(
+    () => CleanupTargetDiscovery.discover(
+      harnessDebugDirectory: harnessDebugDirectory,
+    ),
     debugName: 'vibekits-cleanup-target-discovery',
   );
 

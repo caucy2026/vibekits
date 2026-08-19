@@ -123,11 +123,13 @@ abstract final class CleanupScanner {
     String root,
     CleanupCategory category, {
     int maxDepth = _maxDepth,
+    int maxEntries = _maxEntries,
   }) async {
     final CleanupScanResult result = await scanDirectoryWithProgress(
       root,
       category,
       maxDepth: maxDepth,
+      maxEntries: maxEntries,
     );
     return result.candidates;
   }
@@ -136,6 +138,7 @@ abstract final class CleanupScanner {
     String root,
     CleanupCategory category, {
     int maxDepth = _maxDepth,
+    int maxEntries = _maxEntries,
     CleanupCancellationToken? cancellationToken,
     void Function(CleanupScanProgress progress)? onProgress,
     String? sourceLabel,
@@ -183,7 +186,7 @@ abstract final class CleanupScanner {
     Future<void> walk(String path, int depth) async {
       if (token.isCancelled ||
           depth > maxDepth ||
-          candidates.length >= _maxEntries) {
+          candidates.length >= maxEntries) {
         return;
       }
       final Directory current = Directory(path);
@@ -191,7 +194,7 @@ abstract final class CleanupScanner {
         await for (final FileSystemEntity entity in current.list(
           followLinks: false,
         )) {
-          if (token.isCancelled || candidates.length >= _maxEntries) return;
+          if (token.isCancelled || candidates.length >= maxEntries) return;
           currentPath = entity.path;
           visited++;
           report();
@@ -337,6 +340,7 @@ abstract final class CleanupScanner {
             target.path,
             target.category,
             maxDepth: target.maxDepth,
+            maxEntries: target.maxEntries,
             cancellationToken: token,
             sourceLabel: target.label,
             onProgress: targetProgress,

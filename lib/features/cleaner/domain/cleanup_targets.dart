@@ -22,6 +22,7 @@ class CleanupScanTarget {
     this.safetyNote = '',
     this.minimumAgeHours = 0,
     this.maxDepth = 8,
+    this.maxEntries = 5000,
     this.minimumSizeBytes = 0,
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
@@ -37,6 +38,7 @@ class CleanupScanTarget {
   final String safetyNote;
   final int minimumAgeHours;
   final int maxDepth;
+  final int maxEntries;
   final int minimumSizeBytes;
   final List<String> includePatterns;
   final List<String> excludePatterns;
@@ -46,11 +48,12 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 7;
+  static const int catalogVersion = 8;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
     int? windowsBuild,
+    String harnessDebugDirectory = '',
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
     final List<CleanupScanTarget> targets = <CleanupScanTarget>[];
@@ -291,7 +294,23 @@ abstract final class CleanupTargetDiscovery {
     final String? systemDrive = env['SYSTEMDRIVE'];
     if (systemDrive != null && systemDrive.trim().isNotEmpty) {
       _addWindowsProfileTransientTargets(targets, systemDrive.trim());
+      _addExisting(
+        targets,
+        id: 'system-drive-log-inventory',
+        label: '系统盘全部 .log 日志清单',
+        path: systemDrive.trim().endsWith(Platform.pathSeparator)
+            ? systemDrive.trim()
+            : '${systemDrive.trim()}${Platform.pathSeparator}',
+        category: CleanupCategory.discoveredTransient,
+        defaultEnabled: true,
+        safetyNote: '遍历系统盘并列出旧 .log；未知用途日志默认不勾选，需逐项确认',
+        minimumAgeHours: 168,
+        maxDepth: 16,
+        maxEntries: 25000,
+        includePatterns: const <String>['*.log'],
+      );
     }
+    _addHarnessDebugTargets(targets, harnessDebugDirectory);
 
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
     for (final CleanupScanTarget target in targets) {
@@ -382,6 +401,52 @@ abstract final class CleanupTargetDiscovery {
         );
       }
     }
+  }
+
+  static void _addHarnessDebugTargets(
+    List<CleanupScanTarget> targets,
+    String configuredRoot,
+  ) {
+    final String root = configuredRoot.trim();
+    if (root.isEmpty || !Directory(root).isAbsolute) return;
+    _addExisting(
+      targets,
+      id: 'harness-debug-logs',
+      label: 'Harness 大模型调试日志',
+      path: _join(root, <String>['logs']),
+      category: CleanupCategory.logs,
+      defaultEnabled: true,
+      safetyNote: '只清理 24 小时前的 Harness stdout/stderr 日志',
+      minimumAgeHours: 24,
+      includePatterns: const <String>['*.log'],
+    );
+    _addExisting(
+      targets,
+      id: 'harness-debug-screenshots',
+      label: 'Harness 大模型调试截图',
+      path: _join(root, <String>['screenshots']),
+      category: CleanupCategory.debugArtifacts,
+      defaultEnabled: true,
+      safetyNote: '只清理 24 小时前的调试截图，避免影响当前任务',
+      minimumAgeHours: 24,
+      includePatterns: const <String>[
+        '*.png',
+        '*.jpg',
+        '*.jpeg',
+        '*.webp',
+        '*.bmp',
+      ],
+    );
+    _addExisting(
+      targets,
+      id: 'harness-debug-temp',
+      label: 'Harness 大模型临时文件',
+      path: _join(root, <String>['temp']),
+      category: CleanupCategory.debugArtifacts,
+      defaultEnabled: true,
+      safetyNote: '只清理 24 小时前的子进程临时文件',
+      minimumAgeHours: 24,
+    );
   }
 
   static int _discoverTransientChildren(
@@ -701,6 +766,7 @@ abstract final class CleanupTargetDiscovery {
     String safetyNote = '',
     int minimumAgeHours = 0,
     int maxDepth = 8,
+    int maxEntries = 5000,
     int minimumSizeBytes = 0,
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
@@ -718,6 +784,7 @@ abstract final class CleanupTargetDiscovery {
         safetyNote: safetyNote,
         minimumAgeHours: minimumAgeHours,
         maxDepth: maxDepth,
+        maxEntries: maxEntries,
         minimumSizeBytes: minimumSizeBytes,
         includePatterns: includePatterns,
         excludePatterns: excludePatterns,
