@@ -9,6 +9,7 @@ import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 
 typedef OfficialHarnessCredentialReader = Future<String?> Function(String key);
+typedef OfficialHarnessCredentialDeleter = Future<void> Function(String key);
 typedef OfficialHarnessWebStarter = Future<HarnessSessionHandle> Function(
   HarnessWebRequest request,
 );
@@ -25,6 +26,7 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     this.initialDebugDirectory = '',
     this.onRunningChanged,
     this.credentialReader,
+    this.credentialDeleter,
     this.startWeb = DeepSeekHarnessService.startWebAgent,
     this.findPort = DeepSeekHarnessService.findFreeLoopbackPort,
   });
@@ -33,6 +35,7 @@ class OfficialHarnessWorkspace extends StatefulWidget {
   final String initialDebugDirectory;
   final ValueChanged<bool>? onRunningChanged;
   final OfficialHarnessCredentialReader? credentialReader;
+  final OfficialHarnessCredentialDeleter? credentialDeleter;
   final OfficialHarnessWebStarter startWeb;
   final Future<int> Function() findPort;
 
@@ -94,11 +97,25 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             _credentialKey,
           ) ??
           '';
+      final HarnessCredentialMigration migration =
+          await DeepSeekHarnessService.migrateLegacyCredentialToOfficialStore(
+            key,
+          );
+      if (migration != HarnessCredentialMigration.noLegacyCredential) {
+        try {
+          await (widget.credentialDeleter ?? PlatformCredentialStore.delete)(
+            _credentialKey,
+          );
+        } on Object {
+          // Migration is already durable. A stale legacy copy must never block
+          // the official Web UI; it is no longer injected into the process.
+        }
+      }
       final int port = await widget.findPort();
       final HarnessSessionHandle session = await widget.startWeb(
         HarnessWebRequest(
           workspace: workspace,
-          apiKey: key,
+          apiKey: '',
           port: port,
           debugDirectory: widget.initialDebugDirectory,
           approveTool: _approveVibekitsTool,

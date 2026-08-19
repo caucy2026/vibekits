@@ -406,3 +406,10 @@
 - 本机 C 盘只读审计为总量约 80.00 GiB、已用 73.27 GiB、剩余 6.74 GiB。DISM 报告组件存储资源管理器显示 7.09 GB、实际 7.04 GB、可回收包 1 个且不建议清理，因此不把 WinSxS 作为手工删除项。
 - 用户数据进一步定位到 AppData 20.60 GiB、`.cache` 1.97 GiB、`.gemini` 1.65 GiB、`.codex` 0.89 GiB；明确区分可再生缓存、软件升级残留、工作区/会话数据和安装程序，不按目录大小盲删。
 - `flutter analyze` 0 问题；清理目录、系统盘分析和界面定向测试 26/26 通过。版本更新为 `1.9.0-dev.24+34`。
+
+## 2026-08-19 · v1.9.0-dev.25 官方 Harness 凭据闭环纠偏
+
+- 对照内置官方 `@deepseek-ai/dsh@0.1.0-rc.7` 的凭据提供器确认：进程环境变量是最高优先级只读源，官方 Models 页的可写源是 `$DSH_HOME/.credentials.yaml`；旧集成注入 Key 正是输入框只读的原因。
+- Windows 官方 Web 启动不再注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，也不再由 Vibekits 首次写入默认模型；Key、端点、模型目录和默认模型恢复由官方设置链路持久化及热更新。
+- 旧版 Windows Credential Manager / macOS Keychain 中的 Key 仅迁移一次：不覆盖官方已存值，迁移落盘后删除旧副本；密钥不进入代码、安装包或日志。
+- 修正 App 内常量仍停留在 `dev.21+31` 的版本显示问题，版本统一更新为 `1.9.0-dev.25+35`。

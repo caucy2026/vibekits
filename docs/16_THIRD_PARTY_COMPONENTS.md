@@ -45,7 +45,7 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 - 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；2026-08-18 通过 npm registry 查询的官方 CLI 版本：`@deepseek-ai/dsh@0.1.0-rc.7`。
 - 状态：官方仍是 Developer Preview，存在破坏性变更风险；Vibekits 保留可替换进程适配层，并将固定的 Node、CLI 与生产依赖打入安装包。
 - 发布前由 `tool/prepare_harness_runtime.ps1` 固定安装 `@deepseek-ai/dsh@0.1.0-rc.7`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。Windows 通过内置 `node` 启动内置 `dsh web`，再用 WebView2 嵌入其官方生产界面；不调用 npm/npx、不联网安装，也不依赖用户 PATH。
-- DeepSeek API Key 由 Harness 页录入并写入 Windows Credential Manager/macOS Keychain，启动官方子进程时仅放入 `DEEPSEEK_API_KEY` 环境变量；参数、普通设置和日志均不包含密钥。模型和兼容端点分别经 `DEEPSEEK_MODEL`、`DEEPSEEK_BASE_URL` 传递，仍需以官方真实任务验证版本支持情况。
+- DeepSeek API Key 由官方 Harness 的 Settings → Models 页面录入，写入 `$DSH_HOME/.credentials.yaml`；Web 子进程不注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` 或 `DEEPSEEK_BASE_URL`，避免把官方字段锁成只读并确保设置热更新。旧版系统凭据只做一次迁移，密钥不进入源码、安装包、普通设置或日志。
 - Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。macOS 真启动、WebView 容器和停止后无残留进程仍待验收。
 
 ## 开源借鉴边界

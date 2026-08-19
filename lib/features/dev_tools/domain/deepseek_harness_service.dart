@@ -151,6 +151,12 @@ class HarnessDebugPaths {
   final Directory temp;
 }
 
+enum HarnessCredentialMigration {
+  noLegacyCredential,
+  alreadyConfigured,
+  migrated,
+}
+
 abstract interface class HarnessSessionHandle {
   Stream<String> get output;
   Future<int> get exitCode;
@@ -182,6 +188,7 @@ typedef HarnessModelLister = Future<List<String>> Function(
 abstract final class DeepSeekHarnessService {
   static const String defaultBaseUrl = 'https://api.deepseek.com';
   static const String defaultModel = 'deepseek-v4-flash';
+  static const String _deepSeekCredentialRef = 'DEEPSEEK_API_KEY';
 
   static String defaultDebugDirectory() {
     final File executable = File(Platform.resolvedExecutable);
@@ -391,7 +398,6 @@ abstract final class DeepSeekHarnessService {
       bridge: request.toolBridge,
     );
     final Directory harnessHome = await _prepareHarnessHome(
-      request.model,
       runtime.approvalPluginPath,
     );
     try {
@@ -459,9 +465,12 @@ abstract final class DeepSeekHarnessService {
       bridge: request.toolBridge,
     );
     final Directory harnessHome = await _prepareHarnessHome(
-      request.model,
       runtime.approvalPluginPath,
       includeApprovalBridge: false,
+    );
+    await migrateLegacyCredentialToOfficialStore(
+      request.apiKey,
+      harnessHome: harnessHome,
     );
     try {
       final Process process = await Process.start(
@@ -469,12 +478,6 @@ abstract final class DeepSeekHarnessService {
         <String>[runtime.cliPath, ...request.arguments],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
-          if (request.apiKey.trim().isNotEmpty)
-            'DEEPSEEK_API_KEY': request.apiKey.trim(),
-          'DEEPSEEK_BASE_URL': request.baseUrl.trim(),
-          'DEEPSEEK_MODEL': request.model.trim().isEmpty
-              ? defaultModel
-              : request.model.trim(),
           'DSH_HOME': harnessHome.path,
           'DSH_TELEMETRY_MODE': 'DISABLED',
           'DSH_TELEMETRY_DISABLED': '1',
@@ -530,36 +533,64 @@ abstract final class DeepSeekHarnessService {
     }
   }
 
-  static Future<Directory> _prepareHarnessHome(
-    String requestedModel,
-    String approvalPluginPath, {
-    bool includeApprovalBridge = true,
+  /// Moves a key saved by pre-official Vibekits builds into the writable
+  /// credential store owned by Harness. Injecting it through the environment
+  /// would intentionally make the official Models field read-only.
+  static Future<HarnessCredentialMigration>
+  migrateLegacyCredentialToOfficialStore(
+    String legacyKey, {
+    Directory? harnessHome,
   }) async {
-    final String model = requestedModel.trim().isEmpty
-        ? defaultModel
-        : requestedModel.trim();
+    final String key = legacyKey.trim();
+    if (key.isEmpty) return HarnessCredentialMigration.noLegacyCredential;
+    final Directory home = harnessHome ?? officialHarnessHomeDirectory();
+    await home.create(recursive: true);
+    final File credentials = File(
+      '${home.path}${Platform.pathSeparator}.credentials.yaml',
+    );
+    String current = '';
+    if (await credentials.exists()) {
+      current = await credentials.readAsString();
+      if (RegExp(r'^DEEPSEEK_API_KEY\s*:', multiLine: true).hasMatch(current)) {
+        return HarnessCredentialMigration.alreadyConfigured;
+      }
+    }
+    final String separator = current.isEmpty || current.endsWith('\n')
+        ? ''
+        : '\n';
+    await credentials.writeAsString(
+      '$current$separator$_deepSeekCredentialRef: ${jsonEncode(key)}\n',
+      flush: true,
+    );
+    if (!Platform.isWindows) {
+      final ProcessResult chmod = await Process.run('chmod', <String>[
+        '600',
+        credentials.path,
+      ], runInShell: false);
+      if (chmod.exitCode != 0) {
+        throw StateError('无法限制 Harness 凭据文件权限');
+      }
+    }
+    return HarnessCredentialMigration.migrated;
+  }
+
+  static Directory officialHarnessHomeDirectory() {
     final String base = Platform.isWindows
         ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
         : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
-    final Directory home = Directory(
+    return Directory(
       Platform.isWindows
           ? '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness'
           : '$base${Platform.pathSeparator}Library${Platform.pathSeparator}Application Support${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
     );
+  }
+
+  static Future<Directory> _prepareHarnessHome(
+    String approvalPluginPath, {
+    bool includeApprovalBridge = true,
+  }) async {
+    final Directory home = officialHarnessHomeDirectory();
     await home.create(recursive: true);
-    final File settings = File(
-      '${home.path}${Platform.pathSeparator}settings.yaml',
-    );
-    // The official Web UI owns model settings after first boot. Rewriting this
-    // file on every App launch would silently undo the user's Settings changes.
-    if (!await settings.exists()) {
-      await settings.writeAsString(
-        'agent-default-model:\n'
-        '  provider: deepseek-official\n'
-        '  model: ${jsonEncode(model)}\n',
-        flush: true,
-      );
-    }
     final File patch = File(
       '${home.path}${Platform.pathSeparator}cordis.patch.yml',
     );

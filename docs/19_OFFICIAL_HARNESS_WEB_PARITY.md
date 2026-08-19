@@ -2,7 +2,7 @@
 
 更新日期：2026-08-19
 
-适用版本：`1.9.0-dev.23+33`
+适用版本：`1.9.0-dev.25+35`
 
 ## 1. 唯一行为基线
 
@@ -44,7 +44,9 @@ Vibekits 禁止再拼接“最后 12000 字符”伪造续话，也不再自己�
 ## 4. 模型与权限
 
 - 官方流程是 Settings → Models 录入 API Key，保存后立即可用，无需重启 Web server。
-- 旧版 Windows Credential Manager 中已有 Key 时，Vibekits 只在启动官方进程时作为环境初值注入；没有 Key 也必须允许 Web UI 启动，由官方设置完成配置。
+- 官方流程使用 `$DSH_HOME/.credentials.yaml` 作为可写凭据源；Vibekits Web 进程不得注入 `DEEPSEEK_API_KEY`，否则官方设置页会按设计显示为只读。
+- 旧版 Windows Credential Manager 中已有 Key 时，仅做一次迁移：若官方凭据尚未配置则写入官方存储，若已有配置则保留官方值；迁移成功后删除旧凭据。Key 不进入源码、安装包、普通设置或日志。
+- Web 进程不得用 `DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL` 覆盖官方模型设置；API 地址、模型目录与默认模型全部由官方 Models/Settings 链路持久化和热更新。
 - 设置中的默认权限影响新会话；当前会话的权限切换由官方会话命令/控件管理。
 - Vibekits 只在首次启动时创建默认模型设置；后续启动不得覆写官方 Web UI 保存的模型和权限选择。
 - 官方原生文件/命令工具使用官方审批 UI；Vibekits MCP 扩展工具在进入 App 领域服务前仍做目标锁定、参数验证、风险审批和审计。
@@ -73,4 +75,21 @@ Windows 运行器为每个 Harness 子进程创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB
 | 官方 Web server 本机 HTTP 200 启停 | 已验收 |
 | 项目/会话/侧边栏/设置改为官方单一数据源 | 已切换 |
 | Vibekits MCP 服务器随官方 Web profile 启动 | 已接入，继续做真 Key/ADB 实机回归 |
+| Settings → Models 填写/修改 Key | 已恢复官方可写凭据链路，Windows Release 实机验收中 |
 | macOS 官方 WebView 容器与运行时 | 未完成，不宣称双平台已闭环 |
+
+## 7. 逐项差异审计
+
+| 检查项 | `@deepseek-ai/dsh@0.1.0-rc.7` 官方行为 | Vibekits 当前处理 |
+|---|---|---|
+| API Key | Models 页写入官方可写凭据文件；环境提供时只读 | 已纠偏为官方链路；仅保留一次旧凭据迁移 |
+| API 地址/模型 | Models 页配置并热更新；内置 Flash/Pro 目录 | Web 启动不再用环境变量覆盖 |
+| 工作区—会话 | 一个工作区管理有序多会话；移除工作区不删文件或会话日志 | 直接使用官方 Web/Host 状态，无 Flutter 副本 |
+| 重启恢复 | 官方存储恢复工作区、会话、设置 | Windows 实机已验证恢复 |
+| 会话归档 | 隐藏会话但保留日志、工作区槽位和取消归档恢复能力 | 保持官方语义，不用假删除替代 |
+| 永久删除会话 | 当前 RC.7 没有 `workspace.deleteSession` Host API 和官方菜单 | 未伪造 UI；若产品必须永久删除，应作为明确扩展补齐持久化、索引、运行态与确认闭环 |
+| 权限预设 | `read-only`、`workspace-write`、`danger-full-access`；官方动态显示名含英文 | 内部标识和审批行为保持官方；中文显示属于后续本地化，不改变权限语义 |
+| 推理/工具/计划中间态 | 由官方会话事件投影 | 直接显示官方 UI，不由 Flutter 伪造 |
+| Vibekits 工具 | 官方通过 MCP 扩展第三方工具 | 仅增加 `vibekits` MCP 服务；参数校验、风险审批和真实日志留在 App 领域层 |
+| 外层 Harness/OCR 标签 | 非官方 Web 内容 | 仅是 Vibekits 工具分类容器，不接管官方工作台行为 |
+| 遥测 | 官方默认关闭，可由环境启用 | 按 Vibekits 隐私策略固定关闭，属于部署策略差异 |

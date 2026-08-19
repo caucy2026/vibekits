@@ -37,6 +37,36 @@ void main() {
     expect(safe, contains('[REDACTED]'));
   });
 
+  test('旧 Key 一次迁移到官方可写凭据文件且不覆盖新 Key', () async {
+    final Directory home = await Directory.systemTemp.createTemp(
+      'vibekits_harness_credentials_',
+    );
+    addTearDown(() => home.delete(recursive: true));
+
+    expect(
+      await DeepSeekHarnessService.migrateLegacyCredentialToOfficialStore(
+        'sk-legacy',
+        harnessHome: home,
+      ),
+      HarnessCredentialMigration.migrated,
+    );
+    final File credentials = File(
+      '${home.path}${Platform.pathSeparator}.credentials.yaml',
+    );
+    expect(await credentials.readAsString(), contains('"sk-legacy"'));
+
+    expect(
+      await DeepSeekHarnessService.migrateLegacyCredentialToOfficialStore(
+        'sk-must-not-overwrite',
+        harnessHome: home,
+      ),
+      HarnessCredentialMigration.alreadyConfigured,
+    );
+    final String persisted = await credentials.readAsString();
+    expect(persisted, contains('"sk-legacy"'));
+    expect(persisted, isNot(contains('sk-must-not-overwrite')));
+  });
+
   test('Harness 固定官方内置版本且任务参数不包含安装命令', () async {
     final Directory workspace = await Directory.systemTemp.createTemp(
       'vibekits_harness_',
