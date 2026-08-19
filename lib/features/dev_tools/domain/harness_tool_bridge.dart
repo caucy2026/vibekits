@@ -2,14 +2,27 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../../app/app_settings.dart';
+import '../../cleaner/domain/cleanup_task.dart';
+import '../../cleaner/domain/system_drive_analysis_runner.dart';
+import '../../cleaner/domain/system_drive_analyzer.dart';
 import 'adb_service.dart';
 import 'api_request_service.dart';
+import 'duplicate_file_background_runner.dart';
+import 'duplicate_file_scanner.dart';
+import 'file_hash_background_runner.dart';
+import 'file_hash_service.dart';
 import 'file_search_service.dart';
 import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
 import 'harness_tool_activity_store.dart';
 import 'programmer_calculator.dart';
+import 'platform_credential_store.dart';
+import 'remote_connection_record.dart';
+import 'remote_database_service.dart';
+import 'remote_session.dart';
 import 'serial_port_service.dart';
+import 'sftp_service.dart';
 import 'sqlite_database_service.dart';
 import 'tool_registry.dart';
 import 'tool_result.dart';
@@ -91,6 +104,32 @@ typedef HarnessToolApproval = Future<bool> Function(
 typedef HarnessToolHandler = Future<Map<String, Object?>> Function(
   Map<String, Object?> arguments,
 );
+typedef HarnessRemoteProfileLoader =
+    Future<List<RemoteConnectionRecord>> Function();
+typedef HarnessCredentialReader = Future<String?> Function(String key);
+typedef HarnessRemoteCommandRunner = Future<RemoteCommandResult> Function(
+  RemoteConnectionProfile profile,
+  String command,
+  String? secret,
+  RemoteHostKeyVerifier verifyHostKey,
+);
+typedef HarnessRemoteFileConnector = Future<RemoteFileClient> Function(
+  RemoteConnectionProfile profile,
+  String? secret,
+  RemoteHostKeyVerifier verifyHostKey,
+);
+typedef HarnessRemoteDatabaseProfileLoader =
+    Future<List<RemoteDatabaseProfile>> Function();
+typedef HarnessRemoteDatabaseInspector =
+    Future<RemoteDatabaseSnapshot> Function(
+      RemoteDatabaseProfile profile,
+      String password,
+    );
+typedef HarnessRemoteDatabaseQuerier = Future<SqliteResultPage> Function(
+  RemoteDatabaseProfile profile,
+  String password,
+  String sql,
+);
 
 /// Harness 只能通过此桥接调用 Vibekits 能力。
 ///
@@ -103,11 +142,25 @@ class VibekitsHarnessToolBridge {
     AdbCommandRunner? adbRunner,
     String? adbExecutable,
     HarnessToolActivityRecorder? activityRecorder,
+    HarnessRemoteProfileLoader? remoteProfileLoader,
+    HarnessCredentialReader? credentialReader,
+    HarnessRemoteCommandRunner? remoteCommandRunner,
+    HarnessRemoteFileConnector? remoteFileConnector,
+    HarnessRemoteDatabaseProfileLoader? remoteDatabaseProfileLoader,
+    HarnessRemoteDatabaseInspector? remoteDatabaseInspector,
+    HarnessRemoteDatabaseQuerier? remoteDatabaseQuerier,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
     adbExecutable,
     activityRecorder,
+    remoteProfileLoader,
+    credentialReader,
+    remoteCommandRunner,
+    remoteFileConnector,
+    remoteDatabaseProfileLoader,
+    remoteDatabaseInspector,
+    remoteDatabaseQuerier,
   );
 
   VibekitsHarnessToolBridge._(
@@ -115,6 +168,13 @@ class VibekitsHarnessToolBridge {
     this._adbRunner,
     this._adbExecutable,
     this._activityRecorder,
+    this._remoteProfileLoader,
+    this._credentialReader,
+    this._remoteCommandRunner,
+    this._remoteFileConnector,
+    this._remoteDatabaseProfileLoader,
+    this._remoteDatabaseInspector,
+    this._remoteDatabaseQuerier,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -133,11 +193,30 @@ class VibekitsHarnessToolBridge {
   static const String apiRequestId = 'vibekits.http.request';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
   static const String programmerCalculatorId = 'vibekits.calculator.programmer';
+  static const String remoteListProfilesId = 'vibekits.remote.list_profiles';
+  static const String remoteSshExecId = 'vibekits.remote.ssh_exec';
+  static const String remoteSftpListId = 'vibekits.remote.sftp_list';
+  static const String remoteSftpUploadId = 'vibekits.remote.sftp_upload';
+  static const String remoteSftpDownloadId = 'vibekits.remote.sftp_download';
+  static const String remoteDatabaseListProfilesId =
+      'vibekits.database.remote_list_profiles';
+  static const String remoteDatabaseInspectId =
+      'vibekits.database.remote_inspect';
+  static const String remoteDatabaseQueryId = 'vibekits.database.remote_query';
+  static const String duplicateScanId = 'vibekits.files.duplicate_scan';
+  static const String systemDriveAnalyzeId = 'vibekits.cleaner.analyze_drive';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
   final String? _adbExecutable;
   final HarnessToolActivityRecorder? _activityRecorder;
+  final HarnessRemoteProfileLoader? _remoteProfileLoader;
+  final HarnessCredentialReader? _credentialReader;
+  final HarnessRemoteCommandRunner? _remoteCommandRunner;
+  final HarnessRemoteFileConnector? _remoteFileConnector;
+  final HarnessRemoteDatabaseProfileLoader? _remoteDatabaseProfileLoader;
+  final HarnessRemoteDatabaseInspector? _remoteDatabaseInspector;
+  final HarnessRemoteDatabaseQuerier? _remoteDatabaseQuerier;
 
   late final Map<String, HarnessToolDefinition> _definitions =
       <String, HarnessToolDefinition>{
@@ -324,6 +403,106 @@ class VibekitsHarnessToolBridge {
           description: '并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。',
           properties: const <String, Object?>{},
         ),
+        remoteListProfilesId: _definition(
+          id: remoteListProfilesId,
+          name: '列出远程会话',
+          description: '列出已保存且已确认主机指纹的 SSH/SFTP 会话；不返回密码或私钥内容。',
+          properties: const <String, Object?>{},
+        ),
+        remoteSshExecId: _definition(
+          id: remoteSshExecId,
+          name: '执行 SSH 命令',
+          description: '使用已保存会话和系统凭据执行一条有界远程命令，严格校验已绑定主机指纹。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: <String, Object?>{
+            'profileId': _string('远程工作台保存的会话 ID'),
+            'command': _string('要在远端执行的单条命令'),
+          },
+          required: <String>['profileId', 'command'],
+        ),
+        remoteSftpListId: _definition(
+          id: remoteSftpListId,
+          name: '列出 SFTP 目录',
+          description: '复用已保存 SSH 会话的凭据和主机指纹，只读列出远端目录。',
+          properties: <String, Object?>{
+            'profileId': _string('远程工作台保存的会话 ID'),
+            'remotePath': _string('远端目录，默认当前用户主目录'),
+          },
+          required: <String>['profileId'],
+        ),
+        remoteSftpUploadId: _definition(
+          id: remoteSftpUploadId,
+          name: 'SFTP 上传文件',
+          description: '通过已保存 SSH 会话上传一个本地文件；覆盖已有文件必须明确指定。',
+          risk: HarnessToolRisk.writesData,
+          properties: <String, Object?>{
+            'profileId': _string('远程工作台保存的会话 ID'),
+            'localPath': _string('本地文件绝对路径'),
+            'remotePath': _string('远端目标绝对路径'),
+            'overwrite': <String, Object?>{'type': 'boolean'},
+          },
+          required: <String>['profileId', 'localPath', 'remotePath'],
+        ),
+        remoteSftpDownloadId: _definition(
+          id: remoteSftpDownloadId,
+          name: 'SFTP 下载文件',
+          description: '通过已保存 SSH 会话下载一个远端文件；覆盖本地文件必须明确指定。',
+          risk: HarnessToolRisk.writesData,
+          properties: <String, Object?>{
+            'profileId': _string('远程工作台保存的会话 ID'),
+            'remotePath': _string('远端文件绝对路径'),
+            'localPath': _string('本地目标绝对路径'),
+            'overwrite': <String, Object?>{'type': 'boolean'},
+          },
+          required: <String>['profileId', 'remotePath', 'localPath'],
+        ),
+        remoteDatabaseListProfilesId: _definition(
+          id: remoteDatabaseListProfilesId,
+          name: '列出远程数据库会话',
+          description: '列出已保存的 PostgreSQL、MySQL 和 MariaDB 会话；不返回密码。',
+          properties: const <String, Object?>{},
+        ),
+        remoteDatabaseInspectId: _definition(
+          id: remoteDatabaseInspectId,
+          name: '检查远程数据库',
+          description: '使用系统凭据在后台线程连接已保存的远程数据库，并只读列出对象。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: <String, Object?>{'profileId': _string('数据库工作区保存的会话 ID')},
+          required: <String>['profileId'],
+        ),
+        remoteDatabaseQueryId: _definition(
+          id: remoteDatabaseQueryId,
+          name: '查询远程数据库',
+          description: '使用已保存会话执行一条有界只读 SQL，最多返回 500 行。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: <String, Object?>{
+            'profileId': _string('数据库工作区保存的会话 ID'),
+            'sql': _string('只读 SQL'),
+          },
+          required: <String>['profileId', 'sql'],
+        ),
+        duplicateScanId: _definition(
+          id: duplicateScanId,
+          name: '扫描重复文件',
+          description: '在独立后台线程按大小和完整 SHA-256 扫描重复文件；只返回建议，不自动删除。',
+          properties: <String, Object?>{
+            'root': _string('扫描根目录'),
+            'recursive': <String, Object?>{'type': 'boolean'},
+            'minimumSize': <String, Object?>{
+              'type': 'integer',
+              'minimum': 1,
+              'maximum': 1099511627776,
+            },
+          },
+          required: <String>['root'],
+        ),
+        systemDriveAnalyzeId: _definition(
+          id: systemDriveAnalyzeId,
+          name: '分析磁盘占用',
+          description: '在独立后台线程分析指定磁盘根目录，返回总量、已用、剩余和主要占用；不删除任何文件。',
+          properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
+          required: <String>['root'],
+        ),
         programmerCalculatorId: _definition(
           id: programmerCalculatorId,
           name: '程序员计算器',
@@ -501,6 +680,19 @@ class VibekitsHarnessToolBridge {
     if (toolId == fileSearchId) return _searchFiles;
     if (toolId == apiRequestId) return _requestHttp;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
+    if (toolId == remoteListProfilesId) return _listRemoteProfiles;
+    if (toolId == remoteSshExecId) return _runRemoteSshCommand;
+    if (toolId == remoteSftpListId) return _listRemoteSftp;
+    if (toolId == remoteSftpUploadId) return _uploadRemoteSftp;
+    if (toolId == remoteSftpDownloadId) return _downloadRemoteSftp;
+    if (toolId == remoteDatabaseListProfilesId) {
+      return _listRemoteDatabaseProfiles;
+    }
+    if (toolId == remoteDatabaseInspectId) return _inspectRemoteDatabase;
+    if (toolId == remoteDatabaseQueryId) return _queryRemoteDatabase;
+    if (toolId == duplicateScanId) return _scanDuplicateFiles;
+    if (toolId == systemDriveAnalyzeId) return _analyzeSystemDrive;
+    if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
         ? toolId.substring('vibekits.'.length)
@@ -842,6 +1034,442 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<List<RemoteConnectionRecord>> _loadRemoteProfiles() async {
+    final HarnessRemoteProfileLoader? loader = _remoteProfileLoader;
+    return loader != null
+        ? loader()
+        : RemoteConnectionRecord.decodeMany(
+            (await AppSettingsStore().load()).remoteSessionProfiles,
+          );
+  }
+
+  Future<RemoteConnectionRecord> _remoteProfile(Object? rawId) async {
+    final String id = '$rawId'.trim();
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,100}$').hasMatch(id)) {
+      throw const FormatException('远程会话 ID 无效');
+    }
+    final RemoteConnectionRecord? profile = (await _loadRemoteProfiles())
+        .where((RemoteConnectionRecord value) => value.id == id)
+        .firstOrNull;
+    if (profile == null || profile.mode == RemoteSessionMode.remoteDesktop) {
+      throw StateError('没有找到可用的 SSH/SFTP 会话：$id');
+    }
+    if (profile.hostKeyType == null || profile.hostKeyFingerprint == null) {
+      throw StateError('请先在远程工作台手动连接一次并确认主机指纹');
+    }
+    return profile;
+  }
+
+  Future<String?> _remoteSecret(RemoteConnectionRecord profile) async {
+    final HarnessCredentialReader? reader = _credentialReader;
+    final String? secret = await (reader != null
+        ? reader(profile.credentialKey)
+        : PlatformCredentialStore.read(profile.credentialKey));
+    if (secret?.isNotEmpty != true &&
+        profile.identityFile?.trim().isNotEmpty != true) {
+      throw StateError('该远程会话没有可复用的系统凭据或私钥');
+    }
+    return secret;
+  }
+
+  RemoteHostKeyVerifier _pinnedVerifier(RemoteConnectionRecord profile) =>
+      (String type, String fingerprint) async =>
+          type == profile.hostKeyType &&
+          fingerprint == profile.hostKeyFingerprint;
+
+  Future<RemoteFileClient> _connectRemoteFiles(
+    RemoteConnectionRecord profile,
+  ) async {
+    final String? secret = await _remoteSecret(profile);
+    final RemoteHostKeyVerifier verifier = _pinnedVerifier(profile);
+    final HarnessRemoteFileConnector? connector = _remoteFileConnector;
+    return connector != null
+        ? connector(profile.connection, secret, verifier)
+        : RemoteFileService.connect(
+            profile.connection,
+            secret: secret,
+            verifyHostKey: verifier,
+          );
+  }
+
+  Future<Map<String, Object?>> _listRemoteProfiles(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<RemoteConnectionRecord> profiles = await _loadRemoteProfiles();
+    return <String, Object?>{
+      'profiles': <Map<String, Object?>>[
+        for (final RemoteConnectionRecord profile in profiles)
+          if (profile.mode != RemoteSessionMode.remoteDesktop)
+            <String, Object?>{
+              'id': profile.id,
+              'name': profile.name,
+              'mode': profile.mode.name,
+              'host': profile.host,
+              'port': profile.port,
+              'user': profile.user,
+              'hostKeyPinned': profile.hostKeyFingerprint != null,
+              'hasIdentityFile': profile.identityFile != null,
+            },
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> _runRemoteSshCommand(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteConnectionRecord profile = await _remoteProfile(
+      arguments['profileId'],
+    );
+    final String? secret = await _remoteSecret(profile);
+    final RemoteHostKeyVerifier verifier = _pinnedVerifier(profile);
+    final HarnessRemoteCommandRunner? runner = _remoteCommandRunner;
+    final RemoteCommandResult result = runner != null
+        ? await runner(
+            profile.connection,
+            (arguments['command'] ?? '').toString(),
+            secret,
+            verifier,
+          )
+        : await RemoteSshConnector.runCommand(
+            profile.connection,
+            (arguments['command'] ?? '').toString(),
+            secret: secret,
+            verifyHostKey: verifier,
+          );
+    if (result.exitCode != 0) {
+      throw StateError(
+        result.stderr.trim().isEmpty
+            ? '远程命令失败（exit ${result.exitCode}）'
+            : result.stderr.trim(),
+      );
+    }
+    return <String, Object?>{
+      'profileId': profile.id,
+      'exitCode': result.exitCode,
+      'stdout': result.stdout,
+      'stderr': result.stderr,
+    };
+  }
+
+  Future<Map<String, Object?>> _listRemoteSftp(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteConnectionRecord profile = await _remoteProfile(
+      arguments['profileId'],
+    );
+    final RemoteFileClient client = await _connectRemoteFiles(profile);
+    try {
+      final String path = (arguments['remotePath'] ?? '.').toString().trim();
+      final List<RemoteFileEntry> entries = await client.listDirectory(
+        path.isEmpty ? '.' : path,
+      );
+      return <String, Object?>{
+        'profileId': profile.id,
+        'path': await client.absolute(path.isEmpty ? '.' : path),
+        'entries': <Map<String, Object?>>[
+          for (final RemoteFileEntry entry in entries)
+            <String, Object?>{
+              'name': entry.name,
+              'path': entry.path,
+              'directory': entry.isDirectory,
+              'size': entry.size,
+              if (entry.modifiedEpochSeconds != null)
+                'modifiedEpochSeconds': entry.modifiedEpochSeconds,
+            },
+        ],
+      };
+    } finally {
+      await client.close();
+    }
+  }
+
+  Future<Map<String, Object?>> _uploadRemoteSftp(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteConnectionRecord profile = await _remoteProfile(
+      arguments['profileId'],
+    );
+    final String localPath = (arguments['localPath'] ?? '').toString();
+    final String remotePath = (arguments['remotePath'] ?? '').toString();
+    final File local = File(localPath).absolute;
+    if (localPath.isEmpty || !await local.exists()) {
+      throw StateError('本地上传文件不存在');
+    }
+    final RemoteFileClient client = await _connectRemoteFiles(profile);
+    int transferred = 0;
+    try {
+      await client.upload(
+        local.path,
+        remotePath,
+        overwrite: arguments['overwrite'] == true,
+        cancellation: SftpCancellationToken(),
+        onProgress: (int bytes, int total) => transferred = bytes,
+      );
+      return <String, Object?>{
+        'profileId': profile.id,
+        'localPath': local.path,
+        'remotePath': remotePath,
+        'bytes': transferred,
+      };
+    } finally {
+      await client.close();
+    }
+  }
+
+  Future<Map<String, Object?>> _downloadRemoteSftp(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteConnectionRecord profile = await _remoteProfile(
+      arguments['profileId'],
+    );
+    final String remotePath = (arguments['remotePath'] ?? '').toString();
+    final File local = File((arguments['localPath'] ?? '').toString()).absolute;
+    final RemoteFileClient client = await _connectRemoteFiles(profile);
+    int transferred = 0;
+    try {
+      final String normalized = remotePath.replaceAll('\\', '/');
+      final int separator = normalized.lastIndexOf('/');
+      final String parent = separator <= 0
+          ? '/'
+          : normalized.substring(0, separator);
+      final String name = normalized.substring(separator + 1);
+      final RemoteFileEntry? source = (await client.listDirectory(parent))
+          .where(
+            (RemoteFileEntry entry) => entry.name == name && !entry.isDirectory,
+          )
+          .firstOrNull;
+      if (source == null) throw StateError('远端文件不存在或不是普通文件');
+      await client.download(
+        source.path,
+        local.path,
+        total: source.size,
+        overwrite: arguments['overwrite'] == true,
+        cancellation: SftpCancellationToken(),
+        onProgress: (int bytes, int total) => transferred = bytes,
+      );
+      return <String, Object?>{
+        'profileId': profile.id,
+        'remotePath': source.path,
+        'localPath': local.path,
+        'bytes': transferred,
+      };
+    } finally {
+      await client.close();
+    }
+  }
+
+  Future<List<RemoteDatabaseProfile>> _loadRemoteDatabaseProfiles() async {
+    final HarnessRemoteDatabaseProfileLoader? loader =
+        _remoteDatabaseProfileLoader;
+    if (loader != null) return loader();
+    final List<String> encoded =
+        (await AppSettingsStore().load()).remoteDatabaseProfiles;
+    return encoded
+        .map(RemoteDatabaseProfile.decode)
+        .whereType<RemoteDatabaseProfile>()
+        .toList(growable: false);
+  }
+
+  Future<RemoteDatabaseProfile> _remoteDatabaseProfile(Object? rawId) async {
+    final String id = '$rawId'.trim();
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,100}$').hasMatch(id)) {
+      throw const FormatException('远程数据库会话 ID 无效');
+    }
+    final RemoteDatabaseProfile? profile = (await _loadRemoteDatabaseProfiles())
+        .where((RemoteDatabaseProfile value) => value.id == id)
+        .firstOrNull;
+    if (profile == null) throw StateError('没有找到远程数据库会话：$id');
+    return profile;
+  }
+
+  Future<String> _remoteDatabasePassword(RemoteDatabaseProfile profile) async {
+    final HarnessCredentialReader? reader = _credentialReader;
+    final String? password = await (reader != null
+        ? reader(profile.id)
+        : RemoteDatabaseCredentials.read(profile.id));
+    if (password == null) throw StateError('该数据库会话没有可复用的系统凭据');
+    return password;
+  }
+
+  Future<Map<String, Object?>> _listRemoteDatabaseProfiles(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<RemoteDatabaseProfile> profiles =
+        await _loadRemoteDatabaseProfiles();
+    return <String, Object?>{
+      'profiles': <Map<String, Object?>>[
+        for (final RemoteDatabaseProfile profile in profiles)
+          <String, Object?>{
+            'id': profile.id,
+            'name': profile.name,
+            'engine': profile.engine.storageName,
+            'host': profile.host,
+            'port': profile.port,
+            'database': profile.database,
+            'username': profile.username,
+            'tls': profile.useTls,
+          },
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> _inspectRemoteDatabase(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteDatabaseProfile profile = await _remoteDatabaseProfile(
+      arguments['profileId'],
+    );
+    final String password = await _remoteDatabasePassword(profile);
+    final HarnessRemoteDatabaseInspector? inspector = _remoteDatabaseInspector;
+    final RemoteDatabaseSnapshot snapshot = inspector != null
+        ? await inspector(profile, password)
+        : await RemoteDatabaseService.inspect(profile, password);
+    return <String, Object?>{
+      'profileId': profile.id,
+      'serverVersion': snapshot.serverVersion,
+      'objects': <Map<String, Object?>>[
+        for (final RemoteDatabaseObject object in snapshot.objects)
+          object.toMap(),
+      ],
+      if (snapshot.initialPage != null)
+        'initialPage': _pageJson(snapshot.initialPage!),
+    };
+  }
+
+  Future<Map<String, Object?>> _queryRemoteDatabase(
+    Map<String, Object?> arguments,
+  ) async {
+    final RemoteDatabaseProfile profile = await _remoteDatabaseProfile(
+      arguments['profileId'],
+    );
+    final String password = await _remoteDatabasePassword(profile);
+    final String sql = (arguments['sql'] ?? '').toString();
+    final HarnessRemoteDatabaseQuerier? querier = _remoteDatabaseQuerier;
+    final SqliteResultPage page = querier != null
+        ? await querier(profile, password, sql)
+        : await RemoteDatabaseService.query(profile, password, sql);
+    return <String, Object?>{'profileId': profile.id, ..._pageJson(page)};
+  }
+
+  Future<Map<String, Object?>> _scanDuplicateFiles(
+    Map<String, Object?> arguments,
+  ) async {
+    final String root = (arguments['root'] ?? '').toString().trim();
+    final int minimumSize = _integer(
+      arguments['minimumSize'],
+      1024 * 1024,
+    ).clamp(1, 1 << 40);
+    final DuplicateScanResult result = await DuplicateFileBackgroundRunner.scan(
+      root,
+      recursive: arguments['recursive'] != false,
+      minimumSize: minimumSize,
+      cancellationToken: CleanupCancellationToken(),
+      onProgress: (_) {},
+    );
+    return <String, Object?>{
+      'root': Directory(root).absolute.path,
+      'cancelled': result.cancelled,
+      'visitedFiles': result.visitedFiles,
+      'hashedFiles': result.hashedFiles,
+      'unreadablePaths': result.unreadablePaths,
+      'duplicateFiles': result.duplicateFiles,
+      'reclaimableBytes': result.reclaimableBytes,
+      'truncated': result.groups.length > 100,
+      'groups': <Map<String, Object?>>[
+        for (final DuplicateFileGroup group in result.groups.take(100))
+          <String, Object?>{
+            'sha256': group.sha256,
+            'size': group.size,
+            'reclaimableBytes': group.reclaimableBytes,
+            'suggestedKeep': group.suggestedKeep.path,
+            'files': group.files
+                .take(50)
+                .map((DuplicateFileEntry file) => file.path)
+                .toList(growable: false),
+          },
+      ],
+    };
+  }
+
+  Future<Map<String, Object?>> _hashFileInBackground(
+    Map<String, Object?> arguments,
+  ) async {
+    final String algorithmName = (arguments['params'] ?? 'sha256')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final FileHashAlgorithm algorithm = switch (algorithmName) {
+      'md5' => FileHashAlgorithm.md5,
+      'sha1' || 'sha-1' => FileHashAlgorithm.sha1,
+      'sha256' || 'sha-256' || '' => FileHashAlgorithm.sha256,
+      'sha512' || 'sha-512' => FileHashAlgorithm.sha512,
+      _ => throw const FormatException('算法仅支持 md5/sha1/sha256/sha512'),
+    };
+    final FileHashResult result = await FileHashBackgroundRunner.calculate(
+      (arguments['input'] ?? '').toString(),
+      algorithm,
+      cancellation: FileHashCancellation(),
+      onProgress: (_, _) {},
+    );
+    if (!result.succeeded) {
+      throw StateError(
+        result.cancelled ? '文件哈希已取消' : (result.error ?? '文件哈希失败'),
+      );
+    }
+    return <String, Object?>{
+      'path': File(result.path).absolute.path,
+      'algorithm': result.algorithm.name,
+      'bytes': result.totalBytes,
+      'digest': result.digest,
+    };
+  }
+
+  Future<Map<String, Object?>> _analyzeSystemDrive(
+    Map<String, Object?> arguments,
+  ) async {
+    final String root = (arguments['root'] ?? '').toString().trim();
+    final SystemDriveAnalysis analysis =
+        await SystemDriveAnalysisRunner.analyze(
+          root,
+          cancellationToken: CleanupCancellationToken(),
+          onProgress: (_) {},
+        );
+    Map<String, Object?> entry(SystemDriveUsageEntry value) =>
+        <String, Object?>{
+          'path': value.path,
+          'name': value.name,
+          'sizeBytes': value.sizeBytes,
+          'kind': value.kind.name,
+          'kindLabel': value.kind.label,
+          'owner': value.ownerLabel,
+          'assessment': value.needsReview ? 'review' : 'expected',
+          'canDeleteAfterConfirmation': value.canDelete,
+          'reason': value.reason,
+          'measurementComplete': value.complete,
+        };
+    return <String, Object?>{
+      'root': analysis.rootPath,
+      'cancelled': analysis.cancelled,
+      'totalBytes': analysis.totalBytes,
+      'usedBytes': analysis.usedBytes,
+      'freeBytes': analysis.freeBytes,
+      'availableBytes': analysis.availableBytes,
+      'logicalMeasuredBytes': analysis.logicalMeasuredBytes,
+      'unaccountedBytes': analysis.unaccountedBytes,
+      'logicalOvercountBytes': analysis.logicalOvercountBytes,
+      'visitedEntries': analysis.visitedEntries,
+      'unreadablePaths': analysis.unreadablePaths,
+      'entries': analysis.entries.take(500).map(entry).toList(growable: false),
+      'breakdownEntries': analysis.breakdownEntries
+          .take(500)
+          .map(entry)
+          .toList(growable: false),
+      'truncated':
+          analysis.entries.length > 500 ||
+          analysis.breakdownEntries.length > 500,
+    };
+  }
+
   Future<Map<String, Object?>> _calculate(
     Map<String, Object?> arguments,
   ) async {
@@ -916,6 +1544,20 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbCommandId) return (arguments['serial'] ?? '').toString();
     if (toolId == serialTransactId) return (arguments['port'] ?? '').toString();
     if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
+    if (toolId == duplicateScanId || toolId == systemDriveAnalyzeId) {
+      return (arguments['root'] ?? '').toString();
+    }
+    if (toolId == remoteSshExecId ||
+        toolId == remoteSftpListId ||
+        toolId == remoteSftpUploadId ||
+        toolId == remoteSftpDownloadId) {
+      final String profile = (arguments['profileId'] ?? '').toString();
+      final String path = (arguments['remotePath'] ?? '').toString();
+      return path.isEmpty ? profile : '$profile · $path';
+    }
+    if (toolId == remoteDatabaseInspectId || toolId == remoteDatabaseQueryId) {
+      return (arguments['profileId'] ?? '').toString();
+    }
     if (toolId == gitInspectId ||
         toolId == gitCompareRefsId ||
         toolId == gitCreateLocalBranchId) {

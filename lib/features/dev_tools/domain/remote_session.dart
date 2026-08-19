@@ -150,6 +150,18 @@ typedef RemoteHostKeyVerifier = Future<bool> Function(
   String fingerprint,
 );
 
+class RemoteCommandResult {
+  const RemoteCommandResult({
+    required this.exitCode,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final int exitCode;
+  final String stdout;
+  final String stderr;
+}
+
 abstract final class RemoteSessionService {
   static Future<RemoteSessionHandle> start(
     RemoteLaunchRequest request, {
@@ -362,6 +374,47 @@ abstract final class RemoteSshConnector {
     } on Object {
       client.close();
       rethrow;
+    }
+  }
+
+  static Future<RemoteCommandResult> runCommand(
+    RemoteConnectionProfile profile,
+    String command, {
+    String? secret,
+    required RemoteHostKeyVerifier verifyHostKey,
+  }) async {
+    final String source = command.trim();
+    if (source.isEmpty ||
+        source.length > 8192 ||
+        source.codeUnits.any((int unit) => unit == 0)) {
+      throw const FormatException('远程命令为空、过长或包含非法字符');
+    }
+    final SSHClient client = await connect(
+      profile,
+      secret: secret,
+      verifyHostKey: verifyHostKey,
+    );
+    try {
+      final SSHSession session = await client.execute(source);
+      final Future<String> stdout = session.stdout
+          .cast<List<int>>()
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join();
+      final Future<String> stderr = session.stderr
+          .cast<List<int>>()
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .join();
+      await session.done.timeout(const Duration(seconds: 30));
+      return RemoteCommandResult(
+        exitCode: session.exitCode ?? 0,
+        stdout: await stdout,
+        stderr: await stderr,
+      );
+    } on TimeoutException {
+      client.close();
+      throw StateError('远程命令 30 秒未完成，连接已关闭');
+    } finally {
+      client.close();
     }
   }
 }

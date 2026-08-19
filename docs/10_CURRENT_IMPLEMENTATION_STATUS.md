@@ -4,7 +4,7 @@
 
 更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.33+43`（SSH 会话直达 SFTP 检查点，非正式发布）
+当前版本：`1.9.0-dev.34+44`（Harness 工具闭环检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -20,7 +20,7 @@ Windows 已形成可构建、可启动、可自动路由的开发者工具融合
 | 系统清理 | Windows 规则库 v4（31+ 条）与 macOS v1（26 条）；浏览器/应用/系统/开发/IDE/包管理器/日志缓存；`C:\ESTLOG` 超过 24 小时的 `.log` 独立默认规则；跨 `C:\Users\*\AppData\Roaming/Local` 浅层发现；最多 2 个清理扫描 Isolate；系统盘报告区分真实卷容量与含 NTFS 硬链接重复计数的目录逻辑量 | 本机 `C:\ESTLOG` 24/24 个候选、37.49 MiB 实查闭环；真实 C 盘容量和 DISM 组件存储完成只读审计；删除仍须用户确认，macOS 构建待实机 |
 | 文档阅读 | 全部注册格式按类别可查看；Markdown 默认预览；打开后可关闭；最近打开跨重启保存并可清空；源码识别、查找、编辑、原子保存；结构化数据、Web/EPUB/SVG；大文本与大 BIN 窗口化 | Windows 主路径完成 |
 | 开发工具 | 左侧只保留计算器、数据库、串口、远程、ADB、API、Git、文件搜索/哈希/重命名/重复文件等独立工作区；编码、格式、时间、正则、网络微工具合并到“转换与检查”的右侧分类 Tab | 数据库、串口、SSH/SFTP/转发/系统桌面主路径完成；ADB 路径/设备层完成，操作层待继续 |
-| Harness（智能体） | 一级导航第 1 项；Windows 直接嵌入官方 DeepSeek Harness Web；官方工作区/多会话/模型/权限/任务/工具轨迹为唯一数据源；OCR 为同页辅助入口 | Windows 官方 Web 与 Vibekits MCP 已接入；Key 粘贴、Flash/Pro、推理等级、中文权限及会话归档/删除已验收；真实 DeepSeek Key 全链路与 macOS 仍待验证 |
+| Harness（智能体） | 一级导航第 1 项；Windows 直接嵌入官方 DeepSeek Harness Web；官方工作区/多会话/模型/权限/任务/工具轨迹为唯一数据源；OCR 为同页辅助入口 | Windows 官方 Web 与 Vibekits MCP 已接入；开发工具左侧每个入口均有可执行适配器；保存的 SSH/SFTP 与远程数据库、后台文件哈希/重复扫描和磁盘分析已接入；真实外部服务与 macOS 仍待验证 |
 
 ## 3. 文件融合与系统入口
 
@@ -58,6 +58,7 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 - API 支持常见 HTTP 方法、头、正文、超时、重定向、取消和响应体上限；拒绝 URL 凭据和请求头注入，不提供关闭 TLS 校验的入口。
 - Git 工作区使用随包分发并经哈希校验的 MinGit，不依赖用户 PATH；展示根目录、分支、状态、暂存/未暂存 Diff 和日志。Harness 可只读对比任意两个版本，也可经权限审批创建不切换当前工作区的本地安全分支。GitHub 诊断同样复用内置 Git。
 - Harness 三档权限已传入官方原生沙箱：请求批准逐次询问；帮我批准由 App 对普通原生请求自动决定；完全访问使用官方 `danger-full-access` 模式。官方 PowerShell/文件工具的授权请求通过随机令牌回环桥回到 App，不再只控制 Vibekits MCP 外壳。
+- Harness 可从保存记录列出并调用 SSH/SFTP 和 PostgreSQL/MySQL/MariaDB；凭据只从 Credential Manager/Keychain 读取，主机严格匹配已确认指纹。文件哈希、重复文件扫描和磁盘占用分析均运行在独立 Isolate，工具返回与失败进入同一可删除审计记录。
 - SSH、SFTP 与本地端口转发均由随 App 编译的 `dartssh2` 实现；端口转发不再调用系统 `ssh`。远程桌面、文件定位、系统凭据和截图仍调用 Windows/macOS 自带系统能力，这些不是用户另装依赖。
 
 ### 4.5 微工具融合与 DeepSeek 智能体

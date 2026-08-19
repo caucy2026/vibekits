@@ -5,6 +5,12 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_connection_record.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_database_service.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
+import 'package:vibekits/features/dev_tools/domain/sftp_service.dart';
+import 'package:vibekits/features/dev_tools/domain/sqlite_database_service.dart';
+import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 
 void main() {
   test('导出版本化可执行工具目录且不暴露未接工具', () {
@@ -40,8 +46,65 @@ void main() {
       VibekitsHarnessToolBridge.apiRequestId,
       VibekitsHarnessToolBridge.githubDiagnosticsId,
       VibekitsHarnessToolBridge.programmerCalculatorId,
+      VibekitsHarnessToolBridge.remoteListProfilesId,
+      VibekitsHarnessToolBridge.remoteSshExecId,
+      VibekitsHarnessToolBridge.remoteSftpListId,
+      VibekitsHarnessToolBridge.remoteSftpUploadId,
+      VibekitsHarnessToolBridge.remoteSftpDownloadId,
+      VibekitsHarnessToolBridge.remoteDatabaseListProfilesId,
+      VibekitsHarnessToolBridge.remoteDatabaseInspectId,
+      VibekitsHarnessToolBridge.remoteDatabaseQueryId,
+      VibekitsHarnessToolBridge.duplicateScanId,
+      VibekitsHarnessToolBridge.systemDriveAnalyzeId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
+    }
+  });
+
+  test('开发工具左侧每个入口都有至少一个 Harness 可执行适配器', () {
+    final Set<String> executable = VibekitsHarnessToolBridge().executableCatalog
+        .map((HarnessToolDefinition tool) => tool.id)
+        .toSet();
+    final Map<String, Set<String>> adapters = <String, Set<String>>{
+      'programmer_calculator': <String>{
+        VibekitsHarnessToolBridge.programmerCalculatorId,
+      },
+      'database_manager': <String>{
+        VibekitsHarnessToolBridge.sqliteInspectId,
+        VibekitsHarnessToolBridge.sqliteQueryId,
+        VibekitsHarnessToolBridge.remoteDatabaseInspectId,
+        VibekitsHarnessToolBridge.remoteDatabaseQueryId,
+      },
+      'remote_workspace': <String>{
+        VibekitsHarnessToolBridge.remoteSshExecId,
+        VibekitsHarnessToolBridge.remoteSftpListId,
+        VibekitsHarnessToolBridge.remoteSftpUploadId,
+        VibekitsHarnessToolBridge.remoteSftpDownloadId,
+      },
+      'serial_port': <String>{VibekitsHarnessToolBridge.serialTransactId},
+      'adb_workspace': <String>{VibekitsHarnessToolBridge.adbCommandId},
+      'api_workspace': <String>{VibekitsHarnessToolBridge.apiRequestId},
+      'git_workspace': <String>{VibekitsHarnessToolBridge.gitInspectId},
+      'github_diagnostics': <String>{
+        VibekitsHarnessToolBridge.githubDiagnosticsId,
+      },
+      'file_hash': <String>{'vibekits.file_hash'},
+      'file_search': <String>{VibekitsHarnessToolBridge.fileSearchId},
+      'batch_rename': <String>{'vibekits.batch_rename'},
+      'duplicate_files': <String>{VibekitsHarnessToolBridge.duplicateScanId},
+      'utility_collection': <String>{
+        for (final ToolSpec tool in utilityToolRegistry) 'vibekits.${tool.id}',
+      },
+    };
+
+    for (final ToolSpec workspace in devToolRegistry) {
+      final Set<String>? toolIds = adapters[workspace.id];
+      expect(toolIds, isNotNull, reason: '未声明 ${workspace.id} 的 Harness 适配器');
+      expect(
+        toolIds!.any(executable.contains),
+        isTrue,
+        reason: '${workspace.id} 没有进入 Harness 可执行目录',
+      );
     }
   });
 
@@ -274,4 +337,321 @@ void main() {
     expect(result.data?['hexadecimal'], '0x03FF');
     expect(result.data?['decimal'], '1023');
   });
+
+  test('Harness 通过已保存会话闭环调用 SSH 与 SFTP 且不暴露凭据', () async {
+    const RemoteConnectionRecord profile = RemoteConnectionRecord(
+      id: 'server_1',
+      name: '测试服务器',
+      mode: RemoteSessionMode.ssh,
+      host: 'server.example.com',
+      user: 'dev',
+      port: 22,
+      hostKeyType: 'ssh-ed25519',
+      hostKeyFingerprint: 'SHA256:TrustedHostKey0123456789+/',
+    );
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vibekits_harness_remote_',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final File upload = await File(
+      '${sandbox.path}${Platform.pathSeparator}upload.txt',
+    ).writeAsString('UPLOAD_OK');
+    final String download =
+        '${sandbox.path}${Platform.pathSeparator}download.txt';
+    final List<String> transfers = <String>[];
+    final List<Map<String, Object?>> activities = <Map<String, Object?>>[];
+    int approvals = 0;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      activityRecorder:
+          ({
+            required String toolId,
+            required String toolName,
+            required String target,
+            required Map<String, Object?> arguments,
+            required Object? result,
+            required HarnessToolActivityStatus status,
+            required DateTime startedAt,
+          }) async {
+            activities.add(<String, Object?>{
+              'toolId': toolId,
+              'target': target,
+              'arguments': arguments,
+              'result': result,
+              'status': status.name,
+            });
+          },
+      remoteProfileLoader: () async => const <RemoteConnectionRecord>[profile],
+      credentialReader: (String key) async {
+        expect(key, profile.credentialKey);
+        return 'vault-secret';
+      },
+      remoteCommandRunner:
+          (
+            RemoteConnectionProfile connection,
+            String command,
+            String? secret,
+            RemoteHostKeyVerifier verifier,
+          ) async {
+            expect(connection.host, profile.host);
+            expect(secret, 'vault-secret');
+            expect(command, 'printf HARNESS_SSH_OK');
+            expect(
+              await verifier(profile.hostKeyType!, profile.hostKeyFingerprint!),
+              isTrue,
+            );
+            return const RemoteCommandResult(
+              exitCode: 0,
+              stdout: 'HARNESS_SSH_OK',
+              stderr: '',
+            );
+          },
+      remoteFileConnector: (
+        RemoteConnectionProfile connection,
+        String? secret,
+        RemoteHostKeyVerifier verifier,
+      ) async => _FakeHarnessRemoteFileClient(transfers),
+    );
+
+    Future<bool> approve(HarnessToolApprovalRequest request) async {
+      approvals += 1;
+      expect(request.target, contains('server_1'));
+      return true;
+    }
+
+    final HarnessToolCallResult profiles = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteListProfilesId,
+      arguments: const <String, Object?>{},
+      approve: approve,
+    );
+    final HarnessToolCallResult command = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteSshExecId,
+      arguments: const <String, Object?>{
+        'profileId': 'server_1',
+        'command': 'printf HARNESS_SSH_OK',
+      },
+      approve: approve,
+    );
+    final HarnessToolCallResult listing = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteSftpListId,
+      arguments: const <String, Object?>{
+        'profileId': 'server_1',
+        'remotePath': '/tmp',
+      },
+      approve: approve,
+    );
+    final HarnessToolCallResult uploaded = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteSftpUploadId,
+      arguments: <String, Object?>{
+        'profileId': 'server_1',
+        'localPath': upload.path,
+        'remotePath': '/tmp/upload.txt',
+      },
+      approve: approve,
+    );
+    final HarnessToolCallResult downloaded = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteSftpDownloadId,
+      arguments: <String, Object?>{
+        'profileId': 'server_1',
+        'remotePath': '/tmp/remote.txt',
+        'localPath': download,
+      },
+      approve: approve,
+    );
+
+    expect(profiles.ok, isTrue);
+    expect(profiles.data.toString(), isNot(contains('vault-secret')));
+    expect(command.data?['stdout'], 'HARNESS_SSH_OK');
+    expect(listing.data.toString(), contains('remote.txt'));
+    expect(uploaded.ok, isTrue);
+    expect(downloaded.ok, isTrue);
+    expect(await File(download).readAsString(), 'REMOTE_OK');
+    expect(transfers, <String>['upload:/tmp/upload.txt', 'download:$download']);
+    expect(approvals, 3);
+    expect(activities, hasLength(5));
+    expect(
+      activities.map((Map<String, Object?> item) => item['toolId']),
+      containsAll(<String>[
+        VibekitsHarnessToolBridge.remoteSshExecId,
+        VibekitsHarnessToolBridge.remoteSftpListId,
+        VibekitsHarnessToolBridge.remoteSftpUploadId,
+        VibekitsHarnessToolBridge.remoteSftpDownloadId,
+      ]),
+    );
+    expect(activities.toString(), isNot(contains('vault-secret')));
+  });
+
+  test('Harness 通过已保存会话只读检查和查询远程数据库', () async {
+    const RemoteDatabaseProfile profile = RemoteDatabaseProfile(
+      id: 'postgres-42',
+      name: '开发库',
+      host: 'db.example.com',
+      port: 5432,
+      database: 'app',
+      username: 'developer',
+      useTls: true,
+    );
+    int approvals = 0;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      remoteDatabaseProfileLoader: () async => <RemoteDatabaseProfile>[profile],
+      credentialReader: (String key) async {
+        expect(key, profile.id);
+        return 'database-secret';
+      },
+      remoteDatabaseInspector:
+          (RemoteDatabaseProfile value, String password) async {
+            expect(value.id, profile.id);
+            expect(password, 'database-secret');
+            return const RemoteDatabaseSnapshot(
+              profile: profile,
+              serverVersion: 'PostgreSQL 17',
+              objects: <RemoteDatabaseObject>[
+                RemoteDatabaseObject(schema: 'public', name: 'users'),
+              ],
+            );
+          },
+      remoteDatabaseQuerier:
+          (RemoteDatabaseProfile value, String password, String sql) async {
+            expect(password, 'database-secret');
+            expect(
+              RemoteDatabaseService.validateReadOnlySql(sql, value.engine),
+              'SELECT 1',
+            );
+            return const SqliteResultPage(
+              columns: <String>['value'],
+              rows: <List<String>>[
+                <String>['1'],
+              ],
+              offset: 0,
+              hasMore: false,
+              label: '远程 SQL 查询',
+            );
+          },
+    );
+
+    Future<bool> approve(HarnessToolApprovalRequest request) async {
+      approvals += 1;
+      expect(request.target, profile.id);
+      return true;
+    }
+
+    final HarnessToolCallResult profiles = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteDatabaseListProfilesId,
+      arguments: const <String, Object?>{},
+      approve: approve,
+    );
+    final HarnessToolCallResult inspected = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteDatabaseInspectId,
+      arguments: const <String, Object?>{'profileId': 'postgres-42'},
+      approve: approve,
+    );
+    final HarnessToolCallResult queried = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteDatabaseQueryId,
+      arguments: const <String, Object?>{
+        'profileId': 'postgres-42',
+        'sql': 'SELECT 1',
+      },
+      approve: approve,
+    );
+
+    expect(profiles.data.toString(), contains('db.example.com'));
+    expect(profiles.data.toString(), isNot(contains('database-secret')));
+    expect(inspected.data.toString(), contains('users'));
+    expect(queried.data?['rows'], <List<String>>[
+      <String>['1'],
+    ]);
+    expect(approvals, 2);
+  });
+
+  test('Harness 在后台线程完成文件哈希和重复文件扫描', () async {
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vibekits_harness_files_',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final File first = await File(
+      '${sandbox.path}${Platform.pathSeparator}first.bin',
+    ).writeAsString('same-content');
+    await File('${sandbox.path}${Platform.pathSeparator}second.bin')
+        .writeAsString('same-content');
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    int approvals = 0;
+    Future<bool> approve(HarnessToolApprovalRequest request) async {
+      approvals += 1;
+      return true;
+    }
+
+    final HarnessToolCallResult hash = await bridge.invoke(
+      toolId: 'vibekits.file_hash',
+      arguments: <String, Object?>{'input': first.path, 'params': 'sha256'},
+      approve: approve,
+    );
+    final HarnessToolCallResult duplicates = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.duplicateScanId,
+      arguments: <String, Object?>{'root': sandbox.path, 'minimumSize': 1},
+      approve: approve,
+    );
+    final HarnessToolCallResult drive = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.systemDriveAnalyzeId,
+      arguments: <String, Object?>{'root': sandbox.path},
+      approve: approve,
+    );
+
+    expect(hash.ok, isTrue);
+    expect(hash.data?['digest'], hasLength(64));
+    expect(duplicates.data?['duplicateFiles'], 1);
+    expect(duplicates.data?['reclaimableBytes'], 12);
+    expect(drive.ok, isTrue);
+    expect(drive.data?['totalBytes'], greaterThan(0));
+    expect(drive.data?['entries'].toString(), contains('first.bin'));
+    expect(approvals, 0);
+  });
+}
+
+class _FakeHarnessRemoteFileClient implements RemoteFileClient {
+  _FakeHarnessRemoteFileClient(this.transfers);
+
+  final List<String> transfers;
+
+  @override
+  Future<String> absolute(String path) async => path;
+
+  @override
+  Future<List<RemoteFileEntry>> listDirectory(String path) async =>
+      const <RemoteFileEntry>[
+        RemoteFileEntry(
+          name: 'remote.txt',
+          path: '/tmp/remote.txt',
+          isDirectory: false,
+          size: 9,
+        ),
+      ];
+
+  @override
+  Future<void> upload(
+    String localPath,
+    String remotePath, {
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {
+    final int size = await File(localPath).length();
+    transfers.add('upload:$remotePath');
+    onProgress(size, size);
+  }
+
+  @override
+  Future<void> download(
+    String remotePath,
+    String localPath, {
+    required int total,
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {
+    transfers.add('download:$localPath');
+    await File(localPath).writeAsString('REMOTE_OK');
+    onProgress(total, total);
+  }
+
+  @override
+  Future<void> close() async {}
 }
