@@ -9,6 +9,7 @@ import '../features/cleaner/presentation/cleaner_tab.dart';
 import '../features/documents/presentation/documents_tab.dart';
 import '../features/documents/domain/format_router.dart';
 import '../features/dev_tools/presentation/dev_tools_tab.dart';
+import '../features/dev_tools/domain/remote_session.dart';
 import '../features/local_models/presentation/local_models_tab.dart';
 import 'app_shortcuts.dart';
 import 'app_settings.dart';
@@ -88,6 +89,8 @@ class _MainShellState extends State<MainShell> {
   int _modelDropSerial = 0;
   int _imageDropSerial = 0;
   int _databaseDropSerial = 0;
+  RemoteWorkspaceIntent? _remoteWorkspaceIntent;
+  int _remoteWorkspaceIntentSerial = 0;
   int _dropGeneration = 0;
   List<DroppedFileRoute> _dropBatch = const <DroppedFileRoute>[];
   StreamSubscription<List<String>>? _dropSubscription;
@@ -265,6 +268,16 @@ class _MainShellState extends State<MainShell> {
     });
   }
 
+  Future<void> _openRemoteWorkspace(RemoteWorkspaceIntent intent) async {
+    intent.validate();
+    _selectTab(4);
+    if (!mounted) return;
+    setState(() {
+      _remoteWorkspaceIntent = intent;
+      _remoteWorkspaceIntentSerial++;
+    });
+  }
+
   Future<void> _showDropBatch() async {
     if (!mounted || _dropBatch.isEmpty) return;
     await showDialog<void>(
@@ -382,6 +395,7 @@ class _MainShellState extends State<MainShell> {
                 deepSeekHarnessDebugDirectory: directory,
               ),
             ),
+        remoteWorkspaceLauncher: _openRemoteWorkspace,
       ),
       ArchiveTab(
         key: ValueKey<String>('archive-drop-$_archiveDropSerial'),
@@ -472,6 +486,8 @@ class _MainShellState extends State<MainShell> {
                 serialPortSettings: serialSettings,
               ),
             ),
+        remoteWorkspaceIntent: _remoteWorkspaceIntent,
+        remoteWorkspaceIntentSerial: _remoteWorkspaceIntentSerial,
       ),
     ];
     final List<Widget> tabPages = List<Widget>.generate(

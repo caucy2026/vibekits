@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../domain/bundled_model_installer.dart';
 import '../domain/curated_model.dart';
 import '../domain/curated_model_bundle.dart';
@@ -78,6 +79,7 @@ class LocalModelsTab extends StatefulWidget {
     this.harnessRunAgent = DeepSeekHarnessService.startAgent,
     this.harnessPickDirectory,
     this.harnessCredentialReader,
+    this.remoteWorkspaceLauncher,
   });
 
   final String directory;
@@ -105,6 +107,7 @@ class LocalModelsTab extends StatefulWidget {
   final HarnessAgentRunner harnessRunAgent;
   final AgentDirectoryPicker? harnessPickDirectory;
   final AgentCredentialReader? harnessCredentialReader;
+  final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -447,6 +450,46 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     }
   }
 
+  Future<Map<String, Object?>> _captureScreenshotForHarness() async {
+    if (_capturingScreenshot || _runningOcr) {
+      throw StateError('截图 OCR 正在运行，请等待当前任务完成');
+    }
+    setState(() {
+      _workspace = _ModelWorkspace.ocr;
+      _ocrResult = null;
+      _imagePath = null;
+    });
+    await widget.onLargeModelViewChanged?.call('ocr');
+    await _captureScreenshot();
+    final PpOcrResult? result = _ocrResult;
+    final String? imagePath = _imagePath;
+    if (result == null || imagePath == null) {
+      throw StateError(_message.isEmpty ? '截图 OCR 未完成' : _message);
+    }
+    return <String, Object?>{
+      'imagePath': imagePath,
+      'text': result.text,
+      'lineCount': result.lines.length,
+      'width': result.imageWidth,
+      'height': result.imageHeight,
+      'elapsedMs': result.elapsed.inMilliseconds,
+      'runtime': result.runtime,
+      'lines': <Map<String, Object?>>[
+        for (final OcrTextLine line in result.lines)
+          <String, Object?>{
+            'text': line.text,
+            'confidence': line.confidence,
+            'bounds': <String, int>{
+              'left': line.bounds.left,
+              'top': line.bounds.top,
+              'right': line.bounds.right,
+              'bottom': line.bounds.bottom,
+            },
+          },
+      ],
+    };
+  }
+
   Future<void> _runOcr() async {
     final String? imagePath = _imagePath;
     if (!_ocrBundleInstalled || imagePath == null || _runningOcr) return;
@@ -730,6 +773,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                       if (mounted) setState(() => _agentRunning = running);
                     },
                     credentialReader: widget.harnessCredentialReader,
+                    remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
+                    screenshotOcrRunner: _captureScreenshotForHarness,
                   )
                 else
                   DeepSeekAgentWorkspace(

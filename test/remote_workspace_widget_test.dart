@@ -10,6 +10,44 @@ import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 import 'package:vibekits/features/dev_tools/presentation/remote_workspace.dart';
 
 void main() {
+  testWidgets('开发工具收到 Harness 意图后立即定位并更新 SSH 目标', (WidgetTester tester) async {
+    Widget app(RemoteWorkspaceIntent intent, int serial) => MaterialApp(
+      home: Scaffold(
+        body: DevToolsTab(
+          remoteWorkspaceIntent: intent,
+          remoteWorkspaceIntentSerial: serial,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      app(const RemoteWorkspaceIntent(host: '192.168.3.20', user: 'root'), 1),
+    );
+    expect(find.byKey(const Key('remote-host')), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-host')))
+          .controller
+          ?.text,
+      '192.168.3.20',
+    );
+
+    await tester.pumpWidget(
+      app(
+        const RemoteWorkspaceIntent(host: 'server.example.com', user: 'dev'),
+        2,
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-host')))
+          .controller
+          ?.text,
+      'server.example.com',
+    );
+  });
+
   testWidgets('SSH 工作区用一个主操作连接并发送输入', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -456,6 +494,70 @@ void main() {
       find.byKey(const Key('remote-interactive-terminal')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Harness 打开 SSH 后只输入一次密码并自动显示 SFTP', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final _FakeInteractiveRemoteSession session =
+        _FakeInteractiveRemoteSession();
+    final _FakeRemoteFileClient files = _FakeRemoteFileClient();
+    String? receivedSecret;
+    RemoteSessionHandle? reusedSession;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            launchIntent: const RemoteWorkspaceIntent(
+              host: '192.168.3.20',
+              user: 'root',
+              openSftpAfterConnect: true,
+            ),
+            launchIntentSerial: 1,
+            secureStartSession:
+                (
+                  RemoteLaunchRequest request,
+                  String? secret,
+                  RemoteHostKeyVerifier verifyHostKey,
+                ) async {
+                  receivedSecret = secret;
+                  return session;
+                },
+            connectAuthenticatedRemoteFiles:
+                (RemoteSessionHandle activeSession) async {
+                  reusedSession = activeSession;
+                  return files;
+                },
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-host')))
+          .controller
+          ?.text,
+      '192.168.3.20',
+    );
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remote-session-secret')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('remote-session-secret')),
+      'only-once',
+    );
+    await tester.tap(find.byKey(const Key('remote-session-secret-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(receivedSecret, 'only-once');
+    expect(reusedSession, same(session));
+    expect(find.byKey(const Key('sftp-browser')), findsOneWidget);
+    expect(find.byKey(const Key('remote-session-secret')), findsNothing);
   });
 
   testWidgets('连接中可立即取消且迟到会话自动释放', (WidgetTester tester) async {

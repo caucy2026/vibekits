@@ -130,6 +130,10 @@ typedef HarnessRemoteDatabaseQuerier = Future<SqliteResultPage> Function(
   String password,
   String sql,
 );
+typedef HarnessRemoteWorkspaceLauncher = Future<void> Function(
+  RemoteWorkspaceIntent intent,
+);
+typedef HarnessScreenshotOcrRunner = Future<Map<String, Object?>> Function();
 
 /// Harness 只能通过此桥接调用 Vibekits 能力。
 ///
@@ -149,6 +153,8 @@ class VibekitsHarnessToolBridge {
     HarnessRemoteDatabaseProfileLoader? remoteDatabaseProfileLoader,
     HarnessRemoteDatabaseInspector? remoteDatabaseInspector,
     HarnessRemoteDatabaseQuerier? remoteDatabaseQuerier,
+    HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher,
+    HarnessScreenshotOcrRunner? screenshotOcrRunner,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -161,6 +167,8 @@ class VibekitsHarnessToolBridge {
     remoteDatabaseProfileLoader,
     remoteDatabaseInspector,
     remoteDatabaseQuerier,
+    remoteWorkspaceLauncher,
+    screenshotOcrRunner,
   );
 
   VibekitsHarnessToolBridge._(
@@ -175,6 +183,8 @@ class VibekitsHarnessToolBridge {
     this._remoteDatabaseProfileLoader,
     this._remoteDatabaseInspector,
     this._remoteDatabaseQuerier,
+    this._remoteWorkspaceLauncher,
+    this._screenshotOcrRunner,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -198,6 +208,8 @@ class VibekitsHarnessToolBridge {
   static const String remoteSftpListId = 'vibekits.remote.sftp_list';
   static const String remoteSftpUploadId = 'vibekits.remote.sftp_upload';
   static const String remoteSftpDownloadId = 'vibekits.remote.sftp_download';
+  static const String remoteOpenInteractiveId =
+      'vibekits.remote.open_interactive';
   static const String remoteDatabaseListProfilesId =
       'vibekits.database.remote_list_profiles';
   static const String remoteDatabaseInspectId =
@@ -205,6 +217,7 @@ class VibekitsHarnessToolBridge {
   static const String remoteDatabaseQueryId = 'vibekits.database.remote_query';
   static const String duplicateScanId = 'vibekits.files.duplicate_scan';
   static const String systemDriveAnalyzeId = 'vibekits.cleaner.analyze_drive';
+  static const String screenshotOcrId = 'vibekits.ocr.capture_screen';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
@@ -217,6 +230,8 @@ class VibekitsHarnessToolBridge {
   final HarnessRemoteDatabaseProfileLoader? _remoteDatabaseProfileLoader;
   final HarnessRemoteDatabaseInspector? _remoteDatabaseInspector;
   final HarnessRemoteDatabaseQuerier? _remoteDatabaseQuerier;
+  final HarnessRemoteWorkspaceLauncher? _remoteWorkspaceLauncher;
+  final HarnessScreenshotOcrRunner? _screenshotOcrRunner;
 
   late final Map<String, HarnessToolDefinition> _definitions =
       <String, HarnessToolDefinition>{
@@ -409,6 +424,35 @@ class VibekitsHarnessToolBridge {
           description: '列出已保存且已确认主机指纹的 SSH/SFTP 会话；不返回密码或私钥内容。',
           properties: const <String, Object?>{},
         ),
+        remoteOpenInteractiveId: HarnessToolDefinition(
+          id: remoteOpenInteractiveId,
+          name: '打开 SSH 与 SFTP 工作流',
+          description:
+              '在 Vibekits 中打开指定主机的 SSH 登录界面；用户认证一次后自动复用该连接展示 SFTP 双栏文件。',
+          risk: HarnessToolRisk.readOnly,
+          inputSchema: <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{
+              'host': <String, Object?>{
+                'type': 'string',
+                'description': 'IP 地址或主机名',
+              },
+              'user': <String, Object?>{
+                'type': 'string',
+                'description': 'SSH 用户名；未知时可留空让用户填写',
+              },
+              'port': <String, Object?>{
+                'type': 'integer',
+                'minimum': 1,
+                'maximum': 65535,
+              },
+              'openSftp': <String, Object?>{'type': 'boolean'},
+            },
+            'required': <String>['host'],
+            'additionalProperties': false,
+          },
+          available: _remoteWorkspaceLauncher != null,
+        ),
         remoteSshExecId: _definition(
           id: remoteSshExecId,
           name: '执行 SSH 命令',
@@ -502,6 +546,18 @@ class VibekitsHarnessToolBridge {
           description: '在独立后台线程分析指定磁盘根目录，返回总量、已用、剩余和主要占用；不删除任何文件。',
           properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
           required: <String>['root'],
+        ),
+        screenshotOcrId: HarnessToolDefinition(
+          id: screenshotOcrId,
+          name: '截图并 OCR 分析',
+          description: '让用户框选屏幕区域，使用 App 内置 PP-OCRv6 tiny 在本机识别，并把文字返回智能体。',
+          risk: HarnessToolRisk.controlsDevice,
+          inputSchema: <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{},
+            'additionalProperties': false,
+          },
+          available: _screenshotOcrRunner != null,
         ),
         programmerCalculatorId: _definition(
           id: programmerCalculatorId,
@@ -681,6 +737,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == apiRequestId) return _requestHttp;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
     if (toolId == remoteListProfilesId) return _listRemoteProfiles;
+    if (toolId == remoteOpenInteractiveId) return _openInteractiveRemote;
     if (toolId == remoteSshExecId) return _runRemoteSshCommand;
     if (toolId == remoteSftpListId) return _listRemoteSftp;
     if (toolId == remoteSftpUploadId) return _uploadRemoteSftp;
@@ -692,6 +749,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == remoteDatabaseQueryId) return _queryRemoteDatabase;
     if (toolId == duplicateScanId) return _scanDuplicateFiles;
     if (toolId == systemDriveAnalyzeId) return _analyzeSystemDrive;
+    if (toolId == screenshotOcrId) return _captureScreenAndOcr;
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
@@ -1114,6 +1172,34 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _openInteractiveRemote(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessRemoteWorkspaceLauncher? launcher = _remoteWorkspaceLauncher;
+    if (launcher == null) {
+      throw StateError('当前界面没有连接远程工作区导航器');
+    }
+    final RemoteWorkspaceIntent intent = RemoteWorkspaceIntent(
+      host: (arguments['host'] ?? '').toString().trim(),
+      user: (arguments['user'] ?? '').toString().trim(),
+      port: _integer(arguments['port'], 22),
+      openSftpAfterConnect: arguments['openSftp'] != false,
+    );
+    intent.validate();
+    await launcher(intent);
+    return <String, Object?>{
+      'opened': true,
+      'host': intent.host,
+      'user': intent.user,
+      'port': intent.port,
+      'state': 'awaiting_user_authentication',
+      'sftpAfterAuthentication': intent.openSftpAfterConnect,
+      'message': intent.user.isEmpty
+          ? '已打开 SSH 工作区，请填写用户名和密码；认证成功后将复用连接打开 SFTP。'
+          : '已打开 SSH 工作区，请输入密码；认证成功后将复用连接打开 SFTP。',
+    };
+  }
+
   Future<Map<String, Object?>> _runRemoteSshCommand(
     Map<String, Object?> arguments,
   ) async {
@@ -1470,6 +1556,14 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _captureScreenAndOcr(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessScreenshotOcrRunner? runner = _screenshotOcrRunner;
+    if (runner == null) throw StateError('当前界面没有连接截图 OCR 工作流');
+    return runner();
+  }
+
   Future<Map<String, Object?>> _calculate(
     Map<String, Object?> arguments,
   ) async {
@@ -1544,6 +1638,9 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbCommandId) return (arguments['serial'] ?? '').toString();
     if (toolId == serialTransactId) return (arguments['port'] ?? '').toString();
     if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
+    if (toolId == remoteOpenInteractiveId) {
+      return (arguments['host'] ?? '').toString();
+    }
     if (toolId == duplicateScanId || toolId == systemDriveAnalyzeId) {
       return (arguments['root'] ?? '').toString();
     }

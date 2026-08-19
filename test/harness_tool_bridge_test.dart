@@ -480,6 +480,70 @@ void main() {
     expect(activities.toString(), isNot(contains('vault-secret')));
   });
 
+  test('Harness 可打开一次认证后自动联动 SFTP 的交互工作流', () async {
+    RemoteWorkspaceIntent? opened;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      remoteWorkspaceLauncher: (RemoteWorkspaceIntent intent) async {
+        opened = intent;
+      },
+    );
+    expect(
+      bridge.executableCatalog.any(
+        (HarnessToolDefinition tool) =>
+            tool.id == VibekitsHarnessToolBridge.remoteOpenInteractiveId,
+      ),
+      isTrue,
+    );
+    int approvals = 0;
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.remoteOpenInteractiveId,
+      arguments: const <String, Object?>{
+        'host': '192.168.3.20',
+        'user': 'root',
+        'openSftp': true,
+      },
+      approve: (_) async {
+        approvals += 1;
+        return true;
+      },
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['state'], 'awaiting_user_authentication');
+    expect(opened?.host, '192.168.3.20');
+    expect(opened?.user, 'root');
+    expect(opened?.openSftpAfterConnect, isTrue);
+    expect(approvals, 0);
+  });
+
+  test('Harness 截图 OCR 通过界面工作流返回本机识别结果', () async {
+    int runs = 0;
+    int approvals = 0;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      screenshotOcrRunner: () async {
+        runs += 1;
+        return <String, Object?>{
+          'text': 'Build succeeded',
+          'lineCount': 1,
+          'runtime': 'PP-OCRv6 tiny',
+        };
+      },
+    );
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.screenshotOcrId,
+      arguments: const <String, Object?>{},
+      approve: (_) async {
+        approvals += 1;
+        return true;
+      },
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['text'], 'Build succeeded');
+    expect(runs, 1);
+    expect(approvals, 1);
+  });
+
   test('Harness 通过已保存会话只读检查和查询远程数据库', () async {
     const RemoteDatabaseProfile profile = RemoteDatabaseProfile(
       id: 'postgres-42',

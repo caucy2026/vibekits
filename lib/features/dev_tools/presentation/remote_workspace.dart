@@ -62,6 +62,8 @@ class RemoteWorkspace extends StatefulWidget {
     this.connectAuthenticatedRemoteFiles,
     this.connectPortForwards,
     this.launchRemoteDesktop,
+    this.launchIntent,
+    this.launchIntentSerial = 0,
   });
 
   final RemoteSessionStarter? startSession;
@@ -77,6 +79,8 @@ class RemoteWorkspace extends StatefulWidget {
   final AuthenticatedRemoteFileConnector? connectAuthenticatedRemoteFiles;
   final PortForwardConnector? connectPortForwards;
   final RemoteDesktopLauncher? launchRemoteDesktop;
+  final RemoteWorkspaceIntent? launchIntent;
+  final int launchIntentSerial;
 
   @override
   State<RemoteWorkspace> createState() => _RemoteWorkspaceState();
@@ -110,6 +114,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   String? _desktopStatus;
   bool _starting = false;
   bool _openingSessionFiles = false;
+  bool _openSftpAfterConnect = false;
   int _connectGeneration = 0;
   late final List<RemoteConnectionRecord> _profiles =
       RemoteConnectionRecord.decodeMany(widget.initialProfiles);
@@ -167,6 +172,81 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   @override
   void initState() {
     super.initState();
+    final RemoteWorkspaceIntent? intent = widget.launchIntent;
+    if (intent != null) _applyLaunchIntent(intent, notify: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant RemoteWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.launchIntent != null &&
+        widget.launchIntentSerial != oldWidget.launchIntentSerial) {
+      unawaited(_receiveLaunchIntent(widget.launchIntent!));
+    }
+  }
+
+  void _applyLaunchIntent(
+    RemoteWorkspaceIntent intent, {
+    required bool notify,
+  }) {
+    intent.validate();
+    final RemoteConnectionRecord? saved = _profiles
+        .where(
+          (RemoteConnectionRecord profile) =>
+              profile.mode != RemoteSessionMode.remoteDesktop &&
+              profile.host.toLowerCase() == intent.host.toLowerCase() &&
+              profile.port == intent.port &&
+              (intent.user.isEmpty || profile.user == intent.user),
+        )
+        .firstOrNull;
+    void update() {
+      _selectedProfileId = saved?.id;
+      _mode = RemoteSessionMode.ssh;
+      _host.text = saved?.host ?? intent.host;
+      _user.text = saved?.user ?? intent.user;
+      _port.text = '${saved?.port ?? intent.port}';
+      _identity.text = saved?.identityFile ?? '';
+      _savedCredentialAvailable = false;
+      _openSftpAfterConnect = intent.openSftpAfterConnect;
+      _error = intent.user.isEmpty && saved == null
+          ? '请填写 SSH 用户名；连接时只需输入一次密码，成功后将自动打开 SFTP。'
+          : null;
+      _desktopStatus = null;
+    }
+
+    if (notify) {
+      setState(update);
+    } else {
+      update();
+    }
+    if (saved != null) {
+      unawaited(_refreshSavedCredential(saved));
+    }
+  }
+
+  Future<void> _refreshSavedCredential(RemoteConnectionRecord profile) async {
+    final String? secret = await _readCredential(profile.credentialKey);
+    if (!mounted || _selectedProfileId != profile.id) return;
+    setState(() => _savedCredentialAvailable = secret?.isNotEmpty == true);
+  }
+
+  Future<void> _receiveLaunchIntent(RemoteWorkspaceIntent intent) async {
+    if (_sftpClient != null) await _disconnectSftp();
+    if (!mounted) return;
+    final RemoteSessionHandle? active = _activeTab?.session ?? _session;
+    final bool sameActiveHost =
+        active?.running == true &&
+        _host.text.trim().toLowerCase() == intent.host.trim().toLowerCase() &&
+        int.tryParse(_port.text) == intent.port &&
+        (intent.user.isEmpty || _user.text.trim() == intent.user.trim());
+    if (sameActiveHost) {
+      _openSftpAfterConnect = false;
+      if (intent.openSftpAfterConnect) await _openSftpFromActiveSession();
+      return;
+    }
+    if (active?.running == true) _prepareNewTerminal();
+    if (!mounted) return;
+    _applyLaunchIntent(intent, notify: true);
   }
 
   Terminal _terminalFor(RemoteSessionHandle session) => Terminal(
@@ -980,6 +1060,10 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           _appendOutput(tab, '\n[会话已结束 · exit $code]\n');
         }),
       );
+      if (_openSftpAfterConnect) {
+        _openSftpAfterConnect = false;
+        await _openSftpFromActiveSession();
+      }
     } catch (error) {
       if (!mounted || generation != _connectGeneration) return;
       setState(() {

@@ -7,6 +7,31 @@ import 'package:dartssh2/dartssh2.dart';
 
 enum RemoteSessionMode { ssh, sftp, localForward, remoteDesktop }
 
+/// A cross-workspace request to prepare an interactive SSH task.
+///
+/// It deliberately contains no password. Authentication remains an explicit
+/// user interaction in the remote workspace, after which the same SSH client
+/// can open SFTP without asking again.
+class RemoteWorkspaceIntent {
+  const RemoteWorkspaceIntent({
+    required this.host,
+    this.user = '',
+    this.port = 22,
+    this.openSftpAfterConnect = true,
+  });
+
+  final String host;
+  final String user;
+  final int port;
+  final bool openSftpAfterConnect;
+
+  void validate() => RemoteConnectionProfile(
+    host: host,
+    user: user,
+    port: port,
+  ).validate(requireUser: false);
+}
+
 class RemoteConnectionProfile {
   const RemoteConnectionProfile({
     required this.host,

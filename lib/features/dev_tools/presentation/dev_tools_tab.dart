@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
 import '../domain/tool_registry.dart';
+import '../domain/remote_session.dart';
 import 'batch_rename_workspace.dart';
 import 'adb_workspace.dart';
 import 'api_workspace.dart';
@@ -52,6 +53,8 @@ class DevToolsTab extends StatefulWidget {
     this.gitInspect,
     this.gitPickDirectory,
     this.githubDiagnostics,
+    this.remoteWorkspaceIntent,
+    this.remoteWorkspaceIntentSerial = 0,
   });
 
   final FileHashPicker? fileHashPickFiles;
@@ -84,6 +87,8 @@ class DevToolsTab extends StatefulWidget {
   final GitInspector? gitInspect;
   final GitDirectoryPicker? gitPickDirectory;
   final GithubDiagnosticsRunner? githubDiagnostics;
+  final RemoteWorkspaceIntent? remoteWorkspaceIntent;
+  final int remoteWorkspaceIntentSerial;
 
   @override
   State<DevToolsTab> createState() => _DevToolsTabState();
@@ -103,6 +108,24 @@ class _DevToolsTabState extends State<DevToolsTab> {
       _selected = devToolRegistry.firstWhere(
         (ToolSpec tool) => tool.id == 'database_manager',
       );
+    } else if (widget.remoteWorkspaceIntent != null) {
+      _selected = devToolRegistry.firstWhere(
+        (ToolSpec tool) => tool.id == 'remote_workspace',
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant DevToolsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.remoteWorkspaceIntent != null &&
+        widget.remoteWorkspaceIntentSerial !=
+            oldWidget.remoteWorkspaceIntentSerial) {
+      setState(() {
+        _selected = devToolRegistry.firstWhere(
+          (ToolSpec tool) => tool.id == 'remote_workspace',
+        );
+      });
     }
   }
 
@@ -276,6 +299,8 @@ class _DevToolsTabState extends State<DevToolsTab> {
         writeCredential: widget.remoteCredentialWrite,
         deleteCredential: widget.remoteCredentialDelete,
         profileIdGenerator: widget.remoteProfileIdGenerator,
+        launchIntent: widget.remoteWorkspaceIntent,
+        launchIntentSerial: widget.remoteWorkspaceIntentSerial,
       );
     }
     if (tool.id == 'serial_port') {

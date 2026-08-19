@@ -30,6 +30,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     this.onRunningChanged,
     this.credentialReader,
     this.credentialDeleter,
+    this.remoteWorkspaceLauncher,
+    this.screenshotOcrRunner,
     this.startWeb = DeepSeekHarnessService.startWebAgent,
     this.findPort = DeepSeekHarnessService.findFreeLoopbackPort,
   });
@@ -39,6 +41,8 @@ class OfficialHarnessWorkspace extends StatefulWidget {
   final ValueChanged<bool>? onRunningChanged;
   final OfficialHarnessCredentialReader? credentialReader;
   final OfficialHarnessCredentialDeleter? credentialDeleter;
+  final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
+  final HarnessScreenshotOcrRunner? screenshotOcrRunner;
   final OfficialHarnessWebStarter startWeb;
   final Future<int> Function() findPort;
 
@@ -128,7 +132,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           port: port,
           debugDirectory: widget.initialDebugDirectory,
           approveTool: _approveVibekitsTool,
-          toolBridge: VibekitsHarnessToolBridge(),
+          toolBridge: VibekitsHarnessToolBridge(
+            remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
+            screenshotOcrRunner: widget.screenshotOcrRunner,
+          ),
         ),
       );
       if (!mounted) {
