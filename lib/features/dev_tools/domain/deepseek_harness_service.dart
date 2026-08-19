@@ -400,6 +400,9 @@ abstract final class DeepSeekHarnessService {
     final Directory harnessHome = await _prepareHarnessHome(
       runtime.approvalPluginPath,
     );
+    final Directory nodeCompileCache = await _prepareNodeCompileCache(
+      harnessHome,
+    );
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
@@ -413,6 +416,8 @@ abstract final class DeepSeekHarnessService {
               ? defaultModel
               : request.model.trim(),
           'DSH_HOME': harnessHome.path,
+          'NODE_COMPILE_CACHE': nodeCompileCache.path,
+          'NODE_COMPILE_CACHE_PORTABLE': '1',
           'DSH_TELEMETRY_MODE': 'DISABLED',
           'DSH_PERMISSION_MODE': request.nativeSandboxMode,
           'DSH_TELEMETRY_DISABLED': '1',
@@ -468,6 +473,9 @@ abstract final class DeepSeekHarnessService {
       runtime.approvalPluginPath,
       includeApprovalBridge: false,
     );
+    final Directory nodeCompileCache = await _prepareNodeCompileCache(
+      harnessHome,
+    );
     await migrateLegacyCredentialToOfficialStore(
       request.apiKey,
       harnessHome: harnessHome,
@@ -479,6 +487,8 @@ abstract final class DeepSeekHarnessService {
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
           'DSH_HOME': harnessHome.path,
+          'NODE_COMPILE_CACHE': nodeCompileCache.path,
+          'NODE_COMPILE_CACHE_PORTABLE': '1',
           'DSH_TELEMETRY_MODE': 'DISABLED',
           'DSH_TELEMETRY_DISABLED': '1',
           'DSH_TOOLS_MODE': 'native',
@@ -501,6 +511,11 @@ abstract final class DeepSeekHarnessService {
       final File logFile = File(
         '${debug.logs.path}${Platform.pathSeparator}harness-web-'
         '${DateTime.now().toUtc().toIso8601String().replaceAll(':', '-')}.log',
+      );
+      await logFile.writeAsString(
+        '[${DateTime.now().toUtc().toIso8601String()}] '
+        'pid=${process.pid} url=${request.url} bundled=true\n',
+        flush: true,
       );
       return _ProcessHarnessWebSession(
         process,
@@ -618,6 +633,16 @@ abstract final class DeepSeekHarnessService {
       flush: true,
     );
     return home;
+  }
+
+  static Future<Directory> _prepareNodeCompileCache(
+    Directory harnessHome,
+  ) async {
+    final Directory cache = Directory(
+      '${harnessHome.path}${Platform.pathSeparator}node-compile-cache',
+    );
+    await cache.create(recursive: true);
+    return cache;
   }
 
   static bool _isSupportedNode(String value) {
@@ -842,17 +867,24 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     File logFile,
     this._apiKey,
   ) {
-    _log = logFile.openWrite(mode: FileMode.writeOnly);
+    _log = logFile.openWrite(mode: FileMode.append);
     _stdout = _process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .listen((String chunk) => _forward('stdout', chunk));
+    _stdoutDone = _stdout.asFuture<void>();
     _stderr = _process.stderr
         .transform(const Utf8Decoder(allowMalformed: true))
         .listen((String chunk) => _forward('stderr', chunk));
+    _stderrDone = _stderr.asFuture<void>();
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
-      await _stdout.cancel();
-      await _stderr.cancel();
+      try {
+        await Future.wait<void>(<Future<void>>[_stdoutDone, _stderrDone])
+            .timeout(const Duration(seconds: 2));
+      } on Object {
+        await _stdout.cancel();
+        await _stderr.cancel();
+      }
       _log.writeln(
         '[${DateTime.now().toUtc().toIso8601String()}] exitCode=$code',
       );
@@ -872,6 +904,8 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
   late final IOSink _log;
   late final StreamSubscription<String> _stdout;
   late final StreamSubscription<String> _stderr;
+  late final Future<void> _stdoutDone;
+  late final Future<void> _stderrDone;
   late final Future<int> _exitCode;
   bool _running = true;
 
@@ -881,6 +915,7 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
       <String>[_apiKey],
     );
     _log.write('[${DateTime.now().toUtc().toIso8601String()}][$channel] $safe');
+    unawaited(_log.flush());
     _output.add(safe);
   }
 

@@ -65,7 +65,7 @@
 | DEV-111 | 系统截图 | 截图工作区 | 全屏/窗口/区域；预览、复制、保存、OCR/标注；遵循平台权限与快捷键 | Windows/macOS 区域截图后自动 OCR 已接入；完整保存/标注待实现 |
 | DEV-112 | GitHub 加速 | 网络工作台 | 诊断 DNS/TLS/HTTPS/SSH/代理；可信镜像/代理/SSH443；变更可预览、备份、恢复；不 MITM | 基础诊断已有，加速与恢复待实现 |
 | DEV-113 | 智能代理 | DeepSeek Harness | 直接嵌入固定版本的官方 Web UI；官方工作区/会话/对话/模型/权限/任务/工具为唯一事实源 | Windows 生产入口已切换为 `dsh web` + WebView2，旧 Flutter 壳仅保留为测试/非 Windows 过渡；macOS 待移植 |
-| DEV-114 | 输入 Key 即可工作 | Harness 运行时、Node、依赖、profile 和默认模型配置在编译阶段完成并随 Release 发布；运行时禁止 npm 下载/初始化；Key 验证后直接运行 | Windows 内置 Node、固定 dsh、profile、MCP 与启动配置已完成；官方 Key 输入框可直接 Ctrl+V/Cmd+V，Release 实机已用虚假 Key 验证粘贴且未保存；待真实 DeepSeek Key 端到端实启 |
+| DEV-114 | 输入 Key 即可工作 | Harness 运行时、Node、依赖、profile 和默认模型配置在编译阶段完成并随 Release 发布；运行时禁止 npm 下载/初始化；Key 验证后直接运行 | Windows 内置 Node、固定 dsh、profile、MCP 与启动配置已完成；官方 Key 输入框可直接 Ctrl+V/Cmd+V；冷启动启用 Node 编译缓存、存活等待和可诊断日志，不执行 npm 下载；待真实 DeepSeek Key 端到端实启 |
 | DEV-115 | Harness 调用 APP 全部工具 | 统一版本化工具目录；JSON 参数/结果；风险分级；一次性审批；后台执行、进度、取消、超时；对应工具显示可删除调用记录；ADB 等手工与智能体入口共用服务 | `vibekits.tools.v1` + 随机令牌回环 + 内置 MCP 已闭环；工具日志默认开启且可在设置关闭，开发工具按当前工具查看/删除；ADB 日志由真实进程层写入；微工具、程序员计算器、文件/SQLite/Git/HTTP/GitHub、串口和 ADB 已接；需长期会话或安全凭据别名的 SSH/SFTP/远程数据库继续按专用接口接入 |
 | DEV-116 | 硬件调试 | 串口调试 | 端口枚举/手输、波特率、数据位、校验、停止位、流控、文本/HEX、行尾、日志/历史；后台会话且关闭释放 | Windows 原生枚举、无效端口失败、后台响应、Widget 收发/关闭已闭环；真实 USB 串口与 macOS 待补证 |
 | DEV-117 | 工具必须可独立完成核心任务 | 禁止仅展示状态或仅连接；进入工具后可用最少操作完成核心输入、执行、结果查看、复制/清理；长任务后台运行且可取消 | ADB 已补选中设备命令终端、退出码/耗时/stdout/stderr、复制/清空；其他工具按此合同逐项体验审查 |

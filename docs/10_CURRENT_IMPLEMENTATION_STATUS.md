@@ -4,7 +4,7 @@
 
 更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.29+39`（目录配置与交互响应优化检查点，非正式发布）
+当前版本：`1.9.0-dev.30+40`（Harness 本地冷启动恢复检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -65,6 +65,8 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
 
 Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.0-rc.7` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
+
+DSH、Node 和全部 npm 依赖均从 Release 同级 `tools/harness` 本地启动，启动阶段不执行 npm 下载。Windows 首次扫描新 Release 目录时官方 DSH 组合 Web profile 可能超过 60 秒：dev.30 启用持久化 Node 编译缓存，将存活进程等待上限改为 3 分钟并每 5 秒显示真实已用时间；进程退出则立即失败，且 stdout/stderr 在退出前排空到调试日志，不再因旧的固定窗口误判后循环重启。
 
 项目与会话由官方 Workspace/Session 模型统一持久化：工作区可添加、重命名、排序和移除；每个工作区有有序的多会话；会话可重命名、拖动、Fork 和 Archive。移除工作区不删项目或日志，会话进入 `Ungrouped`；取消归档恢复原工作区位置。侧边栏分组/平铺、折叠、搜索、状态点，以及模型、权限、plan、goal、jobs、subagent 和 tool trajectory 全部使用官方 Client/Host 投影。详细合同见 `19_OFFICIAL_HARNESS_WEB_PARITY.md`。
 

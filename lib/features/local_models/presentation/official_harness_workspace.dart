@@ -272,29 +272,45 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   }
 
   Future<void> _waitUntilReady(Uri url) async {
+    const Duration startupLimit = Duration(minutes: 3);
+    final Stopwatch stopwatch = Stopwatch()..start();
+    int lastReportedSecond = -1;
     final HttpClient client = HttpClient()
-      ..connectionTimeout = const Duration(milliseconds: 500);
+      ..connectionTimeout = const Duration(milliseconds: 400);
     try {
-      for (int attempt = 0; attempt < 80; attempt++) {
+      while (stopwatch.elapsed < startupLimit) {
         if (_session?.running != true) {
           throw StateError('Harness 在控制台就绪前退出');
+        }
+        final int elapsedSeconds = stopwatch.elapsed.inSeconds;
+        if (elapsedSeconds >= 5 &&
+            elapsedSeconds ~/ 5 != lastReportedSecond ~/ 5) {
+          lastReportedSecond = elapsedSeconds;
+          if (mounted) {
+            setState(() {
+              _status = elapsedSeconds < 30
+                  ? '正在加载本地 DSH 组件…（$elapsedSeconds 秒）'
+                  : '本地 DSH 首次装载较慢，仍在继续…（$elapsedSeconds 秒）';
+            });
+          }
         }
         try {
           final HttpClientRequest request = await client
               .getUrl(url)
-              .timeout(const Duration(milliseconds: 600));
+              .timeout(const Duration(milliseconds: 500));
           final HttpClientResponse response = await request.close().timeout(
-            const Duration(milliseconds: 800),
+            const Duration(milliseconds: 700),
           );
           await response.drain<void>();
           if (response.statusCode >= 200 && response.statusCode < 500) return;
         } on Object {
           // Server is still composing the official Web profile.
         }
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
       }
-      throw TimeoutException('官方 Web 控制台启动超时');
+      throw TimeoutException('本地 DSH 在 3 分钟内未完成启动，请查看 Harness 调试日志');
     } finally {
+      stopwatch.stop();
       client.close(force: true);
     }
   }
