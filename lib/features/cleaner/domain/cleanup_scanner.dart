@@ -16,6 +16,7 @@ enum CleanupCategory {
   pluginResidual('旧版本插件', true),
   debugArtifacts('调试临时文件', false),
   logs('日志/崩溃转储', false),
+  discoveredTransient('智能发现的缓存/日志', true),
   emptyDirs('空目录', true),
   downloads('下载建议', true),
   duplicateFiles('重复文件', true),
@@ -57,6 +58,7 @@ class CleanupCandidate {
     CleanupCategory.pluginCache ||
     CleanupCategory.debugArtifacts ||
     CleanupCategory.logs => true,
+    CleanupCategory.discoveredTransient => false,
     _ => false,
   };
 

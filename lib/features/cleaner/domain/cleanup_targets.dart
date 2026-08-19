@@ -46,7 +46,7 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 6;
+  static const int catalogVersion = 7;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
@@ -288,6 +288,10 @@ abstract final class CleanupTargetDiscovery {
       env,
       windowsBuild ?? _currentWindowsBuild(environment != null),
     );
+    final String? systemDrive = env['SYSTEMDRIVE'];
+    if (systemDrive != null && systemDrive.trim().isNotEmpty) {
+      _addWindowsProfileTransientTargets(targets, systemDrive.trim());
+    }
 
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
     for (final CleanupScanTarget target in targets) {
@@ -338,6 +342,184 @@ abstract final class CleanupTargetDiscovery {
       );
     }
   }
+
+  /// Finds transient data across every Windows profile, including template
+  /// profiles such as `C:\Users\Default`. Discovery is evidence-based and
+  /// shallow: it only promotes directories whose name is a well-known
+  /// transient token or that directly contain log/dump files. These targets
+  /// are scanned by default but every result remains high-risk and unselected.
+  static void _addWindowsProfileTransientTargets(
+    List<CleanupScanTarget> targets,
+    String systemDrive,
+  ) {
+    final Directory users = Directory(_join(systemDrive, <String>['Users']));
+    if (!users.existsSync()) return;
+    List<FileSystemEntity> profiles;
+    try {
+      profiles = users.listSync(followLinks: false);
+    } on FileSystemException {
+      return;
+    }
+    int added = 0;
+    for (final FileSystemEntity profile in profiles) {
+      if (added >= 64 ||
+          FileSystemEntity.typeSync(profile.path, followLinks: false) !=
+              FileSystemEntityType.directory) {
+        continue;
+      }
+      final String profileName = _baseName(profile.path);
+      for (final String area in <String>['Roaming', 'Local']) {
+        final Directory appData = Directory(
+          _join(profile.path, <String>['AppData', area]),
+        );
+        if (!appData.existsSync()) continue;
+        added += _discoverTransientChildren(
+          targets,
+          appData,
+          profileName: profileName,
+          area: area,
+          remaining: 64 - added,
+        );
+      }
+    }
+  }
+
+  static int _discoverTransientChildren(
+    List<CleanupScanTarget> targets,
+    Directory root, {
+    required String profileName,
+    required String area,
+    required int remaining,
+  }) {
+    int added = 0;
+    final List<(Directory, int)> pending = <(Directory, int)>[(root, 0)];
+    while (pending.isNotEmpty && added < remaining) {
+      final (Directory current, int depth) = pending.removeLast();
+      List<FileSystemEntity> entries;
+      try {
+        entries = current.listSync(followLinks: false).take(256).toList();
+      } on FileSystemException {
+        continue;
+      }
+      for (final FileSystemEntity entry in entries) {
+        if (added >= remaining ||
+            FileSystemEntity.typeSync(entry.path, followLinks: false) !=
+                FileSystemEntityType.directory) {
+          continue;
+        }
+        final Directory directory = Directory(entry.path);
+        final String name = _baseName(entry.path).toLowerCase();
+        final bool cacheLike = _cacheDirectoryNames.contains(name);
+        final bool logNamed = _logDirectoryNames.contains(name);
+        final bool containsLogs =
+            !cacheLike && _containsDirectLogEvidence(directory);
+        if ((cacheLike || logNamed || containsLogs) &&
+            !_containsTargetPath(targets, directory.path)) {
+          final bool logs = logNamed || containsLogs;
+          _addExisting(
+            targets,
+            id: 'profile-transient-${directory.path.toLowerCase().hashCode.abs()}',
+            label:
+                '$profileName · AppData/$area · '
+                '${logs ? '发现的日志' : '发现的缓存'} · ${_baseName(directory.path)}',
+            path: directory.path,
+            category: CleanupCategory.discoveredTransient,
+            defaultEnabled: true,
+            safetyNote: '按目录语义或直接文件证据自动发现；默认不选择，确认应用已关闭后再清理',
+            minimumAgeHours: 168,
+            maxDepth: 4,
+            includePatterns: logs ? _logEvidencePatterns : const <String>[],
+            excludePatterns: const <String>[
+              '*.db',
+              '*.sqlite',
+              '*.sqlite3',
+              '*.json',
+              '*.yaml',
+              '*.yml',
+              '*.ini',
+              '*.conf',
+              '*.config',
+            ],
+          );
+          added++;
+          continue;
+        }
+        if (depth < 1) pending.add((directory, depth + 1));
+      }
+    }
+    return added;
+  }
+
+  static bool _containsDirectLogEvidence(Directory directory) {
+    try {
+      int checked = 0;
+      for (final FileSystemEntity entry in directory.listSync(
+        followLinks: false,
+      )) {
+        if (++checked > 128) break;
+        if (FileSystemEntity.typeSync(entry.path, followLinks: false) !=
+            FileSystemEntityType.file) {
+          continue;
+        }
+        final String name = _baseName(entry.path).toLowerCase();
+        if (_logEvidencePatterns.any(
+          (String pattern) => _matchesSimpleExtension(name, pattern),
+        )) {
+          return true;
+        }
+      }
+    } on FileSystemException {
+      return false;
+    }
+    return false;
+  }
+
+  static bool _matchesSimpleExtension(String name, String pattern) =>
+      pattern.startsWith('*.') && name.endsWith(pattern.substring(1));
+
+  static bool _containsTargetPath(
+    List<CleanupScanTarget> targets,
+    String path,
+  ) {
+    final String? normalized = CleanupWhitelist.normalize(path);
+    if (normalized == null) return true;
+    final String key = normalized.toLowerCase();
+    return targets.any(
+      (CleanupScanTarget target) =>
+          CleanupWhitelist.normalize(target.path)?.toLowerCase() == key,
+    );
+  }
+
+  static const Set<String> _cacheDirectoryNames = <String>{
+    'cache',
+    'caches',
+    'code cache',
+    'gpucache',
+    'dawncache',
+    'shadercache',
+    'temp',
+    'tmp',
+  };
+
+  static const Set<String> _logDirectoryNames = <String>{
+    'log',
+    'logs',
+    'logfiles',
+    'crash',
+    'crashes',
+    'crashdumps',
+    'dumps',
+  };
+
+  static const List<String> _logEvidencePatterns = <String>[
+    '*.log',
+    '*.etl',
+    '*.dmp',
+    '*.hprof',
+    '*.trace',
+    '*.tmp',
+    '*.bak',
+  ];
 
   static String? _expandEnvironmentPath(
     String template,

@@ -305,6 +305,64 @@ void main() {
     expect(legacyIds, isNot(contains('delivery-optimization-cache')));
   });
 
+  test('自动发现所有 Windows 用户配置中的未知日志目录且默认不选文件', () async {
+    final Directory drive = Directory.systemTemp.createTempSync(
+      'vk_profile_transient_',
+    );
+    addTearDown(() => drive.deleteSync(recursive: true));
+    final Directory estlog = Directory(
+      <String>[
+        drive.path,
+        'Users',
+        'Default',
+        'AppData',
+        'Roaming',
+        'ESTLOG',
+      ].join(Platform.pathSeparator),
+    )..createSync(recursive: true);
+    final DateTime old = DateTime.now().subtract(const Duration(days: 10));
+    final File oldLog = File(
+      '${estlog.path}${Platform.pathSeparator}encrypt-service.log',
+    )..writeAsStringSync('old log');
+    oldLog.setLastModifiedSync(old);
+    final File configuration = File(
+      '${estlog.path}${Platform.pathSeparator}settings.json',
+    )..writeAsStringSync('{}');
+    configuration.setLastModifiedSync(old);
+    final File currentLog = File(
+      '${estlog.path}${Platform.pathSeparator}current.log',
+    )..writeAsStringSync('active');
+
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: <String, String>{'SYSTEMDRIVE': drive.path},
+      windowsBuild: 22621,
+    );
+    final CleanupScanTarget discovered = targets.singleWhere(
+      (CleanupScanTarget target) => target.path == estlog.path,
+    );
+    expect(discovered.category, CleanupCategory.discoveredTransient);
+    expect(discovered.defaultEnabled, isTrue);
+    expect(discovered.minimumAgeHours, 168);
+    expect(discovered.label, contains('Default'));
+
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[discovered],
+    );
+    expect(
+      result.candidates.map((CleanupCandidate item) => item.path),
+      contains(oldLog.path),
+    );
+    expect(
+      result.candidates.map((CleanupCandidate item) => item.path),
+      isNot(contains(configuration.path)),
+    );
+    expect(
+      result.candidates.map((CleanupCandidate item) => item.path),
+      isNot(contains(currentLog.path)),
+    );
+    expect(result.candidates.single.defaultSelected, isFalse);
+  });
+
   test('发现临时目录、浏览器缓存和崩溃转储扫描范围', () {
     final Directory sandbox = Directory.systemTemp.createTempSync('vk_targets');
     addTearDown(() => sandbox.deleteSync(recursive: true));
