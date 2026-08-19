@@ -25,7 +25,7 @@ abstract final class SystemDriveAnalysisReportWriter {
       );
     }
     final Map<String, Object?> report = <String, Object?>{
-      'version': 1,
+      'version': 2,
       'generatedAt': timestamp.toUtc().toIso8601String(),
       'rootPath': analysis.rootPath,
       'cancelled': analysis.cancelled,
@@ -34,8 +34,15 @@ abstract final class SystemDriveAnalysisReportWriter {
         'usedBytes': analysis.usedBytes,
         'freeBytes': analysis.freeBytes,
         'availableBytes': analysis.availableBytes,
-        'measuredBytes': analysis.measuredBytes,
+        'logicalMeasuredBytes': analysis.logicalMeasuredBytes,
         'unaccountedBytes': analysis.unaccountedBytes,
+        'logicalOvercountBytes': analysis.logicalOvercountBytes,
+      },
+      'measurement': <String, Object?>{
+        'kind': 'logical-file-length',
+        'notice': analysis.hasLogicalOvercount
+            ? '目录逻辑量包含 NTFS 硬链接重复计数，不能当作物理占用相加。'
+            : '目录逻辑量用于定位占用来源；与物理已用量的差值包括不可读路径、文件系统元数据和系统保留空间。',
       },
       'scan': <String, int>{
         'rootEntries': analysis.entries.length,

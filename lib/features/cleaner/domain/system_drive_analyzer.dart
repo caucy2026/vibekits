@@ -83,8 +83,19 @@ class SystemDriveAnalysis {
 
   int get usedBytes => totalBytes > freeBytes ? totalBytes - freeBytes : 0;
 
+  /// The sum of logical file lengths found below every root entry.
+  ///
+  /// On Windows this may be greater than [usedBytes] because component-store
+  /// hard links can expose the same physical bytes from multiple directories.
+  int get logicalMeasuredBytes => measuredBytes;
+
   int get unaccountedBytes =>
       usedBytes > measuredBytes ? usedBytes - measuredBytes : 0;
+
+  int get logicalOvercountBytes =>
+      measuredBytes > usedBytes ? measuredBytes - usedBytes : 0;
+
+  bool get hasLogicalOvercount => logicalOvercountBytes > 0;
 }
 
 abstract final class SystemDriveAnalyzer {

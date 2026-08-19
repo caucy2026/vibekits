@@ -21,6 +21,44 @@ void main() {
     ),
   ];
 
+  testWidgets('目录版本升级会自动合入新的 ESTLOG 默认范围', (WidgetTester tester) async {
+    List<String>? savedIds;
+    int? savedVersion;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: const <CleanupScanTarget>[
+              ...testTargets,
+              CleanupScanTarget(
+                id: 'est-encryption-old-logs',
+                label: r'C:\ESTLOG 加密软件日志',
+                path: r'C:\ESTLOG',
+                category: CleanupCategory.logs,
+                defaultEnabled: true,
+                minimumAgeHours: 24,
+                includePatterns: <String>['*.log'],
+              ),
+            ],
+            initialTargetIds: const <String>['test-temp'],
+            initialTargetCatalogVersion: 8,
+            onTargetIdsChanged: (List<String> ids, int version) async {
+              savedIds = ids;
+              savedVersion = version;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      savedIds,
+      containsAll(<String>['test-temp', 'est-encryption-old-logs']),
+    );
+    expect(savedVersion, CleanupTargetDiscovery.catalogVersion);
+  });
+
   testWidgets('扫描显示进度并可取消且保留部分结果', (WidgetTester tester) async {
     final Completer<CleanupScanResult> completer =
         Completer<CleanupScanResult>();

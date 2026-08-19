@@ -112,8 +112,9 @@ void main() {
         ).singleWhere(
           (CleanupScanTarget item) => item.id == 'est-encryption-old-logs',
         );
-    expect(estTarget.defaultEnabled, isFalse);
+    expect(estTarget.defaultEnabled, isTrue);
     expect(estTarget.minimumAgeHours, 24);
+    expect(estTarget.includePatterns, <String>['*.log']);
     final CleanupScanResult estResult = await CleanupScanner.scanTargets(
       <CleanupScanTarget>[estTarget],
     );
@@ -125,6 +126,7 @@ void main() {
       estResult.candidates.map((CleanupCandidate item) => item.path),
       isNot(contains(newEstLog.path)),
     );
+    expect(estResult.candidates.single.defaultSelected, isTrue);
   });
 
   test('macOS 规则库覆盖开发链、应用、浏览器和日志且 ID 唯一', () {

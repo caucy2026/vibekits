@@ -50,7 +50,7 @@ class WindowsCleanupRule {
 /// 规则只描述明确的瞬态目录，不扫描整盘寻找通用扩展名。系统管理型缓存
 /// 默认关闭；下载目录、Windows.old、驱动包、预取和注册表不在直接删除库中。
 abstract final class WindowsCleanupRuleCatalog {
-  static const int version = 3;
+  static const int version = 4;
 
   static const List<WindowsCleanupRule> rules = <WindowsCleanupRule>[
     WindowsCleanupRule(
@@ -68,13 +68,14 @@ abstract final class WindowsCleanupRuleCatalog {
     ),
     WindowsCleanupRule(
       id: 'est-encryption-old-logs',
-      label: 'EST 加密软件旧日志',
+      label: r'C:\ESTLOG 加密软件日志',
       pathTemplate: r'%SYSTEMDRIVE%\estlog',
       category: WindowsCleanupRuleCategory.logs,
       risk: WindowsCleanupRuleRisk.cautious,
-      defaultEnabled: false,
+      defaultEnabled: true,
       minimumAgeHours: 24,
-      note: r'扫描 C:\estlog 中超过 24 小时的日志；默认只提示，确认后清理',
+      includePatterns: <String>['*.log'],
+      note: r'默认扫描 C:\ESTLOG；只列出超过 24 小时的 .log，保留当前活跃日志',
     ),
     WindowsCleanupRule(
       id: 'windows-explorer-thumbnail-cache',

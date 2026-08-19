@@ -984,8 +984,8 @@ class _CleanerTabState extends State<CleanerTab> {
                     '总量 ${_formatSize(analysis.totalBytes)} · '
                     '已用 ${_formatSize(analysis.usedBytes)} · '
                     '剩余 ${_formatSize(analysis.freeBytes)} · '
-                    '已归类 ${_formatSize(analysis.measuredBytes)} · '
-                    '未归类/不可读 ${_formatSize(analysis.unaccountedBytes)}',
+                    '目录逻辑量 ${_formatSize(analysis.logicalMeasuredBytes)} · '
+                    '${analysis.hasLogicalOvercount ? '硬链接重复计数 ${_formatSize(analysis.logicalOvercountBytes)}' : '未归类/系统保留 ${_formatSize(analysis.unaccountedBytes)}'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: context.vibe.muted),
@@ -1070,6 +1070,16 @@ class _CleanerTabState extends State<CleanerTab> {
                   '总量 ${_formatSize(analysis.totalBytes)} · '
                   '已用 ${_formatSize(analysis.usedBytes)} · '
                   '剩余 ${_formatSize(analysis.freeBytes)}',
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  analysis.hasLogicalOvercount
+                      ? '目录逻辑量 ${_formatSize(analysis.logicalMeasuredBytes)}，其中至少 '
+                            '${_formatSize(analysis.logicalOvercountBytes)} 是 NTFS 硬链接重复计数；'
+                            '各目录数字用于定位来源，不能相加当作物理占用。'
+                      : '目录逻辑量 ${_formatSize(analysis.logicalMeasuredBytes)} · '
+                            '未归类/系统保留 ${_formatSize(analysis.unaccountedBytes)}',
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
                 ),
                 const SizedBox(height: 8),
                 for (final SystemDriveUsageEntry entry in analysis.entries)

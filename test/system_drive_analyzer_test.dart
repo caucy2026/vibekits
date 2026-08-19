@@ -47,6 +47,7 @@ void main() {
 
     expect(analysis.cancelled, isFalse);
     expect(analysis.measuredBytes, 112);
+    expect(analysis.logicalMeasuredBytes, 112);
     expect(
       analysis.entries.singleWhere((entry) => entry.name == 'Windows').kind,
       SystemDriveEntryKind.windowsSystem,
@@ -144,7 +145,28 @@ void main() {
     expect(disk['usedBytes'], 1500);
     expect(disk['freeBytes'], 500);
     expect(disk['unaccountedBytes'], 600);
+    expect(disk['logicalMeasuredBytes'], 900);
+    expect(disk['logicalOvercountBytes'], 0);
     expect(entries, hasLength(2));
     expect((entries.last! as Map<String, Object?>)['assessment'], 'review');
+  });
+
+  test('目录逻辑量超过物理已用量时显式报告硬链接重复计数', () {
+    const SystemDriveAnalysis analysis = SystemDriveAnalysis(
+      rootPath: r'C:\',
+      entries: <SystemDriveUsageEntry>[],
+      cancelled: false,
+      unreadablePaths: 0,
+      visitedEntries: 0,
+      measuredBytes: 1800,
+      totalBytes: 2000,
+      freeBytes: 500,
+      availableBytes: 500,
+    );
+
+    expect(analysis.usedBytes, 1500);
+    expect(analysis.unaccountedBytes, 0);
+    expect(analysis.logicalOvercountBytes, 300);
+    expect(analysis.hasLogicalOvercount, isTrue);
   });
 }
