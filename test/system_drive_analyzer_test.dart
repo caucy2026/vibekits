@@ -97,6 +97,60 @@ void main() {
     expect(analysis.visitedEntries, lessThan(1000));
   });
 
+  test('一次扫描同时列出 Windows 组件、安装软件和用户软件数据', () async {
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vk_drive_breakdown_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    final Directory acme = Directory(
+      '${root.path}${Platform.pathSeparator}Program Files'
+      '${Platform.pathSeparator}Acme IDE',
+    )..createSync(recursive: true);
+    final Directory winSxs = Directory(
+      '${root.path}${Platform.pathSeparator}Windows'
+      '${Platform.pathSeparator}WinSxS',
+    )..createSync(recursive: true);
+    final Directory code = Directory(
+      '${root.path}${Platform.pathSeparator}Users'
+      '${Platform.pathSeparator}tester${Platform.pathSeparator}AppData'
+      '${Platform.pathSeparator}Local${Platform.pathSeparator}Code',
+    )..createSync(recursive: true);
+    File('${acme.path}${Platform.pathSeparator}app.bin')
+        .writeAsBytesSync(List<int>.filled(101, 1));
+    File('${winSxs.path}${Platform.pathSeparator}component.bin')
+        .writeAsBytesSync(List<int>.filled(103, 2));
+    File('${code.path}${Platform.pathSeparator}state.bin')
+        .writeAsBytesSync(List<int>.filled(107, 3));
+
+    final SystemDriveAnalysis analysis = await SystemDriveAnalyzer.analyze(
+      root.path,
+    );
+
+    expect(
+      analysis.breakdownEntries.any(
+        (SystemDriveUsageEntry entry) =>
+            entry.name == 'Acme IDE' && entry.sizeBytes == 101,
+      ),
+      isTrue,
+    );
+    expect(
+      analysis.breakdownEntries.any(
+        (SystemDriveUsageEntry entry) =>
+            entry.name == 'WinSxS' && entry.sizeBytes == 103,
+      ),
+      isTrue,
+    );
+    expect(
+      analysis.breakdownEntries.any(
+        (SystemDriveUsageEntry entry) =>
+            entry.name.contains('Code') &&
+            entry.kind == SystemDriveEntryKind.softwareData &&
+            entry.sizeBytes == 107,
+      ),
+      isTrue,
+    );
+  });
+
   test('完整空间报告保存容量、合理性和全部根项目', () async {
     final Directory output = Directory.systemTemp.createTempSync(
       'vk_drive_report_',

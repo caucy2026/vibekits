@@ -6,6 +6,7 @@ import 'cleanup_task.dart';
 enum SystemDriveEntryKind {
   windowsSystem('Windows 系统', true),
   installedPrograms('已安装程序', true),
+  softwareData('软件数据', true),
   userData('用户数据', true),
   recovery('恢复与启动', true),
   systemManaged('系统管理文件', true),
@@ -18,6 +19,13 @@ enum SystemDriveEntryKind {
   final bool normallyExpected;
 }
 
+enum SystemDriveDeletePolicy {
+  protected,
+  recycleAfterConfirmation;
+
+  bool get canDelete => this == recycleAfterConfirmation;
+}
+
 class SystemDriveUsageEntry {
   const SystemDriveUsageEntry({
     required this.path,
@@ -28,6 +36,9 @@ class SystemDriveUsageEntry {
     required this.isDirectory,
     required this.complete,
     this.modified,
+    this.ownerLabel = '',
+    this.parentPath = '',
+    this.deletePolicy = SystemDriveDeletePolicy.protected,
   });
 
   final String path;
@@ -38,8 +49,13 @@ class SystemDriveUsageEntry {
   final bool isDirectory;
   final bool complete;
   final DateTime? modified;
+  final String ownerLabel;
+  final String parentPath;
+  final SystemDriveDeletePolicy deletePolicy;
 
   bool get needsReview => !kind.normallyExpected;
+  bool get canDelete => deletePolicy.canDelete;
+  bool get isBreakdown => parentPath.isNotEmpty;
 }
 
 class SystemDriveAnalysisProgress {
@@ -49,6 +65,8 @@ class SystemDriveAnalysisProgress {
     required this.measuredBytes,
     required this.completedRootEntries,
     required this.totalRootEntries,
+    this.completedEntry,
+    this.completedBreakdownEntries = const <SystemDriveUsageEntry>[],
   });
 
   final String currentPath;
@@ -56,6 +74,8 @@ class SystemDriveAnalysisProgress {
   final int measuredBytes;
   final int completedRootEntries;
   final int totalRootEntries;
+  final SystemDriveUsageEntry? completedEntry;
+  final List<SystemDriveUsageEntry> completedBreakdownEntries;
 }
 
 class SystemDriveAnalysis {
@@ -69,6 +89,7 @@ class SystemDriveAnalysis {
     required this.totalBytes,
     required this.freeBytes,
     required this.availableBytes,
+    this.breakdownEntries = const <SystemDriveUsageEntry>[],
   });
 
   final String rootPath;
@@ -80,6 +101,7 @@ class SystemDriveAnalysis {
   final int totalBytes;
   final int freeBytes;
   final int availableBytes;
+  final List<SystemDriveUsageEntry> breakdownEntries;
 
   int get usedBytes => totalBytes > freeBytes ? totalBytes - freeBytes : 0;
 
@@ -99,7 +121,7 @@ class SystemDriveAnalysis {
 }
 
 abstract final class SystemDriveAnalyzer {
-  static const int maxEntriesPerRoot = 250000;
+  static const int maxEntriesPerRoot = 1000000;
 
   static const Map<String, (SystemDriveEntryKind, String)>
   _knownRoots = <String, (SystemDriveEntryKind, String)>{
@@ -168,13 +190,25 @@ abstract final class SystemDriveAnalyzer {
     } on FileSystemException {
       unreadable++;
     }
+    roots.sort(
+      (FileSystemEntity left, FileSystemEntity right) =>
+          _rootPriority(left.path).compareTo(_rootPriority(right.path)),
+    );
     final List<SystemDriveUsageEntry> entries = <SystemDriveUsageEntry>[];
+    final List<SystemDriveUsageEntry> breakdownEntries =
+        <SystemDriveUsageEntry>[];
     int visited = 0;
     int measured = 0;
     String currentPath = rootPath;
     final Stopwatch progressClock = Stopwatch()..start();
 
-    void report(int completed, {bool force = false}) {
+    void report(
+      int completed, {
+      bool force = false,
+      SystemDriveUsageEntry? completedEntry,
+      List<SystemDriveUsageEntry> completedBreakdownEntries =
+          const <SystemDriveUsageEntry>[],
+    }) {
       if (onProgress == null ||
           (!force && progressClock.elapsedMilliseconds < 150)) {
         return;
@@ -187,55 +221,61 @@ abstract final class SystemDriveAnalyzer {
           measuredBytes: measured,
           completedRootEntries: completed,
           totalRootEntries: roots.length,
+          completedEntry: completedEntry,
+          completedBreakdownEntries: completedBreakdownEntries,
         ),
       );
     }
 
-    for (int rootIndex = 0; rootIndex < roots.length; rootIndex++) {
-      if (token.isCancelled) break;
-      final FileSystemEntity entity = roots[rootIndex];
-      currentPath = entity.path;
-      final String name = _baseName(entity.path);
-      final FileSystemEntityType type = FileSystemEntity.typeSync(
-        entity.path,
-        followLinks: false,
-      );
-      if (type == FileSystemEntityType.link) continue;
-      int size = 0;
-      bool complete = true;
-      DateTime? modified;
-      try {
-        final FileStat stat = entity.statSync();
-        modified = stat.modified;
-        if (type == FileSystemEntityType.file) {
-          size = stat.size;
-          visited++;
-        } else if (type == FileSystemEntityType.directory) {
-          final _DirectoryMeasurement result = await _measureDirectory(
-            Directory(entity.path),
-            token,
-            onVisit: (String path, int fileBytes) {
-              currentPath = path;
-              visited++;
-              measured += fileBytes;
-              report(rootIndex);
-            },
-          );
-          size = result.sizeBytes;
-          complete = result.complete;
-          unreadable += result.unreadablePaths;
+    int nextRootIndex = 0;
+    int completedRoots = 0;
+
+    Future<void> worker() async {
+      while (!token.isCancelled && nextRootIndex < roots.length) {
+        final int rootIndex = nextRootIndex++;
+        final FileSystemEntity entity = roots[rootIndex];
+        currentPath = entity.path;
+        final String name = _baseName(entity.path);
+        final FileSystemEntityType type = FileSystemEntity.typeSync(
+          entity.path,
+          followLinks: false,
+        );
+        if (type == FileSystemEntityType.link) continue;
+        int size = 0;
+        bool complete = true;
+        DateTime? modified;
+        _DirectoryMeasurement? measurement;
+        try {
+          final FileStat stat = entity.statSync();
+          modified = stat.modified;
+          if (type == FileSystemEntityType.file) {
+            size = stat.size;
+            visited++;
+            measured += size;
+          } else if (type == FileSystemEntityType.directory) {
+            measurement = await _measureDirectory(
+              Directory(entity.path),
+              token,
+              onVisit: (String path, int fileBytes) {
+                currentPath = path;
+                visited++;
+                measured += fileBytes;
+                report(completedRoots);
+              },
+            );
+            size = measurement.sizeBytes;
+            complete = measurement.complete;
+            unreadable += measurement.unreadablePaths;
+          }
+        } on FileSystemException {
+          unreadable++;
+          complete = false;
         }
-      } on FileSystemException {
-        unreadable++;
-        complete = false;
-      }
-      if (type == FileSystemEntityType.file) measured += size;
-      final (SystemDriveEntryKind, String) classification = _classify(
-        name,
-        isDirectory: type == FileSystemEntityType.directory,
-      );
-      entries.add(
-        SystemDriveUsageEntry(
+        final (SystemDriveEntryKind, String) classification = _classify(
+          name,
+          isDirectory: type == FileSystemEntityType.directory,
+        );
+        final SystemDriveUsageEntry entry = SystemDriveUsageEntry(
           path: entity.path,
           name: name,
           sizeBytes: size,
@@ -244,11 +284,33 @@ abstract final class SystemDriveAnalyzer {
           isDirectory: type == FileSystemEntityType.directory,
           complete: complete,
           modified: modified,
-        ),
-      );
-      report(rootIndex + 1, force: true);
+          ownerLabel: classification.$1.label,
+          deletePolicy: _deletePolicyFor(classification.$1),
+        );
+        final List<SystemDriveUsageEntry> rootBreakdown = measurement == null
+            ? const <SystemDriveUsageEntry>[]
+            : _buildBreakdownEntries(entry, measurement.breakdownBytes);
+        entries.add(entry);
+        breakdownEntries.addAll(rootBreakdown);
+        completedRoots++;
+        report(
+          completedRoots,
+          force: true,
+          completedEntry: entry,
+          completedBreakdownEntries: rootBreakdown,
+        );
+      }
     }
+
+    final int workerCount = roots.length < 3 ? roots.length : 3;
+    await Future.wait<void>(
+      List<Future<void>>.generate(workerCount, (_) => worker()),
+    );
     entries.sort(
+      (SystemDriveUsageEntry left, SystemDriveUsageEntry right) =>
+          right.sizeBytes.compareTo(left.sizeBytes),
+    );
+    breakdownEntries.sort(
       (SystemDriveUsageEntry left, SystemDriveUsageEntry right) =>
           right.sizeBytes.compareTo(left.sizeBytes),
     );
@@ -265,6 +327,7 @@ abstract final class SystemDriveAnalyzer {
       totalBytes: disk?.totalBytes ?? 0,
       freeBytes: disk?.freeBytes ?? 0,
       availableBytes: disk?.availableBytes ?? 0,
+      breakdownEntries: breakdownEntries,
     );
   }
 
@@ -277,6 +340,7 @@ abstract final class SystemDriveAnalyzer {
     int visited = 0;
     int unreadable = 0;
     bool complete = true;
+    final Map<String, int> breakdownBytes = <String, int>{};
     final List<Directory> pending = <Directory>[directory];
     while (pending.isNotEmpty && !token.isCancelled) {
       final Directory current = pending.removeLast();
@@ -303,6 +367,17 @@ abstract final class SystemDriveAnalyzer {
             try {
               final int fileBytes = await File(entity.path).length();
               size += fileBytes;
+              final String? bucket = _breakdownBucket(
+                directory.path,
+                entity.path,
+              );
+              if (bucket != null) {
+                breakdownBytes.update(
+                  bucket,
+                  (int value) => value + fileBytes,
+                  ifAbsent: () => fileBytes,
+                );
+              }
               onVisit(entity.path, fileBytes);
             } on FileSystemException {
               unreadable++;
@@ -321,7 +396,159 @@ abstract final class SystemDriveAnalyzer {
       sizeBytes: size,
       complete: complete,
       unreadablePaths: unreadable,
+      breakdownBytes: breakdownBytes,
     );
+  }
+
+  static int _rootPriority(String path) {
+    final String name = _baseName(path).toLowerCase();
+    final (SystemDriveEntryKind, String) classification = _classify(
+      name,
+      isDirectory:
+          FileSystemEntity.typeSync(path, followLinks: false) ==
+          FileSystemEntityType.directory,
+    );
+    return switch (classification.$1) {
+      SystemDriveEntryKind.logsAndCaches => 0,
+      SystemDriveEntryKind.unknown => 1,
+      SystemDriveEntryKind.installedPrograms ||
+      SystemDriveEntryKind.softwareData => 2,
+      SystemDriveEntryKind.userData => 3,
+      SystemDriveEntryKind.windowsSystem => 4,
+      _ => 5,
+    };
+  }
+
+  static SystemDriveDeletePolicy _deletePolicyFor(SystemDriveEntryKind kind) =>
+      switch (kind) {
+        SystemDriveEntryKind.logsAndCaches || SystemDriveEntryKind.unknown =>
+          SystemDriveDeletePolicy.recycleAfterConfirmation,
+        _ => SystemDriveDeletePolicy.protected,
+      };
+
+  static String? _breakdownBucket(String rootPath, String filePath) {
+    final String normalizedRoot = rootPath.replaceAll('\\', '/');
+    final String normalizedFile = filePath.replaceAll('\\', '/');
+    if (!normalizedFile.toLowerCase().startsWith(
+      '${normalizedRoot.toLowerCase()}/',
+    )) {
+      return null;
+    }
+    final List<String> parts = normalizedFile
+        .substring(normalizedRoot.length + 1)
+        .split('/')
+        .where((String part) => part.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isEmpty) return null;
+    final String rootName = _baseName(rootPath).toLowerCase();
+    if (rootName != 'users' && parts.length < 2) return null;
+    int componentCount = 1;
+    if (rootName == 'users') {
+      componentCount = parts.length >= 3 ? 2 : 1;
+      if (parts.length >= 5 &&
+          parts[1].toLowerCase() == 'appdata' &&
+          <String>{
+            'local',
+            'locallow',
+            'roaming',
+          }.contains(parts[2].toLowerCase())) {
+        componentCount = 4;
+      }
+    }
+    if (parts.length < componentCount) componentCount = parts.length;
+    return '$rootPath${Platform.pathSeparator}'
+        '${parts.take(componentCount).join(Platform.pathSeparator)}';
+  }
+
+  static List<SystemDriveUsageEntry> _buildBreakdownEntries(
+    SystemDriveUsageEntry parent,
+    Map<String, int> breakdownBytes,
+  ) {
+    final String rootName = parent.name.toLowerCase();
+    return <SystemDriveUsageEntry>[
+      for (final MapEntry<String, int> item in breakdownBytes.entries)
+        if (item.value > 0)
+          _breakdownEntry(parent, item.key, item.value, rootName),
+    ];
+  }
+
+  static SystemDriveUsageEntry _breakdownEntry(
+    SystemDriveUsageEntry parent,
+    String path,
+    int sizeBytes,
+    String rootName,
+  ) {
+    final String relative = path
+        .substring(parent.path.length)
+        .replaceAll('\\', '/')
+        .replaceFirst(RegExp('^/+'), '');
+    final List<String> parts = relative.split('/');
+    final String leaf = parts.last;
+    SystemDriveEntryKind kind;
+    String reason;
+    if (rootName == 'windows') {
+      kind = _looksLikeCachePath(path)
+          ? SystemDriveEntryKind.logsAndCaches
+          : SystemDriveEntryKind.windowsSystem;
+      reason = kind == SystemDriveEntryKind.logsAndCaches
+          ? 'Windows 生成的临时文件或日志目录'
+          : 'Windows 组件：$leaf';
+    } else if (rootName == 'program files' ||
+        rootName == 'program files (x86)') {
+      kind = _looksLikeCachePath(path)
+          ? SystemDriveEntryKind.logsAndCaches
+          : SystemDriveEntryKind.installedPrograms;
+      reason = kind == SystemDriveEntryKind.logsAndCaches
+          ? '$leaf 软件产生的缓存或日志'
+          : '$leaf 的程序安装文件；应优先通过卸载管理';
+    } else if (rootName == 'programdata') {
+      kind = _looksLikeCachePath(path)
+          ? SystemDriveEntryKind.logsAndCaches
+          : SystemDriveEntryKind.softwareData;
+      reason = kind == SystemDriveEntryKind.logsAndCaches
+          ? '$leaf 软件产生的共享缓存或日志'
+          : '$leaf 的共享配置、服务数据或安装缓存';
+    } else if (rootName == 'users' &&
+        parts.length >= 4 &&
+        parts[1].toLowerCase() == 'appdata') {
+      kind = _looksLikeCachePath(path)
+          ? SystemDriveEntryKind.logsAndCaches
+          : SystemDriveEntryKind.softwareData;
+      reason = kind == SystemDriveEntryKind.logsAndCaches
+          ? '$leaf 软件产生的用户缓存或日志'
+          : '$leaf 的用户配置和应用数据';
+    } else {
+      kind = SystemDriveEntryKind.userData;
+      reason = '用户 ${parts.first} 的 $leaf 数据';
+    }
+    return SystemDriveUsageEntry(
+      path: path,
+      name: relative.replaceAll('/', ' / '),
+      sizeBytes: sizeBytes,
+      kind: kind,
+      reason: reason,
+      isDirectory: true,
+      complete: parent.complete,
+      ownerLabel: leaf,
+      parentPath: parent.path,
+      deletePolicy:
+          kind == SystemDriveEntryKind.logsAndCaches &&
+              (rootName == 'programdata' || rootName == 'users')
+          ? SystemDriveDeletePolicy.recycleAfterConfirmation
+          : SystemDriveDeletePolicy.protected,
+    );
+  }
+
+  static bool _looksLikeCachePath(String path) {
+    final String leaf = _baseName(path).toLowerCase();
+    return leaf == 'cache' ||
+        leaf == 'caches' ||
+        leaf == 'temp' ||
+        leaf == 'tmp' ||
+        leaf == 'log' ||
+        leaf == 'logs' ||
+        leaf == 'crashdumps' ||
+        leaf == 'crash reports';
   }
 
   static (SystemDriveEntryKind, String) _classify(
@@ -361,9 +588,11 @@ class _DirectoryMeasurement {
     required this.sizeBytes,
     required this.complete,
     required this.unreadablePaths,
+    required this.breakdownBytes,
   });
 
   final int sizeBytes;
   final bool complete;
   final int unreadablePaths;
+  final Map<String, int> breakdownBytes;
 }

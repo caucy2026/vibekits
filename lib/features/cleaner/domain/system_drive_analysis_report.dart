@@ -52,18 +52,11 @@ abstract final class SystemDriveAnalysisReportWriter {
       'totalsByKind': totalsByKind,
       'entries': <Map<String, Object?>>[
         for (final SystemDriveUsageEntry entry in analysis.entries)
-          <String, Object?>{
-            'path': entry.path,
-            'name': entry.name,
-            'sizeBytes': entry.sizeBytes,
-            'kind': entry.kind.name,
-            'kindLabel': entry.kind.label,
-            'assessment': entry.needsReview ? 'review' : 'expected',
-            'reason': entry.reason,
-            'isDirectory': entry.isDirectory,
-            'measurementComplete': entry.complete,
-            'modifiedAt': entry.modified?.toUtc().toIso8601String(),
-          },
+          _entryJson(entry),
+      ],
+      'breakdownEntries': <Map<String, Object?>>[
+        for (final SystemDriveUsageEntry entry in analysis.breakdownEntries)
+          _entryJson(entry),
       ],
     };
     await file.writeAsString(
@@ -72,6 +65,23 @@ abstract final class SystemDriveAnalysisReportWriter {
     );
     return file;
   }
+
+  static Map<String, Object?> _entryJson(SystemDriveUsageEntry entry) =>
+      <String, Object?>{
+        'path': entry.path,
+        'name': entry.name,
+        'sizeBytes': entry.sizeBytes,
+        'kind': entry.kind.name,
+        'kindLabel': entry.kind.label,
+        'owner': entry.ownerLabel,
+        'parentPath': entry.parentPath,
+        'assessment': entry.needsReview ? 'review' : 'expected',
+        'deletePolicy': entry.deletePolicy.name,
+        'reason': entry.reason,
+        'isDirectory': entry.isDirectory,
+        'measurementComplete': entry.complete,
+        'modifiedAt': entry.modified?.toUtc().toIso8601String(),
+      };
 
   static Directory _defaultDirectory() {
     final String base =

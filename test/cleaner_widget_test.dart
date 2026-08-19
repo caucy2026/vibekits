@@ -370,4 +370,139 @@ void main() {
     expect(find.textContaining('需复核'), findsOneWidget);
     expect(find.textContaining('剩余 2.0 KB'), findsOneWidget);
   });
+
+  testWidgets('空间分析未完成时逐项显示已完成的软件占用', (WidgetTester tester) async {
+    final Completer<SystemDriveAnalysis> result =
+        Completer<SystemDriveAnalysis>();
+    late void Function(SystemDriveAnalysisProgress) report;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            persistDriveAnalysisReport: false,
+            driveAnalysisRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(SystemDriveAnalysisProgress progress)
+                  onProgress,
+                }) {
+                  report = onProgress;
+                  return result.future;
+                },
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.pump();
+    report(
+      const SystemDriveAnalysisProgress(
+        currentPath: r'C:\Program Files\Acme IDE',
+        visitedEntries: 20,
+        measuredBytes: 4096,
+        completedRootEntries: 1,
+        totalRootEntries: 8,
+        completedEntry: SystemDriveUsageEntry(
+          path: r'C:\Program Files',
+          name: 'Program Files',
+          sizeBytes: 4096,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: '应用安装目录',
+          isDirectory: true,
+          complete: true,
+        ),
+        completedBreakdownEntries: <SystemDriveUsageEntry>[
+          SystemDriveUsageEntry(
+            path: r'C:\Program Files\Acme IDE',
+            name: 'Acme IDE',
+            sizeBytes: 4096,
+            kind: SystemDriveEntryKind.installedPrograms,
+            reason: 'Acme IDE 的程序安装文件',
+            isDirectory: true,
+            complete: true,
+            ownerLabel: 'Acme IDE',
+            parentPath: r'C:\Program Files',
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('占用结果实时加载'), findsOneWidget);
+    expect(find.text('Acme IDE'), findsOneWidget);
+    expect(find.textContaining('1/8'), findsOneWidget);
+
+    result.complete(
+      const SystemDriveAnalysis(
+        rootPath: r'C:\',
+        entries: <SystemDriveUsageEntry>[],
+        cancelled: true,
+        unreadablePaths: 0,
+        visitedEntries: 20,
+        measuredBytes: 4096,
+        totalBytes: 10000,
+        freeBytes: 2000,
+        availableBytes: 2000,
+      ),
+    );
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('空间占用列表可确认后把日志目录移到回收站', (WidgetTester tester) async {
+    String? recycledPath;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            persistDriveAnalysisReport: false,
+            driveEntryRecycler: (String path) async {
+              recycledPath = path;
+              return true;
+            },
+            driveAnalysisRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(SystemDriveAnalysisProgress progress)
+                  onProgress,
+                }) async => const SystemDriveAnalysis(
+                  rootPath: r'C:\',
+                  entries: <SystemDriveUsageEntry>[
+                    SystemDriveUsageEntry(
+                      path: r'C:\ESTLOG',
+                      name: 'ESTLOG',
+                      sizeBytes: 8192,
+                      kind: SystemDriveEntryKind.logsAndCaches,
+                      reason: 'EST 加密软件日志',
+                      isDirectory: true,
+                      complete: true,
+                      deletePolicy:
+                          SystemDriveDeletePolicy.recycleAfterConfirmation,
+                    ),
+                  ],
+                  cancelled: false,
+                  unreadablePaths: 0,
+                  visitedEntries: 10,
+                  measuredBytes: 8192,
+                  totalBytes: 10000,
+                  freeBytes: 1000,
+                  availableBytes: 1000,
+                ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('移到回收站'));
+    await tester.pumpAndSettle();
+    expect(find.text('从空间列表清理？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '移到回收站'));
+    await tester.pumpAndSettle();
+
+    expect(recycledPath, r'C:\ESTLOG');
+  });
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,7 @@ typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
   required CleanupCancellationToken cancellationToken,
   required void Function(SystemDriveAnalysisProgress progress) onProgress,
 });
+typedef CleanupDriveEntryRecycler = Future<bool> Function(String path);
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
@@ -50,6 +52,7 @@ class CleanerTab extends StatefulWidget {
     this.onCleanupStatsChanged,
     this.availableTargets,
     this.driveAnalysisRunner,
+    this.driveEntryRecycler,
     this.analyzeAfterCleanup = true,
     this.persistDriveAnalysisReport = true,
     this.harnessDebugDirectory = '',
@@ -70,6 +73,7 @@ class CleanerTab extends StatefulWidget {
   onCleanupStatsChanged;
   final List<CleanupScanTarget>? availableTargets;
   final CleanupDriveAnalysisRunner? driveAnalysisRunner;
+  final CleanupDriveEntryRecycler? driveEntryRecycler;
   final bool analyzeAfterCleanup;
   final bool persistDriveAnalysisReport;
   final String harnessDebugDirectory;
@@ -99,7 +103,10 @@ class _CleanerTabState extends State<CleanerTab> {
   DiskSpaceSnapshot? _diskAfter;
   SystemDriveAnalysis? _driveAnalysis;
   SystemDriveAnalysisProgress? _driveAnalysisProgress;
+  final Map<String, SystemDriveUsageEntry> _partialDriveEntries =
+      <String, SystemDriveUsageEntry>{};
   bool _analyzingDrive = false;
+  String? _deletingDrivePath;
   late int _totalReleasedBytes = widget.initialTotalReleasedBytes;
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
@@ -458,7 +465,9 @@ class _CleanerTabState extends State<CleanerTab> {
     _taskToken = token;
     setState(() {
       _analyzingDrive = true;
+      _driveAnalysis = null;
       _driveAnalysisProgress = null;
+      _partialDriveEntries.clear();
       _lastDriveAnalysisReport = null;
       _message = '正在分析系统盘根目录与空间占用…';
     });
@@ -468,23 +477,20 @@ class _CleanerTabState extends State<CleanerTab> {
               _systemDiskPath(),
               cancellationToken: token,
               onProgress: (SystemDriveAnalysisProgress progress) {
-                if (mounted) {
-                  setState(() => _driveAnalysisProgress = progress);
-                }
+                if (mounted) _recordDriveProgress(progress);
               },
             )
           : await widget.driveAnalysisRunner!(
               cancellationToken: token,
               onProgress: (SystemDriveAnalysisProgress progress) {
-                if (mounted) {
-                  setState(() => _driveAnalysisProgress = progress);
-                }
+                if (mounted) _recordDriveProgress(progress);
               },
             );
       if (!mounted) return;
       setState(() {
         _driveAnalysis = analysis;
         _analyzingDrive = false;
+        _partialDriveEntries.clear();
         _message = analysis.cancelled
             ? '空间分析已取消，以下为已完成部分'
             : '空间分析完成：${analysis.entries.length} 个系统盘根项目';
@@ -513,6 +519,18 @@ class _CleanerTabState extends State<CleanerTab> {
     } finally {
       if (identical(_taskToken, token)) _taskToken = null;
     }
+  }
+
+  void _recordDriveProgress(SystemDriveAnalysisProgress progress) {
+    setState(() {
+      _driveAnalysisProgress = progress;
+      final SystemDriveUsageEntry? completed = progress.completedEntry;
+      if (completed != null) _partialDriveEntries[completed.path] = completed;
+      for (final SystemDriveUsageEntry entry
+          in progress.completedBreakdownEntries) {
+        _partialDriveEntries[entry.path] = entry;
+      }
+    });
   }
 
   String _systemDiskPath() {
@@ -802,6 +820,8 @@ class _CleanerTabState extends State<CleanerTab> {
         if (_lastResult != null) _buildResultSummary(_lastResult!),
         if (_analyzingDrive && _driveAnalysisProgress != null)
           _buildDriveAnalysisProgress(_driveAnalysisProgress!),
+        if (_analyzingDrive && _partialDriveEntries.isNotEmpty)
+          _buildPartialDriveAnalysis(),
         if (_driveAnalysis != null) _buildDriveAnalysis(_driveAnalysis!),
         Expanded(child: _buildBody()),
       ],
@@ -954,11 +974,27 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Widget _buildDriveAnalysis(SystemDriveAnalysis analysis) {
-    final List<SystemDriveUsageEntry> visible = analysis.entries
-        .take(10)
+    final Map<SystemDriveEntryKind, int> totals = <SystemDriveEntryKind, int>{};
+    for (final SystemDriveUsageEntry entry in analysis.entries) {
+      totals.update(
+        entry.kind,
+        (int value) => value + entry.sizeBytes,
+        ifAbsent: () => entry.sizeBytes,
+      );
+    }
+    final List<SystemDriveUsageEntry> details =
+        <SystemDriveUsageEntry>[
+          ...analysis.entries,
+          ...analysis.breakdownEntries,
+        ]..sort(
+          (SystemDriveUsageEntry left, SystemDriveUsageEntry right) =>
+              right.sizeBytes.compareTo(left.sizeBytes),
+        );
+    final List<SystemDriveUsageEntry> visible = details
+        .take(40)
         .toList(growable: false);
     return Container(
-      constraints: const BoxConstraints(maxHeight: 280),
+      constraints: const BoxConstraints(maxHeight: 420),
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       decoration: BoxDecoration(
         color: context.vibe.panel,
@@ -980,15 +1016,37 @@ class _CleanerTabState extends State<CleanerTab> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    '总量 ${_formatSize(analysis.totalBytes)} · '
-                    '已用 ${_formatSize(analysis.usedBytes)} · '
-                    '剩余 ${_formatSize(analysis.freeBytes)} · '
-                    '目录逻辑量 ${_formatSize(analysis.logicalMeasuredBytes)} · '
-                    '${analysis.hasLogicalOvercount ? '硬链接重复计数 ${_formatSize(analysis.logicalOvercountBytes)}' : '未归类/系统保留 ${_formatSize(analysis.unaccountedBytes)}'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '总量 ${_formatSize(analysis.totalBytes)} · '
+                        '已用 ${_formatSize(analysis.usedBytes)} · '
+                        '剩余 ${_formatSize(analysis.freeBytes)} · '
+                        '已归类 ${_formatSize(analysis.logicalMeasuredBytes)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      Text(
+                        totals.entries
+                            .where(
+                              (MapEntry<SystemDriveEntryKind, int> item) =>
+                                  item.value > 0,
+                            )
+                            .map(
+                              (MapEntry<SystemDriveEntryKind, int> item) =>
+                                  '${item.key.label} ${_formatSize(item.value)}',
+                            )
+                            .join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.vibe.muted,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 IconButton(
@@ -1014,44 +1072,167 @@ class _CleanerTabState extends State<CleanerTab> {
                   const Divider(height: 1),
               itemBuilder: (BuildContext context, int index) {
                 final SystemDriveUsageEntry entry = visible[index];
-                return ListTile(
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  leading: Icon(
-                    entry.needsReview
-                        ? Icons.warning_amber_rounded
-                        : Icons.check_circle_outline,
-                    size: 18,
-                    color: entry.needsReview
-                        ? VibekitsColors.warning
-                        : context.vibe.success,
-                  ),
-                  title: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          entry.name,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        '${entry.complete ? '' : '≥ '}${_formatSize(entry.sizeBytes)}',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                  subtitle: Text(
-                    '${entry.kind.label} · ${entry.needsReview ? '需复核' : '正常'} · ${entry.reason}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
+                return _buildDriveEntryTile(entry);
               },
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildPartialDriveAnalysis() {
+    final List<SystemDriveUsageEntry> visible =
+        _partialDriveEntries.values.toList()..sort(
+          (SystemDriveUsageEntry left, SystemDriveUsageEntry right) =>
+              right.sizeBytes.compareTo(left.sizeBytes),
+        );
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 300),
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      decoration: BoxDecoration(
+        color: context.vibe.panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.vibe.border),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.storage_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  '占用结果实时加载 · 已显示 ${visible.length} 项',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Text(
+                  '扫描可继续在后台运行',
+                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: visible.length > 30 ? 30 : visible.length,
+              separatorBuilder: (BuildContext context, int index) =>
+                  const Divider(height: 1),
+              itemBuilder: (BuildContext context, int index) =>
+                  _buildDriveEntryTile(visible[index]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriveEntryTile(SystemDriveUsageEntry entry) => ListTile(
+    dense: true,
+    visualDensity: VisualDensity.compact,
+    leading: Icon(
+      entry.canDelete
+          ? Icons.delete_sweep_outlined
+          : entry.needsReview
+          ? Icons.warning_amber_rounded
+          : Icons.check_circle_outline,
+      size: 18,
+      color: entry.canDelete
+          ? VibekitsColors.warning
+          : entry.needsReview
+          ? VibekitsColors.warning
+          : context.vibe.success,
+    ),
+    title: Text(entry.name, overflow: TextOverflow.ellipsis),
+    subtitle: Text(
+      '${entry.kind.label} · '
+      '${entry.canDelete ? '可清理' : entry.needsReview ? '需复核' : '正常'} · '
+      '${entry.ownerLabel.isEmpty ? entry.reason : '${entry.ownerLabel} · ${entry.reason}'}',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          '${entry.complete ? '' : '≥ '}${_formatSize(entry.sizeBytes)}',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        if (entry.canDelete) ...<Widget>[
+          const SizedBox(width: 6),
+          if (_deletingDrivePath == entry.path)
+            const SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            IconButton(
+              tooltip: '移到回收站',
+              onPressed: _analyzingDrive || _deletingDrivePath != null
+                  ? null
+                  : () => _deleteDriveEntry(entry),
+              icon: const Icon(Icons.delete_outline, size: 18),
+            ),
+        ],
+      ],
+    ),
+  );
+
+  Future<void> _deleteDriveEntry(SystemDriveUsageEntry entry) async {
+    if (!entry.canDelete || _deletingDrivePath != null) return;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('从空间列表清理？'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('${entry.name} · ${_formatSize(entry.sizeBytes)}'),
+              const SizedBox(height: 8),
+              SelectableText(entry.path),
+              const SizedBox(height: 8),
+              Text(entry.reason),
+              const SizedBox(height: 8),
+              const Text('该项目将优先移入系统回收站；系统目录和程序安装目录不会在这里直接删除。'),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('移到回收站'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingDrivePath = entry.path);
+    final bool removed = widget.driveEntryRecycler != null
+        ? await widget.driveEntryRecycler!(entry.path)
+        : await Isolate.run<bool>(
+            () => CleanupDeleter.sendToRecycleBin(<String>[entry.path]),
+            debugName: 'vibekits-space-entry-delete',
+          );
+    if (!mounted) return;
+    setState(() {
+      _deletingDrivePath = null;
+      _message = removed
+          ? '已移到回收站：${entry.name}（${_formatSize(entry.sizeBytes)}）'
+          : '无法清理 ${entry.name}；可能正在使用或权限不足';
+    });
+    if (removed) await _analyzeSystemDrive();
   }
 
   Future<void> _showDriveAnalysisReport(SystemDriveAnalysis analysis) async {
