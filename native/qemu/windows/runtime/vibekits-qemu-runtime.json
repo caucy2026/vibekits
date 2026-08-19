@@ -1,0 +1,8 @@
+﻿{
+    "product":  "QEMU x86_64 compact runtime",
+    "version":  "QEMU emulator version 11.1.0 (v11.1.0-12130-ge470268ff4)",
+    "source":  "https://www.qemu.org/",
+    "windowsBuild":  "https://qemu.weilnetz.de/w64/qemu-w64-setup-20260811.exe",
+    "license":  "GPL-2.0 and component licenses; see COPYING files",
+    "installerSha512":  "5BCF9EED634E8575A37B74F445AF41A2FE4106DA512D0C30C368301D4C105037FDFAB40A5287367A28A957624CDDEBBC8C07E16C88AB6634F554CDF3D16BF543"
+}

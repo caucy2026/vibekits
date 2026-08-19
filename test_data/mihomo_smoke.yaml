@@ -1,0 +1,8 @@
+mixed-port: 17890
+mode: rule
+log-level: warning
+ipv6: false
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT

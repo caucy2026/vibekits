@@ -1,7 +1,7 @@
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
-  [string]$ExpectedVersion = '1.9.0-dev.40+50'
+  [string]$ExpectedVersion = '1.9.0-dev.41+51'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +20,11 @@ $required = @(
   'tools\harness\harness-runtime.json',
   'tools\harness\vibekits-mcp-server.mjs',
   'tools\harness\vibekits-approval.mjs',
+  'tools\mihomo\mihomo.exe',
+  'tools\mihomo\vibekits-mihomo-runtime.json',
+  'tools\qemu\qemu-system-x86_64.exe',
+  'tools\qemu\qemu-img.exe',
+  'tools\qemu\vibekits-qemu-runtime.json',
   'libserialport_plus.dll',
   'onnxruntime.dll',
   'vibekits_onnx.dll',

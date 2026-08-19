@@ -52,6 +52,26 @@ void main() {
     expect(find.byTooltip('复制当前结果'), findsOneWidget);
   });
 
+  testWidgets('网络与虚拟化合并 Clash Verge 和轻量虚拟机', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: DevToolsTab())),
+    );
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '虚拟化');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '网络与虚拟化'));
+    await tester.pump();
+    expect(find.text('Clash Verge'), findsWidgets);
+    expect(find.text('轻量虚拟机'), findsOneWidget);
+    expect(find.byKey(const Key('mihomo-start')), findsOneWidget);
+    await tester.tap(find.text('轻量虚拟机'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('qemu-start')), findsOneWidget);
+  });
+
   testWidgets('DEV-002 执行并将结果继续作为输入', (WidgetTester tester) async {
     final Finder input = await pumpTools(tester);
 

@@ -96,6 +96,28 @@ install(FILES
   DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/7zip"
   COMPONENT Runtime)
 
+# Clash Verge-compatible Mihomo core. The private copy is always used so proxy
+# tasks do not depend on another Clash installation or PATH.
+set(MIHOMO_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/mihomo/windows/runtime")
+if(EXISTS "${MIHOMO_RUNTIME_DIR}/vibekits-mihomo-runtime.json")
+  install(DIRECTORY "${MIHOMO_RUNTIME_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/mihomo" COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/mihomo/LICENSE.txt"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/mihomo" COMPONENT Runtime)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR "Bundled Mihomo is missing. Run tool/prepare_mihomo_runtime.ps1.")
+endif()
+
+# Compact QEMU package keeps only x86_64 system emulation, qemu-img, runtime
+# DLLs and firmware data instead of every architecture supplied upstream.
+set(QEMU_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/qemu/windows/runtime")
+if(EXISTS "${QEMU_RUNTIME_DIR}/vibekits-qemu-runtime.json")
+  install(DIRECTORY "${QEMU_RUNTIME_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/qemu" COMPONENT Runtime)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR "Bundled QEMU is missing. Run tool/prepare_qemu_runtime.ps1.")
+endif()
+
 # The official DeepSeek Harness is prepared ahead of the Release build by
 # tool/prepare_harness_runtime.ps1. Runtime startup never invokes npm/npx.
 set(HARNESS_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/harness/windows/runtime")

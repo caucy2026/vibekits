@@ -14,6 +14,7 @@ import 'file_diff_workspace.dart';
 import 'file_search_workspace.dart';
 import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
+import 'network_virtualization_workspace.dart';
 import 'harness_tool_activity_dialog.dart';
 import 'programmer_calculator_workspace.dart';
 import 'remote_workspace.dart';
@@ -333,6 +334,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
       return GithubDiagnosticsWorkspace(
         runDiagnostics: widget.githubDiagnostics,
       );
+    }
+    if (tool.id == 'network_virtualization') {
+      return const NetworkVirtualizationWorkspace();
     }
     if (tool.id == 'batch_rename') {
       return const BatchRenameWorkspace();

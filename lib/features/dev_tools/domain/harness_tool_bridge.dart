@@ -19,6 +19,7 @@ import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_work_status.dart';
+import 'network_virtualization_service.dart';
 import 'programmer_calculator.dart';
 import 'platform_credential_store.dart';
 import 'remote_connection_record.dart';
@@ -222,6 +223,12 @@ class VibekitsHarnessToolBridge {
   static const String fileDiffId = 'vibekits.file_diff';
   static const String systemDriveAnalyzeId = 'vibekits.cleaner.analyze_drive';
   static const String screenshotOcrId = 'vibekits.ocr.capture_screen';
+  static const String runtimeInspectId = 'vibekits.runtime.inspect';
+  static const String runtimeStatusId = 'vibekits.runtime.status';
+  static const String proxyStartId = 'vibekits.proxy.start';
+  static const String proxyStopId = 'vibekits.proxy.stop';
+  static const String vmStartId = 'vibekits.vm.start';
+  static const String vmStopId = 'vibekits.vm.stop';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
@@ -575,6 +582,63 @@ class VibekitsHarnessToolBridge {
           },
           available: _screenshotOcrRunner != null,
         ),
+        runtimeInspectId: _definition(
+          id: runtimeInspectId,
+          name: '检查代理与虚拟机运行时',
+          description: '只读检查 Vibekits 发布包中的 Mihomo 与 QEMU 版本和绝对路径。',
+          properties: const <String, Object?>{},
+        ),
+        runtimeStatusId: _definition(
+          id: runtimeStatusId,
+          name: '读取代理与虚拟机状态',
+          description: '只读返回 Mihomo/QEMU 运行状态、进程号和有界日志。',
+          properties: const <String, Object?>{},
+        ),
+        proxyStartId: _definition(
+          id: proxyStartId,
+          name: '启动 Clash Verge 内核',
+          description: '使用用户明确选择的 YAML 配置启动内置 Mihomo；不自动修改系统代理或 TUN。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: <String, Object?>{
+            'configPath': _string('Clash YAML 配置绝对路径'),
+            'dataDirectory': _string('Mihomo 数据目录'),
+          },
+          required: <String>['configPath', 'dataDirectory'],
+        ),
+        proxyStopId: _definition(
+          id: proxyStopId,
+          name: '停止 Clash Verge 内核',
+          description: '停止由 Vibekits 启动的 Mihomo 子进程。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: const <String, Object?>{},
+        ),
+        vmStartId: _definition(
+          id: vmStartId,
+          name: '启动轻量虚拟机',
+          description: '使用内置 QEMU 启动用户明确指定的虚拟磁盘或 ISO。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: <String, Object?>{
+            'diskPath': _string('可选虚拟磁盘绝对路径'),
+            'isoPath': _string('可选 ISO 绝对路径'),
+            'memoryMiB': <String, Object?>{
+              'type': 'integer',
+              'minimum': 256,
+              'maximum': 32768,
+            },
+            'cpuCount': <String, Object?>{
+              'type': 'integer',
+              'minimum': 1,
+              'maximum': 16,
+            },
+          },
+        ),
+        vmStopId: _definition(
+          id: vmStopId,
+          name: '停止轻量虚拟机',
+          description: '停止由 Vibekits 启动的 QEMU 子进程。',
+          risk: HarnessToolRisk.controlsDevice,
+          properties: const <String, Object?>{},
+        ),
         programmerCalculatorId: _definition(
           id: programmerCalculatorId,
           name: '程序员计算器',
@@ -808,6 +872,12 @@ class VibekitsHarnessToolBridge {
     if (toolId == fileDiffId) return _diffFiles;
     if (toolId == systemDriveAnalyzeId) return _analyzeSystemDrive;
     if (toolId == screenshotOcrId) return _captureScreenAndOcr;
+    if (toolId == runtimeInspectId) return _inspectBundledRuntimes;
+    if (toolId == runtimeStatusId) return _runtimeStatus;
+    if (toolId == proxyStartId) return _startProxy;
+    if (toolId == proxyStopId) return _stopProxy;
+    if (toolId == vmStartId) return _startVm;
+    if (toolId == vmStopId) return _stopVm;
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
@@ -833,6 +903,60 @@ class VibekitsHarnessToolBridge {
           throw FormatException(message, null, position),
       };
     };
+  }
+
+  Future<Map<String, Object?>> _inspectBundledRuntimes(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<BundledRuntimeStatus> runtimes = await Future.wait(
+      <Future<BundledRuntimeStatus>>[
+        NetworkVirtualizationService.inspectMihomo(),
+        NetworkVirtualizationService.inspectQemu(),
+      ],
+    );
+    return <String, Object?>{
+      'runtimes': runtimes
+          .map((BundledRuntimeStatus value) => value.toJson())
+          .toList(),
+    };
+  }
+
+  Future<Map<String, Object?>> _runtimeStatus(
+    Map<String, Object?> arguments,
+  ) async => NetworkVirtualizationService.status();
+
+  Future<Map<String, Object?>> _startProxy(
+    Map<String, Object?> arguments,
+  ) async {
+    final ManagedToolProcess process =
+        await NetworkVirtualizationService.startMihomo(
+          configPath: (arguments['configPath'] ?? '').toString(),
+          dataDirectory: (arguments['dataDirectory'] ?? '').toString(),
+        );
+    return <String, Object?>{'started': true, 'pid': process.process.pid};
+  }
+
+  Future<Map<String, Object?>> _stopProxy(
+    Map<String, Object?> arguments,
+  ) async {
+    await NetworkVirtualizationService.stopMihomo();
+    return const <String, Object?>{'stopped': true};
+  }
+
+  Future<Map<String, Object?>> _startVm(Map<String, Object?> arguments) async {
+    final ManagedToolProcess process =
+        await NetworkVirtualizationService.startQemu(
+          diskPath: (arguments['diskPath'] ?? '').toString(),
+          isoPath: (arguments['isoPath'] ?? '').toString(),
+          memoryMiB: _integer(arguments['memoryMiB'], 2048),
+          cpuCount: _integer(arguments['cpuCount'], 2),
+        );
+    return <String, Object?>{'started': true, 'pid': process.process.pid};
+  }
+
+  Future<Map<String, Object?>> _stopVm(Map<String, Object?> arguments) async {
+    await NetworkVirtualizationService.stopQemu();
+    return const <String, Object?>{'stopped': true};
   }
 
   Future<Map<String, Object?>> _listAdbDevices(

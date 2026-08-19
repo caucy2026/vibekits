@@ -1,0 +1,8 @@
+﻿{
+    "product":  "Mihomo Meta",
+    "version":  "1.19.29",
+    "source":  "https://github.com/MetaCubeX/mihomo",
+    "upstreamBundle":  "Clash Verge Rev",
+    "license":  "MIT",
+    "sha256":  "98986B574E41F92B22ED65AA42A61AD8CADF886CC7B3F76B722CD73A3A52D878"
+}

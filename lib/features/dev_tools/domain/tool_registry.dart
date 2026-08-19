@@ -148,6 +148,20 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     offline: false,
     harnessToolIds: <String>['vibekits.github.diagnose'],
   ),
+  const ToolSpec(
+    id: 'network_virtualization',
+    name: '网络与虚拟化',
+    group: ToolGroups.network,
+    description: '使用内置 Mihomo 运行 Clash Verge 配置，并用内置 QEMU 启动轻量虚拟机。',
+    harnessToolIds: <String>[
+      'vibekits.runtime.inspect',
+      'vibekits.proxy.start',
+      'vibekits.proxy.stop',
+      'vibekits.vm.start',
+      'vibekits.vm.stop',
+      'vibekits.runtime.status',
+    ],
+  ),
   ToolSpec(
     id: 'next_action_recommendation',
     name: '下一步建议',
@@ -454,6 +468,7 @@ const Set<String> _standaloneToolIds = <String>{
   'git_workspace',
   'file_diff',
   'github_diagnostics',
+  'network_virtualization',
   'file_hash',
   'file_search',
   'batch_rename',
