@@ -6,6 +6,7 @@
 #include <flutter/method_channel.h>
 
 #include <memory>
+#include <map>
 
 #include "win32_window.h"
 
@@ -31,6 +32,9 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       file_drop_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      process_lifecycle_channel_;
+  std::map<DWORD, HANDLE> child_process_jobs_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

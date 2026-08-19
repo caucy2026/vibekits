@@ -386,3 +386,14 @@
 - Harness 当前设置的调试目录真实接入清理：`logs`、`screenshots`、`temp` 中超过 24 小时的日志、调试截图和临时文件进入候选，当前任务文件保留。
 - 清理报告升级 v2，记录真实路径、来源、大小、修改时间、状态和原因；清理页新增“清理日志”，可浏览每次运行及逐项明细，也可逐条删除记录。
 - `flutter analyze` 0 问题；清理规则、Harness 年龄门槛、删除、原子报告读写删除、后台取消和界面定向回归 28/28 通过。版本更新为 `1.9.0-dev.22+32`。
+
+## 2026-08-19 · v1.9.0-dev.23 官方 Harness Web 整体移植
+
+- 对照 DeepSeek 官方仓库 Web UI 指南和 Release 内固定 `@deepseek-ai/dsh@0.1.0-rc.7` 的完整 Client UI 产物，建立 `19_OFFICIAL_HARNESS_WEB_PARITY.md` 作为唯一操作基线。
+- Windows Harness 正式入口改为启动内置 `dsh web` 并用 WebView2 嵌入官方生产界面；删除 Flutter 前置选项目/输 Key 和自制对话交互路径。
+- 项目、有序多会话、重命名、排序、Fork、Archive、Ungrouped、搜索、模型、权限、plan/goal/jobs/subagent/tool trajectory 全部回归官方 Host/Client 数据模型。
+- 官方 Web 允许在无环境 Key 时启动，用户按官方 Settings → Models 配置；旧凭据仅作为进程环境初值，不进入命令行或日志。
+- 默认模型设置改为仅首次创建，后续 App 启动不再覆写用户在官方 Settings 中保存的配置。
+- Vibekits 工具保留为官方 MCP client 下的扩展，继续共用 App 领域服务、审批、取消和真实审计记录；不接管官方原生会话和权限 UI。
+- Release 首次实启发现 App 关闭后 `node.exe` 可残留；Windows Runner 新增专用 Job Object 生命周期通道，Harness 进程树绑定 App，即使 Dart 未来得及 await `dispose` 也会由内核回收。
+- 静态分析 0 问题；首轮 Harness/Web/工具桥及主界面 46/46 通过，进程生命周期修复后定向 25/25 通过；Windows Release 构建通过。App 实启后官方动态回环端口返回 HTTP 200/12076 字节 HTML，强制结束 App 后 Harness node 残留为 0。

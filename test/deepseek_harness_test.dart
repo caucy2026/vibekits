@@ -51,8 +51,14 @@ void main() {
       prompt: '检查失败的测试',
       apiKey: 'test-key',
     );
+    final HarnessWebRequest officialWeb = HarnessWebRequest(
+      workspace: workspace.path,
+      apiKey: '',
+      port: 31888,
+    );
     web.validate();
     agent.validate();
+    officialWeb.validate();
     expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.0-rc.7');
     expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
@@ -62,6 +68,8 @@ void main() {
     expect(agent.baseUrl, DeepSeekHarnessService.defaultBaseUrl);
     expect(agent.model, DeepSeekHarnessService.defaultModel);
     expect(agent.nativeSandboxMode, 'workspace-write');
+    expect(officialWeb.arguments, <String>['web', '--port', '31888']);
+    expect(officialWeb.url, Uri.parse('http://127.0.0.1:31888'));
     expect(
       HarnessAgentRequest(
         workspace: workspace.path,

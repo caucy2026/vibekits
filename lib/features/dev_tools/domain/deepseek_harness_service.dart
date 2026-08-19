@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../../app/platform_process_lifecycle.dart';
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
 import 'harness_agent_preferences.dart';
@@ -86,6 +87,48 @@ class HarnessAgentRequest {
     }
     if (prompt.trim().isEmpty) {
       throw const FormatException('请输入要交给智能体的任务');
+    }
+    if (debugDirectory.trim().isNotEmpty &&
+        !Directory(debugDirectory.trim()).isAbsolute) {
+      throw const FormatException('调试目录必须是绝对路径');
+    }
+  }
+}
+
+class HarnessWebRequest {
+  const HarnessWebRequest({
+    required this.workspace,
+    required this.apiKey,
+    required this.port,
+    this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
+    this.model = DeepSeekHarnessService.defaultModel,
+    this.debugDirectory = '',
+    this.approveTool,
+    this.toolBridge,
+  });
+
+  final String workspace;
+  final String apiKey;
+  final int port;
+  final String baseUrl;
+  final String model;
+  final String debugDirectory;
+  final HarnessToolApproval? approveTool;
+  final VibekitsHarnessToolBridge? toolBridge;
+
+  Uri get url => Uri.parse('http://127.0.0.1:$port');
+  List<String> get arguments => <String>['web', '--port', '$port'];
+
+  void validate() {
+    final Directory directory = Directory(workspace.trim());
+    if (workspace.trim().isEmpty || !directory.isAbsolute) {
+      throw const FormatException('请选择绝对路径的工作区');
+    }
+    if (!directory.existsSync()) {
+      throw const FormatException('工作区不存在或无法访问');
+    }
+    if (port < 1024 || port > 65535) {
+      throw const FormatException('端口必须在 1024 到 65535 之间');
     }
     if (debugDirectory.trim().isNotEmpty &&
         !Directory(debugDirectory.trim()).isAbsolute) {
@@ -324,6 +367,7 @@ abstract final class DeepSeekHarnessService {
         runInShell: false,
         mode: ProcessStartMode.normal,
       );
+      await _bindProcessToAppLifetime(process);
       return _ProcessHarnessSession(process, spec.url);
     } on ProcessException catch (error) {
       throw StateError('无法启动官方 Harness：${error.message}');
@@ -356,7 +400,8 @@ abstract final class DeepSeekHarnessService {
         <String>[runtime.cliPath, ...request.arguments],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
-          'DEEPSEEK_API_KEY': request.apiKey.trim(),
+          if (request.apiKey.trim().isNotEmpty)
+            'DEEPSEEK_API_KEY': request.apiKey.trim(),
           'DEEPSEEK_BASE_URL': request.baseUrl.trim(),
           'DEEPSEEK_MODEL': request.model.trim().isEmpty
               ? defaultModel
@@ -380,6 +425,7 @@ abstract final class DeepSeekHarnessService {
         runInShell: false,
         mode: ProcessStartMode.normal,
       );
+      await _bindProcessToAppLifetime(process);
       final File logFile = File(
         '${debug.logs.path}${Platform.pathSeparator}harness-'
         '${DateTime.now().toUtc().toIso8601String().replaceAll(':', '-')}.log',
@@ -399,6 +445,83 @@ abstract final class DeepSeekHarnessService {
     }
   }
 
+  static Future<HarnessSessionHandle> startWebAgent(
+    HarnessWebRequest request,
+  ) async {
+    request.validate();
+    _validateEndpoint(request.baseUrl);
+    final _HarnessRuntime runtime = await _resolveBundledRuntime();
+    final HarnessDebugPaths debug = await prepareDebugDirectory(
+      request.debugDirectory,
+    );
+    final HarnessToolServer toolServer = await HarnessToolServer.start(
+      approve: request.approveTool,
+      bridge: request.toolBridge,
+    );
+    final Directory harnessHome = await _prepareHarnessHome(
+      request.model,
+      runtime.approvalPluginPath,
+      includeApprovalBridge: false,
+    );
+    try {
+      final Process process = await Process.start(
+        runtime.nodeExecutable,
+        <String>[runtime.cliPath, ...request.arguments],
+        workingDirectory: request.workspace.trim(),
+        environment: <String, String>{
+          if (request.apiKey.trim().isNotEmpty)
+            'DEEPSEEK_API_KEY': request.apiKey.trim(),
+          'DEEPSEEK_BASE_URL': request.baseUrl.trim(),
+          'DEEPSEEK_MODEL': request.model.trim().isEmpty
+              ? defaultModel
+              : request.model.trim(),
+          'DSH_HOME': harnessHome.path,
+          'DSH_TELEMETRY_MODE': 'DISABLED',
+          'DSH_TELEMETRY_DISABLED': '1',
+          'DSH_TOOLS_MODE': 'native',
+          'DSH_LOG_DIR': debug.logs.path,
+          'VIBEKITS_DEBUG_DIR': debug.root.path,
+          'VIBEKITS_SCREENSHOT_DIR': debug.screenshots.path,
+          'TEMP': debug.temp.path,
+          'TMP': debug.temp.path,
+          'TMPDIR': debug.temp.path,
+          'VIBEKITS_NODE_EXECUTABLE': runtime.nodeExecutable,
+          'VIBEKITS_MCP_SERVER': runtime.mcpServerPath,
+          'VIBEKITS_TOOL_BRIDGE_URL': toolServer.endpoint.toString(),
+          'VIBEKITS_TOOL_BRIDGE_TOKEN': toolServer.token,
+        },
+        includeParentEnvironment: true,
+        runInShell: false,
+        mode: ProcessStartMode.normal,
+      );
+      await _bindProcessToAppLifetime(process);
+      final File logFile = File(
+        '${debug.logs.path}${Platform.pathSeparator}harness-web-'
+        '${DateTime.now().toUtc().toIso8601String().replaceAll(':', '-')}.log',
+      );
+      return _ProcessHarnessWebSession(
+        process,
+        request.url,
+        toolServer,
+        logFile,
+        request.apiKey.trim(),
+      );
+    } on Object {
+      await toolServer.close();
+      rethrow;
+    }
+  }
+
+  static Future<int> findFreeLoopbackPort() async {
+    final ServerSocket socket = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final int port = socket.port;
+    await socket.close();
+    return port;
+  }
+
   static void _validateEndpoint(String value) {
     final String raw = value.trim().isEmpty ? defaultBaseUrl : value.trim();
     final Uri base = Uri.parse(raw);
@@ -409,8 +532,9 @@ abstract final class DeepSeekHarnessService {
 
   static Future<Directory> _prepareHarnessHome(
     String requestedModel,
-    String approvalPluginPath,
-  ) async {
+    String approvalPluginPath, {
+    bool includeApprovalBridge = true,
+  }) async {
     final String model = requestedModel.trim().isEmpty
         ? defaultModel
         : requestedModel.trim();
@@ -426,15 +550,24 @@ abstract final class DeepSeekHarnessService {
     final File settings = File(
       '${home.path}${Platform.pathSeparator}settings.yaml',
     );
-    await settings.writeAsString(
-      'agent-default-model:\n'
-      '  provider: deepseek-official\n'
-      '  model: ${jsonEncode(model)}\n',
-      flush: true,
-    );
+    // The official Web UI owns model settings after first boot. Rewriting this
+    // file on every App launch would silently undo the user's Settings changes.
+    if (!await settings.exists()) {
+      await settings.writeAsString(
+        'agent-default-model:\n'
+        '  provider: deepseek-official\n'
+        '  model: ${jsonEncode(model)}\n',
+        flush: true,
+      );
+    }
     final File patch = File(
       '${home.path}${Platform.pathSeparator}cordis.patch.yml',
     );
+    final String approvalPatch = includeApprovalBridge
+        ? '- insert:\n'
+              '    - id: vibekits-native-approval\n'
+              '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n'
+        : '';
     await patch.writeAsString(
       '- insert:\n'
       '    - id: vibekits-mcp\n'
@@ -450,9 +583,7 @@ abstract final class DeepSeekHarnessService {
       '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
       '        failOnStartupError: true\n'
       '        toolCallTimeoutMs: 60000\n'
-      '- insert:\n'
-      '    - id: vibekits-native-approval\n'
-      '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n',
+      '$approvalPatch',
       flush: true,
     );
     return home;
@@ -590,6 +721,7 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
       await _log.close();
       await _output.close();
       await _toolServer.close();
+      await PlatformProcessLifecycle.releaseProcessTree(_process.pid);
       return code;
     });
   }
@@ -643,6 +775,7 @@ class _ProcessHarnessSession implements HarnessSessionHandle {
       await _stdout.cancel();
       await _stderr.cancel();
       await _output.close();
+      await PlatformProcessLifecycle.releaseProcessTree(_process.pid);
       return code;
     });
   }
@@ -653,6 +786,73 @@ class _ProcessHarnessSession implements HarnessSessionHandle {
   late final StreamSubscription<String> _stderr;
   late final Future<int> _exitCode;
   bool _running = true;
+  @override
+  final Uri url;
+  @override
+  Stream<String> get output => _output.stream;
+  @override
+  Future<int> get exitCode => _exitCode;
+  @override
+  bool get running => _running;
+  @override
+  Future<void> stop() async {
+    if (!_running) return;
+    _running = false;
+    await _stopProcessTree(_process);
+    await _exitCode.timeout(const Duration(seconds: 5), onTimeout: () => -1);
+  }
+}
+
+class _ProcessHarnessWebSession implements HarnessSessionHandle {
+  _ProcessHarnessWebSession(
+    this._process,
+    this.url,
+    this._toolServer,
+    File logFile,
+    this._apiKey,
+  ) {
+    _log = logFile.openWrite(mode: FileMode.writeOnly);
+    _stdout = _process.stdout
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen((String chunk) => _forward('stdout', chunk));
+    _stderr = _process.stderr
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen((String chunk) => _forward('stderr', chunk));
+    _exitCode = _process.exitCode.then((int code) async {
+      _running = false;
+      await _stdout.cancel();
+      await _stderr.cancel();
+      _log.writeln(
+        '[${DateTime.now().toUtc().toIso8601String()}] exitCode=$code',
+      );
+      await _log.flush();
+      await _log.close();
+      await _output.close();
+      await _toolServer.close();
+      await PlatformProcessLifecycle.releaseProcessTree(_process.pid);
+      return code;
+    });
+  }
+
+  final Process _process;
+  final HarnessToolServer _toolServer;
+  final String _apiKey;
+  final StreamController<String> _output = StreamController<String>();
+  late final IOSink _log;
+  late final StreamSubscription<String> _stdout;
+  late final StreamSubscription<String> _stderr;
+  late final Future<int> _exitCode;
+  bool _running = true;
+
+  void _forward(String channel, String chunk) {
+    final String safe = DeepSeekHarnessService.redactSensitiveOutput(
+      chunk,
+      <String>[_apiKey],
+    );
+    _log.write('[${DateTime.now().toUtc().toIso8601String()}][$channel] $safe');
+    _output.add(safe);
+  }
+
   @override
   final Uri url;
   @override
@@ -683,5 +883,14 @@ Future<void> _stopProcessTree(Process process) async {
     );
   } else {
     process.kill(ProcessSignal.sigterm);
+  }
+}
+
+Future<void> _bindProcessToAppLifetime(Process process) async {
+  try {
+    await PlatformProcessLifecycle.bindProcessTree(process.pid);
+  } on Object {
+    await _stopProcessTree(process);
+    rethrow;
   }
 }

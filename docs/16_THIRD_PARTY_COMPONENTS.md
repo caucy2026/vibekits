@@ -2,7 +2,7 @@
 
 更新日期：2026-08-19
 
-适用版本：`1.9.0-dev.20+30`
+适用版本：`1.9.0-dev.23+33`
 
 ## 发布时直接使用的关键组件
 
@@ -44,9 +44,9 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 
 - 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；2026-08-18 通过 npm registry 查询的官方 CLI 版本：`@deepseek-ai/dsh@0.1.0-rc.7`。
 - 状态：官方仍是 Developer Preview，存在破坏性变更风险；Vibekits 保留可替换进程适配层，并将固定的 Node、CLI 与生产依赖打入安装包。
-- 发布前由 `tool/prepare_harness_runtime.ps1` 固定安装 `@deepseek-ai/dsh@0.1.0-rc.7`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest 和 profile 打入安装包。任务阶段通过内置 `node` 直接启动内置 CLI，不调用 npm/npx、不联网安装，也不依赖用户 PATH。工作目录限定为用户选定项目，输出仅在当前应用会话流式显示。
+- 发布前由 `tool/prepare_harness_runtime.ps1` 固定安装 `@deepseek-ai/dsh@0.1.0-rc.7`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。Windows 通过内置 `node` 启动内置 `dsh web`，再用 WebView2 嵌入其官方生产界面；不调用 npm/npx、不联网安装，也不依赖用户 PATH。
 - DeepSeek API Key 由 Harness 页录入并写入 Windows Credential Manager/macOS Keychain，启动官方子进程时仅放入 `DEEPSEEK_API_KEY` 环境变量；参数、普通设置和日志均不包含密钥。模型和兼容端点分别经 `DEEPSEEK_MODEL`、`DEEPSEEK_BASE_URL` 传递，仍需以官方真实任务验证版本支持情况。
-- 当前机器的官方包帮助探测在下载阶段超过 2 分钟无输出后人工取消；这不是已通过的实启证据。发布前还需记录 npm 包完整性、Windows/macOS 真启动和停止后无残留进程。
+- Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。macOS 真启动、WebView 容器和停止后无残留进程仍待验收。
 
 ## 开源借鉴边界
 
@@ -54,7 +54,7 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 - 2026-08-18 继续审阅 [Kudu](https://github.com/AdventDevInc/kudu)（MIT）、[constUP Garbage Cleaner](https://github.com/constup-foss/garbage-cleaner-powershell)（MPL-2.0）与 [BitCleanerX](https://github.com/paulocoutinhox/bitcleanerx)（MIT）。Vibekits 没有嵌入上游源码或规则文件；独立实现了最小年龄、最大扫描深度、直接文件名白名单和 dry-run 候选模型，并根据公开路径语义增加 JetBrains/WSLg/Gradio/.NET/Scoop 等受限规则。MPL 上游实现未复制，因此不引入其文件级许可证传播要求。
 - 2026-08-19 再次复核 [BleachBit CleanerML](https://github.com/bleachbit/cleanerml)（GPL-3.0-or-later）、[Winapp2](https://github.com/MoscaDotTo/Winapp2)（仓库当前标注 CC-BY-SA-4.0）与 [Czkawka](https://github.com/qarmin/czkawka)（MIT）。仅吸收声明式规则、Detect/Exclude/Warning、发布前验证、dry-run、排除路径、停止标记和进度等通用设计；未复制 CleanerML/Winapp2 规则、源码或文本。Vibekits 独立实现系统盘 `.log` 高风险清单、Harness 调试产物保留期和 v2 本地审计日志。
 - 2026-08-19 将上述安全模型扩展到 macOS 明确缓存/日志目录，并新增 Windows 系统盘只读空间审计。空间审计只统计元数据和容量，不复制第三方源码、不读取文件正文，也不把未知根目录自动变为删除规则。
-- Harness 工作台以 DeepSeek 官方社区 Web UI 的功能模块为基线（工作区、会话、对话、工具、目标/计划、任务、模型、权限、插件与设置），使用 Vibekits 自有 Flutter 信息架构和接近 Codex 的中性色视觉；没有嵌入官方 React 产物或品牌素材。
+- Harness 工作台直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产产物，不再由 Flutter 仿制项目、会话、对话、工具、目标/计划、任务、模型、权限、插件与设置。Vibekits 的 ADB/串口/Git 等以官方 MCP client 插件扩展接入。
 - Zed、Geany、OpenSSH 和 GitHub 文档只用于工作流与操作习惯研究。Git 执行采用官方 MinGit 二进制分发，按 GPL-2.0-only 及归档组件许可证履行随附义务，不复制修改其源码。
 - SSH 交互终端、SFTP 和端口转发使用 `dartssh2`，终端渲染使用 `xterm`；主机密钥必须经用户确认或与已绑定指纹一致。转发连接和数据泵运行在后台 Isolate；不自行实现密码学。
 - GitHub 网络诊断只读取 DNS/TLS/HTTPS/代理/hosts/SSH 状态，不移植 FastGithub 的 hosts、代理、证书或系统修改逻辑。

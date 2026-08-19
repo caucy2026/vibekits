@@ -2,9 +2,9 @@
 
 > 当前研发顺序与逐项关闭状态以 [发布完成清单](17_RELEASE_COMPLETION_CHECKLIST.md) 为唯一执行入口；早期 Windows/UI 矩阵保留为用例库。
 
-更新日期：2026-08-18
+更新日期：2026-08-19
 
-当前版本：`1.9.0-dev.21+31`（跨 Windows 用户配置的瞬态目录智能发现检查点，非正式发布）
+当前版本：`1.9.0-dev.23+33`（Windows 官方 Harness Web 整体移植检查点，非正式发布）
 
 目标平台：Windows x64；macOS arm64/x64 工程基线
 
@@ -64,11 +64,15 @@ PostgreSQL、MySQL 和 MariaDB 已接入 TLS/非 TLS 连接、对象列表、100
 
 Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构小工具不再各占左侧条目。左侧统一为“转换与检查”，右侧第一层按类别 Tab、第二层用紧凑选项切换，并共享输入/输出、复制、清空和“结果作为输入”。左侧搜索仍能用具体工具名直接命中并自动定位。
 
-DeepSeek 从开发工具左侧迁入模型页，界面采用 Codex 风格的工作区、持续对话和底部任务输入。首轮直接发送任务，后续自动携带当前会话的有界上下文；回复支持 Markdown 与复制。运行中可展开查看理解任务、规划操作、工具目标、真实执行状态/耗时、继续分析和生成回复，展示可核对摘要而不是私有逐字思维链；任务期间仍可停止或切换其他工具。数据按“项目 → 最多 40 个会话 → 每会话最近 80 条消息”保存到用户应用数据目录，新建会话不覆盖旧记录，切换项目先保存，重启恢复活动会话；旧版单会话文件自动迁移。`Enter` 发送、`Shift+Enter` 换行。设置页将 DeepSeek 官方 `deepseek-v4-flash`、`deepseek-v4-pro` 作为未验证候选，输入 Key 后以当前端点 `/models` 的真实返回替换列表。输入框权限菜单提供“请求批准 / 帮我批准 / 完全访问权限”，默认“帮我批准”且跨重启保存：普通注册工具自动执行，破坏性操作仍询问；完全访问保存后跨页面/重启继续生效且不再弹工具批准框，但不会取消工具白名单、ADB 禁止命令和目标锁定。工具日志默认开启，可在 Harness 设置关闭；开发工具页按当前工具过滤展示调用时间、目标、参数摘要、结果、状态和耗时，支持单条删除与清空。ADB 成功/失败证据由 `AdbService` 在真实 `adb.exe` 进程退出后写入原始参数、退出码和 stdout/stderr，桥接层不会伪造成功记录；敏感字段统一脱敏。当前固定官方 `@deepseek-ai/dsh@0.1.0-rc.7 --profile headless`。
+Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.0-rc.7` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
+
+项目与会话由官方 Workspace/Session 模型统一持久化：工作区可添加、重命名、排序和移除；每个工作区有有序的多会话；会话可重命名、拖动、Fork 和 Archive。移除工作区不删项目或日志，会话进入 `Ungrouped`；取消归档恢复原工作区位置。侧边栏分组/平铺、折叠、搜索、状态点，以及模型、权限、plan、goal、jobs、subagent 和 tool trajectory 全部使用官方 Client/Host 投影。详细合同见 `19_OFFICIAL_HARNESS_WEB_PARITY.md`。
+
+官方 Web 可在没有环境 Key 时正常启动，用户按 Settings → Models 录入 Key，保存后立即可用；旧版系统凭据中已有 Key 时仅作为子进程环境初值。Vibekits MCP 以官方 MCP client 插件接入，ADB/串口/Git/文件等仍共用 App 领域服务和真实审计日志；官方原生工具使用官方权限 UI。
 
 Harness 设置页提供“调试文件目录”，默认解析为 `vibekits.exe` 同目录下的 `tmp`，可选择其他绝对路径并跨重启保存。保存时创建 `logs`、`screenshots`、`temp`：Harness stdout/stderr 同步写入按 UTC 时间命名的日志，OCR/截图写入 `screenshots`，子进程 `TEMP/TMP/TMPDIR` 指向 `temp`；DeepSeek Key 只在子进程环境变量中传递，不写日志文件名或正文。
 
-参数合同、流式输出、完成恢复和取消适配的模拟进程自动测试已通过；本机官方 npm 包首次探测下载超过 2 分钟无输出后取消，因此当前不能写成官方 Harness 已真实启动。该项目仍为开发者预览，后续在 ACP JSON-RPC 稳定后增加可续接会话和结构化审批。
+内置官方 server 已以 `dsh web --port 31999` 真实启动并返回 HTTP 200，停止正常；本机不需要 npm/npx 下载。该项目仍为开发者预览，真实 DeepSeek Key + ADB MCP 任务和 macOS 实机仍待本轮后续验收。
 
 ### 4.6 文件搜索与线程隔离
 
@@ -99,6 +103,8 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 - 每次清理保存可审计 v2 JSON（真实路径、来源、大小、修改时间、结果与原因）；清理页可查看每次及逐项明细、删除单条日志。
 
 ## 7. 2026-08-17 验证证据
+
+- 2026-08-19 `v1.9.0-dev.23+33`：Windows 官方 `dsh web` + WebView2 整体移植；`flutter analyze` 0 问题；首轮定向 46/46、进程回收修复后 25/25 通过；Release 启动后 App 可响应且 WebView2/Harness node 存在，强制结束 App 后 Harness node 残留为 0。
 
 - `dart format lib test`：已执行。
 - `flutter analyze`：`No issues found`。
