@@ -510,3 +510,11 @@
 - 复核 ripgrep、fd、jq、delta、yq、ast-grep、tokei 和 hyperfine 的任务模型与许可证。首批融合安全只读 JSON 路径查询和 Tokei 风格代码统计；不复制第三方源码/UI，不开放 hyperfine 式任意命令执行。
 - 代码统计在 Isolate 中执行，最多 50000 个源码文件、单文件 8 MiB，跳过 `.git`、依赖和构建目录；JSON 查询只支持确定性的点路径、数组下标和通配，不执行任意表达式。
 - 定向与全量 Analyze 0 问题；领域、界面、自动工具发现、真实 Harness 调用和日志合同回归通过。完整 Release 门禁 9/9 项 PASS，13 条任务链清单有效，自包含资产 17/17；EXE SHA-256 为 `01A81BA10AE603EE54B8F2D422008986A76AAE623B3153060F170898C27688EB`。
+
+## 2026-08-20 · v1.9.0-dev.39 开源能力融合后续项当日收口
+
+- 原“JSON 路径查询”原位升级为 JSON/YAML/TOML/XML 统一结构化查询；自动识别格式，支持确定性点路径、数组、通配和 XML 属性，不执行任意 jq/yq 表达式，不修改源数据。
+- 新增 Tokei/ast-grep 工作流衔接：代码统计先提供项目规模与主要语言，代码结构搜索再在独立 Isolate 中定位类、类型和函数声明，结果直接供 Harness 选择具体文件；最多扫描 50000 个文件、返回 500 项、单文件 8 MiB。
+- 文件搜索吸收 ripgrep/fd 的默认行为：读取根 `.gitignore` 常用 glob、默认跳过匹配项并启用 smart case；明确不把轻量 matcher 宣称为完整 Git ignore 引擎。
+- 安全性能基准吸收 hyperfine 的预热、多轮采样和百分位思想，但只允许 SHA-256、JSON 解析、Base64 三种内置操作，输入 1 MiB、5～200 次；模型无法借此执行任意命令。
+- 新能力均通过 `ToolSpec` 自动进入现有“转换与检查”、Harness MCP 目录、使用边界描述与分模块日志，没有新增左侧孤岛。定向回归 48/48 及新增 Harness 真实调用通过；完整 Release 门禁 10/10 项 PASS，14 条任务链有效，自包含资产 17/17；EXE SHA-256 为 `FD3DFB2DA82268B9321902040C8DDC08E5BA81CD74A8FB54D81F9D0D1DD2731F`。

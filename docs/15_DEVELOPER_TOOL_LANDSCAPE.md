@@ -69,9 +69,9 @@ Star 数只作为社区采用度信号，不作为接入授权；最终决策以
 | sharkdp/fd | 43.1k | MIT / Apache-2.0 | 友好的文件名搜索、smart case、隐藏/ignore 默认值 | 合并进现有文件搜索筛选，不重复打包同类 UI |
 | jqlang/jq | 34.8k | MIT | JSON 提取、过滤、结构化输出 | 首批加入安全只读“JSON 路径查询”；不开放任意表达式执行 |
 | dandavison/delta | 31k | MIT | 行号、易读 Diff、Git/grep 结果衔接 | 现有文件 Diff/Git Diff 吸收交互原则，不再引入孤立 pager |
-| mikefarah/yq | 15.5k | MIT（依赖需单列复核） | YAML/JSON/XML/TOML 统一查询 | 下一批扩展同一个结构化查询，不新增左侧入口 |
-| ast-grep/ast-grep | 14.2k | MIT | 基于 AST 的结构化搜索、Lint、改写 | 下一批先做只读结构搜索；改写走预览与批准 |
+| mikefarah/yq | 15.5k | MIT（依赖需单列复核） | YAML/JSON/XML/TOML 统一查询 | 已扩展同一个结构化查询，不新增左侧入口；采用自研安全子集 |
+| ast-grep/ast-grep | 14.2k | MIT | 基于 AST 的结构化搜索、Lint、改写 | 已融合有界只读声明搜索；完整 AST 与改写不作虚假支持 |
 | XAMPPRocky/tokei | 高采用度 | MIT / Apache-2.0 | 多语言代码/注释/空白统计、结构化输出 | 首批加入后台“代码统计”，结果给文件搜索和 Harness 复用 |
-| sharkdp/hyperfine | 高采用度 | MIT / Apache-2.0 | 多轮统计基准、预热、异常值 | 暂不开放任意命令；待设计受限命令模板和资源上限 |
+| sharkdp/hyperfine | 高采用度 | MIT / Apache-2.0 | 多轮统计基准、预热、异常值 | 已融合内置操作预热、多轮与百分位；永久禁止模型任意 shell |
 
 本轮没有复制上述仓库源码或 UI；采用的是任务模型和安全边界，自研 Dart 领域实现。自动发现与融合规则见 `22_CAPABILITY_INTEGRATION_STANDARD.md`。

@@ -16,7 +16,7 @@ void main() {
     addTearDown(() => sandbox.deleteSync(recursive: true));
 
     final FileSearchResult result = await FileSearchService.search(
-      FileSearchRequest(root: sandbox.path, query: 'CONFIG'),
+      FileSearchRequest(root: sandbox.path, query: 'config'),
     );
 
     expect(result.cancelled, isFalse);
@@ -123,5 +123,36 @@ void main() {
     expect(result.matches.map((FileSearchMatch item) => item.name), <String>[
       'recent.dart',
     ]);
+  });
+
+  test('默认遵循根 gitignore 并采用 smart case', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_file_search_ignore',
+    );
+    Directory('${sandbox.path}/build').createSync();
+    File('${sandbox.path}/.gitignore').writeAsStringSync('build/\n*.tmp\n');
+    File('${sandbox.path}/UserService.dart')
+        .writeAsStringSync('class UserService {}');
+    File('${sandbox.path}/userservice.tmp').writeAsStringSync('ignored');
+    File('${sandbox.path}/build/UserService.dart')
+        .writeAsStringSync('generated');
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+
+    final FileSearchResult exact = await FileSearchService.search(
+      FileSearchRequest(root: sandbox.path, query: 'UserService'),
+    );
+    expect(exact.matches.map((FileSearchMatch item) => item.name), <String>[
+      'UserService.dart',
+    ]);
+
+    final FileSearchResult wrongCase = await FileSearchService.search(
+      FileSearchRequest(root: sandbox.path, query: 'Userservice'),
+    );
+    expect(wrongCase.matches, isEmpty);
+
+    final FileSearchResult insensitive = await FileSearchService.search(
+      FileSearchRequest(root: sandbox.path, query: 'userservice'),
+    );
+    expect(insensitive.matches, hasLength(1));
   });
 }

@@ -1,9 +1,11 @@
 import 'crypto_tools.dart';
 import 'code_statistics_service.dart';
+import 'code_structure_search_service.dart';
 import 'encoding_tools.dart';
 import 'file_tools.dart';
 import 'format_tools.dart';
 import 'network_tools.dart';
+import 'micro_benchmark_service.dart';
 import 'time_tools.dart';
 import 'tool_result.dart';
 
@@ -305,14 +307,15 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'json_query',
-    name: 'JSON 路径查询',
+    name: '结构化数据查询',
     group: ToolGroups.format,
-    description: '用安全的点路径和数组下标提取 JSON，例如 .users[0].name 或 .items[*].id。',
-    paramLabel: '查询路径',
-    aiUseWhen: '需要从 JSON 响应、配置或日志中精确提取字段时，优先于读取整段文本。',
-    aiAvoidWhen: '需要执行任意 jq 表达式、修改源文件或处理非 JSON 数据时不要使用。',
-    aiExamples: <String>['从 API 响应提取 .data.items[*].id'],
-    run: (String input, String params) => FormatTools.jsonQuery(input, params),
+    description: '安全查询 JSON/YAML/TOML/XML，支持点路径、数组下标和通配，例如 auto|.items[*].id。',
+    paramLabel: '格式|查询路径，如 yaml|.server.port',
+    aiUseWhen: '需要从 API 响应、配置或日志中精确提取字段时，优先于读取整段文本。',
+    aiAvoidWhen: '需要执行任意 jq/yq 表达式、修改源文件或输入不是结构化数据时不要使用。',
+    aiExamples: <String>['从 API 响应提取 auto|.data.items[*].id'],
+    run: (String input, String params) =>
+        FormatTools.structuredQuery(input, params),
   ),
   ToolSpec(
     id: 'url_parse',
@@ -373,6 +376,30 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     aiExamples: <String>['统计当前工作区主要语言和代码行数'],
     runAsync: (String input, String params) =>
         CodeStatisticsService.analyze(input, extensions: params),
+  ),
+  ToolSpec(
+    id: 'code_structure_search',
+    name: '代码结构搜索',
+    group: ToolGroups.file,
+    description: '后台按声明结构查找类、类型和函数，返回文件、行号与声明；不修改源码。',
+    paramLabel: '类型|符号，如 class|UserService',
+    aiUseWhen: '需要定位类、函数或类型定义时，优先于读取整个仓库或普通全文搜索。',
+    aiAvoidWhen: '需要完整编译器语义、引用关系、宏展开或自动改写时不要使用。',
+    aiExamples: <String>['在工作区定位 class|HarnessToolBridge'],
+    runAsync: (String input, String params) =>
+        CodeStructureSearchService.search(input, params),
+  ),
+  ToolSpec(
+    id: 'safe_benchmark',
+    name: '安全性能基准',
+    group: ToolGroups.calculate,
+    description: '对内置 SHA-256、JSON 解析或 Base64 做预热和多轮统计，不执行任意命令。',
+    paramLabel: '操作|次数，如 json_parse|50',
+    aiUseWhen: '需要在当前机器比较内置数据处理操作的相对耗时时使用。',
+    aiAvoidWhen: '需要运行 shell、外部程序、清缓存或得出跨机器绝对性能结论时不要使用。',
+    aiExamples: <String>['对这段 JSON 执行 json_parse|50'],
+    runAsync: (String input, String params) =>
+        MicroBenchmarkService.run(input, params),
   ),
   ToolSpec(
     id: 'batch_rename',

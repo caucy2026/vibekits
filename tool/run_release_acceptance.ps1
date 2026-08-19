@@ -50,6 +50,11 @@ $commands.Add([pscustomobject]@{
   executable = $flutter
   arguments = @('test', 'test\format_tools_test.dart', 'test\code_statistics_service_test.dart', 'test\dev_tools_widget_test.dart')
 })
+$commands.Add([pscustomobject]@{
+  name = 'open source capability closure'
+  executable = $flutter
+  arguments = @('test', 'test\format_tools_test.dart', 'test\code_structure_search_service_test.dart', 'test\file_search_service_test.dart', 'test\micro_benchmark_service_test.dart')
+})
 if ($Tier -eq 'release') {
   $commands.Add([pscustomobject]@{
     name = 'Flutter analyze'

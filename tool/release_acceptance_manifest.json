@@ -3,6 +3,13 @@
   "policy": "A feature is releasable only when its user workflow, automated coverage and any required real-environment evidence are all named here.",
   "workflows": [
     {
+      "id": "structured-query-code-search-benchmark",
+      "name": "多格式结构化查询、代码声明搜索、ignore 搜索与安全性能基准",
+      "risk": "read-only",
+      "tests": ["test/format_tools_test.dart", "test/code_structure_search_service_test.dart", "test/file_search_service_test.dart", "test/micro_benchmark_service_test.dart", "test/harness_tool_bridge_test.dart"],
+      "evidence": ["docs/acceptance/V1_9_0_DEV39_OPEN_SOURCE_CAPABILITY_CLOSURE_2026-08-20.md"]
+    },
+    {
       "id": "capability-auto-discovery",
       "name": "ToolSpec 单一注册、模型选择描述、Harness 自动发现和模块审计",
       "risk": "platform",

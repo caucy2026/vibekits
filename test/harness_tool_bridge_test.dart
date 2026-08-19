@@ -28,6 +28,16 @@ void main() {
     expect(jsonQuery['description'], contains('本地优先'));
     expect(jsonQuery['description'], contains('适合：'));
     expect(
+      tools.any(
+        (dynamic tool) => tool['id'] == 'vibekits.code_structure_search',
+      ),
+      isTrue,
+    );
+    expect(
+      tools.any((dynamic tool) => tool['id'] == 'vibekits.safe_benchmark'),
+      isTrue,
+    );
+    expect(
       tools.any((dynamic tool) => tool['id'] == 'vibekits.database_manager'),
       isFalse,
     );
@@ -126,6 +136,46 @@ void main() {
 
     expect(result.ok, isTrue);
     expect(result.data?['output'], '7');
+    expect(approvals, 0);
+  });
+
+  test('Harness 自动调用代码结构搜索和安全性能基准', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits_harness_structure_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await File('${root.path}${Platform.pathSeparator}agent.dart')
+        .writeAsString('class ToolAgent {}\n');
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    int approvals = 0;
+
+    final HarnessToolCallResult structure = await bridge.invoke(
+      toolId: 'vibekits.code_structure_search',
+      arguments: <String, Object?>{
+        'input': root.path,
+        'params': 'class|ToolAgent',
+      },
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+    final HarnessToolCallResult benchmark = await bridge.invoke(
+      toolId: 'vibekits.safe_benchmark',
+      arguments: <String, Object?>{
+        'input': '{"ok":true}',
+        'params': 'json_parse|5',
+      },
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+
+    expect(structure.ok, isTrue);
+    expect(structure.data?['output'], contains('ToolAgent'));
+    expect(benchmark.ok, isTrue);
+    expect(benchmark.data?['output'], contains('"iterations": 5'));
     expect(approvals, 0);
   });
 

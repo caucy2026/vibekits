@@ -66,5 +66,29 @@ void main() {
     test('不存在字段明确失败', () {
       expect(FormatTools.jsonQuery('{"a":1}', '.b'), isA<ToolFailure>());
     });
+
+    test('自动查询 YAML 嵌套列表', () {
+      final ToolResult result = FormatTools.structuredQuery(
+        'server:\n  ports:\n    - 8080\n    - 8443\n',
+        'yaml|.server.ports[1]',
+      );
+      expect((result as ToolSuccess).output, '8443');
+    });
+
+    test('自动查询 TOML section', () {
+      final ToolResult result = FormatTools.structuredQuery(
+        '[database]\nhost = "localhost"\nport = 5432\n',
+        'toml|.database.port',
+      );
+      expect((result as ToolSuccess).output, '5432');
+    });
+
+    test('自动查询 XML 重复节点和属性', () {
+      final ToolResult result = FormatTools.structuredQuery(
+        '<root><item id="a">one</item><item id="b">two</item></root>',
+        'xml|.item[1].@id',
+      );
+      expect((result as ToolSuccess).output, '"b"');
+    });
   });
 }

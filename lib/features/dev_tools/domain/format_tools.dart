@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'structured_data_parser.dart';
 import 'tool_result.dart';
 
 /// 格式处理工具，全部离线可用。
@@ -35,9 +36,21 @@ abstract final class FormatTools {
 
   /// 安全的 JSON 点路径查询。只读取，不支持表达式执行或写入。
   static ToolResult jsonQuery(String input, String query) {
+    return structuredQuery(input, query);
+  }
+
+  /// 查询 JSON/YAML/TOML/XML。参数可为 `.path` 或 `format|.path`。
+  static ToolResult structuredQuery(String input, String query) {
     try {
-      final Object? root = jsonDecode(input);
-      final List<Object> tokens = _jsonPathTokens(query);
+      String format = 'auto';
+      String path = query.trim();
+      final int separator = path.indexOf('|');
+      if (separator >= 0) {
+        format = path.substring(0, separator).trim();
+        path = path.substring(separator + 1).trim();
+      }
+      final Object? root = StructuredDataParser.parse(input, format);
+      final List<Object> tokens = _jsonPathTokens(path);
       List<Object?> values = <Object?>[root];
       for (final Object token in tokens) {
         final List<Object?> next = <Object?>[];

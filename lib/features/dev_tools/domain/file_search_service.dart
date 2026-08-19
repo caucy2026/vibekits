@@ -18,6 +18,8 @@ class FileSearchRequest {
     this.mode = FileSearchMode.name,
     this.recursive = true,
     this.includeHidden = false,
+    this.respectGitIgnore = true,
+    this.smartCase = true,
     this.extensions = const <String>{},
     this.minimumBytes = 0,
     this.modifiedAfter,
@@ -30,6 +32,8 @@ class FileSearchRequest {
   final FileSearchMode mode;
   final bool recursive;
   final bool includeHidden;
+  final bool respectGitIgnore;
+  final bool smartCase;
   final Set<String> extensions;
   final int minimumBytes;
   final DateTime? modifiedAfter;
@@ -153,7 +157,13 @@ abstract final class FileSearchService {
       throw const FileSystemException('搜索文件夹不存在或不可访问');
     }
 
-    final String needle = request.query.trim().toLowerCase();
+    final String rawNeedle = request.query.trim();
+    final bool caseSensitive =
+        request.smartCase && rawNeedle.toLowerCase() != rawNeedle;
+    final String needle = caseSensitive ? rawNeedle : rawNeedle.toLowerCase();
+    final _GitIgnoreMatcher ignore = request.respectGitIgnore
+        ? await _GitIgnoreMatcher.load(rootPath)
+        : const _GitIgnoreMatcher(<_IgnoreRule>[]);
     final List<FileSearchMatch> matches = <FileSearchMatch>[];
     final List<Directory> pending = <Directory>[Directory(rootPath)];
     int visitedFiles = 0;
@@ -172,6 +182,13 @@ abstract final class FileSearchService {
             entity.path,
             followLinks: false,
           );
+          final String relative = _relativePath(rootPath, entity.path);
+          if (ignore.ignores(
+            relative,
+            directory: type == FileSystemEntityType.directory,
+          )) {
+            continue;
+          }
           if (type == FileSystemEntityType.directory) {
             if (request.recursive &&
                 (request.includeHidden || !_isHidden(entity.path)) &&
@@ -204,7 +221,10 @@ abstract final class FileSearchService {
             FileSearchMatch? match;
             if (request.mode == FileSearchMode.name) {
               final String name = _basename(entity.path);
-              if (name.toLowerCase().contains(needle)) {
+              final String comparable = caseSensitive
+                  ? name
+                  : name.toLowerCase();
+              if (comparable.contains(needle)) {
                 match = FileSearchMatch(
                   path: entity.path,
                   name: name,
@@ -213,7 +233,13 @@ abstract final class FileSearchService {
                 );
               }
             } else if (stat.size <= request.maxContentFileBytes) {
-              match = await _searchContent(file, stat, needle, token);
+              match = await _searchContent(
+                file,
+                stat,
+                needle,
+                caseSensitive,
+                token,
+              );
             } else {
               skippedFiles++;
             }
@@ -262,12 +288,15 @@ abstract final class FileSearchService {
     File file,
     FileStat stat,
     String needle,
+    bool caseSensitive,
     FileSearchCancellation token,
   ) async {
     final List<int> bytes = await file.readAsBytes();
     if (token.isCancelled || _looksBinary(bytes)) return null;
     final String text = utf8.decode(bytes, allowMalformed: true);
-    final int offset = text.toLowerCase().indexOf(needle);
+    final int offset = (caseSensitive ? text : text.toLowerCase()).indexOf(
+      needle,
+    );
     if (offset < 0) return null;
     final int lineStart = offset == 0
         ? 0
@@ -316,4 +345,93 @@ abstract final class FileSearchService {
       .split('/')
       .where((String part) => part.isNotEmpty)
       .last;
+
+  static String _relativePath(String root, String path) {
+    final String normalizedRoot = Directory(root).absolute.path
+        .replaceAll('\\', '/');
+    final String normalizedPath = File(path).absolute.path
+        .replaceAll('\\', '/');
+    if (normalizedPath.toLowerCase().startsWith(normalizedRoot.toLowerCase())) {
+      return normalizedPath
+          .substring(normalizedRoot.length)
+          .replaceFirst(RegExp(r'^/+'), '');
+    }
+    return normalizedPath;
+  }
+}
+
+class _GitIgnoreMatcher {
+  const _GitIgnoreMatcher(this.rules);
+
+  final List<_IgnoreRule> rules;
+
+  static Future<_GitIgnoreMatcher> load(String root) async {
+    final File file = File(
+      '${Directory(root).absolute.path}${Platform.pathSeparator}.gitignore',
+    );
+    if (!await file.exists()) return const _GitIgnoreMatcher(<_IgnoreRule>[]);
+    try {
+      final List<_IgnoreRule> rules = <_IgnoreRule>[];
+      for (String line in await file.readAsLines()) {
+        line = line.trim();
+        if (line.isEmpty || line.startsWith('#')) continue;
+        bool negated = false;
+        if (line.startsWith('!')) {
+          negated = true;
+          line = line.substring(1);
+        }
+        if (line.isEmpty) continue;
+        rules.add(_IgnoreRule.fromPattern(line, negated));
+        if (rules.length >= 2000) break;
+      }
+      return _GitIgnoreMatcher(List<_IgnoreRule>.unmodifiable(rules));
+    } on Object {
+      return const _GitIgnoreMatcher(<_IgnoreRule>[]);
+    }
+  }
+
+  bool ignores(String relative, {required bool directory}) {
+    final String path = relative.replaceAll('\\', '/');
+    bool ignored = false;
+    for (final _IgnoreRule rule in rules) {
+      if (rule.matches(path, directory: directory)) ignored = !rule.negated;
+    }
+    return ignored;
+  }
+}
+
+class _IgnoreRule {
+  const _IgnoreRule(this.expression, this.negated, this.directoryOnly);
+
+  factory _IgnoreRule.fromPattern(String pattern, bool negated) {
+    bool directoryOnly = pattern.endsWith('/');
+    String value = pattern.replaceFirst(RegExp(r'^/+'), '');
+    if (directoryOnly) value = value.substring(0, value.length - 1);
+    final bool anyDepth = !value.contains('/');
+    final StringBuffer regex = StringBuffer(anyDepth ? r'(^|.*/)' : '^');
+    for (int index = 0; index < value.length; index++) {
+      final String char = value[index];
+      if (char == '*') {
+        if (index + 1 < value.length && value[index + 1] == '*') {
+          regex.write('.*');
+          index++;
+        } else {
+          regex.write('[^/]*');
+        }
+      } else if (char == '?') {
+        regex.write('[^/]');
+      } else {
+        regex.write(RegExp.escape(char));
+      }
+    }
+    regex.write(directoryOnly ? r'(/.*)?$' : r'$');
+    return _IgnoreRule(RegExp(regex.toString()), negated, directoryOnly);
+  }
+
+  final RegExp expression;
+  final bool negated;
+  final bool directoryOnly;
+
+  bool matches(String path, {required bool directory}) =>
+      (!directoryOnly || directory) && expression.hasMatch(path);
 }

@@ -217,7 +217,10 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
             selected.description,
             style: TextStyle(color: context.vibe.muted),
           ),
-          if (selected.id == 'code_statistics') ...<Widget>[
+          if (<String>{
+            'code_statistics',
+            'code_structure_search',
+          }.contains(selected.id)) ...<Widget>[
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
