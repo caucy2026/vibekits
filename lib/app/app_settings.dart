@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -371,6 +372,8 @@ class AppSettingsController extends ChangeNotifier {
     : _store = store ?? AppSettingsStore();
 
   final AppSettingsStore _store;
+  Timer? _backgroundSaveTimer;
+  Future<void> _saveTail = Future<void>.value();
   AppSettings value = const AppSettings();
 
   Future<void> load() async {
@@ -379,8 +382,51 @@ class AppSettingsController extends ChangeNotifier {
   }
 
   Future<void> update(AppSettings settings) async {
+    _backgroundSaveTimer?.cancel();
     value = settings;
     notifyListeners();
-    await _store.save(settings);
+    await _queueSave(settings);
+  }
+
+  /// Persists high-frequency workspace state without rebuilding the whole app.
+  ///
+  /// Navigation, recent-file and tool-local callbacks already update their own
+  /// widgets. Notifying every root listener here used to rebuild the active
+  /// workspace and race multiple atomic settings writes after a single click.
+  Future<void> updateInBackground(AppSettings settings) {
+    value = settings;
+    _backgroundSaveTimer?.cancel();
+    _backgroundSaveTimer = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(_queueSave(value)),
+    );
+    return Future<void>.value();
+  }
+
+  Future<void> _queueSave(AppSettings settings) {
+    final Completer<void> completed = Completer<void>();
+    _saveTail = _saveTail
+        .then((_) => _store.save(settings))
+        .then(
+          (_) {
+            if (!completed.isCompleted) completed.complete();
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!completed.isCompleted) {
+              completed.completeError(error, stackTrace);
+            }
+          },
+        );
+    return completed.future;
+  }
+
+  @override
+  void dispose() {
+    final Timer? timer = _backgroundSaveTimer;
+    if (timer?.isActive == true) {
+      timer!.cancel();
+      unawaited(_queueSave(value));
+    }
+    super.dispose();
   }
 }

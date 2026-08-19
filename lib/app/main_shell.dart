@@ -188,10 +188,12 @@ class _MainShellState extends State<MainShell> {
       });
     }
     if (widget.settingsController.value.restoreLastTab) {
-      widget.settingsController.update(
-        widget.settingsController.value.copyWith(
-          lastTab: index,
-          lastWorkspaceId: _workspaceIds[index],
+      unawaited(
+        widget.settingsController.updateInBackground(
+          widget.settingsController.value.copyWith(
+            lastTab: index,
+            lastWorkspaceId: _workspaceIds[index],
+          ),
         ),
       );
     }
@@ -402,21 +404,21 @@ class _MainShellState extends State<MainShell> {
                 : null),
         initialLargeModelView: settings.lastLargeModelView,
         onLargeModelViewChanged: (String view) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 lastLargeModelView: view,
               ),
             ),
         initialHarnessWorkspace: settings.deepSeekHarnessWorkspace,
         onHarnessWorkspaceChanged: (String workspace) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 deepSeekHarnessWorkspace: workspace,
               ),
             ),
         initialHarnessDebugDirectory: settings.deepSeekHarnessDebugDirectory,
         onHarnessDebugDirectoryChanged: (String directory) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 deepSeekHarnessDebugDirectory: directory,
               ),
@@ -446,20 +448,20 @@ class _MainShellState extends State<MainShell> {
         initialTotalReleasedBytes: settings.cleanupTotalReleasedBytes,
         initialCompletedRuns: settings.cleanupCompletedRuns,
         onWhitelistChanged: (List<String> whitelist) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 cleanupWhitelist: whitelist,
               ),
             ),
         onTargetIdsChanged: (List<String> targetIds, int catalogVersion) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 cleanupScanTargets: targetIds,
                 cleanupTargetCatalogVersion: catalogVersion,
               ),
             ),
         onCleanupStatsChanged: (int totalReleasedBytes, int completedRuns) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 cleanupTotalReleasedBytes: totalReleasedBytes,
                 cleanupCompletedRuns: completedRuns,
@@ -480,7 +482,7 @@ class _MainShellState extends State<MainShell> {
         initialMode: _documentDropPath == null ? null : _documentDropMode,
         initialRecentPaths: settings.recentDocumentPaths,
         onRecentPathsChanged: (List<String> paths) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 recentDocumentPaths: paths,
               ),
@@ -496,21 +498,21 @@ class _MainShellState extends State<MainShell> {
                 : null),
         initialRemoteDatabaseProfiles: settings.remoteDatabaseProfiles,
         onRemoteDatabaseProfilesChanged: (List<String> profiles) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 remoteDatabaseProfiles: profiles,
               ),
             ),
         initialRemoteSessionProfiles: settings.remoteSessionProfiles,
         onRemoteSessionProfilesChanged: (List<String> profiles) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 remoteSessionProfiles: profiles,
               ),
             ),
         initialSerialPortSettings: settings.serialPortSettings,
         onSerialPortSettingsChanged: (String serialSettings) =>
-            widget.settingsController.update(
+            widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 serialPortSettings: serialSettings,
               ),
@@ -667,6 +669,7 @@ class _MainShellState extends State<MainShell> {
             const SizedBox(width: 4),
           ],
           IconButton(
+            key: const Key('app-settings-button'),
             tooltip: '设置 (Ctrl+,)',
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_outlined),
@@ -704,6 +707,7 @@ class _MainShellState extends State<MainShell> {
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 child: InkWell(
+                  key: ValueKey<String>('compact-nav-${_tabTitles[index]}'),
                   onTap: () => _selectTab(index),
                   borderRadius: BorderRadius.circular(8),
                   child: Row(

@@ -104,6 +104,7 @@ class DevToolsTab extends StatefulWidget {
 class _DevToolsTabState extends State<DevToolsTab> {
   String _query = '';
   ToolSpec _selected = devToolRegistry.first;
+  late final PageController _toolPageController;
   String? _utilityInitialToolId;
   List<String> _hashInitialPaths = const <String>[];
   int _hashRequestSerial = 0;
@@ -120,6 +121,15 @@ class _DevToolsTabState extends State<DevToolsTab> {
         (ToolSpec tool) => tool.id == 'remote_workspace',
       );
     }
+    _toolPageController = PageController(
+      initialPage: devToolRegistry.indexOf(_selected),
+    );
+  }
+
+  @override
+  void dispose() {
+    _toolPageController.dispose();
+    super.dispose();
   }
 
   @override
@@ -133,6 +143,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
           (ToolSpec tool) => tool.id == 'remote_workspace',
         );
       });
+      _showSelectedToolPage();
     }
   }
 
@@ -189,6 +200,23 @@ class _DevToolsTabState extends State<DevToolsTab> {
             ?.id;
       }
     });
+    _showSelectedToolPage();
+  }
+
+  void _showSelectedToolPage() {
+    final int index = devToolRegistry.indexWhere(
+      (ToolSpec tool) => tool.id == _selected.id,
+    );
+    if (index < 0) return;
+    if (_toolPageController.hasClients) {
+      _toolPageController.jumpToPage(index);
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _toolPageController.hasClients) {
+        _toolPageController.jumpToPage(index);
+      }
+    });
   }
 
   void _openHashFor(String path) {
@@ -199,6 +227,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
         (ToolSpec tool) => tool.id == 'file_hash',
       );
     });
+    _showSelectedToolPage();
   }
 
   @override
@@ -247,6 +276,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
                   ),
                   for (final ToolSpec tool in entry.value)
                     ListTile(
+                      key: ValueKey<String>('dev-tool-nav-${tool.id}'),
                       dense: true,
                       selected: tool.id == _selected.id,
                       title: Text(
@@ -279,7 +309,21 @@ class _DevToolsTabState extends State<DevToolsTab> {
   }
 
   Widget _buildWorkArea() {
-    final ToolSpec tool = _selected;
+    return PageView.builder(
+      key: const Key('dev-tool-pages'),
+      controller: _toolPageController,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: devToolRegistry.length,
+      itemBuilder: (BuildContext context, int index) => _KeepAliveToolWorkspace(
+        child: KeyedSubtree(
+          key: PageStorageKey<String>('dev-tool-${devToolRegistry[index].id}'),
+          child: _buildToolArea(devToolRegistry[index]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolArea(ToolSpec tool) {
     if (tool.id == 'programmer_calculator') {
       return const ProgrammerCalculatorWorkspace();
     }
@@ -367,5 +411,27 @@ class _DevToolsTabState extends State<DevToolsTab> {
       );
     }
     return const Center(child: Text('该工具暂不可用'));
+  }
+}
+
+class _KeepAliveToolWorkspace extends StatefulWidget {
+  const _KeepAliveToolWorkspace({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAliveToolWorkspace> createState() =>
+      _KeepAliveToolWorkspaceState();
+}
+
+class _KeepAliveToolWorkspaceState extends State<_KeepAliveToolWorkspace>
+    with AutomaticKeepAliveClientMixin<_KeepAliveToolWorkspace> {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

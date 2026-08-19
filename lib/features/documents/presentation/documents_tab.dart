@@ -113,6 +113,8 @@ class _DocumentsTabState extends State<DocumentsTab> {
   int _hexWindowOffset = 0;
   int _hexFileSize = 0;
   bool _hexBusy = false;
+  bool _loadingDocument = false;
+  int _loadGeneration = 0;
 
   bool get _isWindowedHex =>
       _mode == DocViewMode.hex && _hexFileSize > _bytes!.length;
@@ -201,6 +203,13 @@ class _DocumentsTabState extends State<DocumentsTab> {
       final bool discard = await _confirmDiscardEdits();
       if (!discard) return;
     }
+    final int generation = ++_loadGeneration;
+    setState(() {
+      _loadingDocument = true;
+      _error = '';
+    });
+    // Let the loading state paint before local parsing starts.
+    await Future<void>.delayed(Duration.zero);
     try {
       final File file = File(path);
       final Uint8List? suppliedBytes = widget.bytesReader == null
@@ -238,10 +247,14 @@ class _DocumentsTabState extends State<DocumentsTab> {
       }
 
       final Uint8List bytes = suppliedBytes ?? await file.readAsBytes();
-      final DateTime? modified = file.existsSync()
-          ? file.lastModifiedSync()
-          : null;
+      // A supplied reader is also used by tests, drag buffers and future
+      // virtual-file providers. Do not add a second filesystem round trip for
+      // content that is already in memory (the path may not exist locally).
+      final DateTime modified = suppliedBytes == null
+          ? (await file.stat()).modified
+          : DateTime.fromMillisecondsSinceEpoch(0);
 
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _path = path;
         _name = file.uri.pathSegments.last;
@@ -326,10 +339,15 @@ class _DocumentsTabState extends State<DocumentsTab> {
         }
       });
     } catch (e) {
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _mode = DocViewMode.empty;
         _error = '打开失败：$e';
       });
+    } finally {
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loadingDocument = false);
+      }
     }
   }
 
@@ -338,6 +356,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
       path,
       offset: 0,
     );
+    final DateTime modified = await file.lastModified();
     if (!mounted) return;
     setState(() {
       _path = path;
@@ -350,7 +369,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
       _editing = false;
       _dirty = false;
       _loadedSize = window.fileSize;
-      _loadedModified = file.lastModifiedSync();
+      _loadedModified = modified;
       _hexWindowOffset = window.offset;
       _hexFileSize = window.fileSize;
       _rememberRecent(path);
@@ -974,6 +993,11 @@ class _DocumentsTabState extends State<DocumentsTab> {
     return Column(
       children: <Widget>[
         _buildToolbar(),
+        if (_loadingDocument)
+          const LinearProgressIndicator(
+            key: Key('document-loading-indicator'),
+            minHeight: 2,
+          ),
         if (_searchOpen) _buildSearchBar(),
         if (_error.isNotEmpty && _mode != DocViewMode.empty)
           Container(

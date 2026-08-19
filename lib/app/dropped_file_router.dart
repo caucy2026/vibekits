@@ -41,7 +41,7 @@ abstract final class DroppedFileRouter {
         detail: '路径为空',
       );
     }
-    final FileSystemEntityType type = FileSystemEntity.typeSync(
+    final FileSystemEntityType type = await FileSystemEntity.type(
       path,
       followLinks: false,
     );
@@ -64,11 +64,27 @@ abstract final class DroppedFileRouter {
 
     try {
       final File file = File(path);
+      final VibekitsFileKind extensionKind = SupportedFileTypes.kindForPath(
+        path,
+      );
+      if (extensionKind == VibekitsFileKind.model) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.model,
+          detail: '已识别为本地模型，交给模型仓库校验并导入',
+        );
+      }
       final int size = await file.length();
+      // Known documents need only enough bytes to reject a misleading suffix
+      // (ZIP/image/SQLite magic). Unknown archives still retain the larger
+      // probe required by TAR/ISO signatures at fixed offsets.
+      final int probeBytes = extensionKind == VibekitsFileKind.document
+          ? 512
+          : 0x9000;
       final RandomAccessFile reader = await file.open();
       late final Uint8List header;
       try {
-        header = await reader.read(size.clamp(0, 0x9000));
+        header = await reader.read(size.clamp(0, probeBytes));
       } finally {
         await reader.close();
       }
@@ -98,9 +114,6 @@ abstract final class DroppedFileRouter {
         );
       }
 
-      final VibekitsFileKind extensionKind = SupportedFileTypes.kindForPath(
-        path,
-      );
       if (extensionKind == VibekitsFileKind.archive) {
         return DroppedFileRoute(
           path: path,
