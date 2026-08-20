@@ -122,7 +122,14 @@ class _MainShellState extends State<MainShell> {
         _selectedIndex == 0) {
       _selectedIndex = 4;
     }
-    _loadedTabs = <int>{_selectedIndex};
+    // First frame contains only the navigation shell. Heavy workspaces are
+    // mounted on the next frame so a click always produces visible UI before
+    // disk discovery, WebView/DSH startup or model inspection begins.
+    _loadedTabs = <int>{};
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _loadedTabs.add(_selectedIndex));
+    });
     widget.settingsController.addListener(_applySettings);
     if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
     _dropSubscription = (widget.droppedFiles ?? WindowsFileDrop.instance.files)
@@ -961,9 +968,16 @@ class _DeferredWorkspace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => const Center(
-    child: SizedBox.square(
-      dimension: 22,
-      child: CircularProgressIndicator(strokeWidth: 2),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox.square(
+          dimension: 22,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        SizedBox(height: 12),
+        Text('界面已就绪，正在加载工作区…'),
+      ],
     ),
   );
 }

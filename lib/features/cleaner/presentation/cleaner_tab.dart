@@ -1212,7 +1212,7 @@ class _CleanerTabState extends State<CleanerTab> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.search, size: 18),
-                label: Text(_scanning ? '扫描中…' : '开始扫描'),
+                label: Text(_scanning ? '扫描中…' : '扫描可清理项'),
               ),
               if (_scanning || _cleaning) ...<Widget>[
                 const SizedBox(width: 6),
@@ -1238,7 +1238,7 @@ class _CleanerTabState extends State<CleanerTab> {
               const SizedBox(width: 6),
               if (veryCompact)
                 IconButton(
-                  tooltip: '磁盘空间分析',
+                  tooltip: '分析全部磁盘占用（只读）',
                   onPressed: _scanning || _cleaning || _analyzingDrive
                       ? null
                       : _analyzeSystemDrive,
@@ -1250,7 +1250,7 @@ class _CleanerTabState extends State<CleanerTab> {
                       ? null
                       : _analyzeSystemDrive,
                   icon: const Icon(Icons.donut_large, size: 18),
-                  label: Text(_analyzingDrive ? '分析中…' : '分析所选磁盘'),
+                  label: Text(_analyzingDrive ? '分析中…' : '分析全部占用'),
                 ),
               const SizedBox(width: 6),
               if (veryCompact)
@@ -2348,7 +2348,7 @@ class _CleanerTabState extends State<CleanerTab> {
     if (_candidates.isEmpty) {
       return Center(
         child: Text(
-          '点击“开始扫描”查找可清理的临时文件\n扫描不会删除任何内容',
+          '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
           textAlign: TextAlign.center,
           style: TextStyle(color: context.vibe.muted),
         ),

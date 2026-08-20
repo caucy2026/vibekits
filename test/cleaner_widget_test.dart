@@ -87,7 +87,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始扫描'));
+    await tester.tap(find.text('扫描可清理项'));
     await tester.pump();
     progressCallback(
       const CleanupScanProgress(
@@ -162,7 +162,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始扫描'));
+    await tester.tap(find.text('扫描可清理项'));
     await tester.pumpAndSettle();
 
     expect(find.text(protected), findsNothing);
@@ -232,7 +232,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('开始扫描'));
+    await tester.tap(find.text('扫描可清理项'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('智能选择'));
     await tester.pumpAndSettle();
@@ -275,7 +275,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始扫描'));
+    await tester.tap(find.text('扫描可清理项'));
     await tester.pumpAndSettle();
     for (final String view in <String>[
       'recommended',
@@ -393,7 +393,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('开始扫描'));
+    await tester.tap(find.text('扫描可清理项'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('清理 1 项'));
     await tester.pumpAndSettle();
@@ -473,7 +473,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('磁盘空间分析'), findsOneWidget);
@@ -512,7 +512,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
     await tester.pump();
     report(
       const SystemDriveAnalysisProgress(
@@ -614,7 +614,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('磁盘占用与可清理'));
     await tester.pumpAndSettle();
@@ -719,7 +719,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
     await tester.pumpAndSettle();
     expect(find.text('软件占用与操作'), findsOneWidget);
     expect(find.text('Acme IDE'), findsOneWidget);
@@ -812,7 +812,7 @@ void main() {
     expect(find.textContaining('C:（系统盘）'), findsOneWidget);
     expect(find.textContaining('D: · 本地磁盘'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey<String>('cleaner-volume-D:\\')));
-    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
     await tester.pumpAndSettle();
 
     expect(analyzedRoots, containsAll(<String>['C:\\', 'D:\\']));

@@ -78,7 +78,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   @override
   void initState() {
     super.initState();
-    unawaited(_initialize());
+    // Let the workspace frame paint before credential, port and DSH startup.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_initialize());
+    });
   }
 
   @override

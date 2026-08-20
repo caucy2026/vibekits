@@ -33,20 +33,24 @@ void main() {
       expect(find.text(title), findsWidgets);
     }
 
-    // 默认展示 Harness 智能体工作台。
+    // 首帧先展示完整导航与轻量工作区骨架，再加载 Harness。
+    expect(find.text('界面已就绪，正在加载工作区…'), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsNothing);
+    await tester.pump();
     expect(find.text('Harness 智能体'), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     // 其余页面处于离屏状态。
-    expect(find.text('开始扫描'), findsNothing);
+    expect(find.text('扫描可清理项'), findsNothing);
   });
 
   testWidgets('点击 Tab 切换页面', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
     await tester.tap(find.text('系统清理'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('开始扫描'), findsOneWidget);
+    expect(find.text('扫描可清理项'), findsOneWidget);
     expect(find.text('打开压缩包'), findsNothing);
   });
 
@@ -59,7 +63,8 @@ void main() {
     addTearDown(settings.dispose);
 
     await tester.pumpWidget(VibekitsApp(settingsController: settings));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('文档阅读'), findsWidgets);
     expect(find.text('打开文件'), findsOneWidget);
@@ -75,7 +80,8 @@ void main() {
     addTearDown(settings.dispose);
 
     await tester.pumpWidget(VibekitsApp(settingsController: settings));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Harness（智能体）'), findsWidgets);
     expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
@@ -89,7 +95,8 @@ void main() {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(key);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
     }
 
     await pressCtrlWithKey(LogicalKeyboardKey.digit4);
@@ -113,7 +120,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.comma);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('主题'), findsOneWidget);
@@ -160,7 +167,8 @@ void main() {
       '解压缩',
     ]) {
       await tester.tap(find.text(title).first);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(tester.takeException(), isNull, reason: '$title 在最小窗口应可操作');
     }
   });

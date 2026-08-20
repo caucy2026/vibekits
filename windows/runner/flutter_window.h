@@ -39,6 +39,7 @@ class FlutterWindow : public Win32Window {
   // consuming CPU in the background.
   HANDLE app_process_job_ = nullptr;
   std::map<DWORD, HANDLE> child_process_jobs_;
+  bool startup_surface_visible_ = true;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

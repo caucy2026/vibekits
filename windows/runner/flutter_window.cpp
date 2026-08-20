@@ -39,6 +39,12 @@ bool FlutterWindow::OnCreate() {
     }
   }
 
+  // Give immediate click feedback while the Flutter engine and plugins are
+  // still starting. The first Flutter frame replaces this lightweight native
+  // surface; no disk, network or Harness work is allowed to block it.
+  Show();
+  ::UpdateWindow(GetHandle());
+
   RECT frame = GetClientArea();
 
   // The size here must match the window dimensions to avoid unnecessary surface
@@ -148,6 +154,7 @@ bool FlutterWindow::OnCreate() {
       });
   DragAcceptFiles(GetHandle(), TRUE);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  startup_surface_visible_ = false;
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -195,6 +202,37 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_ERASEBKGND:
+      if (startup_surface_visible_) return 1;
+      break;
+    case WM_PAINT:
+      if (startup_surface_visible_) {
+        PAINTSTRUCT paint{};
+        HDC device = ::BeginPaint(hwnd, &paint);
+        RECT client{};
+        ::GetClientRect(hwnd, &client);
+        HBRUSH background = ::CreateSolidBrush(RGB(248, 248, 246));
+        ::FillRect(device, &client, background);
+        ::DeleteObject(background);
+        ::SetBkMode(device, TRANSPARENT);
+        ::SetTextColor(device, RGB(35, 35, 33));
+        HFONT font = ::CreateFontW(
+            -28, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        HGDIOBJ previous_font = ::SelectObject(device, font);
+        RECT text_area = client;
+        text_area.left += 48;
+        ::DrawTextW(device,
+                    L"Vibekits  \u6b63\u5728\u542f\u52a8\u2026", -1,
+                    &text_area,
+                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        ::SelectObject(device, previous_font);
+        ::DeleteObject(font);
+        ::EndPaint(hwnd, &paint);
+        return 0;
+      }
+      break;
     case WM_COPYDATA: {
       const COPYDATASTRUCT* data =
           reinterpret_cast<const COPYDATASTRUCT*>(lparam);
