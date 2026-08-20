@@ -844,4 +844,19 @@ void main() {
     expect(candidate.highRisk, isTrue);
     expect(candidate.defaultSelected, isFalse);
   });
+
+  test('回收站与系统盘日志清单共用盘符但不会被去重', () {
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
+      environment: const <String, String>{'SYSTEMDRIVE': r'C:'},
+    );
+    final CleanupScanTarget recycle = targets.singleWhere(
+      (CleanupScanTarget item) => item.id == 'system-recycle-bin',
+    );
+    final CleanupScanTarget logs = targets.singleWhere(
+      (CleanupScanTarget item) => item.id == 'system-drive-log-inventory',
+    );
+    expect(recycle.strategy, CleanupTargetStrategy.recycleBin);
+    expect(logs.strategy, CleanupTargetStrategy.directoryContents);
+    expect(recycle.path, logs.path);
+  });
 }

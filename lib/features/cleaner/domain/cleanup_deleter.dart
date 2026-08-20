@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart';
 import 'cleanup_scanner.dart';
 import 'cleanup_task.dart';
 import 'cleanup_file_identity.dart';
+import 'recycle_bin_service.dart';
 
 enum CleanupItemStatus { succeeded, skipped, failed }
 
@@ -220,11 +221,49 @@ abstract final class CleanupDeleter {
   }) async {
     final CleanupCancellationToken token =
         cancellationToken ?? CleanupCancellationToken();
+    if (recycle == null && Platform.isWindows && candidates.length > 1) {
+      return _deleteWindowsBatched(
+        candidates,
+        cancellationToken: token,
+        onProgress: onProgress,
+        permanentFallback: permanentFallback,
+      );
+    }
     final List<CleanupItemResult> items = <CleanupItemResult>[];
     int releasedBytes = 0;
 
     for (final CleanupCandidate candidate in candidates) {
       if (token.isCancelled) break;
+      if (candidate.category == CleanupCategory.recycleBin) {
+        final bool emptied = RecycleBinService.empty(candidate.path);
+        final int remaining =
+            RecycleBinService.query(candidate.path)?.bytes ?? 0;
+        if (emptied && remaining == 0) {
+          releasedBytes += candidate.size;
+          items.add(
+            CleanupItemResult(
+              candidate: candidate,
+              status: CleanupItemStatus.succeeded,
+              reason: '已永久清空系统回收站',
+            ),
+          );
+        } else {
+          items.add(
+            CleanupItemResult(
+              candidate: candidate,
+              status: CleanupItemStatus.failed,
+              reason: '系统拒绝清空回收站；可能存在权限或占用问题',
+            ),
+          );
+        }
+        onProgress?.call(
+          CleanupDeleteProgress(
+            completed: items.length,
+            total: candidates.length,
+          ),
+        );
+        continue;
+      }
       final FileSystemEntityType type = FileSystemEntity.typeSync(
         candidate.path,
         followLinks: false,
@@ -315,6 +354,145 @@ abstract final class CleanupDeleter {
     return CleanupDeleteResult(
       items: items,
       cancelled: token.isCancelled,
+      releasedBytes: releasedBytes,
+    );
+  }
+
+  /// Uses one Shell operation for a bounded group instead of opening the
+  /// recycle-bin API once per file. Large developer caches often contain tens
+  /// of thousands of small files; batching keeps cancellation points without
+  /// turning cleanup into a multi-minute UI wait.
+  static Future<CleanupDeleteResult> _deleteWindowsBatched(
+    List<CleanupCandidate> candidates, {
+    required CleanupCancellationToken cancellationToken,
+    required void Function(CleanupDeleteProgress progress)? onProgress,
+    required bool permanentFallback,
+  }) async {
+    const int batchSize = 128;
+    final List<CleanupItemResult> items = <CleanupItemResult>[];
+    int releasedBytes = 0;
+    final List<CleanupCandidate> ordered = candidates
+        .where(
+          (CleanupCandidate item) =>
+              item.category != CleanupCategory.recycleBin,
+        )
+        .toList(growable: false);
+    for (
+      int start = 0;
+      start < ordered.length && !cancellationToken.isCancelled;
+      start += batchSize
+    ) {
+      final List<CleanupCandidate> batch = ordered
+          .skip(start)
+          .take(batchSize)
+          .toList(growable: false);
+      final List<CleanupCandidate> ready = <CleanupCandidate>[];
+      for (final CleanupCandidate candidate in batch) {
+        final FileSystemEntityType type = FileSystemEntity.typeSync(
+          candidate.path,
+          followLinks: false,
+        );
+        if (type == FileSystemEntityType.notFound) {
+          items.add(
+            CleanupItemResult(
+              candidate: candidate,
+              status: CleanupItemStatus.skipped,
+              reason: '扫描后已不存在',
+            ),
+          );
+        } else if (!_unchanged(candidate, type)) {
+          items.add(
+            CleanupItemResult(
+              candidate: candidate,
+              status: CleanupItemStatus.skipped,
+              reason: '扫描后文件已变化',
+            ),
+          );
+        } else {
+          ready.add(candidate);
+        }
+      }
+      if (ready.isNotEmpty) {
+        final _RecycleResult shell = _sendToRecycleBin(
+          ready.map((CleanupCandidate item) => item.path).toList(),
+        );
+        for (final CleanupCandidate candidate in ready) {
+          bool removed = await _waitUntilRemoved(candidate.path);
+          String reason = '已批量移入回收站';
+          if (!removed &&
+              permanentFallback &&
+              candidate.allowsPermanentFallback &&
+              deletePermanently(candidate.path)) {
+            removed = await _waitUntilRemoved(candidate.path);
+            reason = '回收站操作失败后，已永久删除可再生成缓存';
+          }
+          if (removed) {
+            releasedBytes += candidate.size;
+            items.add(
+              CleanupItemResult(
+                candidate: candidate,
+                status: CleanupItemStatus.succeeded,
+                reason: reason,
+              ),
+            );
+          } else {
+            items.add(
+              CleanupItemResult(
+                candidate: candidate,
+                status: CleanupItemStatus.failed,
+                reason: shell.aborted
+                    ? '用户或系统中止了回收站操作'
+                    : '批量回收站错误 ${shell.code}；文件可能正被程序占用',
+              ),
+            );
+          }
+        }
+      }
+      onProgress?.call(
+        CleanupDeleteProgress(
+          completed: items.length,
+          total: candidates.length,
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 4));
+    }
+    // This is deliberately a second phase. A recycle candidate can share the
+    // final 128-item chunk with normal files; emptying it inside that chunk
+    // would leave those newly moved files occupying the drive.
+    for (final CleanupCandidate candidate in candidates.where(
+      (CleanupCandidate item) => item.category == CleanupCategory.recycleBin,
+    )) {
+      if (cancellationToken.isCancelled) break;
+      final bool emptied = RecycleBinService.empty(candidate.path);
+      final int remaining = RecycleBinService.query(candidate.path)?.bytes ?? 0;
+      if (emptied && remaining == 0) {
+        releasedBytes += candidate.size;
+        items.add(
+          CleanupItemResult(
+            candidate: candidate,
+            status: CleanupItemStatus.succeeded,
+            reason: '已永久清空系统回收站',
+          ),
+        );
+      } else {
+        items.add(
+          CleanupItemResult(
+            candidate: candidate,
+            status: CleanupItemStatus.failed,
+            reason: '系统拒绝清空回收站；可能存在权限或占用问题',
+          ),
+        );
+      }
+      onProgress?.call(
+        CleanupDeleteProgress(
+          completed: items.length,
+          total: candidates.length,
+        ),
+      );
+    }
+    return CleanupDeleteResult(
+      items: items,
+      cancelled: cancellationToken.isCancelled,
       releasedBytes: releasedBytes,
     );
   }

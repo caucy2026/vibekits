@@ -3,6 +3,7 @@ import 'dart:io';
 import 'cleanup_task.dart';
 import 'cleanup_targets.dart';
 import 'cleanup_file_identity.dart';
+import 'recycle_bin_service.dart';
 
 enum CleanupRiskLevel {
   safe('推荐', false),
@@ -386,6 +387,7 @@ abstract final class CleanupScanner {
             cancellationToken: token,
             onProgress: targetProgress,
           ),
+        CleanupTargetStrategy.recycleBin => _scanRecycleBin(target),
       };
       for (final CleanupCandidate candidate in result.candidates) {
         candidates[_pathKey(candidate.path)] = candidate;
@@ -403,6 +405,34 @@ abstract final class CleanupScanner {
       unreadablePaths: unreadable,
       visitedEntries: visitedOffset,
       candidateBytes: bytesOffset,
+    );
+  }
+
+  static CleanupScanResult _scanRecycleBin(CleanupScanTarget target) {
+    final RecycleBinSnapshot? snapshot = RecycleBinService.query(target.path);
+    if (snapshot == null || snapshot.bytes <= 0 || snapshot.items <= 0) {
+      return const CleanupScanResult(
+        candidates: <CleanupCandidate>[],
+        cancelled: false,
+        unreadablePaths: 0,
+      );
+    }
+    return CleanupScanResult(
+      candidates: <CleanupCandidate>[
+        CleanupCandidate(
+          path: target.path,
+          size: snapshot.bytes,
+          category: CleanupCategory.recycleBin,
+          reason: '${snapshot.items} 个回收站项目',
+          sourceLabel: target.label,
+          riskLevel: CleanupRiskLevel.systemManaged,
+          impactNote: target.safetyNote,
+        ),
+      ],
+      cancelled: false,
+      unreadablePaths: 0,
+      visitedEntries: snapshot.items,
+      candidateBytes: snapshot.bytes,
     );
   }
 

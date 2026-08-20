@@ -9,6 +9,7 @@ enum CleanupTargetStrategy {
   directoryContents,
   downloadSuggestions,
   staleVsCodeExtensions,
+  recycleBin,
 }
 
 class CleanupScanTarget {
@@ -137,6 +138,7 @@ abstract final class CleanupTargetDiscovery {
         category: CleanupCategory.devCache,
         defaultEnabled: true,
         safetyNote: '可由 Gradle 重新生成；首次构建会变慢',
+        maxEntries: 100000,
       );
       for (final (String id, String label, List<String> parts)
           in <(String, String, List<String>)>[
@@ -230,6 +232,7 @@ abstract final class CleanupTargetDiscovery {
         path: _join(local, <String>['npm-cache']),
         category: CleanupCategory.devCache,
         defaultEnabled: true,
+        maxEntries: 100000,
       );
       _addExisting(
         targets,
@@ -238,6 +241,7 @@ abstract final class CleanupTargetDiscovery {
         path: _join(local, <String>['pip', 'Cache']),
         category: CleanupCategory.devCache,
         defaultEnabled: true,
+        maxEntries: 100000,
       );
       _addExisting(
         targets,
@@ -246,6 +250,7 @@ abstract final class CleanupTargetDiscovery {
         path: _join(local, <String>['Pub', 'Cache']),
         category: CleanupCategory.devCache,
         defaultEnabled: true,
+        maxEntries: 100000,
       );
       _addExisting(
         targets,
@@ -297,6 +302,20 @@ abstract final class CleanupTargetDiscovery {
     );
     final String? systemDrive = env['SYSTEMDRIVE'];
     if (systemDrive != null && systemDrive.trim().isNotEmpty) {
+      targets.add(
+        CleanupScanTarget(
+          id: 'system-recycle-bin',
+          label: '系统回收站',
+          path: systemDrive.trim().endsWith(Platform.pathSeparator)
+              ? systemDrive.trim()
+              : '${systemDrive.trim()}${Platform.pathSeparator}',
+          category: CleanupCategory.recycleBin,
+          defaultEnabled: true,
+          strategy: CleanupTargetStrategy.recycleBin,
+          safetyNote: '清空后无法恢复；必须逐项确认，不会自动勾选',
+          riskLevel: CleanupRiskLevel.systemManaged,
+        ),
+      );
       _addWindowsProfileTransientTargets(targets, systemDrive.trim());
       _addExisting(
         targets,
@@ -321,7 +340,13 @@ abstract final class CleanupTargetDiscovery {
       final String? normalized = CleanupWhitelist.normalize(target.path);
       if (normalized != null) {
         final String pathKey = normalized.toLowerCase();
-        final String key = target.ruleCatalogVersion == null
+        // A physical path may intentionally have multiple scanners. For
+        // example C:\ is both the recycle-bin pseudo target and the optional
+        // full-drive log inventory. Only ordinary directory targets are
+        // interchangeable by path.
+        final String key =
+            target.ruleCatalogVersion == null &&
+                target.strategy == CleanupTargetStrategy.directoryContents
             ? pathKey
             : '$pathKey|${target.id}';
         unique[key] = target;

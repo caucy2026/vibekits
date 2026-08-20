@@ -239,7 +239,7 @@ class _CleanerTabState extends State<CleanerTab> {
       String bundledRuleDatabase = '';
       try {
         bundledRuleDatabase = await rootBundle.loadString(
-          'assets/cleaner/windows_rules_v5.json',
+          'assets/cleaner/windows_rules_v6.json',
         );
       } on Object {
         // Compiled rules remain available if the optional database is missing.
