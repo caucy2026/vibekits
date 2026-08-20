@@ -234,7 +234,7 @@ void main() {
     );
     await tester.tap(find.text('扫描可清理项'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('智能选择'));
+    await tester.tap(find.byTooltip('智能选择可清理内容'));
     await tester.pumpAndSettle();
 
     expect(find.text('智能选择清理计划'), findsOneWidget);
@@ -405,6 +405,9 @@ void main() {
     expect(find.text('系统盘总容量'), findsOneWidget);
     expect(find.text('当前可用'), findsOneWidget);
     expect(find.text('当前已用'), findsOneWidget);
+    expect(find.text('10 GiB 验收'), findsOneWidget);
+    expect(find.text('未达标'), findsOneWidget);
+    expect(find.textContaining('还差'), findsWidgets);
     expect(find.text('2.0 KB'), findsOneWidget);
     expect(find.text('3.0 KB'), findsOneWidget);
     expect(persistedTotal, 3072);

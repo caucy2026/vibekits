@@ -129,6 +129,7 @@ class CleanerTab extends StatefulWidget {
 }
 
 class _CleanerTabState extends State<CleanerTab> {
+  static const int _acceptanceTargetBytes = 10 * 1024 * 1024 * 1024;
   List<CleanupCandidate> _candidates = const <CleanupCandidate>[];
   final Set<String> _selected = <String>{};
   late Set<String> _whitelist = CleanupWhitelist.sanitize(
@@ -172,6 +173,12 @@ class _CleanerTabState extends State<CleanerTab> {
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
   final Map<CleanupCategory, int> _visibleItemLimits = <CleanupCategory, int>{};
+
+  bool get _acceptancePassed =>
+      _totalReleasedBytes >= _acceptanceTargetBytes;
+  int get _acceptanceRemainingBytes => _acceptancePassed
+      ? 0
+      : _acceptanceTargetBytes - _totalReleasedBytes;
 
   @override
   void initState() {
@@ -1194,7 +1201,7 @@ class _CleanerTabState extends State<CleanerTab> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
-          final bool veryCompact = constraints.maxWidth < 820;
+          final bool veryCompact = constraints.maxWidth < 1450;
           return Row(
             children: <Widget>[
               ElevatedButton.icon(
@@ -1298,6 +1305,27 @@ class _CleanerTabState extends State<CleanerTab> {
                   ),
               ],
               const Spacer(),
+              Tooltip(
+                message: _acceptancePassed
+                    ? '10 GiB 实际释放目标已经达到'
+                    : '10 GiB 实际释放目标尚未达到，还差 ${_formatSize(_acceptanceRemainingBytes)}',
+                child: Text(
+                  key: const Key('cleaner-10g-acceptance-status'),
+                  _acceptancePassed
+                      ? (veryCompact ? '10G 已达标' : '10 GiB 验收：已达标')
+                      : veryCompact
+                      ? '10G 差 ${_formatSize(_acceptanceRemainingBytes)}'
+                      : '10 GiB 验收：未达标，还差 ${_formatSize(_acceptanceRemainingBytes)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _acceptancePassed
+                        ? context.vibe.success
+                        : VibekitsColors.warning,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
               if (!veryCompact) ...<Widget>[
                 Text(
                   '已选择 ${_formatSize(_selectedSize)}',
@@ -1522,6 +1550,12 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Widget _buildDriveAnalysisProgress(SystemDriveAnalysisProgress progress) {
+    final DiskVolumeInfo? volume = _volumeForRoot(
+      _activeVolumeRoot ?? _systemDiskPath(),
+    );
+    final int physicalUsed = volume == null
+        ? 0
+        : (volume.totalBytes - volume.freeBytes).clamp(0, volume.totalBytes);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
@@ -1535,12 +1569,18 @@ class _CleanerTabState extends State<CleanerTab> {
           Expanded(
             child: Text(
               '空间分析 ${progress.completedRootEntries}/${progress.totalRootEntries} · '
-              '已检查 ${progress.visitedEntries} 项 · ${_formatSize(progress.measuredBytes)} · '
+              '已检查 ${progress.visitedEntries} 项 · '
+              '${volume == null ? '' : '物理已用 ${_formatSize(physicalUsed)} / ${_formatSize(volume.totalBytes)} · '}'
               '${progress.currentPath}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 12),
             ),
+          ),
+          Tooltip(
+            message:
+                '目录遍历会重复遇到 Windows 硬链接，因此遍历字节数可能超过磁盘容量；此处只显示磁盘真实物理已用。',
+            child: const Icon(Icons.info_outline, size: 16),
           ),
           TextButton(
             onPressed: () => _taskToken?.cancel(),
@@ -1621,9 +1661,9 @@ class _CleanerTabState extends State<CleanerTab> {
                         ),
                         Text(
                           analysis.hasLogicalOvercount
-                              ? '目录统计合计 ${_formatSize(analysis.logicalMeasuredBytes)} · '
-                                    '含硬链接重复 ${_formatSize(analysis.logicalOvercountBytes)}，'
-                                    '物理占用以“已用”为准'
+                              ? '物理占用 ${_formatSize(analysis.usedBytes)}（不超过总量） · '
+                                    '检测到目录硬链接重复引用 ${_formatSize(analysis.logicalOvercountBytes)}，'
+                                    '下方目录逻辑量不可相加'
                               : '已归类合计 ${_formatSize(analysis.logicalMeasuredBytes)} · '
                                     '未归类/系统保留 ${_formatSize(analysis.unaccountedBytes)}',
                           maxLines: 1,
@@ -2064,7 +2104,7 @@ class _CleanerTabState extends State<CleanerTab> {
                 ),
                 const Spacer(),
                 Text(
-                  '扫描可继续在后台运行',
+                  '目录逻辑量含硬链接重复，不可相加 · 扫描在后台运行',
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
                 ),
               ],
@@ -2569,6 +2609,13 @@ class _CleanerTabState extends State<CleanerTab> {
                 label: '累计清理',
                 value: _formatSize(_totalReleasedBytes),
                 detail: '$_completedRuns 次',
+              ),
+              _SummaryMetric(
+                label: '10 GiB 验收',
+                value: _acceptancePassed ? '已达标' : '未达标',
+                detail: _acceptancePassed
+                    ? '实际累计释放达到目标'
+                    : '还差 ${_formatSize(_acceptanceRemainingBytes)}',
               ),
               if (disk != null) ...<Widget>[
                 _SummaryMetric(

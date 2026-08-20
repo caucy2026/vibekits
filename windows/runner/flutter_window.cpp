@@ -222,11 +222,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         HGDIOBJ previous_font = ::SelectObject(device, font);
         RECT text_area = client;
-        text_area.left += 48;
         ::DrawTextW(device,
                     L"Vibekits  \u6b63\u5728\u542f\u52a8\u2026", -1,
                     &text_area,
-                    DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         ::SelectObject(device, previous_font);
         ::DeleteObject(font);
         ::EndPaint(hwnd, &paint);
