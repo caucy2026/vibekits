@@ -32,6 +32,7 @@ class SoftwareStorageSummary {
   int get totalBytes => installBytes + dataBytes;
   bool get sizeKnown => totalBytes > 0;
   bool get canCleanCache =>
+      application != null &&
       cacheEntries.any((SystemDriveUsageEntry entry) => entry.canDelete);
   bool get canUninstall => application?.canUninstall == true;
 }

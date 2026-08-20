@@ -23,6 +23,12 @@ import '../domain/system_drive_analysis_report.dart';
 import '../domain/system_drive_analyzer.dart';
 import '../domain/system_drive_insights.dart';
 
+void _recycleSoftwareCacheEntry(List<Object> request) {
+  final SendPort resultPort = request[0] as SendPort;
+  final List<String> paths = (request[1] as List<Object>).cast<String>();
+  resultPort.send(CleanupDeleter.sendToRecycleBin(paths));
+}
+
 typedef CleanupScanRunner = Future<CleanupScanResult> Function({
   required CleanupCancellationToken cancellationToken,
   required void Function(CleanupScanProgress progress) onProgress,
@@ -156,6 +162,8 @@ class _CleanerTabState extends State<CleanerTab> {
   List<InstalledApplication> _installedApplications =
       const <InstalledApplication>[];
   String? _cleaningSoftwareId;
+  Isolate? _softwareCleanupIsolate;
+  ReceivePort? _softwareCleanupPort;
   String? _uninstallingSoftwareId;
   String _softwareQuery = '';
   _CleanupResultView _cleanupResultView = _CleanupResultView.recommended;
@@ -236,14 +244,9 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _discoverTargets() async {
     try {
-      String bundledRuleDatabase = '';
-      try {
-        bundledRuleDatabase = await rootBundle.loadString(
-          'assets/cleaner/windows_rules_v6.json',
-        );
-      } on Object {
-        // Compiled rules remain available if the optional database is missing.
-      }
+      final String bundledRuleDatabase = await rootBundle.loadString(
+        'assets/cleaner/windows_rules_v6.json',
+      );
       final List<CleanupScanTarget>
       targets = await CleanupBackgroundRunner.discoverTargets(
         harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
@@ -280,6 +283,8 @@ class _CleanerTabState extends State<CleanerTab> {
   @override
   void dispose() {
     _taskToken?.cancel();
+    _softwareCleanupIsolate?.kill(priority: Isolate.immediate);
+    _softwareCleanupPort?.close();
     super.dispose();
   }
 
@@ -454,6 +459,92 @@ class _CleanerTabState extends State<CleanerTab> {
       .where((CleanupCandidate c) => _selected.contains(c.path))
       .fold<int>(0, (int sum, CleanupCandidate c) => sum + c.size);
 
+  Future<void> _smartSelect() async {
+    final List<CleanupCandidate> plan = _candidates
+        .where((candidate) {
+          if (candidate.category == CleanupCategory.downloads ||
+              candidate.category == CleanupCategory.duplicateFiles ||
+              candidate.category == CleanupCategory.pluginResidual) {
+            return false;
+          }
+          // Smart mode must never turn a review item into an automatic delete.
+          // App runtimes, downloaded models, recycle-bin contents and unknown
+          // discoveries remain visible, but require an explicit user choice.
+          const Set<CleanupCategory> automaticCategories = <CleanupCategory>{
+            CleanupCategory.userTemp,
+            CleanupCategory.browserCache,
+            CleanupCategory.applicationCache,
+            CleanupCategory.systemCache,
+            CleanupCategory.pluginCache,
+            CleanupCategory.debugArtifacts,
+            CleanupCategory.logs,
+          };
+          return !candidate.highRisk &&
+              candidate.defaultSelected &&
+              automaticCategories.contains(candidate.category);
+        })
+        .toList(growable: false);
+    if (plan.isEmpty) return;
+    final int bytes = plan.fold<int>(
+      0,
+      (int total, CleanupCandidate candidate) => total + candidate.size,
+    );
+    final int reviewCount = _candidates
+        .where((CleanupCandidate candidate) => candidate.highRisk)
+        .length;
+    final bool emptiesRecycleBin = plan.any(
+      (CleanupCandidate candidate) =>
+          candidate.category == CleanupCategory.recycleBin,
+    );
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('智能选择清理计划'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('将选择 ${plan.length} 项，预计 ${_formatSize(bytes)}。'),
+              const SizedBox(height: 10),
+              const Text(
+                '包含旧临时文件、日志、可重建开发缓存、应用更新包和可重新下载的运行缓存；不选项目、下载文件、重复文件或旧插件。',
+              ),
+              if (reviewCount > 0) ...<Widget>[
+                const SizedBox(height: 10),
+                Text('$reviewCount 项需复核，已保留在列表中且不会被智能选择。'),
+              ],
+              if (emptiesRecycleBin) ...<Widget>[
+                const SizedBox(height: 10),
+                const Text(
+                  '⚠ 包含清空系统回收站：本次移入及回收站原有内容将无法恢复。',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确认选择'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(plan.map((CleanupCandidate candidate) => candidate.path));
+    });
+  }
+
   Future<void> _clean() async {
     final List<CleanupCandidate> plan = _candidates
         .where(
@@ -470,6 +561,8 @@ class _CleanerTabState extends State<CleanerTab> {
       0,
       (int total, CleanupCandidate candidate) => total + candidate.size,
     );
+    // Regenerable cache/log candidates use the fast permanent path by default.
+    // Review/high-risk items still go through the recycle-bin path.
     bool permanentFallback = true;
     final bool hasRegenerableCache = plan.any(
       (CleanupCandidate candidate) => candidate.allowsPermanentFallback,
@@ -1189,6 +1282,21 @@ class _CleanerTabState extends State<CleanerTab> {
                   icon: const Icon(Icons.tune, size: 18),
                   label: Text('范围（${_enabledTargetIds.length}）'),
                 ),
+              if (_candidates.isNotEmpty) ...<Widget>[
+                const SizedBox(width: 6),
+                if (veryCompact)
+                  IconButton(
+                    tooltip: '智能选择可清理内容',
+                    onPressed: _scanning || _cleaning ? null : _smartSelect,
+                    icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: _scanning || _cleaning ? null : _smartSelect,
+                    icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                    label: const Text('智能选择'),
+                  ),
+              ],
               const Spacer(),
               if (!veryCompact) ...<Widget>[
                 Text(
@@ -1662,10 +1770,18 @@ class _CleanerTabState extends State<CleanerTab> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: busy
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
+                          ? _cleaningSoftwareId == item.id
+                                ? TextButton.icon(
+                                    onPressed: _cancelSoftwareCacheCleanup,
+                                    icon: const Icon(Icons.stop, size: 16),
+                                    label: const Text('停止'),
+                                  )
+                                : const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
@@ -1794,11 +1910,8 @@ class _CleanerTabState extends State<CleanerTab> {
         if (!await widget.driveEntryRecycler!(entry.path)) removed = false;
       }
     } else {
-      removed = await Isolate.run<bool>(
-        () => CleanupDeleter.sendToRecycleBin(
-          entries.map((SystemDriveUsageEntry entry) => entry.path).toList(),
-        ),
-        debugName: 'vibekits-software-cache-delete',
+      removed = await _runSoftwareCacheCleanup(
+        entries.map((SystemDriveUsageEntry entry) => entry.path).toList(),
       );
     }
     if (!mounted) return;
@@ -1809,6 +1922,45 @@ class _CleanerTabState extends State<CleanerTab> {
           : '${software.name} 部分缓存未能清理；请关闭软件后重试';
     });
     if (removed) await _analyzeSystemDrive();
+  }
+
+  Future<bool> _runSoftwareCacheCleanup(List<String> paths) async {
+    final ReceivePort port = ReceivePort();
+    _softwareCleanupPort = port;
+    try {
+      final Isolate isolate = await Isolate.spawn<List<Object>>(
+        _recycleSoftwareCacheEntry,
+        <Object>[port.sendPort, paths],
+        debugName: 'vibekits-software-cache-delete',
+      );
+      _softwareCleanupIsolate = isolate;
+      final Object? result = await port.first.timeout(
+        const Duration(seconds: 30),
+      );
+      return result == true;
+    } on TimeoutException {
+      if (mounted) _message = '缓存清理超过 30 秒，已自动停止；请查看明细后分项处理';
+      return false;
+    } on StateError {
+      return false;
+    } finally {
+      _softwareCleanupIsolate?.kill(priority: Isolate.immediate);
+      _softwareCleanupIsolate = null;
+      _softwareCleanupPort?.close();
+      _softwareCleanupPort = null;
+    }
+  }
+
+  void _cancelSoftwareCacheCleanup() {
+    _softwareCleanupIsolate?.kill(priority: Isolate.immediate);
+    _softwareCleanupPort?.close();
+    _softwareCleanupIsolate = null;
+    _softwareCleanupPort = null;
+    if (!mounted) return;
+    setState(() {
+      _cleaningSoftwareId = null;
+      _message = '已停止缓存清理';
+    });
   }
 
   Future<void> _uninstallSoftware(SoftwareStorageSummary software) async {

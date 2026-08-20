@@ -480,7 +480,18 @@ abstract final class SystemDriveAnalyzer {
             'roaming',
           }.contains(parts[2].toLowerCase())) {
         componentCount = 4;
+        // Microsoft/Google/Tencent are vendors, not useful software names.
+        // Attribute their data to the next product component (Edge, Chrome,
+        // WXWork...) so the UI reports real per-application usage.
+        if (parts.length >= 5 &&
+            _genericVendorNames.contains(parts[3].toLowerCase())) {
+          componentCount = 5;
+        }
       }
+    } else if (parts.length >= 2 &&
+        (_genericVendorNames.contains(parts.first.toLowerCase()) ||
+            parts.first.toLowerCase() == 'windowsapps')) {
+      componentCount = 2;
     }
     if (parts.length < componentCount) componentCount = parts.length;
     return '$rootPath${Platform.pathSeparator}'
@@ -612,6 +623,15 @@ abstract final class SystemDriveAnalyzer {
         leaf == 'crashdumps' ||
         leaf == 'crash reports';
   }
+
+  static const Set<String> _genericVendorNames = <String>{
+    'microsoft',
+    'google',
+    'tencent',
+    'adobe',
+    'apple',
+    'oracle',
+  };
 
   static String? _cacheBreakdownBucket(String rootPath, String filePath) {
     final String? softwareRoot = _breakdownBucket(rootPath, filePath);

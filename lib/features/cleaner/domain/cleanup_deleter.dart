@@ -195,20 +195,57 @@ abstract final class CleanupDeleter {
   /// 永久删除单个路径（不进入回收站）。
   static bool deletePermanently(String path) {
     try {
-      _clearReadOnlyTree(path);
+      // The common case (cache/log files) is writable. Walking the complete
+      // subtree first doubled the I/O and made large cleanups painfully slow.
+      // Clear read-only attributes only after the first delete attempt fails.
       final FileSystemEntityType type = FileSystemEntity.typeSync(
         path,
         followLinks: false,
       );
+      _deleteByType(path, type);
+      return FileSystemEntity.typeSync(path, followLinks: false) ==
+          FileSystemEntityType.notFound;
+    } catch (_) {
+      try {
+        _clearReadOnlyTree(path);
+        final FileSystemEntityType type = FileSystemEntity.typeSync(
+          path,
+          followLinks: false,
+        );
+        _deleteByType(path, type);
+        return FileSystemEntity.typeSync(path, followLinks: false) ==
+            FileSystemEntityType.notFound;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
+  static void _deleteByType(String path, FileSystemEntityType type) {
+    if (type == FileSystemEntityType.directory) {
+      Directory(path).deleteSync(recursive: true);
+    } else if (type == FileSystemEntityType.file ||
+        type == FileSystemEntityType.link) {
+      File(path).deleteSync();
+    }
+  }
+
+  static Future<bool> _deletePermanentlyFast(String path) async {
+    try {
+      final FileSystemEntityType type = FileSystemEntity.typeSync(
+        path,
+        followLinks: false,
+      );
+      if (type == FileSystemEntityType.notFound) return true;
       if (type == FileSystemEntityType.directory) {
-        Directory(path).deleteSync(recursive: true);
-      } else if (type == FileSystemEntityType.file) {
-        File(path).deleteSync();
+        await Directory(path).delete(recursive: true);
+      } else {
+        await File(path).delete();
       }
       return FileSystemEntity.typeSync(path, followLinks: false) ==
           FileSystemEntityType.notFound;
     } catch (_) {
-      return false;
+      return deletePermanently(path);
     }
   }
 
@@ -368,7 +405,7 @@ abstract final class CleanupDeleter {
     required void Function(CleanupDeleteProgress progress)? onProgress,
     required bool permanentFallback,
   }) async {
-    const int batchSize = 128;
+    const int batchSize = 512;
     final List<CleanupItemResult> items = <CleanupItemResult>[];
     int releasedBytes = 0;
     final List<CleanupCandidate> ordered = candidates
@@ -413,26 +450,74 @@ abstract final class CleanupDeleter {
         }
       }
       if (ready.isNotEmpty) {
-        final _RecycleResult shell = _sendToRecycleBin(
-          ready.map((CleanupCandidate item) => item.path).toList(),
-        );
-        for (final CleanupCandidate candidate in ready) {
-          bool removed = await _waitUntilRemoved(candidate.path);
-          String reason = '已批量移入回收站';
-          if (!removed &&
-              permanentFallback &&
-              candidate.allowsPermanentFallback &&
-              deletePermanently(candidate.path)) {
-            removed = await _waitUntilRemoved(candidate.path);
-            reason = '回收站操作失败后，已永久删除可再生成缓存';
+        final List<CleanupCandidate> direct = permanentFallback
+            ? ready
+                  .where(
+                    (CleanupCandidate item) => item.allowsPermanentFallback,
+                  )
+                  .toList(growable: false)
+            : const <CleanupCandidate>[];
+        final Set<String> directPaths = direct
+            .map((CleanupCandidate item) => item.path)
+            .toSet();
+        final List<CleanupCandidate> recyclable = ready
+            .where((CleanupCandidate item) => !directPaths.contains(item.path))
+            .toList(growable: false);
+        final _RecycleResult shell = recyclable.isEmpty
+            ? const _RecycleResult(code: 0, aborted: false)
+            : _sendToRecycleBin(
+                recyclable.map((CleanupCandidate item) => item.path).toList(),
+              );
+        // A small bounded pool is faster for tens of thousands of tiny files
+        // while avoiding the disk/antivirus contention caused by unbounded IO.
+        const int directConcurrency = 8;
+        for (
+          int offset = 0;
+          offset < direct.length;
+          offset += directConcurrency
+        ) {
+          if (cancellationToken.isCancelled) break;
+          final List<CleanupCandidate> group = direct
+              .skip(offset)
+              .take(directConcurrency)
+              .toList(growable: false);
+          final List<bool> removed = await Future.wait<bool>(
+            group.map(
+              (CleanupCandidate candidate) =>
+                  _deletePermanentlyFast(candidate.path),
+            ),
+          );
+          for (int index = 0; index < group.length; index++) {
+            final CleanupCandidate candidate = group[index];
+            if (removed[index]) {
+              releasedBytes += candidate.size;
+              items.add(
+                CleanupItemResult(
+                  candidate: candidate,
+                  status: CleanupItemStatus.succeeded,
+                  reason: '已并发永久删除可再生成缓存',
+                ),
+              );
+            } else {
+              items.add(
+                CleanupItemResult(
+                  candidate: candidate,
+                  status: CleanupItemStatus.failed,
+                  reason: '文件可能正被程序占用或权限不足',
+                ),
+              );
+            }
           }
+        }
+        for (final CleanupCandidate candidate in recyclable) {
+          final bool removed = await _waitUntilRemoved(candidate.path);
           if (removed) {
             releasedBytes += candidate.size;
             items.add(
               CleanupItemResult(
                 candidate: candidate,
                 status: CleanupItemStatus.succeeded,
-                reason: reason,
+                reason: '已批量移入回收站',
               ),
             );
           } else {

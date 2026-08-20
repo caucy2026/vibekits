@@ -27,21 +27,17 @@ abstract final class CleanupBackgroundRunner {
       ),
     );
     if (bundledRuleDatabase.trim().isNotEmpty) {
-      try {
-        final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
-          bundledRuleDatabase,
-        );
-        final Set<String> ids = targets
-            .map((CleanupScanTarget target) => target.id)
-            .toSet();
-        targets.addAll(
-          database.targets.where(
-            (CleanupScanTarget target) => ids.add(target.id),
-          ),
-        );
-      } on FormatException {
-        // A bad optional database never disables the compiled safe catalog.
-      }
+      final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
+        bundledRuleDatabase,
+      );
+      final Set<String> ids = targets
+          .map((CleanupScanTarget target) => target.id)
+          .toSet();
+      targets.addAll(
+        database.targets.where(
+          (CleanupScanTarget target) => ids.add(target.id),
+        ),
+      );
     }
     return targets;
   }, debugName: 'vibekits-cleanup-target-discovery');

@@ -145,4 +145,31 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hidden
     expect(cacheEntry.sizeBytes, 4096);
     expect(cacheEntry.canDelete, isTrue);
   });
+
+  test('未匹配到真实安装项的聚合目录只分析不允许一键清理', () {
+    const SoftwareStorageSummary aggregate = SoftwareStorageSummary(
+      id: 'microsoft',
+      name: 'Microsoft',
+      installBytes: 0,
+      dataBytes: 1024,
+      cacheBytes: 1024,
+      level: SystemDriveAssessmentLevel.normal,
+      assessment: '聚合目录',
+      installEntries: <SystemDriveUsageEntry>[],
+      dataEntries: <SystemDriveUsageEntry>[],
+      cacheEntries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Users\me\AppData\Local\Microsoft\Cache',
+          name: 'Cache',
+          sizeBytes: 1024,
+          kind: SystemDriveEntryKind.logsAndCaches,
+          reason: '缓存',
+          isDirectory: true,
+          complete: true,
+          deletePolicy: SystemDriveDeletePolicy.recycleAfterConfirmation,
+        ),
+      ],
+    );
+    expect(aggregate.canCleanCache, isFalse);
+  });
 }

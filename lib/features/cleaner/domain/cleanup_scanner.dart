@@ -410,7 +410,7 @@ abstract final class CleanupScanner {
 
   static CleanupScanResult _scanRecycleBin(CleanupScanTarget target) {
     final RecycleBinSnapshot? snapshot = RecycleBinService.query(target.path);
-    if (snapshot == null || snapshot.bytes <= 0 || snapshot.items <= 0) {
+    if (snapshot == null) {
       return const CleanupScanResult(
         candidates: <CleanupCandidate>[],
         cancelled: false,
@@ -423,7 +423,9 @@ abstract final class CleanupScanner {
           path: target.path,
           size: snapshot.bytes,
           category: CleanupCategory.recycleBin,
-          reason: '${snapshot.items} 个回收站项目',
+          reason: snapshot.items == 0
+              ? '清理完成后统一清空回收站'
+              : '${snapshot.items} 个现有回收站项目；清理完成后统一清空',
           sourceLabel: target.label,
           riskLevel: CleanupRiskLevel.systemManaged,
           impactNote: target.safetyNote,
@@ -431,7 +433,7 @@ abstract final class CleanupScanner {
       ],
       cancelled: false,
       unreadablePaths: 0,
-      visitedEntries: snapshot.items,
+      visitedEntries: snapshot.items + 1,
       candidateBytes: snapshot.bytes,
     );
   }

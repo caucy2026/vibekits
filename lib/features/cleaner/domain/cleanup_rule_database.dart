@@ -74,7 +74,10 @@ abstract final class CleanupRuleDatabase {
           continue;
         }
         final String? path = _expandPath('${raw['pathTemplate'] ?? ''}', env);
-        if (path == null || !Directory(path).existsSync()) continue;
+        // A rule describes supported software, not only what exists during
+        // this launch. Keeping absent targets makes the configured scope
+        // stable across restarts; the scanner cheaply skips missing paths.
+        if (path == null) continue;
         final CleanupRiskLevel risk = _risk('${raw['risk'] ?? ''}');
         final String action = '${raw['cleanupAction'] ?? ''}';
         if (action != 'recycle') {

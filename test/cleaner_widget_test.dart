@@ -170,6 +170,81 @@ void main() {
     expect(find.byTooltip('白名单（1）'), findsOneWidget);
   });
 
+  testWidgets('智能选择只选安全项并保留应用运行包和回收站', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            scanRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(CleanupScanProgress progress)
+                  onProgress,
+                }) async => const CleanupScanResult(
+                  candidates: <CleanupCandidate>[
+                    CleanupCandidate(
+                      path: r'C:\Cache\gradle.bin',
+                      size: 8 * 1024 * 1024 * 1024,
+                      category: CleanupCategory.systemCache,
+                      reason: '已验证的系统缓存',
+                    ),
+                    CleanupCandidate(
+                      path: r'C:\',
+                      size: 2 * 1024 * 1024 * 1024,
+                      category: CleanupCategory.recycleBin,
+                      reason: '回收站',
+                      riskLevel: CleanupRiskLevel.systemManaged,
+                    ),
+                    CleanupCandidate(
+                      path: r'C:\Users\caucy\Downloads\keep.zip',
+                      size: 3 * 1024 * 1024 * 1024,
+                      category: CleanupCategory.downloads,
+                      reason: '用户下载',
+                    ),
+                    CleanupCandidate(
+                      path:
+                          r'C:\Users\caucy\AppData\Roaming\Tencent\runtime.dll',
+                      size: 1024 * 1024 * 1024,
+                      category: CleanupCategory.applicationCache,
+                      reason: '应用运行包',
+                      riskLevel: CleanupRiskLevel.cautious,
+                    ),
+                    CleanupCandidate(
+                      path: r'C:\Users\caucy\.gradle\caches\active.bin',
+                      size: 1024 * 1024 * 1024,
+                      category: CleanupCategory.devCache,
+                      reason: '当前可能使用的开发依赖',
+                    ),
+                    CleanupCandidate(
+                      path: r'C:\Users\caucy\AppData\Local\KnownApp\Cache\old.tmp',
+                      size: 512 * 1024 * 1024,
+                      category: CleanupCategory.applicationCache,
+                      reason: '已验证的可重建应用缓存',
+                    ),
+                  ],
+                  cancelled: false,
+                  unreadablePaths: 0,
+                ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('开始扫描'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('智能选择'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('智能选择清理计划'), findsOneWidget);
+    expect(find.textContaining('不会被智能选择'), findsOneWidget);
+    expect(find.textContaining('预计 8.50 GB'), findsOneWidget);
+    await tester.tap(find.text('确认选择'));
+    await tester.pumpAndSettle();
+    expect(find.text('清理 2 项'), findsOneWidget);
+  });
+
   testWidgets('大量候选按分类折叠并分批显示', (WidgetTester tester) async {
     final List<CleanupCandidate> candidates = List<CleanupCandidate>.generate(
       150,

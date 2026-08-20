@@ -53,7 +53,7 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 10;
+  static const int catalogVersion = 12;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,

@@ -77,4 +77,32 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('软件目录暂时不存在时仍保留规则范围', () {
+    final String missing =
+        '${Directory.systemTemp.path}${Platform.pathSeparator}vk_missing_rule_path';
+    final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
+      jsonEncode(<String, Object?>{
+        'schemaVersion': 1,
+        'catalogVersion': 6,
+        'rules': <Object?>[
+          <String, Object?>{
+            'id': 'stable-missing-cache',
+            'label': '稳定规则',
+            'platform': Platform.operatingSystem,
+            'pathTemplate': r'%TEST_CACHE%',
+            'category': 'applicationCache',
+            'risk': 'safe',
+            'defaultEnabled': true,
+            'cleanupAction': 'recycle',
+            'impact': '目录出现后扫描',
+          },
+        ],
+      }),
+      environment: <String, String>{'TEST_CACHE': missing},
+      platform: Platform.operatingSystem,
+    );
+
+    expect(database.targets.single.path, missing);
+  });
 }
