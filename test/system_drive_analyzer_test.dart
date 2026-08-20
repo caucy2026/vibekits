@@ -206,7 +206,7 @@ void main() {
     expect(disk['logicalOvercountBytes'], 0);
     expect(entries, hasLength(2));
     expect((entries.last! as Map<String, Object?>)['assessment'], 'review');
-    expect(json['version'], 3);
+    expect(json['version'], 4);
     expect(insights['systemBaseline'].toString(), contains('20–40 GiB'));
   });
 

@@ -289,7 +289,11 @@ abstract final class SystemDriveAnalyzer {
         );
         final List<SystemDriveUsageEntry> rootBreakdown = measurement == null
             ? const <SystemDriveUsageEntry>[]
-            : _buildBreakdownEntries(entry, measurement.breakdownBytes);
+            : _buildBreakdownEntries(
+                entry,
+                measurement.breakdownBytes,
+                measurement.cacheBreakdownBytes,
+              );
         entries.add(entry);
         breakdownEntries.addAll(rootBreakdown);
         completedRoots++;
@@ -341,6 +345,7 @@ abstract final class SystemDriveAnalyzer {
     int unreadable = 0;
     bool complete = true;
     final Map<String, int> breakdownBytes = <String, int>{};
+    final Map<String, int> cacheBreakdownBytes = <String, int>{};
     final List<Directory> pending = <Directory>[directory];
     while (pending.isNotEmpty && !token.isCancelled) {
       final Directory current = pending.removeLast();
@@ -378,6 +383,17 @@ abstract final class SystemDriveAnalyzer {
                   ifAbsent: () => fileBytes,
                 );
               }
+              final String? cacheBucket = _cacheBreakdownBucket(
+                directory.path,
+                entity.path,
+              );
+              if (cacheBucket != null) {
+                cacheBreakdownBytes.update(
+                  cacheBucket,
+                  (int value) => value + fileBytes,
+                  ifAbsent: () => fileBytes,
+                );
+              }
               onVisit(entity.path, fileBytes);
             } on FileSystemException {
               unreadable++;
@@ -397,6 +413,7 @@ abstract final class SystemDriveAnalyzer {
       complete: complete,
       unreadablePaths: unreadable,
       breakdownBytes: breakdownBytes,
+      cacheBreakdownBytes: cacheBreakdownBytes,
     );
   }
 
@@ -463,13 +480,45 @@ abstract final class SystemDriveAnalyzer {
   static List<SystemDriveUsageEntry> _buildBreakdownEntries(
     SystemDriveUsageEntry parent,
     Map<String, int> breakdownBytes,
+    Map<String, int> cacheBreakdownBytes,
   ) {
     final String rootName = parent.name.toLowerCase();
     return <SystemDriveUsageEntry>[
       for (final MapEntry<String, int> item in breakdownBytes.entries)
         if (item.value > 0)
           _breakdownEntry(parent, item.key, item.value, rootName),
+      for (final MapEntry<String, int> item in cacheBreakdownBytes.entries)
+        if (item.value > 0)
+          _cacheBreakdownEntry(parent, item.key, item.value, rootName),
     ];
+  }
+
+  static SystemDriveUsageEntry _cacheBreakdownEntry(
+    SystemDriveUsageEntry parent,
+    String path,
+    int sizeBytes,
+    String rootName,
+  ) {
+    final String relative = path
+        .substring(parent.path.length)
+        .replaceAll('\\', '/')
+        .replaceFirst(RegExp('^/+'), '');
+    final String owner = _softwareOwnerFor(parent.path, path);
+    final bool safeUserCache = rootName == 'programdata' || rootName == 'users';
+    return SystemDriveUsageEntry(
+      path: path,
+      name: relative.replaceAll('/', ' / '),
+      sizeBytes: sizeBytes,
+      kind: SystemDriveEntryKind.logsAndCaches,
+      reason: '$owner 产生的可再生缓存或日志；清理前应关闭对应软件',
+      isDirectory: true,
+      complete: parent.complete,
+      ownerLabel: owner,
+      parentPath: parent.path,
+      deletePolicy: safeUserCache
+          ? SystemDriveDeletePolicy.recycleAfterConfirmation
+          : SystemDriveDeletePolicy.protected,
+    );
   }
 
   static SystemDriveUsageEntry _breakdownEntry(
@@ -551,6 +600,58 @@ abstract final class SystemDriveAnalyzer {
         leaf == 'crash reports';
   }
 
+  static String? _cacheBreakdownBucket(String rootPath, String filePath) {
+    final String? softwareRoot = _breakdownBucket(rootPath, filePath);
+    if (softwareRoot == null) return null;
+    final String normalizedSoftware = softwareRoot.replaceAll('\\', '/');
+    final String normalizedFile = filePath.replaceAll('\\', '/');
+    if (!normalizedFile.toLowerCase().startsWith(
+      '${normalizedSoftware.toLowerCase()}/',
+    )) {
+      return null;
+    }
+    final List<String> descendants = normalizedFile
+        .substring(normalizedSoftware.length + 1)
+        .split('/');
+    for (int index = 0; index < descendants.length - 1; index++) {
+      final String lower = descendants[index].toLowerCase();
+      if (_cacheDirectoryNames.contains(lower)) {
+        return '$softwareRoot${Platform.pathSeparator}'
+            '${descendants.take(index + 1).join(Platform.pathSeparator)}';
+      }
+    }
+    return null;
+  }
+
+  static String _softwareOwnerFor(String rootPath, String path) {
+    final String normalizedRoot = rootPath.replaceAll('\\', '/');
+    final String normalizedPath = path.replaceAll('\\', '/');
+    final List<String> parts = normalizedPath
+        .substring(normalizedRoot.length + 1)
+        .split('/');
+    if (_baseName(rootPath).toLowerCase() == 'users' && parts.length >= 4) {
+      return parts[3];
+    }
+    return parts.isEmpty ? _baseName(path) : parts.first;
+  }
+
+  static const Set<String> _cacheDirectoryNames = <String>{
+    'cache',
+    'caches',
+    'cache2',
+    'code cache',
+    'gpucache',
+    'dawncache',
+    'shadercache',
+    'temp',
+    'tmp',
+    'log',
+    'logs',
+    'crashdumps',
+    'crash reports',
+    'cachestorage',
+  };
+
   static (SystemDriveEntryKind, String) _classify(
     String name, {
     required bool isDirectory,
@@ -589,10 +690,12 @@ class _DirectoryMeasurement {
     required this.complete,
     required this.unreadablePaths,
     required this.breakdownBytes,
+    required this.cacheBreakdownBytes,
   });
 
   final int sizeBytes;
   final bool complete;
   final int unreadablePaths;
   final Map<String, int> breakdownBytes;
+  final Map<String, int> cacheBreakdownBytes;
 }

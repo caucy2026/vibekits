@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import '../../../app/app_settings.dart';
 import '../../cleaner/domain/cleanup_task.dart';
+import '../../cleaner/domain/installed_application_service.dart';
+import '../../cleaner/domain/software_storage_analyzer.dart';
 import '../../cleaner/domain/system_drive_analysis_runner.dart';
 import '../../cleaner/domain/system_drive_analyzer.dart';
 import '../../cleaner/domain/system_drive_insights.dart';
@@ -1703,6 +1705,10 @@ class VibekitsHarnessToolBridge {
           onProgress: (_) {},
         );
     final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
+    final List<InstalledApplication> installed =
+        await InstalledApplicationService.load();
+    final List<SoftwareStorageSummary> software =
+        SoftwareStorageAnalyzer.summarize(analysis, installed);
     Map<String, Object?> entry(SystemDriveUsageEntry value) =>
         <String, Object?>{
           'path': value.path,
@@ -1746,6 +1752,29 @@ class VibekitsHarnessToolBridge {
       'softwareOwners': insights.softwareOwners
           .take(100)
           .map((SystemDriveEntryAssessment item) => item.toJson())
+          .toList(growable: false),
+      'softwareStorage': software
+          .take(300)
+          .map(
+            (SoftwareStorageSummary item) => <String, Object?>{
+              'name': item.name,
+              'publisher': item.application?.publisher ?? '',
+              'version': item.application?.version ?? '',
+              'installBytes': item.installBytes,
+              'dataBytes': item.dataBytes,
+              'cacheBytes': item.cacheBytes,
+              'totalBytes': item.totalBytes,
+              'assessment': item.level.name,
+              'assessmentLabel': item.level.label,
+              'reason': item.assessment,
+              'canCleanCache': item.canCleanCache,
+              'canUninstall': item.canUninstall,
+              'cachePaths': item.cacheEntries
+                  .where((SystemDriveUsageEntry entry) => entry.canDelete)
+                  .map((SystemDriveUsageEntry entry) => entry.path)
+                  .toList(growable: false),
+            },
+          )
           .toList(growable: false),
       'entries': analysis.entries.take(500).map(entry).toList(growable: false),
       'breakdownEntries': analysis.breakdownEntries

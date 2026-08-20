@@ -7,6 +7,7 @@ import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
+import 'package:vibekits/features/cleaner/domain/installed_application_service.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
 
@@ -466,6 +467,8 @@ void main() {
           body: CleanerTab(
             availableTargets: testTargets,
             persistDriveAnalysisReport: false,
+            installedApplicationLoader: () async =>
+                const <InstalledApplication>[],
             driveEntryRecycler: (String path) async {
               recycledPath = path;
               return true;
@@ -505,6 +508,8 @@ void main() {
 
     await tester.tap(find.byTooltip('系统盘空间分析'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('系统占用与异常'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('移到回收站'));
     await tester.pumpAndSettle();
     expect(find.text('从空间列表清理？'), findsOneWidget);
@@ -512,5 +517,117 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(recycledPath, r'C:\ESTLOG');
+  });
+
+  testWidgets('软件占用列表可直接清理缓存并启动正式卸载器', (WidgetTester tester) async {
+    String? recycledPath;
+    String? uninstalledName;
+    const SystemDriveAnalysis analysis = SystemDriveAnalysis(
+      rootPath: r'C:\',
+      entries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Program Files',
+          name: 'Program Files',
+          sizeBytes: 5000,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: '程序安装目录',
+          isDirectory: true,
+          complete: true,
+        ),
+      ],
+      breakdownEntries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Program Files\Acme',
+          name: 'Acme',
+          sizeBytes: 3000,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: 'Acme 安装目录',
+          isDirectory: true,
+          complete: true,
+          ownerLabel: 'Acme',
+          parentPath: r'C:\Program Files',
+        ),
+        SystemDriveUsageEntry(
+          path: r'C:\Users\me\AppData\Local\Acme',
+          name: 'me / AppData / Local / Acme',
+          sizeBytes: 2000,
+          kind: SystemDriveEntryKind.softwareData,
+          reason: 'Acme 数据',
+          isDirectory: true,
+          complete: true,
+          ownerLabel: 'Acme',
+          parentPath: r'C:\Users',
+        ),
+        SystemDriveUsageEntry(
+          path: r'C:\Users\me\AppData\Local\Acme\Cache',
+          name: 'me / AppData / Local / Acme / Cache',
+          sizeBytes: 1000,
+          kind: SystemDriveEntryKind.logsAndCaches,
+          reason: 'Acme 缓存',
+          isDirectory: true,
+          complete: true,
+          ownerLabel: 'Acme',
+          parentPath: r'C:\Users',
+          deletePolicy: SystemDriveDeletePolicy.recycleAfterConfirmation,
+        ),
+      ],
+      cancelled: false,
+      unreadablePaths: 0,
+      visitedEntries: 10,
+      measuredBytes: 5000,
+      totalBytes: 10000,
+      freeBytes: 3000,
+      availableBytes: 3000,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            persistDriveAnalysisReport: false,
+            installedApplicationLoader: () async =>
+                const <InstalledApplication>[
+                  InstalledApplication(
+                    id: 'acme',
+                    name: 'Acme IDE',
+                    uninstallCommand: r'"C:\Program Files\Acme\uninstall.exe"',
+                  ),
+                ],
+            applicationUninstallLauncher: (InstalledApplication app) async {
+              uninstalledName = app.name;
+              return true;
+            },
+            driveEntryRecycler: (String path) async {
+              recycledPath = path;
+              return true;
+            },
+            driveAnalysisRunner: ({
+              required CleanupCancellationToken cancellationToken,
+              required void Function(SystemDriveAnalysisProgress progress)
+              onProgress,
+            }) async => analysis,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.pumpAndSettle();
+    expect(find.text('软件占用与操作'), findsOneWidget);
+    expect(find.text('Acme IDE'), findsOneWidget);
+    expect(find.textContaining('安装 2.9 KB'), findsOneWidget);
+    expect(find.textContaining('可清缓存 1000 B'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '清理缓存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-software-cache-clean')));
+    await tester.pumpAndSettle();
+    expect(recycledPath, r'C:\Users\me\AppData\Local\Acme\Cache');
+
+    await tester.tap(find.widgetWithText(TextButton, '卸载'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('confirm-software-uninstall')));
+    await tester.pumpAndSettle();
+    expect(uninstalledName, 'Acme IDE');
   });
 }

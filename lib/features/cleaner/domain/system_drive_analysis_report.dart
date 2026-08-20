@@ -3,12 +3,16 @@ import 'dart:io';
 
 import 'system_drive_analyzer.dart';
 import 'system_drive_insights.dart';
+import 'installed_application_service.dart';
+import 'software_storage_analyzer.dart';
 
 abstract final class SystemDriveAnalysisReportWriter {
   static Future<File> write(
     SystemDriveAnalysis analysis, {
     DateTime? generatedAt,
     Directory? directory,
+    List<InstalledApplication> installedApplications =
+        const <InstalledApplication>[],
   }) async {
     final DateTime timestamp = generatedAt ?? DateTime.now();
     final Directory target = directory ?? _defaultDirectory();
@@ -26,8 +30,10 @@ abstract final class SystemDriveAnalysisReportWriter {
       );
     }
     final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
+    final List<SoftwareStorageSummary> software =
+        SoftwareStorageAnalyzer.summarize(analysis, installedApplications);
     final Map<String, Object?> report = <String, Object?>{
-      'version': 3,
+      'version': 4,
       'generatedAt': timestamp.toUtc().toIso8601String(),
       'rootPath': analysis.rootPath,
       'cancelled': analysis.cancelled,
@@ -73,6 +79,23 @@ abstract final class SystemDriveAnalysisReportWriter {
       'breakdownEntries': <Map<String, Object?>>[
         for (final SystemDriveUsageEntry entry in analysis.breakdownEntries)
           _entryJson(entry),
+      ],
+      'softwareStorage': <Map<String, Object?>>[
+        for (final SoftwareStorageSummary item in software)
+          <String, Object?>{
+            'name': item.name,
+            'publisher': item.application?.publisher ?? '',
+            'version': item.application?.version ?? '',
+            'installBytes': item.installBytes,
+            'dataBytes': item.dataBytes,
+            'cacheBytes': item.cacheBytes,
+            'totalBytes': item.totalBytes,
+            'assessment': item.level.name,
+            'assessmentLabel': item.level.label,
+            'reason': item.assessment,
+            'canCleanCache': item.canCleanCache,
+            'canUninstall': item.canUninstall,
+          },
       ],
     };
     await file.writeAsString(

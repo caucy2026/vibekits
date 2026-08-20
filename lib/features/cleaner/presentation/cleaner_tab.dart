@@ -14,6 +14,8 @@ import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
 import '../domain/cleanup_targets.dart';
 import '../domain/cleanup_whitelist.dart';
+import '../domain/installed_application_service.dart';
+import '../domain/software_storage_analyzer.dart';
 import '../domain/system_drive_analysis_runner.dart';
 import '../domain/system_drive_analysis_report.dart';
 import '../domain/system_drive_analyzer.dart';
@@ -36,6 +38,11 @@ typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
 });
 typedef CleanupDriveEntryRecycler = Future<bool> Function(String path);
 typedef CleanupHarnessLauncher = Future<void> Function(String prompt);
+typedef InstalledApplicationLoader =
+    Future<List<InstalledApplication>> Function();
+typedef ApplicationUninstallLauncher = Future<bool> Function(
+  InstalledApplication application,
+);
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
@@ -59,6 +66,8 @@ class CleanerTab extends StatefulWidget {
     this.persistDriveAnalysisReport = true,
     this.harnessDebugDirectory = '',
     this.onAskHarness,
+    this.installedApplicationLoader,
+    this.applicationUninstallLauncher,
   });
 
   final CleanupScanRunner? scanRunner;
@@ -81,6 +90,8 @@ class CleanerTab extends StatefulWidget {
   final bool persistDriveAnalysisReport;
   final String harnessDebugDirectory;
   final CleanupHarnessLauncher? onAskHarness;
+  final InstalledApplicationLoader? installedApplicationLoader;
+  final ApplicationUninstallLauncher? applicationUninstallLauncher;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -111,6 +122,11 @@ class _CleanerTabState extends State<CleanerTab> {
       <String, SystemDriveUsageEntry>{};
   bool _analyzingDrive = false;
   String? _deletingDrivePath;
+  List<InstalledApplication> _installedApplications =
+      const <InstalledApplication>[];
+  String? _cleaningSoftwareId;
+  String? _uninstallingSoftwareId;
+  String _softwareQuery = '';
   late int _totalReleasedBytes = widget.initialTotalReleasedBytes;
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
@@ -476,6 +492,9 @@ class _CleanerTabState extends State<CleanerTab> {
       _message = '正在分析系统盘根目录与空间占用…';
     });
     try {
+      final Future<List<InstalledApplication>> applicationsFuture =
+          widget.installedApplicationLoader?.call() ??
+          InstalledApplicationService.load();
       final SystemDriveAnalysis analysis = widget.driveAnalysisRunner == null
           ? await SystemDriveAnalysisRunner.analyze(
               _systemDiskPath(),
@@ -490,19 +509,28 @@ class _CleanerTabState extends State<CleanerTab> {
                 if (mounted) _recordDriveProgress(progress);
               },
             );
+      List<InstalledApplication> applications;
+      try {
+        applications = await applicationsFuture;
+      } on Object {
+        applications = const <InstalledApplication>[];
+      }
       if (!mounted) return;
       setState(() {
         _driveAnalysis = analysis;
+        _installedApplications = applications;
         _analyzingDrive = false;
         _partialDriveEntries.clear();
         _message = analysis.cancelled
             ? '空间分析已取消，以下为已完成部分'
-            : '空间分析完成：${analysis.entries.length} 个系统盘根项目';
+            : '空间分析完成：识别 ${applications.length} 个已安装软件，'
+                  '${analysis.entries.length} 个系统盘根项目';
       });
       if (widget.persistDriveAnalysisReport) {
         try {
           final File report = await SystemDriveAnalysisReportWriter.write(
             analysis,
+            installedApplications: applications,
           );
           if (mounted) setState(() => _lastDriveAnalysisReport = report);
         } catch (error) {
@@ -1003,116 +1031,393 @@ class _CleanerTabState extends State<CleanerTab> {
     final List<SystemDriveUsageEntry> visible = details
         .take(40)
         .toList(growable: false);
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 420),
-      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-      decoration: BoxDecoration(
-        color: context.vibe.panel,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.vibe.border),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-            child: Row(
-              children: <Widget>[
-                const Icon(Icons.storage_outlined, size: 18),
-                const SizedBox(width: 8),
-                const Text(
-                  '系统盘空间分析',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        '总量 ${_formatSize(analysis.totalBytes)} · '
-                        '已用 ${_formatSize(analysis.usedBytes)} · '
-                        '剩余 ${_formatSize(analysis.freeBytes)} · '
-                        '已归类 ${_formatSize(analysis.logicalMeasuredBytes)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      Text(
-                        totals.entries
-                            .where(
-                              (MapEntry<SystemDriveEntryKind, int> item) =>
-                                  item.value > 0,
-                            )
-                            .map(
-                              (MapEntry<SystemDriveEntryKind, int> item) =>
-                                  '${item.key.label} ${_formatSize(item.value)}',
-                            )
-                            .join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.vibe.muted,
+    final List<SoftwareStorageSummary> software =
+        SoftwareStorageAnalyzer.summarize(analysis, _installedApplications);
+    return DefaultTabController(
+      length: 2,
+      initialIndex: software.isEmpty ? 1 : 0,
+      child: Container(
+        height: 470,
+        margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+        decoration: BoxDecoration(
+          color: context.vibe.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.vibe.border),
+        ),
+        child: Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.storage_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          '系统盘空间分析',
+                          style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                      ),
-                      Text(
-                        '${insights.storagePressure.label} · '
-                        '${insights.storagePressureSummary}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color:
-                              insights.storagePressure ==
-                                  SystemDriveAssessmentLevel.normal
-                              ? context.vibe.success
-                              : VibekitsColors.warning,
+                        Text(
+                          '总量 ${_formatSize(analysis.totalBytes)} · '
+                          '已用 ${_formatSize(analysis.usedBytes)} · '
+                          '剩余 ${_formatSize(analysis.freeBytes)} · '
+                          '识别软件 ${software.length} 个',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
                         ),
-                      ),
-                    ],
+                        Text(
+                          '${insights.storagePressure.label} · '
+                          '${insights.storagePressureSummary}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color:
+                                insights.storagePressure ==
+                                    SystemDriveAssessmentLevel.normal
+                                ? context.vibe.success
+                                : VibekitsColors.warning,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  tooltip: '重新分析',
-                  onPressed: _analyzingDrive ? null : _analyzeSystemDrive,
-                  icon: const Icon(Icons.refresh, size: 18),
-                ),
-                if (_lastDriveAnalysisReport != null)
                   IconButton(
-                    tooltip: '查看完整空间报告',
-                    onPressed: () => _showDriveAnalysisReport(analysis),
-                    icon: const Icon(Icons.description_outlined, size: 18),
+                    tooltip: '重新分析',
+                    onPressed: _analyzingDrive ? null : _analyzeSystemDrive,
+                    icon: const Icon(Icons.refresh, size: 18),
                   ),
-                if (widget.onAskHarness != null)
-                  TextButton.icon(
-                    onPressed: () => _askHarnessAboutDrive(analysis),
-                    icon: const Icon(Icons.auto_awesome_outlined, size: 17),
-                    label: const Text('让 Harness 解释'),
-                  ),
+                  if (_lastDriveAnalysisReport != null)
+                    IconButton(
+                      tooltip: '查看完整空间报告',
+                      onPressed: () => _showDriveAnalysisReport(analysis),
+                      icon: const Icon(Icons.description_outlined, size: 18),
+                    ),
+                  if (widget.onAskHarness != null)
+                    TextButton.icon(
+                      onPressed: () => _askHarnessAboutDrive(analysis),
+                      icon: const Icon(Icons.auto_awesome_outlined, size: 17),
+                      label: const Text('让 Harness 解释'),
+                    ),
+                ],
+              ),
+            ),
+            const TabBar(
+              tabs: <Widget>[
+                Tab(key: Key('cleaner-software-storage-tab'), text: '软件占用与操作'),
+                Tab(key: Key('cleaner-system-storage-tab'), text: '系统占用与异常'),
               ],
             ),
-          ),
-          const Divider(height: 1),
-          Flexible(
-            child: ListView.separated(
-              shrinkWrap: true,
-              itemCount: visible.length,
-              separatorBuilder: (BuildContext context, int index) =>
-                  const Divider(height: 1),
-              itemBuilder: (BuildContext context, int index) {
-                final SystemDriveUsageEntry entry = visible[index];
-                return _buildDriveEntryTile(
-                  entry,
-                  assessment: assessmentsByPath[entry.path],
-                );
-              },
+            const Divider(height: 1),
+            Expanded(
+              child: TabBarView(
+                children: <Widget>[
+                  _buildSoftwareStorageList(software),
+                  _buildSystemStorageList(
+                    visible,
+                    assessmentsByPath,
+                    totals,
+                    insights,
+                  ),
+                ],
+              ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSoftwareStorageList(List<SoftwareStorageSummary> software) {
+    final String query = _softwareQuery.trim().toLowerCase();
+    final List<SoftwareStorageSummary> visible = query.isEmpty
+        ? software
+        : software
+              .where(
+                (SoftwareStorageSummary item) =>
+                    item.name.toLowerCase().contains(query) ||
+                    (item.application?.publisher.toLowerCase().contains(
+                          query,
+                        ) ??
+                        false),
+              )
+              .toList(growable: false);
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 7, 10, 5),
+          child: TextField(
+            key: const Key('cleaner-software-search'),
+            onChanged: (String value) => setState(() => _softwareQuery = value),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: '搜索软件、发布者',
+              prefixIcon: const Icon(Icons.search, size: 17),
+              suffixText: '${visible.length}/${software.length}',
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ),
+        Expanded(
+          child: visible.isEmpty
+              ? const Center(child: Text('没有匹配的软件'))
+              : ListView.separated(
+                  key: const Key('cleaner-software-storage-list'),
+                  itemCount: visible.length,
+                  separatorBuilder: (BuildContext context, int index) =>
+                      const Divider(height: 1),
+                  itemBuilder: (BuildContext context, int index) {
+                    final SoftwareStorageSummary item = visible[index];
+                    final bool busy =
+                        _cleaningSoftwareId == item.id ||
+                        _uninstallingSoftwareId == item.id;
+                    final Color statusColor =
+                        item.level == SystemDriveAssessmentLevel.normal
+                        ? context.vibe.success
+                        : VibekitsColors.warning;
+                    return ListTile(
+                      key: ValueKey<String>('software-storage-${item.id}'),
+                      dense: true,
+                      leading: Icon(
+                        Icons.apps_outlined,
+                        color: statusColor,
+                        size: 20,
+                      ),
+                      title: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${item.level.label} · '
+                            '${item.sizeKnown ? _formatSize(item.totalBytes) : '体积未知'}',
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(
+                        '安装 ${_formatSize(item.installBytes)} · '
+                        '数据 ${_formatSize(item.dataBytes)} · '
+                        '可清缓存 ${_formatSize(item.cacheBytes)}\n'
+                        '${item.assessment}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: busy
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                OutlinedButton(
+                                  key: ValueKey<String>(
+                                    'software-clean-cache-${item.id}',
+                                  ),
+                                  onPressed: item.canCleanCache
+                                      ? () => _cleanSoftwareCache(item)
+                                      : null,
+                                  child: Text(
+                                    item.cacheBytes > 0 ? '清理缓存' : '未发现缓存',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                TextButton(
+                                  key: ValueKey<String>(
+                                    'software-uninstall-${item.id}',
+                                  ),
+                                  onPressed: item.canUninstall
+                                      ? () => _uninstallSoftware(item)
+                                      : null,
+                                  child: const Text('卸载'),
+                                ),
+                              ],
+                            ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSystemStorageList(
+    List<SystemDriveUsageEntry> visible,
+    Map<String, SystemDriveEntryAssessment> assessmentsByPath,
+    Map<SystemDriveEntryKind, int> totals,
+    SystemDriveInsights insights,
+  ) => Column(
+    children: <Widget>[
+      Container(
+        width: double.infinity,
+        color: context.vibe.canvas,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Text(
+          '异常判断：${insights.priorities.length} 项需要关注 · '
+          '${insights.storagePressure.label}\n${insights.systemBaseline}\n'
+          '${totals.entries.where((item) => item.value > 0).map((item) => '${item.key.label} ${_formatSize(item.value)}').join(' · ')}',
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11, color: context.vibe.muted),
+        ),
+      ),
+      Expanded(
+        child: ListView.separated(
+          key: const Key('cleaner-system-storage-list'),
+          itemCount: visible.length,
+          separatorBuilder: (BuildContext context, int index) =>
+              const Divider(height: 1),
+          itemBuilder: (BuildContext context, int index) {
+            final SystemDriveUsageEntry entry = visible[index];
+            return _buildDriveEntryTile(
+              entry,
+              assessment: assessmentsByPath[entry.path],
+            );
+          },
+        ),
+      ),
+    ],
+  );
+
+  Future<void> _cleanSoftwareCache(SoftwareStorageSummary software) async {
+    if (_cleaningSoftwareId != null || _uninstallingSoftwareId != null) return;
+    final List<SystemDriveUsageEntry> entries = software.cacheEntries
+        .where((SystemDriveUsageEntry entry) => entry.canDelete)
+        .toList(growable: false);
+    if (entries.isEmpty) return;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('清理 ${software.name} 的缓存？'),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                '${entries.length} 个缓存/日志目录 · '
+                '${_formatSize(software.cacheBytes)}',
+              ),
+              const SizedBox(height: 8),
+              const Text('只处理扫描确认的可再生缓存和日志，不删除软件配置、数据库或用户文件。'),
+              const SizedBox(height: 8),
+              for (final SystemDriveUsageEntry entry in entries.take(6))
+                Text(
+                  '• ${entry.path}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
+                ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('confirm-software-cache-clean'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('移到回收站'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !mounted) return;
+    setState(() => _cleaningSoftwareId = software.id);
+    bool removed = true;
+    if (widget.driveEntryRecycler != null) {
+      for (final SystemDriveUsageEntry entry in entries) {
+        if (!await widget.driveEntryRecycler!(entry.path)) removed = false;
+      }
+    } else {
+      removed = await Isolate.run<bool>(
+        () => CleanupDeleter.sendToRecycleBin(
+          entries.map((SystemDriveUsageEntry entry) => entry.path).toList(),
+        ),
+        debugName: 'vibekits-software-cache-delete',
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _cleaningSoftwareId = null;
+      _message = removed
+          ? '已清理 ${software.name} 缓存 ${_formatSize(software.cacheBytes)}'
+          : '${software.name} 部分缓存未能清理；请关闭软件后重试';
+    });
+    if (removed) await _analyzeSystemDrive();
+  }
+
+  Future<void> _uninstallSoftware(SoftwareStorageSummary software) async {
+    final InstalledApplication? application = software.application;
+    if (application == null ||
+        !application.canUninstall ||
+        _cleaningSoftwareId != null ||
+        _uninstallingSoftwareId != null) {
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('卸载 ${software.name}？'),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                '当前占用约 ${_formatSize(software.totalBytes)}'
+                '${application.publisher.isEmpty ? '' : ' · ${application.publisher}'}',
+              ),
+              const SizedBox(height: 8),
+              const Text('将启动软件自己的 Windows 卸载器；Vibekits 不直接删除安装目录。'),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('confirm-software-uninstall'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('打开卸载器'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _uninstallingSoftwareId = software.id);
+    final bool launched = widget.applicationUninstallLauncher != null
+        ? await widget.applicationUninstallLauncher!(application)
+        : await InstalledApplicationService.launchUninstaller(application);
+    if (!mounted) return;
+    setState(() {
+      _uninstallingSoftwareId = null;
+      _message = launched
+          ? '已打开 ${software.name} 的 Windows 卸载器'
+          : '无法启动 ${software.name} 的卸载器';
+    });
   }
 
   Widget _buildPartialDriveAnalysis() {
