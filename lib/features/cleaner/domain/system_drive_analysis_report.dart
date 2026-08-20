@@ -86,6 +86,7 @@ abstract final class SystemDriveAnalysisReportWriter {
             'name': item.name,
             'publisher': item.application?.publisher ?? '',
             'version': item.application?.version ?? '',
+            'installPaths': item.installPaths,
             'installBytes': item.installBytes,
             'dataBytes': item.dataBytes,
             'cacheBytes': item.cacheBytes,

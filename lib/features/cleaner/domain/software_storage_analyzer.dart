@@ -35,6 +35,17 @@ class SoftwareStorageSummary {
       application != null &&
       cacheEntries.any((SystemDriveUsageEntry entry) => entry.canDelete);
   bool get canUninstall => application?.canUninstall == true;
+
+  /// Registry path first, measured installation roots as a reliable fallback.
+  List<String> get installPaths {
+    final Set<String> paths = <String>{};
+    final String registered = application?.installLocation.trim() ?? '';
+    if (registered.isNotEmpty) paths.add(registered);
+    for (final SystemDriveUsageEntry entry in installEntries) {
+      if (entry.path.trim().isNotEmpty) paths.add(entry.path.trim());
+    }
+    return List<String>.unmodifiable(paths);
+  }
 }
 
 abstract final class SoftwareStorageAnalyzer {

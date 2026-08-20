@@ -725,6 +725,7 @@ void main() {
     expect(find.text('Acme IDE'), findsOneWidget);
     expect(find.textContaining('安装 2.9 KB'), findsOneWidget);
     expect(find.textContaining('可清缓存 1000 B'), findsOneWidget);
+    expect(find.textContaining(r'安装路径：C:\Program Files\Acme'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(OutlinedButton, '清理缓存'));
     await tester.pumpAndSettle();

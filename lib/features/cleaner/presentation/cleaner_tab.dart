@@ -1620,6 +1620,20 @@ class _CleanerTabState extends State<CleanerTab> {
                           style: const TextStyle(fontSize: 12),
                         ),
                         Text(
+                          analysis.hasLogicalOvercount
+                              ? '目录统计合计 ${_formatSize(analysis.logicalMeasuredBytes)} · '
+                                    '含硬链接重复 ${_formatSize(analysis.logicalOvercountBytes)}，'
+                                    '物理占用以“已用”为准'
+                              : '已归类合计 ${_formatSize(analysis.logicalMeasuredBytes)} · '
+                                    '未归类/系统保留 ${_formatSize(analysis.unaccountedBytes)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.vibe.muted,
+                          ),
+                        ),
+                        Text(
                           '${insights.storagePressure.label} · '
                           '${insights.storagePressureSummary}',
                           maxLines: 1,
@@ -1695,7 +1709,10 @@ class _CleanerTabState extends State<CleanerTab> {
                     (item.application?.publisher.toLowerCase().contains(
                           query,
                         ) ??
-                        false),
+                        false) ||
+                    item.installPaths.any(
+                      (String path) => path.toLowerCase().contains(query),
+                    ),
               )
               .toList(growable: false);
     return Column(
@@ -1765,8 +1782,9 @@ class _CleanerTabState extends State<CleanerTab> {
                         '安装 ${_formatSize(item.installBytes)} · '
                         '数据 ${_formatSize(item.dataBytes)} · '
                         '可清缓存 ${_formatSize(item.cacheBytes)}\n'
+                        '安装路径：${item.installPaths.isEmpty ? '系统未报告' : item.installPaths.join('；')}\n'
                         '${item.assessment}',
-                        maxLines: 2,
+                        maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: busy

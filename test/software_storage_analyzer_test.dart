@@ -101,6 +101,7 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hidden
     const InstalledApplication app = InstalledApplication(
       id: 'acme',
       name: 'Acme IDE',
+      installLocation: r'C:\Program Files\Acme',
       uninstallCommand: r'"C:\Program Files\Acme\uninstall.exe"',
     );
 
@@ -116,6 +117,43 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hidden
     expect(summary.level, SystemDriveAssessmentLevel.critical);
     expect(summary.canCleanCache, isTrue);
     expect(summary.canUninstall, isTrue);
+    expect(summary.installPaths, <String>[r'C:\Program Files\Acme']);
+  });
+
+  test('注册表没有安装路径时使用扫描到的真实安装目录', () {
+    const SystemDriveAnalysis analysis = SystemDriveAnalysis(
+      rootPath: r'C:\',
+      entries: <SystemDriveUsageEntry>[],
+      breakdownEntries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Program Files\Acme',
+          name: 'Acme',
+          sizeBytes: 1024,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: '安装目录',
+          isDirectory: true,
+          complete: true,
+          ownerLabel: 'Acme',
+          parentPath: r'C:\Program Files',
+        ),
+      ],
+      cancelled: false,
+      unreadablePaths: 0,
+      visitedEntries: 1,
+      measuredBytes: 1024,
+      totalBytes: 4096,
+      freeBytes: 2048,
+      availableBytes: 2048,
+    );
+    const InstalledApplication app = InstalledApplication(
+      id: 'acme',
+      name: 'Acme',
+    );
+    final SoftwareStorageSummary summary = SoftwareStorageAnalyzer.summarize(
+      analysis,
+      const <InstalledApplication>[app],
+    ).single;
+    expect(summary.installPaths, <String>[r'C:\Program Files\Acme']);
   });
 
   test('系统盘扫描单独产出软件缓存目录而不是只能看到 AppData 总量', () async {

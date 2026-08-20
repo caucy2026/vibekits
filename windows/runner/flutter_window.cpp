@@ -20,6 +20,25 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
 
+  app_process_job_ = ::CreateJobObjectW(nullptr, nullptr);
+  if (app_process_job_ != nullptr) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    const bool configured = ::SetInformationJobObject(
+        app_process_job_, JobObjectExtendedLimitInformation, &limits,
+        sizeof(limits));
+    const bool assigned =
+        configured && ::AssignProcessToJobObject(app_process_job_,
+                                                 ::GetCurrentProcess());
+    if (!assigned) {
+      // Some launchers already put the runner in a restrictive job. Keep the
+      // existing per-child fallback in that case.
+      ::CloseHandle(app_process_job_);
+      app_process_job_ = nullptr;
+    }
+  }
+
   RECT frame = GetClientArea();
 
   // The size here must match the window dimensions to avoid unnecessary surface
@@ -92,6 +111,14 @@ bool FlutterWindow::OnCreate() {
                             static_cast<int64_t>(::GetLastError())));
           return;
         }
+        BOOL already_in_app_job = FALSE;
+        if (app_process_job_ != nullptr &&
+            ::IsProcessInJob(process, app_process_job_, &already_in_app_job) &&
+            already_in_app_job) {
+          ::CloseHandle(process);
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
         HANDLE job = ::CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
         limits.BasicLimitInformation.LimitFlags =
@@ -142,6 +169,10 @@ void FlutterWindow::OnDestroy() {
     ::CloseHandle(entry.second);
   }
   child_process_jobs_.clear();
+  // Do not close app_process_job_ here: the runner itself belongs to this job,
+  // so closing the last handle would terminate the process before Flutter and
+  // COM finish their normal shutdown. Windows closes the handle at process
+  // exit, which then terminates every remaining child in the job.
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
