@@ -126,7 +126,9 @@ void main() {
       estResult.candidates.map((CleanupCandidate item) => item.path),
       isNot(contains(newEstLog.path)),
     );
-    expect(estResult.candidates.single.defaultSelected, isTrue);
+    // 加密软件日志虽然可清理，但可能仍用于排障；谨慎规则必须逐项确认。
+    expect(estResult.candidates.single.defaultSelected, isFalse);
+    expect(estResult.candidates.single.riskLevel, CleanupRiskLevel.cautious);
   });
 
   test('macOS 规则库覆盖开发链、应用、浏览器和日志且 ID 唯一', () {

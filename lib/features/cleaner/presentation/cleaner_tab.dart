@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
 import '../../archive/domain/disk_space.dart';
@@ -50,6 +51,19 @@ typedef InstalledApplicationLoader =
 typedef ApplicationUninstallLauncher = Future<bool> Function(
   InstalledApplication application,
 );
+
+enum _CleanupResultView {
+  recommended('推荐清理', Icons.auto_awesome_outlined),
+  softwareCache('软件缓存', Icons.apps_outlined),
+  largeDownloads('大文件 / 下载', Icons.file_present_outlined),
+  unusedSoftware('不常用软件', Icons.inventory_2_outlined),
+  deepCleanup('深度清理', Icons.manage_search_outlined);
+
+  const _CleanupResultView(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+}
 
 /// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
 class CleanerTab extends StatefulWidget {
@@ -144,6 +158,8 @@ class _CleanerTabState extends State<CleanerTab> {
   String? _cleaningSoftwareId;
   String? _uninstallingSoftwareId;
   String _softwareQuery = '';
+  _CleanupResultView _cleanupResultView = _CleanupResultView.recommended;
+  bool _loadingInstalledApplications = false;
   late int _totalReleasedBytes = widget.initialTotalReleasedBytes;
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
@@ -220,11 +236,20 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _discoverTargets() async {
     try {
+      String bundledRuleDatabase = '';
+      try {
+        bundledRuleDatabase = await rootBundle.loadString(
+          'assets/cleaner/windows_rules_v5.json',
+        );
+      } on Object {
+        // Compiled rules remain available if the optional database is missing.
+      }
       final List<CleanupScanTarget>
       targets = await CleanupBackgroundRunner.discoverTargets(
         harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
             ? '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
             : widget.harnessDebugDirectory.trim(),
+        bundledRuleDatabase: bundledRuleDatabase,
       );
       if (mounted) _applyDiscoveredTargets(targets);
     } on Object catch (error) {
@@ -371,15 +396,58 @@ class _CleanerTabState extends State<CleanerTab> {
     }
   }
 
-  Map<CleanupCategory, List<CleanupCandidate>> get _grouped {
+  _CleanupResultView _viewForCandidate(CleanupCandidate candidate) {
+    if (candidate.category == CleanupCategory.downloads ||
+        candidate.category == CleanupCategory.duplicateFiles) {
+      return _CleanupResultView.largeDownloads;
+    }
+    if (<CleanupCategory>{
+      CleanupCategory.browserCache,
+      CleanupCategory.applicationCache,
+      CleanupCategory.devCache,
+      CleanupCategory.pluginCache,
+    }.contains(candidate.category)) {
+      return _CleanupResultView.softwareCache;
+    }
+    return candidate.highRisk
+        ? _CleanupResultView.deepCleanup
+        : _CleanupResultView.recommended;
+  }
+
+  List<CleanupCandidate> _candidatesForView(_CleanupResultView view) =>
+      _candidates
+          .where((CleanupCandidate item) => _viewForCandidate(item) == view)
+          .toList(growable: false);
+
+  Map<CleanupCategory, List<CleanupCandidate>> _groupCandidates(
+    List<CleanupCandidate> candidates,
+  ) {
     final Map<CleanupCategory, List<CleanupCandidate>> grouped =
         <CleanupCategory, List<CleanupCandidate>>{};
-    for (final CleanupCandidate candidate in _candidates) {
+    for (final CleanupCandidate candidate in candidates) {
       grouped
           .putIfAbsent(candidate.category, () => <CleanupCandidate>[])
           .add(candidate);
     }
     return grouped;
+  }
+
+  Future<void> _selectCleanupView(_CleanupResultView view) async {
+    setState(() => _cleanupResultView = view);
+    if (view != _CleanupResultView.unusedSoftware ||
+        _installedApplications.isNotEmpty ||
+        _loadingInstalledApplications) {
+      return;
+    }
+    setState(() => _loadingInstalledApplications = true);
+    try {
+      final List<InstalledApplication> applications =
+          await (widget.installedApplicationLoader?.call() ??
+              InstalledApplicationService.load());
+      if (mounted) setState(() => _installedApplications = applications);
+    } finally {
+      if (mounted) setState(() => _loadingInstalledApplications = false);
+    }
   }
 
   int get _selectedSize => _candidates
@@ -2111,13 +2179,175 @@ class _CleanerTabState extends State<CleanerTab> {
         ),
       );
     }
-    return ListView(
+    final List<CleanupCandidate> visible = _candidatesForView(
+      _cleanupResultView,
+    );
+    final Map<CleanupCategory, List<CleanupCandidate>> grouped =
+        _groupCandidates(visible);
+    return Column(
       children: <Widget>[
-        for (final MapEntry<CleanupCategory, List<CleanupCandidate>> entry
-            in _grouped.entries)
-          _buildCategory(entry.key, entry.value),
+        _buildCleanupTaskNavigation(),
+        Expanded(
+          child: _cleanupResultView == _CleanupResultView.unusedSoftware
+              ? _buildUnusedSoftwareTask()
+              : visible.isEmpty
+              ? Center(
+                  child: Text(
+                    '${_cleanupResultView.label}没有发现项目',
+                    style: TextStyle(color: context.vibe.muted),
+                  ),
+                )
+              : ListView(
+                  children: <Widget>[
+                    for (final MapEntry<CleanupCategory, List<CleanupCandidate>>
+                        entry
+                        in grouped.entries)
+                      _buildCategory(entry.key, entry.value),
+                  ],
+                ),
+        ),
       ],
     );
+  }
+
+  Widget _buildCleanupTaskNavigation() {
+    return Container(
+      height: 49,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: context.vibe.canvas,
+        border: Border(bottom: BorderSide(color: context.vibe.border)),
+      ),
+      child: ListView.separated(
+        key: const ValueKey<String>('cleanup-task-navigation'),
+        scrollDirection: Axis.horizontal,
+        itemCount: _CleanupResultView.values.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (BuildContext context, int index) {
+          final _CleanupResultView view = _CleanupResultView.values[index];
+          final List<CleanupCandidate> items =
+              view == _CleanupResultView.unusedSoftware
+              ? const <CleanupCandidate>[]
+              : _candidatesForView(view);
+          final int bytes = items.fold<int>(
+            0,
+            (int total, CleanupCandidate item) => total + item.size,
+          );
+          return ChoiceChip(
+            key: ValueKey<String>('cleanup-view-${view.name}'),
+            selected: _cleanupResultView == view,
+            onSelected: (_) => _selectCleanupView(view),
+            avatar: Icon(view.icon, size: 16),
+            label: Text(
+              view == _CleanupResultView.unusedSoftware
+                  ? '${view.label} · ${_installedApplications.length}'
+                  : '${view.label} · ${items.length} · ${_formatSize(bytes)}',
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildUnusedSoftwareTask() {
+    if (_loadingInstalledApplications) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final List<InstalledApplication> applications =
+        List<InstalledApplication>.of(_installedApplications)..sort(
+          (InstalledApplication left, InstalledApplication right) =>
+              right.estimatedSizeBytes.compareTo(left.estimatedSizeBytes),
+        );
+    if (applications.isEmpty) {
+      return const Center(child: Text('没有读取到可管理的已安装软件'));
+    }
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          color: VibekitsColors.warning.withValues(alpha: 0.08),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: const Text(
+            '当前先按安装体积列出软件。没有可靠最近使用证据前，不会擅自标记为“不常用”；后续接入本地使用频率数据库。',
+            style: TextStyle(fontSize: 11),
+          ),
+        ),
+        Expanded(
+          child: ListView.separated(
+            itemCount: applications.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (BuildContext context, int index) {
+              final InstalledApplication application = applications[index];
+              return ListTile(
+                dense: true,
+                leading: const Icon(Icons.apps_outlined, size: 19),
+                title: Text(application.name, overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                  '${application.publisher.isEmpty ? '未知发布者' : application.publisher}'
+                  '${application.version.isEmpty ? '' : ' · ${application.version}'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      application.estimatedSizeBytes > 0
+                          ? _formatSize(application.estimatedSizeBytes)
+                          : '体积未知',
+                      style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                    ),
+                    const SizedBox(width: 6),
+                    TextButton(
+                      onPressed: application.canUninstall
+                          ? () => _confirmInstalledApplicationUninstall(
+                              application,
+                            )
+                          : null,
+                      child: const Text('卸载'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _confirmInstalledApplicationUninstall(
+    InstalledApplication application,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('卸载 ${application.name}？'),
+        content: const Text('将启动软件自己的 Windows 卸载器；Vibekits 不直接删除安装目录。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('打开卸载器'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final bool launched = widget.applicationUninstallLauncher != null
+        ? await widget.applicationUninstallLauncher!(application)
+        : await InstalledApplicationService.launchUninstaller(application);
+    if (mounted) {
+      setState(() {
+        _message = launched
+            ? '已打开 ${application.name} 的卸载器'
+            : '无法启动 ${application.name} 的卸载器';
+      });
+    }
   }
 
   Widget _buildResultSummary(CleanupDeleteResult result) {
@@ -2372,6 +2602,9 @@ class _CleanerTabState extends State<CleanerTab> {
         .length;
     final bool all = selectedCount == items.length;
     final bool partial = selectedCount > 0 && !all;
+    final bool requiresConfirmation = items.any(
+      (CleanupCandidate item) => item.highRisk,
+    );
     final int totalSize = items.fold<int>(
       0,
       (int sum, CleanupCandidate c) => sum + c.size,
@@ -2389,7 +2622,7 @@ class _CleanerTabState extends State<CleanerTab> {
         value: all ? true : (partial ? null : false),
         onChanged: (bool? v) => setState(() {
           for (final CleanupCandidate candidate in items) {
-            if (v == true) {
+            if (v == true && !candidate.highRisk) {
               _selected.add(candidate.path);
             } else {
               _selected.remove(candidate.path);
@@ -2398,11 +2631,11 @@ class _CleanerTabState extends State<CleanerTab> {
         }),
       ),
       title: Text(
-        '${category.label}${category.highRisk ? '（需确认）' : ''}',
+        '${category.label}${requiresConfirmation ? '（高风险项需逐项选择）' : ''}',
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: category.highRisk
+          color: requiresConfirmation
               ? VibekitsColors.warning
               : Theme.of(context).colorScheme.onSurface,
         ),
@@ -2428,14 +2661,16 @@ class _CleanerTabState extends State<CleanerTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    '${candidate.reason} · ${_formatSize(candidate.size)}'
+                    '${candidate.highRisk && candidate.riskLevel == CleanupRiskLevel.safe ? '需确认' : candidate.riskLevel.label} · ${candidate.reason} · ${_formatSize(candidate.size)}'
                     '${candidate.modified == null ? '' : ' · ${_formatDate(candidate.modified!)}'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11),
                   ),
                   Text(
-                    candidate.path,
+                    candidate.impactNote.isEmpty
+                        ? candidate.path
+                        : '${candidate.impactNote} · ${candidate.path}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11),

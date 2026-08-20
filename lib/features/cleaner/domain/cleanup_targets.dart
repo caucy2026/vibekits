@@ -27,6 +27,8 @@ class CleanupScanTarget {
     this.includePatterns = const <String>[],
     this.excludePatterns = const <String>[],
     this.ruleCatalogVersion,
+    this.riskLevel = CleanupRiskLevel.safe,
+    this.ruleSource = '内置规则',
   });
 
   final String id;
@@ -43,8 +45,10 @@ class CleanupScanTarget {
   final List<String> includePatterns;
   final List<String> excludePatterns;
   final int? ruleCatalogVersion;
+  final CleanupRiskLevel riskLevel;
+  final String ruleSource;
 
-  bool get highRisk => category.highRisk;
+  bool get highRisk => category.highRisk || riskLevel.highRisk;
 }
 
 abstract final class CleanupTargetDiscovery {
@@ -358,6 +362,13 @@ abstract final class CleanupTargetDiscovery {
         includePatterns: rule.includePatterns,
         excludePatterns: rule.excludePatterns,
         ruleCatalogVersion: WindowsCleanupRuleCatalog.version,
+        riskLevel: switch (rule.risk) {
+          WindowsCleanupRuleRisk.safe => CleanupRiskLevel.safe,
+          WindowsCleanupRuleRisk.cautious => CleanupRiskLevel.cautious,
+          WindowsCleanupRuleRisk.systemManaged =>
+            CleanupRiskLevel.systemManaged,
+        },
+        ruleSource: 'Windows 规则库 v${WindowsCleanupRuleCatalog.version}',
       );
     }
   }
@@ -771,6 +782,8 @@ abstract final class CleanupTargetDiscovery {
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
     int? ruleCatalogVersion,
+    CleanupRiskLevel riskLevel = CleanupRiskLevel.safe,
+    String ruleSource = '内置规则',
   }) {
     if (!Directory(path).existsSync()) return;
     targets.add(
@@ -789,6 +802,8 @@ abstract final class CleanupTargetDiscovery {
         includePatterns: includePatterns,
         excludePatterns: excludePatterns,
         ruleCatalogVersion: ruleCatalogVersion,
+        riskLevel: riskLevel,
+        ruleSource: ruleSource,
       ),
     );
   }

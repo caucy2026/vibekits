@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'cleanup_deleter.dart';
+import 'cleanup_rule_database.dart';
 import 'cleanup_scanner.dart';
 import 'cleanup_task.dart';
 import 'cleanup_targets.dart';
@@ -18,12 +19,30 @@ abstract final class CleanupBackgroundRunner {
 
   static Future<List<CleanupScanTarget>> discoverTargets({
     String harnessDebugDirectory = '',
-  }) => Isolate.run(
-    () => CleanupTargetDiscovery.discover(
+    String bundledRuleDatabase = '',
+  }) => Isolate.run(() {
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       harnessDebugDirectory: harnessDebugDirectory,
-    ),
-    debugName: 'vibekits-cleanup-target-discovery',
-  );
+    );
+    if (bundledRuleDatabase.trim().isNotEmpty) {
+      try {
+        final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
+          bundledRuleDatabase,
+        );
+        final Set<String> ids = targets
+            .map((CleanupScanTarget target) => target.id)
+            .toSet();
+        targets.addAll(
+          database.targets.where(
+            (CleanupScanTarget target) => ids.add(target.id),
+          ),
+        );
+      } on FormatException {
+        // A bad optional database never disables the compiled safe catalog.
+      }
+    }
+    return targets;
+  }, debugName: 'vibekits-cleanup-target-discovery');
 
   static Future<CleanupScanResult> scanTargets(
     List<CleanupScanTarget> targets, {

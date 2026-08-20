@@ -202,6 +202,38 @@ void main() {
 
     await tester.tap(find.text('开始扫描'));
     await tester.pumpAndSettle();
+    for (final String view in <String>[
+      'recommended',
+      'softwareCache',
+      'largeDownloads',
+    ]) {
+      expect(
+        find.byKey(ValueKey<String>('cleanup-view-$view')),
+        findsOneWidget,
+      );
+    }
+    await tester.drag(
+      find.byKey(const ValueKey<String>('cleanup-task-navigation')),
+      const Offset(-600, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('cleanup-view-unusedSoftware')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('cleanup-view-deepCleanup')),
+      findsOneWidget,
+    );
+    await tester.drag(
+      find.byKey(const ValueKey<String>('cleanup-task-navigation')),
+      const Offset(600, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('cleanup-view-softwareCache')),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('插件下载缓存'), findsOneWidget);
     expect(find.byType(CheckboxListTile), findsNothing);
 

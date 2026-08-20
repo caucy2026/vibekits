@@ -4,6 +4,17 @@ import 'cleanup_task.dart';
 import 'cleanup_targets.dart';
 import 'cleanup_file_identity.dart';
 
+enum CleanupRiskLevel {
+  safe('推荐', false),
+  cautious('需确认', true),
+  systemManaged('系统管理', true);
+
+  const CleanupRiskLevel(this.label, this.highRisk);
+
+  final String label;
+  final bool highRisk;
+}
+
 /// 清理类别（docs/00 §4.1）。
 enum CleanupCategory {
   userTemp('用户临时文件', false),
@@ -38,6 +49,8 @@ class CleanupCandidate {
     this.modified,
     this.identity,
     this.sourceLabel,
+    this.riskLevel = CleanupRiskLevel.safe,
+    this.impactNote = '',
   });
 
   final String path;
@@ -47,20 +60,24 @@ class CleanupCandidate {
   final DateTime? modified;
   final CleanupFileIdentity? identity;
   final String? sourceLabel;
+  final CleanupRiskLevel riskLevel;
+  final String impactNote;
 
-  bool get highRisk => category.highRisk;
+  bool get highRisk => category.highRisk || riskLevel.highRisk;
 
-  bool get allowsPermanentFallback => switch (category) {
-    CleanupCategory.browserCache ||
-    CleanupCategory.applicationCache ||
-    CleanupCategory.systemCache ||
-    CleanupCategory.devCache ||
-    CleanupCategory.pluginCache ||
-    CleanupCategory.debugArtifacts ||
-    CleanupCategory.logs => true,
-    CleanupCategory.discoveredTransient => false,
-    _ => false,
-  };
+  bool get allowsPermanentFallback =>
+      switch (category) {
+        CleanupCategory.browserCache ||
+        CleanupCategory.applicationCache ||
+        CleanupCategory.systemCache ||
+        CleanupCategory.devCache ||
+        CleanupCategory.pluginCache ||
+        CleanupCategory.debugArtifacts ||
+        CleanupCategory.logs => true,
+        CleanupCategory.discoveredTransient => false,
+        _ => false,
+      } &&
+      riskLevel == CleanupRiskLevel.safe;
 
   bool get defaultSelected {
     if (highRisk || reason == '空目录') return false;
@@ -146,6 +163,8 @@ abstract final class CleanupScanner {
     int minimumSizeBytes = 0,
     List<String> includePatterns = const <String>[],
     List<String> excludePatterns = const <String>[],
+    CleanupRiskLevel riskLevel = CleanupRiskLevel.safe,
+    String impactNote = '',
   }) async {
     final CleanupCancellationToken token =
         cancellationToken ?? CleanupCancellationToken();
@@ -224,6 +243,8 @@ abstract final class CleanupScanner {
                   reason: '空目录',
                   identity: CleanupFileIdentity.read(entity.path),
                   sourceLabel: sourceLabel,
+                  riskLevel: riskLevel,
+                  impactNote: impactNote,
                 ),
               );
             }
@@ -258,6 +279,8 @@ abstract final class CleanupScanner {
                 modified: modified,
                 identity: CleanupFileIdentity.read(entity.path),
                 sourceLabel: sourceLabel,
+                riskLevel: riskLevel,
+                impactNote: impactNote,
               ),
             );
           }
@@ -348,6 +371,8 @@ abstract final class CleanupScanner {
             minimumSizeBytes: target.minimumSizeBytes,
             includePatterns: target.includePatterns,
             excludePatterns: target.excludePatterns,
+            riskLevel: target.riskLevel,
+            impactNote: target.safetyNote,
           ),
         CleanupTargetStrategy.downloadSuggestions =>
           await _scanDownloadSuggestions(
@@ -479,6 +504,8 @@ abstract final class CleanupScanner {
               modified: modified,
               identity: CleanupFileIdentity.read(entity.path),
               sourceLabel: target.label,
+              riskLevel: target.riskLevel,
+              impactNote: target.safetyNote,
             ),
           );
           onProgress?.call(
@@ -556,6 +583,8 @@ abstract final class CleanupScanner {
           CleanupCategory.pluginResidual,
           cancellationToken: cancellationToken,
           sourceLabel: '旧版插件 ${stale.name} ${stale.version}',
+          riskLevel: target.riskLevel,
+          impactNote: target.safetyNote,
           onProgress: (CleanupScanProgress progress) {
             onProgress?.call(
               CleanupScanProgress(

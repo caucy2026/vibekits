@@ -28,6 +28,8 @@
 22. [跨工具开发工作流](20_INTEGRATED_DEVELOPER_WORKFLOWS.md)
 23. [发布质量门禁](21_RELEASE_QUALITY_GATE.md)
 24. [能力融合与智能体自动发现最高准则](22_CAPABILITY_INTEGRATION_STANDARD.md)——新增或移植任何工具时必须遵循
+25. [创新能力交付路线](23_INNOVATION_DELIVERY_ROADMAP.md)
+26. [智能清理产品与架构准则](24_CLEANER_COMPETITIVE_ARCHITECTURE.md)——清理竞品结论、五任务入口、规则数据库和超越路线
 
 ## 完成定义
 
