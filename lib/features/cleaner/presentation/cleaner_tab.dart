@@ -14,6 +14,7 @@ import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
 import '../domain/cleanup_targets.dart';
 import '../domain/cleanup_whitelist.dart';
+import '../domain/disk_volume_discovery.dart';
 import '../domain/installed_application_service.dart';
 import '../domain/software_storage_analyzer.dart';
 import '../domain/system_drive_analysis_runner.dart';
@@ -33,6 +34,12 @@ typedef CleanupDeleteRunner = Future<CleanupDeleteResult> Function({
 });
 typedef CleanupDiskSnapshotReader = DiskSpaceSnapshot? Function(String path);
 typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
+  required CleanupCancellationToken cancellationToken,
+  required void Function(SystemDriveAnalysisProgress progress) onProgress,
+});
+typedef CleanupVolumeLoader = Future<List<DiskVolumeInfo>> Function();
+typedef CleanupVolumeDriveAnalysisRunner = Future<SystemDriveAnalysis> Function(
+  String rootPath, {
   required CleanupCancellationToken cancellationToken,
   required void Function(SystemDriveAnalysisProgress progress) onProgress,
 });
@@ -61,6 +68,8 @@ class CleanerTab extends StatefulWidget {
     this.onCleanupStatsChanged,
     this.availableTargets,
     this.driveAnalysisRunner,
+    this.volumeLoader,
+    this.volumeDriveAnalysisRunner,
     this.driveEntryRecycler,
     this.analyzeAfterCleanup = true,
     this.persistDriveAnalysisReport = true,
@@ -85,6 +94,8 @@ class CleanerTab extends StatefulWidget {
   onCleanupStatsChanged;
   final List<CleanupScanTarget>? availableTargets;
   final CleanupDriveAnalysisRunner? driveAnalysisRunner;
+  final CleanupVolumeLoader? volumeLoader;
+  final CleanupVolumeDriveAnalysisRunner? volumeDriveAnalysisRunner;
   final CleanupDriveEntryRecycler? driveEntryRecycler;
   final bool analyzeAfterCleanup;
   final bool persistDriveAnalysisReport;
@@ -117,6 +128,12 @@ class _CleanerTabState extends State<CleanerTab> {
   DiskSpaceSnapshot? _diskBefore;
   DiskSpaceSnapshot? _diskAfter;
   SystemDriveAnalysis? _driveAnalysis;
+  final Map<String, SystemDriveAnalysis> _driveAnalyses =
+      <String, SystemDriveAnalysis>{};
+  List<DiskVolumeInfo> _volumes = const <DiskVolumeInfo>[];
+  late Set<String> _selectedVolumeRoots;
+  String? _activeVolumeRoot;
+  bool _discoveringVolumes = true;
   SystemDriveAnalysisProgress? _driveAnalysisProgress;
   final Map<String, SystemDriveUsageEntry> _partialDriveEntries =
       <String, SystemDriveUsageEntry>{};
@@ -135,11 +152,69 @@ class _CleanerTabState extends State<CleanerTab> {
   @override
   void initState() {
     super.initState();
+    _selectedVolumeRoots = <String>{_systemDiskPath()};
+    _activeVolumeRoot = _systemDiskPath();
+    unawaited(_discoverVolumes());
     final List<CleanupScanTarget>? supplied = widget.availableTargets;
     if (supplied != null) {
       _applyDiscoveredTargets(supplied);
     } else {
       unawaited(_discoverTargets());
+    }
+  }
+
+  Future<void> _discoverVolumes() async {
+    try {
+      List<DiskVolumeInfo> volumes =
+          await (widget.volumeLoader?.call() ?? DiskVolumeDiscovery.discover());
+      if (volumes.isEmpty) {
+        final String root = _systemDiskPath();
+        final DiskSpaceSnapshot? disk =
+            widget.diskSnapshotReader?.call(root) ?? DiskSpace.snapshot(root);
+        volumes = <DiskVolumeInfo>[
+          DiskVolumeInfo(
+            rootPath: root,
+            name: '${_shortVolumeName(root)}（系统盘）',
+            type: DiskVolumeType.fixed,
+            totalBytes: disk?.totalBytes ?? 0,
+            freeBytes: disk?.freeBytes ?? 0,
+            availableBytes: disk?.availableBytes ?? 0,
+            isSystemVolume: true,
+          ),
+        ];
+      }
+      if (!mounted) return;
+      final Set<String> available = volumes
+          .map((DiskVolumeInfo item) => _volumeKey(item.rootPath))
+          .toSet();
+      final Set<String> retained = _selectedVolumeRoots
+          .where((String root) => available.contains(_volumeKey(root)))
+          .toSet();
+      if (retained.isEmpty) {
+        retained.add(
+          volumes
+              .firstWhere(
+                (DiskVolumeInfo item) => item.isSystemVolume,
+                orElse: () => volumes.first,
+              )
+              .rootPath,
+        );
+      }
+      setState(() {
+        _volumes = List<DiskVolumeInfo>.unmodifiable(volumes);
+        _selectedVolumeRoots = retained;
+        _activeVolumeRoot = _matchingVolumeRoot(
+          _activeVolumeRoot ?? retained.first,
+          volumes,
+        );
+        _discoveringVolumes = false;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _discoveringVolumes = false;
+        _message = '磁盘列表加载失败：$error';
+      });
     }
   }
 
@@ -481,34 +556,61 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _analyzeSystemDrive() async {
     if (_scanning || _cleaning || _analyzingDrive) return;
+    final List<String> roots =
+        _selectedVolumeRoots.isEmpty
+              ? <String>[_systemDiskPath()]
+              : _selectedVolumeRoots.toList(growable: false)
+          ..sort((String left, String right) => left.compareTo(right));
     final CleanupCancellationToken token = CleanupCancellationToken();
     _taskToken = token;
     setState(() {
       _analyzingDrive = true;
       _driveAnalysis = null;
+      _driveAnalyses.clear();
       _driveAnalysisProgress = null;
       _partialDriveEntries.clear();
       _lastDriveAnalysisReport = null;
-      _message = '正在分析系统盘根目录与空间占用…';
+      _message = '正在分析 ${roots.length} 个已选磁盘的空间占用…';
     });
     try {
       final Future<List<InstalledApplication>> applicationsFuture =
           widget.installedApplicationLoader?.call() ??
           InstalledApplicationService.load();
-      final SystemDriveAnalysis analysis = widget.driveAnalysisRunner == null
-          ? await SystemDriveAnalysisRunner.analyze(
-              _systemDiskPath(),
-              cancellationToken: token,
-              onProgress: (SystemDriveAnalysisProgress progress) {
-                if (mounted) _recordDriveProgress(progress);
-              },
-            )
-          : await widget.driveAnalysisRunner!(
-              cancellationToken: token,
-              onProgress: (SystemDriveAnalysisProgress progress) {
-                if (mounted) _recordDriveProgress(progress);
-              },
+      int completed = 0;
+      for (final String root in roots) {
+        if (token.isCancelled) break;
+        if (mounted) {
+          setState(() {
+            _activeVolumeRoot = root;
+            _driveAnalysisProgress = null;
+            _partialDriveEntries.clear();
+            _message =
+                '正在分析 ${_shortVolumeName(root)} '
+                '(${completed + 1}/${roots.length})…';
+          });
+        }
+        final SystemDriveAnalysis analysis = await _runDriveAnalysis(
+          root,
+          token,
+        );
+        completed++;
+        if (!mounted) return;
+        setState(() {
+          _driveAnalyses[_volumeKey(root)] = analysis;
+          _driveAnalysis = analysis;
+          _partialDriveEntries.clear();
+        });
+        if (widget.persistDriveAnalysisReport) {
+          try {
+            final File report = await SystemDriveAnalysisReportWriter.write(
+              analysis,
             );
+            if (mounted) setState(() => _lastDriveAnalysisReport = report);
+          } on Object {
+            // 单个磁盘报告失败不影响其他磁盘继续分析。
+          }
+        }
+      }
       List<InstalledApplication> applications;
       try {
         applications = await applicationsFuture;
@@ -517,40 +619,57 @@ class _CleanerTabState extends State<CleanerTab> {
       }
       if (!mounted) return;
       setState(() {
-        _driveAnalysis = analysis;
         _installedApplications = applications;
         _analyzingDrive = false;
         _partialDriveEntries.clear();
-        _message = analysis.cancelled
-            ? '空间分析已取消，以下为已完成部分'
-            : '空间分析完成：识别 ${applications.length} 个已安装软件，'
-                  '${analysis.entries.length} 个系统盘根项目';
+        final int rootEntries = _driveAnalyses.values.fold<int>(
+          0,
+          (int total, SystemDriveAnalysis item) => total + item.entries.length,
+        );
+        _message = token.isCancelled
+            ? '空间分析已取消，已保留 ${_driveAnalyses.length} 个磁盘的完成结果'
+            : '空间分析完成：${_driveAnalyses.length} 个磁盘，'
+                  '识别 ${applications.length} 个已安装软件、$rootEntries 个根项目';
       });
-      if (widget.persistDriveAnalysisReport) {
-        try {
-          final File report = await SystemDriveAnalysisReportWriter.write(
-            analysis,
-            installedApplications: applications,
-          );
-          if (mounted) setState(() => _lastDriveAnalysisReport = report);
-        } catch (error) {
-          if (mounted) {
-            setState(
-              () => _message = '$_message；详细报告保存失败：${error.runtimeType}',
-            );
-          }
-        }
-      }
     } catch (error) {
       if (mounted) {
         setState(() {
           _analyzingDrive = false;
-          _message = '系统盘空间分析失败：$error';
+          _message = '磁盘空间分析失败：$error';
         });
       }
     } finally {
       if (identical(_taskToken, token)) _taskToken = null;
     }
+  }
+
+  Future<SystemDriveAnalysis> _runDriveAnalysis(
+    String root,
+    CleanupCancellationToken token,
+  ) {
+    void onProgress(SystemDriveAnalysisProgress progress) {
+      if (mounted) _recordDriveProgress(progress);
+    }
+
+    if (widget.volumeDriveAnalysisRunner != null) {
+      return widget.volumeDriveAnalysisRunner!(
+        root,
+        cancellationToken: token,
+        onProgress: onProgress,
+      );
+    }
+    if (widget.driveAnalysisRunner != null &&
+        _volumeKey(root) == _volumeKey(_systemDiskPath())) {
+      return widget.driveAnalysisRunner!(
+        cancellationToken: token,
+        onProgress: onProgress,
+      );
+    }
+    return SystemDriveAnalysisRunner.analyze(
+      root,
+      cancellationToken: token,
+      onProgress: onProgress,
+    );
   }
 
   void _recordDriveProgress(SystemDriveAnalysisProgress progress) {
@@ -577,6 +696,47 @@ class _CleanerTabState extends State<CleanerTab> {
       return windowsDirectory.substring(0, 3);
     }
     return Directory.current.path;
+  }
+
+  String _volumeKey(String path) =>
+      Platform.isWindows ? path.replaceAll('/', '\\').toLowerCase() : path;
+
+  String _shortVolumeName(String path) {
+    if (Platform.isWindows && path.length >= 2 && path[1] == ':') {
+      return path.substring(0, 2).toUpperCase();
+    }
+    return path == '/' ? '/' : path.split('/').where((e) => e.isNotEmpty).last;
+  }
+
+  String _matchingVolumeRoot(String root, List<DiskVolumeInfo> volumes) {
+    final String key = _volumeKey(root);
+    for (final DiskVolumeInfo volume in volumes) {
+      if (_volumeKey(volume.rootPath) == key) return volume.rootPath;
+    }
+    return volumes.first.rootPath;
+  }
+
+  DiskVolumeInfo? _volumeForRoot(String root) {
+    final String key = _volumeKey(root);
+    for (final DiskVolumeInfo volume in _volumes) {
+      if (_volumeKey(volume.rootPath) == key) return volume;
+    }
+    return null;
+  }
+
+  int _cleanableBytes(SystemDriveAnalysis analysis) {
+    final Map<String, SystemDriveUsageEntry> safe =
+        <String, SystemDriveUsageEntry>{};
+    for (final SystemDriveUsageEntry entry in <SystemDriveUsageEntry>[
+      ...analysis.entries,
+      ...analysis.breakdownEntries,
+    ]) {
+      if (entry.canDelete) safe[entry.path.toLowerCase()] = entry;
+    }
+    return safe.values.fold<int>(
+      0,
+      (int total, SystemDriveUsageEntry entry) => total + entry.sizeBytes,
+    );
   }
 
   Future<void> _manageWhitelist() async {
@@ -836,6 +996,7 @@ class _CleanerTabState extends State<CleanerTab> {
     return Column(
       children: <Widget>[
         _buildToolbar(),
+        _buildVolumeSelector(),
         if (_message.isNotEmpty)
           Container(
             width: double.infinity,
@@ -854,6 +1015,7 @@ class _CleanerTabState extends State<CleanerTab> {
           _buildDriveAnalysisProgress(_driveAnalysisProgress!),
         if (_analyzingDrive && _partialDriveEntries.isNotEmpty)
           _buildPartialDriveAnalysis(),
+        if (_driveAnalyses.isNotEmpty) _buildDriveResultsSelector(),
         if (_driveAnalysis != null) _buildDriveAnalysis(_driveAnalysis!),
         Expanded(child: _buildBody()),
       ],
@@ -910,7 +1072,7 @@ class _CleanerTabState extends State<CleanerTab> {
               const SizedBox(width: 6),
               if (veryCompact)
                 IconButton(
-                  tooltip: '系统盘空间分析',
+                  tooltip: '磁盘空间分析',
                   onPressed: _scanning || _cleaning || _analyzingDrive
                       ? null
                       : _analyzeSystemDrive,
@@ -922,7 +1084,7 @@ class _CleanerTabState extends State<CleanerTab> {
                       ? null
                       : _analyzeSystemDrive,
                   icon: const Icon(Icons.donut_large, size: 18),
-                  label: Text(_analyzingDrive ? '分析中…' : '空间分析'),
+                  label: Text(_analyzingDrive ? '分析中…' : '分析所选磁盘'),
                 ),
               const SizedBox(width: 6),
               if (veryCompact)
@@ -975,6 +1137,209 @@ class _CleanerTabState extends State<CleanerTab> {
     );
   }
 
+  Widget _buildVolumeSelector() {
+    if (_discoveringVolumes && _volumes.isEmpty) {
+      return const SizedBox(
+        height: 46,
+        child: Center(child: Text('正在读取本机磁盘…')),
+      );
+    }
+    if (_volumes.isEmpty) {
+      return SizedBox(
+        height: 46,
+        child: Center(
+          child: TextButton.icon(
+            onPressed: _discoverVolumes,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('未读取到磁盘，点击重试'),
+          ),
+        ),
+      );
+    }
+    return Container(
+      height: 62,
+      decoration: BoxDecoration(
+        color: context.vibe.canvas,
+        border: Border.symmetric(
+          horizontal: BorderSide(color: context.vibe.border),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 6),
+            child: Text(
+              '扫描磁盘',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: context.vibe.muted,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              itemCount: _volumes.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (BuildContext context, int index) {
+                final DiskVolumeInfo volume = _volumes[index];
+                final bool selected = _selectedVolumeRoots.any(
+                  (String root) =>
+                      _volumeKey(root) == _volumeKey(volume.rootPath),
+                );
+                return InkWell(
+                  key: ValueKey<String>('cleaner-volume-${volume.rootPath}'),
+                  borderRadius: BorderRadius.circular(9),
+                  onTap: _analyzingDrive
+                      ? null
+                      : () => setState(() {
+                          if (selected && _selectedVolumeRoots.length > 1) {
+                            _selectedVolumeRoots.removeWhere(
+                              (String root) =>
+                                  _volumeKey(root) ==
+                                  _volumeKey(volume.rootPath),
+                            );
+                          } else {
+                            _selectedVolumeRoots.add(volume.rootPath);
+                          }
+                        }),
+                  child: Container(
+                    width: 184,
+                    padding: const EdgeInsets.symmetric(horizontal: 7),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : context.vibe.panel,
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : context.vibe.border,
+                      ),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Checkbox(
+                          value: selected,
+                          visualDensity: VisualDensity.compact,
+                          onChanged: _analyzingDrive
+                              ? null
+                              : (_) => setState(() {
+                                  if (selected &&
+                                      _selectedVolumeRoots.length > 1) {
+                                    _selectedVolumeRoots.removeWhere(
+                                      (String root) =>
+                                          _volumeKey(root) ==
+                                          _volumeKey(volume.rootPath),
+                                    );
+                                  } else {
+                                    _selectedVolumeRoots.add(volume.rootPath);
+                                  }
+                                }),
+                        ),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                '${volume.name} · ${volume.type.label}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                '已用 ${_formatSize(volume.usedBytes)} / '
+                                '${_formatSize(volume.totalBytes)} · '
+                                '剩余 ${_formatSize(volume.freeBytes)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: context.vibe.muted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          TextButton(
+            onPressed: _analyzingDrive
+                ? null
+                : () => setState(() {
+                    if (_selectedVolumeRoots.length == _volumes.length) {
+                      final DiskVolumeInfo system = _volumes.firstWhere(
+                        (DiskVolumeInfo item) => item.isSystemVolume,
+                        orElse: () => _volumes.first,
+                      );
+                      _selectedVolumeRoots = <String>{system.rootPath};
+                    } else {
+                      _selectedVolumeRoots = _volumes
+                          .map((DiskVolumeInfo item) => item.rootPath)
+                          .toSet();
+                    }
+                  }),
+            child: Text(
+              _selectedVolumeRoots.length == _volumes.length ? '仅系统盘' : '全选',
+            ),
+          ),
+          IconButton(
+            tooltip: '刷新磁盘列表',
+            onPressed: _analyzingDrive ? null : _discoverVolumes,
+            icon: const Icon(Icons.refresh, size: 17),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriveResultsSelector() {
+    if (_driveAnalyses.length <= 1) return const SizedBox.shrink();
+    return SizedBox(
+      height: 42,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        children: <Widget>[
+          for (final SystemDriveAnalysis analysis in _driveAnalyses.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ChoiceChip(
+                key: ValueKey<String>(
+                  'cleaner-volume-result-${analysis.rootPath}',
+                ),
+                selected:
+                    _activeVolumeRoot != null &&
+                    _volumeKey(_activeVolumeRoot!) ==
+                        _volumeKey(analysis.rootPath),
+                onSelected: (_) => setState(() {
+                  _activeVolumeRoot = analysis.rootPath;
+                  _driveAnalysis = analysis;
+                }),
+                label: Text(
+                  '${_shortVolumeName(analysis.rootPath)} · '
+                  '已用 ${_formatSize(analysis.usedBytes)} · '
+                  '剩余 ${_formatSize(analysis.freeBytes)} · '
+                  '可清 ${_formatSize(_cleanableBytes(analysis))}',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDriveAnalysisProgress(SystemDriveAnalysisProgress progress) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1007,6 +1372,9 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Widget _buildDriveAnalysis(SystemDriveAnalysis analysis) {
     final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
+    final bool isSystemVolume =
+        _volumeForRoot(analysis.rootPath)?.isSystemVolume ??
+        _volumeKey(analysis.rootPath) == _volumeKey(_systemDiskPath());
     final Map<String, SystemDriveEntryAssessment> assessmentsByPath =
         <String, SystemDriveEntryAssessment>{
           for (final SystemDriveEntryAssessment item in insights.assessments)
@@ -1037,7 +1405,7 @@ class _CleanerTabState extends State<CleanerTab> {
       length: 2,
       initialIndex: software.isEmpty ? 1 : 0,
       child: Container(
-        height: 470,
+        height: 370,
         margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
         decoration: BoxDecoration(
           color: context.vibe.panel,
@@ -1056,8 +1424,9 @@ class _CleanerTabState extends State<CleanerTab> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        const Text(
-                          '系统盘空间分析',
+                        Text(
+                          '${_shortVolumeName(analysis.rootPath)} 磁盘空间分析'
+                          '${_volumeForRoot(analysis.rootPath)?.isSystemVolume == true ? '（系统盘）' : ''}',
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         Text(
@@ -1110,7 +1479,7 @@ class _CleanerTabState extends State<CleanerTab> {
             const TabBar(
               tabs: <Widget>[
                 Tab(key: Key('cleaner-software-storage-tab'), text: '软件占用与操作'),
-                Tab(key: Key('cleaner-system-storage-tab'), text: '系统占用与异常'),
+                Tab(key: Key('cleaner-system-storage-tab'), text: '磁盘占用与可清理'),
               ],
             ),
             const Divider(height: 1),
@@ -1123,6 +1492,7 @@ class _CleanerTabState extends State<CleanerTab> {
                     assessmentsByPath,
                     totals,
                     insights,
+                    isSystemVolume: isSystemVolume,
                   ),
                 ],
               ),
@@ -1261,8 +1631,9 @@ class _CleanerTabState extends State<CleanerTab> {
     List<SystemDriveUsageEntry> visible,
     Map<String, SystemDriveEntryAssessment> assessmentsByPath,
     Map<SystemDriveEntryKind, int> totals,
-    SystemDriveInsights insights,
-  ) => Column(
+    SystemDriveInsights insights, {
+    required bool isSystemVolume,
+  }) => Column(
     children: <Widget>[
       Container(
         width: double.infinity,
@@ -1270,7 +1641,8 @@ class _CleanerTabState extends State<CleanerTab> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         child: Text(
           '异常判断：${insights.priorities.length} 项需要关注 · '
-          '${insights.storagePressure.label}\n${insights.systemBaseline}\n'
+          '${insights.storagePressure.label}\n'
+          '${isSystemVolume ? insights.systemBaseline : '数据盘普通目录仅统计占用；只允许清理明确识别的缓存、临时文件和日志'}\n'
           '${totals.entries.where((item) => item.value > 0).map((item) => '${item.key.label} ${_formatSize(item.value)}').join(' · ')}',
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
@@ -1427,7 +1799,7 @@ class _CleanerTabState extends State<CleanerTab> {
               right.sizeBytes.compareTo(left.sizeBytes),
         );
     return Container(
-      constraints: const BoxConstraints(maxHeight: 300),
+      constraints: const BoxConstraints(maxHeight: 240),
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       decoration: BoxDecoration(
         color: context.vibe.panel,
@@ -1474,7 +1846,7 @@ class _CleanerTabState extends State<CleanerTab> {
   Future<void> _askHarnessAboutDrive(SystemDriveAnalysis analysis) async {
     final String prompt =
         '请调用 vibekits.cleaner.analyze_drive 分析 ${analysis.rootPath}。'
-        '请按 Windows 系统、已安装软件、软件数据、用户数据、日志缓存和未知目录说明各占多少，'
+        '请按系统、已安装软件、软件数据、普通数据、日志缓存和未知目录说明各占多少，'
         '解释哪些属于常见范围、哪些异常、判断依据和最安全的处理顺序。'
         '不要直接删除任何内容；需要清理时先列出具体路径、影响和恢复方式，等待我确认。';
     await widget.onAskHarness?.call(prompt);
@@ -1598,7 +1970,7 @@ class _CleanerTabState extends State<CleanerTab> {
     await showDialog<void>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('系统盘详细分析报告'),
+        title: Text('${_shortVolumeName(analysis.rootPath)} 磁盘详细分析报告'),
         content: SizedBox(
           width: 680,
           child: SingleChildScrollView(

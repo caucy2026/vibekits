@@ -7,6 +7,7 @@ import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
+import 'package:vibekits/features/cleaner/domain/disk_volume_discovery.dart';
 import 'package:vibekits/features/cleaner/domain/installed_application_service.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
@@ -365,10 +366,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.tap(find.byTooltip('磁盘空间分析'));
     await tester.pumpAndSettle();
 
-    expect(find.text('系统盘空间分析'), findsOneWidget);
+    expect(find.textContaining('磁盘空间分析'), findsOneWidget);
     expect(find.textContaining('总量 9.8 KB'), findsOneWidget);
     expect(find.text('Windows'), findsOneWidget);
     expect(find.text('estlog'), findsOneWidget);
@@ -404,7 +405,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.tap(find.byTooltip('磁盘空间分析'));
     await tester.pump();
     report(
       const SystemDriveAnalysisProgress(
@@ -506,9 +507,9 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.tap(find.byTooltip('磁盘空间分析'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('系统占用与异常'));
+    await tester.tap(find.text('磁盘占用与可清理'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('移到回收站'));
     await tester.pumpAndSettle();
@@ -611,7 +612,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byTooltip('系统盘空间分析'));
+    await tester.tap(find.byTooltip('磁盘空间分析'));
     await tester.pumpAndSettle();
     expect(find.text('软件占用与操作'), findsOneWidget);
     expect(find.text('Acme IDE'), findsOneWidget);
@@ -629,5 +630,92 @@ void main() {
     await tester.tap(find.byKey(const Key('confirm-software-uninstall')));
     await tester.pumpAndSettle();
     expect(uninstalledName, 'Acme IDE');
+  });
+
+  testWidgets('可勾选多个磁盘并切换查看逐盘占用和可清理容量', (WidgetTester tester) async {
+    final List<String> analyzedRoots = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            availableTargets: testTargets,
+            persistDriveAnalysisReport: false,
+            volumeLoader: () async => const <DiskVolumeInfo>[
+              DiskVolumeInfo(
+                rootPath: 'C:\\',
+                name: 'C:（系统盘）',
+                type: DiskVolumeType.fixed,
+                totalBytes: 10000,
+                freeBytes: 2000,
+                availableBytes: 2000,
+                isSystemVolume: true,
+              ),
+              DiskVolumeInfo(
+                rootPath: 'D:\\',
+                name: 'D:',
+                type: DiskVolumeType.fixed,
+                totalBytes: 20000,
+                freeBytes: 7000,
+                availableBytes: 7000,
+                isSystemVolume: false,
+              ),
+            ],
+            installedApplicationLoader: () async =>
+                const <InstalledApplication>[],
+            volumeDriveAnalysisRunner:
+                (
+                  String rootPath, {
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(SystemDriveAnalysisProgress progress)
+                  onProgress,
+                }) async {
+                  analyzedRoots.add(rootPath);
+                  final bool dataDrive = rootPath.startsWith('D:');
+                  return SystemDriveAnalysis(
+                    rootPath: rootPath,
+                    entries: <SystemDriveUsageEntry>[
+                      SystemDriveUsageEntry(
+                        path: '${rootPath}Logs',
+                        name: 'Logs',
+                        sizeBytes: dataDrive ? 3000 : 1000,
+                        kind: SystemDriveEntryKind.logsAndCaches,
+                        reason: '日志目录',
+                        isDirectory: true,
+                        complete: true,
+                        deletePolicy:
+                            SystemDriveDeletePolicy.recycleAfterConfirmation,
+                      ),
+                    ],
+                    cancelled: false,
+                    unreadablePaths: 0,
+                    visitedEntries: 2,
+                    measuredBytes: dataDrive ? 13000 : 8000,
+                    totalBytes: dataDrive ? 20000 : 10000,
+                    freeBytes: dataDrive ? 7000 : 2000,
+                    availableBytes: dataDrive ? 7000 : 2000,
+                  );
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('C:（系统盘）'), findsOneWidget);
+    expect(find.textContaining('D: · 本地磁盘'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('cleaner-volume-D:\\')));
+    await tester.tap(find.byTooltip('磁盘空间分析'));
+    await tester.pumpAndSettle();
+
+    expect(analyzedRoots, containsAll(<String>['C:\\', 'D:\\']));
+    expect(
+      find.byKey(const ValueKey<String>('cleaner-volume-result-C:\\')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('cleaner-volume-result-D:\\')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('可清 2.9 KB'), findsOneWidget);
   });
 }

@@ -3,9 +3,26 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const MethodChannel processLifecycle = MethodChannel(
+    'vibekits/process_lifecycle',
+  );
+  setUpAll(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(processLifecycle, (MethodCall call) async {
+          if (call.method == 'bindProcessTree') return true;
+          return null;
+        });
+  });
+  tearDownAll(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(processLifecycle, null);
+  });
+
   test('官方 Harness 使用本地模型端点完成一次真实任务', () async {
     final Directory workspace = await Directory.systemTemp.createTemp(
       'vibekits_harness_native_',

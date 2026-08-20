@@ -98,6 +98,38 @@ void main() {
     expect(analysis.visitedEntries, lessThan(1000));
   });
 
+  test('数据盘普通目录受保护，仅明确缓存日志目录可进入清理', () async {
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vk_data_drive_analysis_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    final Directory project = Directory(
+      '${root.path}${Platform.pathSeparator}Projects',
+    )..createSync();
+    final Directory logs = Directory(
+      '${root.path}${Platform.pathSeparator}Logs',
+    )..createSync();
+    File('${project.path}${Platform.pathSeparator}source.dart')
+        .writeAsStringSync('void main() {}');
+    File('${logs.path}${Platform.pathSeparator}worker.log')
+        .writeAsStringSync('diagnostic');
+
+    final SystemDriveAnalysis analysis = await SystemDriveAnalyzer.analyze(
+      root.path,
+    );
+    final SystemDriveUsageEntry projectEntry = analysis.entries.singleWhere(
+      (SystemDriveUsageEntry entry) => entry.name == 'Projects',
+    );
+    final SystemDriveUsageEntry logsEntry = analysis.entries.singleWhere(
+      (SystemDriveUsageEntry entry) => entry.name == 'Logs',
+    );
+
+    expect(projectEntry.kind, SystemDriveEntryKind.userData);
+    expect(projectEntry.canDelete, isFalse);
+    expect(logsEntry.kind, SystemDriveEntryKind.logsAndCaches);
+    expect(logsEntry.canDelete, isTrue);
+  });
+
   test('一次扫描同时列出 Windows 组件、安装软件和用户软件数据', () async {
     final Directory root = Directory.systemTemp.createTempSync(
       'vk_drive_breakdown_',

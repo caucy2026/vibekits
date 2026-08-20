@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/app/app.dart';
 import 'package:vibekits/app/app_settings.dart';
+import 'package:vibekits/app/app_version.dart';
 import 'package:vibekits/app/dropped_file_router.dart';
 import 'package:vibekits/app/main_shell.dart';
 import 'package:vibekits/features/documents/domain/format_router.dart';
@@ -129,7 +130,7 @@ void main() {
     expect(find.byKey(const Key('primary-navigation')), findsOneWidget);
     expect(find.byKey(const Key('primary-navigation-compact')), findsNothing);
     expect(find.text('LOCAL TOOLKIT'), findsOneWidget);
-    expect(find.textContaining('v1.9.0-dev.21+31'), findsWidgets);
+    expect(find.textContaining(AppVersion.display), findsWidgets);
     expect(find.text('任务 0'), findsNothing);
   });
 

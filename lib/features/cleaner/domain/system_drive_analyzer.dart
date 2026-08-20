@@ -190,9 +190,17 @@ abstract final class SystemDriveAnalyzer {
     } on FileSystemException {
       unreadable++;
     }
+    final bool systemVolume =
+        _isSystemVolume(rootPath) ||
+        roots.any(
+          (FileSystemEntity entry) =>
+              _baseName(entry.path).toLowerCase() == 'windows',
+        );
     roots.sort(
-      (FileSystemEntity left, FileSystemEntity right) =>
-          _rootPriority(left.path).compareTo(_rootPriority(right.path)),
+      (FileSystemEntity left, FileSystemEntity right) => _rootPriority(
+        left.path,
+        systemVolume: systemVolume,
+      ).compareTo(_rootPriority(right.path, systemVolume: systemVolume)),
     );
     final List<SystemDriveUsageEntry> entries = <SystemDriveUsageEntry>[];
     final List<SystemDriveUsageEntry> breakdownEntries =
@@ -274,6 +282,7 @@ abstract final class SystemDriveAnalyzer {
         final (SystemDriveEntryKind, String) classification = _classify(
           name,
           isDirectory: type == FileSystemEntityType.directory,
+          systemVolume: systemVolume,
         );
         final SystemDriveUsageEntry entry = SystemDriveUsageEntry(
           path: entity.path,
@@ -417,13 +426,14 @@ abstract final class SystemDriveAnalyzer {
     );
   }
 
-  static int _rootPriority(String path) {
+  static int _rootPriority(String path, {required bool systemVolume}) {
     final String name = _baseName(path).toLowerCase();
     final (SystemDriveEntryKind, String) classification = _classify(
       name,
       isDirectory:
           FileSystemEntity.typeSync(path, followLinks: false) ==
           FileSystemEntityType.directory,
+      systemVolume: systemVolume,
     );
     return switch (classification.$1) {
       SystemDriveEntryKind.logsAndCaches => 0,
@@ -438,7 +448,7 @@ abstract final class SystemDriveAnalyzer {
 
   static SystemDriveDeletePolicy _deletePolicyFor(SystemDriveEntryKind kind) =>
       switch (kind) {
-        SystemDriveEntryKind.logsAndCaches || SystemDriveEntryKind.unknown =>
+        SystemDriveEntryKind.logsAndCaches =>
           SystemDriveDeletePolicy.recycleAfterConfirmation,
         _ => SystemDriveDeletePolicy.protected,
       };
@@ -504,7 +514,10 @@ abstract final class SystemDriveAnalyzer {
         .replaceAll('\\', '/')
         .replaceFirst(RegExp('^/+'), '');
     final String owner = _softwareOwnerFor(parent.path, path);
-    final bool safeUserCache = rootName == 'programdata' || rootName == 'users';
+    final bool safeUserCache =
+        rootName == 'programdata' ||
+        rootName == 'users' ||
+        parent.kind == SystemDriveEntryKind.userData;
     return SystemDriveUsageEntry(
       path: path,
       name: relative.replaceAll('/', ' / '),
@@ -655,9 +668,24 @@ abstract final class SystemDriveAnalyzer {
   static (SystemDriveEntryKind, String) _classify(
     String name, {
     required bool isDirectory,
+    required bool systemVolume,
   }) {
     final String lower = name.toLowerCase();
     if (isDirectory) {
+      if (_cacheDirectoryNames.contains(lower)) {
+        return (
+          SystemDriveEntryKind.logsAndCaches,
+          '明确命名的缓存或日志目录；确认无软件正在写入后可清理',
+        );
+      }
+      final (SystemDriveEntryKind, String)? known = _knownRoots[lower];
+      if (known != null) return known;
+      if (!systemVolume) {
+        return (
+          SystemDriveEntryKind.userData,
+          '非系统盘普通数据；仅列出占用，不会直接删除项目、媒体或用户文件',
+        );
+      }
       return _knownRoots[lower] ??
           (
             SystemDriveEntryKind.unknown,
@@ -675,6 +703,21 @@ abstract final class SystemDriveAnalyzer {
       return (SystemDriveEntryKind.logsAndCaches, '根目录诊断文件；大于阈值且过期时可进入清理复核');
     }
     return (SystemDriveEntryKind.unknown, '未知根目录文件；不得自动删除');
+  }
+
+  static bool _isSystemVolume(String rootPath) {
+    final String normalized = rootPath.replaceAll('/', '\\').toLowerCase();
+    final String? systemDrive = Platform.environment['SystemDrive'];
+    if (systemDrive != null && systemDrive.trim().isNotEmpty) {
+      final String expected = systemDrive.endsWith('\\')
+          ? systemDrive
+          : '$systemDrive\\';
+      return normalized == expected.toLowerCase();
+    }
+    final String? windows = Platform.environment['WINDIR'];
+    return windows != null &&
+        windows.length >= 3 &&
+        normalized == windows.substring(0, 3).toLowerCase();
   }
 
   static String _baseName(String path) => path
