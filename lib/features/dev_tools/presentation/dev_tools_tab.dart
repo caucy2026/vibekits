@@ -243,6 +243,7 @@ class _DevToolsTabState extends State<DevToolsTab> {
 
   Widget _buildSidebar() {
     return SizedBox(
+      key: const Key('dev-tools-sidebar'),
       width: 220,
       child: Column(
         children: <Widget>[
@@ -289,37 +290,64 @@ class _DevToolsTabState extends State<DevToolsTab> {
               ],
             ),
           ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: OutlinedButton.icon(
-              key: const Key('current-tool-harness-activity'),
-              onPressed: () => showHarnessToolActivityDialog(
-                context,
-                toolName: _selected.name,
-                toolIds: harnessToolIdsFor(_selected),
-              ),
-              icon: const Icon(Icons.history_rounded, size: 18),
-              label: const Text('当前工具的 Harness 记录'),
-            ),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildWorkArea() {
-    return PageView.builder(
-      key: const Key('dev-tool-pages'),
-      controller: _toolPageController,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: devToolRegistry.length,
-      itemBuilder: (BuildContext context, int index) => _KeepAliveToolWorkspace(
-        child: KeyedSubtree(
-          key: PageStorageKey<String>('dev-tool-${devToolRegistry[index].id}'),
-          child: _buildToolArea(devToolRegistry[index]),
+    return Column(
+      children: <Widget>[
+        Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: context.vibe.border)),
+          ),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  _selected.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                key: const Key('current-tool-harness-activity'),
+                onPressed: () => showHarnessToolActivityDialog(
+                  context,
+                  toolName: _selected.name,
+                  toolIds: harnessToolIdsFor(_selected),
+                ),
+                icon: const Icon(Icons.history_rounded, size: 17),
+                label: const Text('Harness 记录'),
+              ),
+            ],
+          ),
         ),
-      ),
+        Expanded(
+          child: PageView.builder(
+            key: const Key('dev-tool-pages'),
+            controller: _toolPageController,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: devToolRegistry.length,
+            itemBuilder: (BuildContext context, int index) =>
+                _KeepAliveToolWorkspace(
+                  child: KeyedSubtree(
+                    key: PageStorageKey<String>(
+                      'dev-tool-${devToolRegistry[index].id}',
+                    ),
+                    child: _buildToolArea(devToolRegistry[index]),
+                  ),
+                ),
+          ),
+        ),
+      ],
     );
   }
 

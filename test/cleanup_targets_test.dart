@@ -834,6 +834,7 @@ void main() {
       environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
     ).singleWhere((item) => item.id == 'system-drive-log-inventory');
     expect(target.maxEntries, 25000);
+    expect(target.defaultEnabled, isFalse);
     final CleanupScanResult result = await CleanupScanner.scanTargets(
       <CleanupScanTarget>[target],
     );

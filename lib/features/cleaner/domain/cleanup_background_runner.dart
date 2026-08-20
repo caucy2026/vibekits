@@ -21,8 +21,10 @@ abstract final class CleanupBackgroundRunner {
     String harnessDebugDirectory = '',
     String bundledRuleDatabase = '',
   }) => Isolate.run(() {
-    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
-      harnessDebugDirectory: harnessDebugDirectory,
+    final List<CleanupScanTarget> targets = List<CleanupScanTarget>.of(
+      CleanupTargetDiscovery.discover(
+        harnessDebugDirectory: harnessDebugDirectory,
+      ),
     );
     if (bundledRuleDatabase.trim().isNotEmpty) {
       try {

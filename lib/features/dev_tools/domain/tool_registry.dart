@@ -150,7 +150,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'network_virtualization',
-    name: '网络与虚拟化',
+    name: 'Clash Verge / 虚拟机',
     group: ToolGroups.network,
     description: '使用内置 Mihomo 运行 Clash Verge 配置，并用内置 QEMU 启动轻量虚拟机。',
     harnessToolIds: <String>[

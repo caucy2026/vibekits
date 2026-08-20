@@ -1054,6 +1054,11 @@ class _CleanerTabState extends State<CleanerTab> {
     if (configured.isEmpty) return defaults;
     if (widget.initialTargetCatalogVersion <
         CleanupTargetDiscovery.catalogVersion) {
+      // v10 removes the whole-drive log inventory from the fast default scan.
+      // It remains available as an explicit deep-clean option.
+      if (widget.initialTargetCatalogVersion < 10) {
+        configured.remove('system-drive-log-inventory');
+      }
       configured.addAll(defaults);
     }
     return configured;

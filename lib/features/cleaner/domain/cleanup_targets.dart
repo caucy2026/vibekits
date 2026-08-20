@@ -52,7 +52,7 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 9;
+  static const int catalogVersion = 10;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
@@ -306,7 +306,7 @@ abstract final class CleanupTargetDiscovery {
             ? systemDrive.trim()
             : '${systemDrive.trim()}${Platform.pathSeparator}',
         category: CleanupCategory.discoveredTransient,
-        defaultEnabled: true,
+        defaultEnabled: false,
         safetyNote: '遍历系统盘并列出旧 .log；未知用途日志默认不勾选，需逐项确认',
         minimumAgeHours: 168,
         maxDepth: 16,

@@ -52,7 +52,7 @@ void main() {
     expect(find.byTooltip('复制当前结果'), findsOneWidget);
   });
 
-  testWidgets('网络与虚拟化合并 Clash Verge 和轻量虚拟机', (WidgetTester tester) async {
+  testWidgets('工具列表明确显示 Clash Verge 和轻量虚拟机', (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: DevToolsTab())),
     );
@@ -60,10 +60,21 @@ void main() {
       (Widget widget) =>
           widget is TextField && widget.decoration?.hintText == '搜索工具',
     );
-    await tester.enterText(search, '虚拟化');
+    await tester.enterText(search, 'Clash Verge');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '网络与虚拟化'));
+    await tester.tap(find.widgetWithText(ListTile, 'Clash Verge / 虚拟机'));
     await tester.pump();
+    expect(
+      find.byKey(const Key('current-tool-harness-activity')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('dev-tools-sidebar')),
+        matching: find.byKey(const Key('current-tool-harness-activity')),
+      ),
+      findsNothing,
+    );
     expect(find.text('Clash Verge'), findsWidgets);
     expect(find.text('轻量虚拟机'), findsOneWidget);
     expect(find.byKey(const Key('mihomo-start')), findsOneWidget);

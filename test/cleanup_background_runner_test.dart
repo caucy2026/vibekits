@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,40 @@ void main() {
     expect(
       targets.every((CleanupScanTarget target) => target.id.isNotEmpty),
       isTrue,
+    );
+  });
+
+  test('后台发现可合并外部规则且不会修改固定长度内置列表', () async {
+    final Directory directory = Directory.systemTemp.createTempSync(
+      'vibekits_external_cleanup_rule_',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final String database = jsonEncode(<String, Object?>{
+      'schemaVersion': 1,
+      'catalogVersion': 99,
+      'rules': <Object?>[
+        <String, Object?>{
+          'id': 'external-test-cache',
+          'label': '外部测试缓存',
+          'platform': 'windows',
+          'pathTemplate': r'%TEST_CACHE%',
+          'category': 'applicationCache',
+          'risk': 'safe',
+          'defaultEnabled': true,
+          'cleanupAction': 'recycle',
+          'impact': '测试目录可重新生成',
+        },
+      ],
+    }).replaceAll(r'%TEST_CACHE%', directory.path.replaceAll(r'\', r'\\'));
+
+    final List<CleanupScanTarget> targets =
+        await CleanupBackgroundRunner.discoverTargets(
+          bundledRuleDatabase: database,
+        );
+
+    expect(
+      targets.map((CleanupScanTarget target) => target.id),
+      contains('external-test-cache'),
     );
   });
 
