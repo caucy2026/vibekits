@@ -1,12 +1,17 @@
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
-  [string]$ExpectedVersion = '1.9.0-dev.44+54'
+  [string]$ExpectedVersion = '1.9.0-dev.55+65',
+  [string]$BundlePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$bundle = Join-Path $projectRoot "build\windows\x64\runner\$Configuration"
+$bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
+  Join-Path $projectRoot "build\windows\x64\runner\$Configuration"
+} else {
+  (Resolve-Path -LiteralPath $BundlePath).Path
+}
 $app = Join-Path $bundle 'vibekits.exe'
 $required = @(
   'tools\git\cmd\git.exe',
@@ -56,4 +61,4 @@ $node = Join-Path $bundle 'tools\harness\node.exe'
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-approval.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness approval plugin syntax check failed' }
 
-Write-Host "Verified $Configuration bundle $ExpectedVersion; $gitVersion; required runtimes: $($required.Count)"
+Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; required runtimes: $($required.Count)"
