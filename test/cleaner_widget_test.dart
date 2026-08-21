@@ -489,6 +489,13 @@ void main() {
 
     expect(find.textContaining('磁盘空间分析'), findsOneWidget);
     expect(find.textContaining('总量 9.8 KB'), findsOneWidget);
+    expect(
+      tester
+          .getBottomRight(find.byKey(const Key('cleaner-drive-analysis-card')))
+          .dy,
+      greaterThan(580),
+      reason: '磁盘分析卡片应占满工具栏下方的剩余高度',
+    );
     expect(find.text('Windows'), findsOneWidget);
     expect(find.text('estlog'), findsOneWidget);
     expect(find.textContaining('需复核'), findsOneWidget);

@@ -163,6 +163,7 @@ class _CleanerTabState extends State<CleanerTab> {
       <String, SystemDriveUsageEntry>{};
   bool _analyzingDrive = false;
   bool _restoringDriveAnalysis = false;
+  bool _showDriveAnalysis = false;
   String? _deletingDrivePath;
   List<InstalledApplication> _installedApplications =
       const <InstalledApplication>[];
@@ -222,6 +223,7 @@ class _CleanerTabState extends State<CleanerTab> {
           ..clear()
           ..addAll(restored);
         _driveAnalysis = restored[preferred];
+        _showDriveAnalysis = true;
         _activeVolumeRoot = _driveAnalysis?.rootPath;
         _selectedVolumeRoots = snapshot.analyses
             .map((SystemDriveAnalysis item) => item.rootPath)
@@ -382,6 +384,7 @@ class _CleanerTabState extends State<CleanerTab> {
     if (_discoveringTargets || _enabledTargetIds.isEmpty) return;
     setState(() {
       _scanning = true;
+      _showDriveAnalysis = false;
       _message = '';
       _candidates = const <CleanupCandidate>[];
       _selected.clear();
@@ -779,6 +782,7 @@ class _CleanerTabState extends State<CleanerTab> {
     _taskToken = token;
     setState(() {
       _analyzingDrive = true;
+      _showDriveAnalysis = true;
       _driveAnalysis = null;
       _driveAnalyses.clear();
       _driveAnalysisProgress = null;
@@ -1262,11 +1266,16 @@ class _CleanerTabState extends State<CleanerTab> {
         if (_lastResult != null) _buildResultSummary(_lastResult!),
         if (_analyzingDrive && _driveAnalysisProgress != null)
           _buildDriveAnalysisProgress(_driveAnalysisProgress!),
-        if (_analyzingDrive && _partialDriveEntries.isNotEmpty)
-          _buildPartialDriveAnalysis(),
         if (_driveAnalyses.isNotEmpty) _buildDriveResultsSelector(),
-        if (_driveAnalysis != null) _buildDriveAnalysis(_driveAnalysis!),
-        Expanded(child: _buildBody()),
+        Expanded(
+          child: _showDriveAnalysis && _driveAnalysis != null
+              ? _buildDriveAnalysis(_driveAnalysis!)
+              : _showDriveAnalysis &&
+                    _analyzingDrive &&
+                    _partialDriveEntries.isNotEmpty
+              ? _buildPartialDriveAnalysis()
+              : _buildBody(),
+        ),
       ],
     );
   }
@@ -1629,6 +1638,7 @@ class _CleanerTabState extends State<CleanerTab> {
                 onSelected: (_) => setState(() {
                   _activeVolumeRoot = analysis.rootPath;
                   _driveAnalysis = analysis;
+                  _showDriveAnalysis = true;
                 }),
                 label: Text(
                   '${_shortVolumeName(analysis.rootPath)} · '
@@ -1717,7 +1727,7 @@ class _CleanerTabState extends State<CleanerTab> {
       length: 2,
       initialIndex: software.isEmpty ? 1 : 0,
       child: Container(
-        height: 370,
+        key: const Key('cleaner-drive-analysis-card'),
         margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
         decoration: BoxDecoration(
           color: context.vibe.panel,
@@ -2341,7 +2351,6 @@ class _CleanerTabState extends State<CleanerTab> {
               right.sizeBytes.compareTo(left.sizeBytes),
         );
     return Container(
-      constraints: const BoxConstraints(maxHeight: 240),
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       decoration: BoxDecoration(
         color: context.vibe.panel,
@@ -2349,7 +2358,6 @@ class _CleanerTabState extends State<CleanerTab> {
         border: Border.all(color: context.vibe.border),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.all(10),
@@ -2370,9 +2378,8 @@ class _CleanerTabState extends State<CleanerTab> {
             ),
           ),
           const Divider(height: 1),
-          Flexible(
+          Expanded(
             child: ListView.separated(
-              shrinkWrap: true,
               itemCount: visible.length > 30 ? 30 : visible.length,
               separatorBuilder: (BuildContext context, int index) =>
                   const Divider(height: 1),
