@@ -34,11 +34,15 @@ class CleanupDeleteResult {
     required this.items,
     required this.cancelled,
     required this.releasedBytes,
+    this.recycledBytes = 0,
   });
 
   final List<CleanupItemResult> items;
   final bool cancelled;
   final int releasedBytes;
+
+  /// 已从原位置移走、但仍占用同一磁盘回收站的容量。
+  final int recycledBytes;
 
   int get succeeded => items
       .where(
@@ -268,15 +272,30 @@ abstract final class CleanupDeleter {
     }
     final List<CleanupItemResult> items = <CleanupItemResult>[];
     int releasedBytes = 0;
+    int recycledBytes = 0;
 
-    for (final CleanupCandidate candidate in candidates) {
+    // Always empty the recycle bin after recyclable items have been moved.
+    // Otherwise a later move can make free space drop again immediately after
+    // an apparently successful recycle-bin cleanup.
+    final List<CleanupCandidate> ordered = List<CleanupCandidate>.of(candidates)
+      ..sort((CleanupCandidate left, CleanupCandidate right) {
+        final int leftOrder = left.category == CleanupCategory.recycleBin
+            ? 1
+            : 0;
+        final int rightOrder = right.category == CleanupCategory.recycleBin
+            ? 1
+            : 0;
+        return leftOrder.compareTo(rightOrder);
+      });
+    for (final CleanupCandidate candidate in ordered) {
       if (token.isCancelled) break;
       if (candidate.category == CleanupCategory.recycleBin) {
         final bool emptied = RecycleBinService.empty(candidate.path);
         final int remaining =
             RecycleBinService.query(candidate.path)?.bytes ?? 0;
         if (emptied && remaining == 0) {
-          releasedBytes += candidate.size;
+          releasedBytes += candidate.size + recycledBytes;
+          recycledBytes = 0;
           items.add(
             CleanupItemResult(
               candidate: candidate,
@@ -330,7 +349,7 @@ abstract final class CleanupDeleter {
               shellResult?.succeeded ?? recycle!(candidate.path);
           bool removed = await _waitUntilRemoved(candidate.path);
           if (accepted && removed) {
-            releasedBytes += candidate.size;
+            recycledBytes += candidate.size;
             items.add(
               CleanupItemResult(
                 candidate: candidate,
@@ -392,6 +411,7 @@ abstract final class CleanupDeleter {
       items: items,
       cancelled: token.isCancelled,
       releasedBytes: releasedBytes,
+      recycledBytes: recycledBytes,
     );
   }
 
@@ -408,6 +428,7 @@ abstract final class CleanupDeleter {
     const int batchSize = 512;
     final List<CleanupItemResult> items = <CleanupItemResult>[];
     int releasedBytes = 0;
+    int recycledBytes = 0;
     final List<CleanupCandidate> ordered = candidates
         .where(
           (CleanupCandidate item) =>
@@ -512,7 +533,7 @@ abstract final class CleanupDeleter {
         for (final CleanupCandidate candidate in recyclable) {
           final bool removed = await _waitUntilRemoved(candidate.path);
           if (removed) {
-            releasedBytes += candidate.size;
+            recycledBytes += candidate.size;
             items.add(
               CleanupItemResult(
                 candidate: candidate,
@@ -551,7 +572,8 @@ abstract final class CleanupDeleter {
       final bool emptied = RecycleBinService.empty(candidate.path);
       final int remaining = RecycleBinService.query(candidate.path)?.bytes ?? 0;
       if (emptied && remaining == 0) {
-        releasedBytes += candidate.size;
+        releasedBytes += candidate.size + recycledBytes;
+        recycledBytes = 0;
         items.add(
           CleanupItemResult(
             candidate: candidate,
@@ -579,6 +601,7 @@ abstract final class CleanupDeleter {
       items: items,
       cancelled: cancellationToken.isCancelled,
       releasedBytes: releasedBytes,
+      recycledBytes: recycledBytes,
     );
   }
 

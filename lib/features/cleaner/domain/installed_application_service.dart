@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 class InstalledApplication {
   const InstalledApplication({
@@ -9,6 +10,9 @@ class InstalledApplication {
     this.installLocation = '',
     this.estimatedSizeBytes = 0,
     this.uninstallCommand = '',
+    this.installedAt,
+    this.lastUsedAt,
+    this.usageEvidence = '',
   });
 
   final String id;
@@ -18,8 +22,30 @@ class InstalledApplication {
   final String installLocation;
   final int estimatedSizeBytes;
   final String uninstallCommand;
+  final DateTime? installedAt;
+  final DateTime? lastUsedAt;
+  final String usageEvidence;
 
   bool get canUninstall => uninstallCommand.trim().isNotEmpty;
+
+  bool unusedForSixMonthsAt(DateTime now) =>
+      lastUsedAt != null && now.difference(lastUsedAt!).inDays >= 183;
+
+  InstalledApplication withUsage({
+    required DateTime lastUsedAt,
+    required String evidence,
+  }) => InstalledApplication(
+    id: id,
+    name: name,
+    publisher: publisher,
+    version: version,
+    installLocation: installLocation,
+    estimatedSizeBytes: estimatedSizeBytes,
+    uninstallCommand: uninstallCommand,
+    installedAt: installedAt,
+    lastUsedAt: lastUsedAt,
+    usageEvidence: evidence,
+  );
 }
 
 abstract final class InstalledApplicationService {
@@ -52,7 +78,10 @@ abstract final class InstalledApplicationService {
         (InstalledApplication left, InstalledApplication right) =>
             left.name.toLowerCase().compareTo(right.name.toLowerCase()),
       );
-    return List<InstalledApplication>.unmodifiable(result);
+    final List<InstalledApplication> enriched = await Isolate.run(
+      () => _attachPrefetchUsage(result),
+    );
+    return List<InstalledApplication>.unmodifiable(enriched);
   }
 
   static Future<List<InstalledApplication>> _loadRegistryRoot(
@@ -96,6 +125,7 @@ abstract final class InstalledApplicationService {
                 values['QuietUninstallString']?.trim().isNotEmpty == true
                 ? values['QuietUninstallString']!.trim()
                 : values['UninstallString']?.trim() ?? '',
+            installedAt: _parseInstallDate(values['InstallDate']?.trim() ?? ''),
           ),
         );
       }
@@ -203,6 +233,119 @@ abstract final class InstalledApplicationService {
       (app.installLocation.isNotEmpty ? 2 : 0) +
       (app.estimatedSizeBytes > 0 ? 1 : 0);
 
+  static DateTime? _parseInstallDate(String value) {
+    final RegExpMatch? match = RegExp(r'^(\d{4})(\d{2})(\d{2})$')
+        .firstMatch(value);
+    if (match == null) return null;
+    return DateTime.tryParse(
+      '${match.group(1)}-${match.group(2)}-${match.group(3)}',
+    );
+  }
+
+  static List<InstalledApplication> _attachPrefetchUsage(
+    List<InstalledApplication> apps,
+  ) {
+    final String windows = Platform.environment['WINDIR'] ?? r'C:\Windows';
+    final Directory prefetch = Directory(
+      '$windows${Platform.pathSeparator}Prefetch',
+    );
+    if (!prefetch.existsSync()) return apps;
+    final Map<String, DateTime> launches = <String, DateTime>{};
+    try {
+      for (final FileSystemEntity entity in prefetch.listSync(
+        followLinks: false,
+      )) {
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.pf')) {
+          continue;
+        }
+        final String fileName = _baseName(entity.path).toUpperCase();
+        final RegExpMatch? match = RegExp(r'^(.+)-[0-9A-F]+\.PF$')
+            .firstMatch(fileName);
+        if (match == null) continue;
+        final String executable = match.group(1)!;
+        final DateTime modified = entity.lastModifiedSync();
+        final DateTime? previous = launches[executable];
+        if (previous == null || modified.isAfter(previous)) {
+          launches[executable] = modified;
+        }
+      }
+    } on FileSystemException {
+      return apps;
+    }
+    return <InstalledApplication>[
+      for (final InstalledApplication app in apps) _enrichApp(app, launches),
+    ];
+  }
+
+  static InstalledApplication _enrichApp(
+    InstalledApplication app,
+    Map<String, DateTime> launches,
+  ) {
+    final String location = app.installLocation.trim();
+    if (location.isEmpty || !Directory(location).existsSync()) return app;
+    final Set<String> executableNames = <String>{};
+    int visited = 0;
+    try {
+      // Prefetch enrichment runs while the analysis result is being prepared.
+      // Only inspect the installation root: recursively walking SDKs, IDEs and
+      // game directories made opening the cleaner take tens of seconds.
+      for (final FileSystemEntity entity in Directory(
+        location,
+      ).listSync(followLinks: false)) {
+        if (++visited > 120) break;
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.exe')) {
+          continue;
+        }
+        final String name = _baseName(entity.path).toUpperCase();
+        final String lower = name.toLowerCase();
+        if (lower.contains('unins') ||
+            lower.contains('uninstall') ||
+            lower.contains('update') ||
+            lower.contains('crash') ||
+            lower.contains('setup')) {
+          continue;
+        }
+        executableNames.add(name);
+      }
+    } on FileSystemException {
+      return app;
+    }
+    DateTime? latest;
+    String? matchedExecutable;
+    for (final String executable in executableNames) {
+      final DateTime? used = launches[executable];
+      if (used != null && (latest == null || used.isAfter(latest))) {
+        latest = used;
+        matchedExecutable = executable;
+      }
+    }
+    if (latest == null) {
+      final Set<String> identities = <String>{
+        _usageToken(app.name),
+        _usageToken(_baseName(location)),
+      }..removeWhere((String value) => value.length < 5);
+      for (final MapEntry<String, DateTime> launch in launches.entries) {
+        final String launchToken = _usageToken(launch.key);
+        final bool matches = identities.any(
+          (String identity) =>
+              launchToken == identity ||
+              launchToken.contains(identity) ||
+              identity.contains(launchToken),
+        );
+        if (matches && (latest == null || launch.value.isAfter(latest))) {
+          latest = launch.value;
+          matchedExecutable = launch.key;
+        }
+      }
+    }
+    return latest == null
+        ? app
+        : app.withUsage(
+            lastUsedAt: latest,
+            evidence: 'Windows Prefetch · $matchedExecutable',
+          );
+  }
+
   static String _unquote(String value) =>
       value.length >= 2 && value.startsWith('"') && value.endsWith('"')
       ? value.substring(1, value.length - 1)
@@ -216,6 +359,12 @@ abstract final class InstalledApplicationService {
 
   static String _baseName(String path) =>
       path.replaceAll('/', '\\').split('\\').last;
+
+  static String _usageToken(String value) => value
+      .toLowerCase()
+      .replaceAll(RegExp(r'\.exe$'), '')
+      .replaceAll(RegExp(r'\b(x64|x86|64bit|32bit)\b'), '')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '');
 }
 
 class _WindowsCommand {

@@ -33,6 +33,8 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Acme
     DisplayVersion    REG_SZ    3.2.1
     InstallLocation    REG_SZ    C:\Program Files\Acme
     EstimatedSize    REG_DWORD    2048
+    InstallDate    REG_SZ    20240102
+    InstallDate    REG_SZ    20240102
     UninstallString    REG_SZ    "C:\Program Files\Acme\uninstall.exe" /remove
 
 HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hidden
@@ -47,6 +49,8 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Hidden
     expect(apps.single.publisher, 'Acme Inc.');
     expect(apps.single.estimatedSizeBytes, 2048 * 1024);
     expect(apps.single.canUninstall, isTrue);
+    expect(apps.single.installedAt, DateTime(2024, 1, 2));
+    expect(apps.single.installedAt, DateTime(2024, 1, 2));
   });
 
   test('同一软件聚合安装、数据和可清缓存并判断异常', () {

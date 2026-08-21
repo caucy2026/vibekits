@@ -4,7 +4,7 @@ import 'dart:io';
 import 'cleanup_deleter.dart';
 
 abstract final class CleanupReportWriter {
-  static const int currentVersion = 2;
+  static const int currentVersion = 3;
 
   static Future<File> write(
     CleanupDeleteResult result, {
@@ -29,6 +29,7 @@ abstract final class CleanupReportWriter {
       'skipped': result.skipped,
       'failed': result.failed,
       'releasedBytes': result.releasedBytes,
+      'recycledBytes': result.recycledBytes,
       'items': <Map<String, Object>>[
         for (int index = 0; index < result.items.length; index++)
           <String, Object>{
@@ -100,6 +101,7 @@ abstract final class CleanupReportWriter {
             skipped: 0,
             failed: 1,
             releasedBytes: 0,
+            recycledBytes: 0,
             cancelled: false,
             items: const <Map<String, Object?>>[],
             unreadable: true,
@@ -135,6 +137,7 @@ class CleanupReportEntry {
     required this.skipped,
     required this.failed,
     required this.releasedBytes,
+    required this.recycledBytes,
     required this.cancelled,
     required this.items,
     this.unreadable = false,
@@ -151,6 +154,7 @@ class CleanupReportEntry {
       skipped: integer('skipped'),
       failed: integer('failed'),
       releasedBytes: integer('releasedBytes'),
+      recycledBytes: integer('recycledBytes'),
       cancelled: json['cancelled'] == true,
       items: json['items'] is List<Object?>
           ? (json['items']! as List<Object?>)
@@ -166,6 +170,7 @@ class CleanupReportEntry {
   final int skipped;
   final int failed;
   final int releasedBytes;
+  final int recycledBytes;
   final bool cancelled;
   final List<Map<String, Object?>> items;
   final bool unreadable;

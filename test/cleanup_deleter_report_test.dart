@@ -55,7 +55,8 @@ void main() {
     expect(result.succeeded, 1);
     expect(result.skipped, 1);
     expect(result.failed, 1);
-    expect(result.releasedBytes, 4);
+    expect(result.releasedBytes, 0);
+    expect(result.recycledBytes, 4);
   });
 
   test('清理日志持久化真实路径并支持读取和删除', () async {
@@ -90,7 +91,7 @@ void main() {
     expect(contents, contains(privatePath.replaceAll(r'\', r'\\')));
     expect(contents, contains('访问被拒绝'));
     expect(contents, contains('"failed": 1'));
-    expect(contents, contains('"version": 2'));
+    expect(contents, contains('"version": 3'));
 
     final List<CleanupReportEntry> entries = await CleanupReportWriter.list(
       directory: sandbox,

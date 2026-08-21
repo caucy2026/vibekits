@@ -519,16 +519,8 @@ class _CleanerTabState extends State<CleanerTab> {
           .fold<int>(0, (int sum, CleanupCandidate item) => sum + item.size);
 
   Future<void> _smartSelect() async {
-    final List<CleanupCandidate> plan = _candidates
+    final List<CleanupCandidate> recommended = _candidates
         .where((candidate) {
-          if (candidate.category == CleanupCategory.downloads ||
-              candidate.category == CleanupCategory.duplicateFiles ||
-              candidate.category == CleanupCategory.pluginResidual) {
-            return false;
-          }
-          // Smart mode must never turn a review item into an automatic delete.
-          // App runtimes, downloaded models, recycle-bin contents and unknown
-          // discoveries remain visible, but require an explicit user choice.
           const Set<CleanupCategory> automaticCategories = <CleanupCategory>{
             CleanupCategory.userTemp,
             CleanupCategory.browserCache,
@@ -543,66 +535,128 @@ class _CleanerTabState extends State<CleanerTab> {
               automaticCategories.contains(candidate.category);
         })
         .toList(growable: false);
-    if (plan.isEmpty) return;
-    final int bytes = plan.fold<int>(
+    final List<CleanupCandidate> review = _candidates
+        .where(
+          (CleanupCandidate candidate) =>
+              !recommended.contains(candidate) &&
+              candidate.riskLevel != CleanupRiskLevel.systemManaged &&
+              candidate.category != CleanupCategory.downloads &&
+              candidate.category != CleanupCategory.duplicateFiles,
+        )
+        .toList(growable: false);
+    final List<CleanupCandidate> recycleBin = _candidates
+        .where(
+          (CleanupCandidate candidate) =>
+              candidate.category == CleanupCategory.recycleBin,
+        )
+        .toList(growable: false);
+    if (recommended.isEmpty && review.isEmpty && recycleBin.isEmpty) return;
+    int bytesOf(Iterable<CleanupCandidate> items) => items.fold<int>(
       0,
       (int total, CleanupCandidate candidate) => total + candidate.size,
     );
-    final int reviewCount = _candidates
-        .where((CleanupCandidate candidate) => candidate.highRisk)
-        .length;
-    final bool emptiesRecycleBin = plan.any(
-      (CleanupCandidate candidate) =>
-          candidate.category == CleanupCategory.recycleBin,
-    );
-    final bool? confirmed = await showDialog<bool>(
+    final int recommendedBytes = bytesOf(recommended);
+    final int reviewBytes = bytesOf(review);
+    final int recycleBytes = bytesOf(recycleBin);
+    bool includeReview = review.isNotEmpty;
+    bool includeRecycleBin = recycleBin.isNotEmpty;
+    final _SmartCleanupSelection?
+    selection = await showDialog<_SmartCleanupSelection>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('智能选择清理计划'),
-        content: SizedBox(
-          width: 520,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('将选择 ${plan.length} 项，预计 ${_formatSize(bytes)}。'),
-              const SizedBox(height: 10),
-              const Text(
-                '包含旧临时文件、日志、可重建开发缓存、应用更新包和可重新下载的运行缓存；不选项目、下载文件、重复文件或旧插件。',
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setDialogState) {
+          final int selectedBytes =
+              recommendedBytes +
+              (includeReview ? reviewBytes : 0) +
+              (includeRecycleBin ? recycleBytes : 0);
+          return AlertDialog(
+            title: const Text('智能选择清理计划'),
+            content: SizedBox(
+              width: 560,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '计划 ${_formatSize(selectedBytes)} · '
+                    '${selectedBytes >= _acceptanceTargetBytes ? '达到 10 GiB 目标' : '还差 ${_formatSize(_acceptanceTargetBytes - selectedBytes)}'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('推荐安全项：${_formatSize(recommendedBytes)}'),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: includeReview,
+                    title: Text('加入需确认项 ${_formatSize(reviewBytes)}'),
+                    subtitle: const Text(
+                      '包括可重建开发缓存、明确旧版本和旧智能体调试会话；不包含下载文件和重复文件。',
+                    ),
+                    onChanged: review.isEmpty
+                        ? null
+                        : (bool? value) => setDialogState(
+                            () => includeReview = value ?? false,
+                          ),
+                  ),
+                  CheckboxListTile(
+                    key: const Key('smart-select-recycle-bin'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: includeRecycleBin,
+                    title: Text('永久清空系统回收站 ${_formatSize(recycleBytes)}'),
+                    subtitle: const Text(
+                      '这是达到当前 10 GiB 目标的必要步骤；回收站中的原有文件和本次移入项目都将无法恢复。',
+                      style: TextStyle(color: VibekitsColors.warning),
+                    ),
+                    onChanged: recycleBin.isEmpty
+                        ? null
+                        : (bool? value) => setDialogState(
+                            () => includeRecycleBin = value ?? false,
+                          ),
+                  ),
+                  const Text(
+                    '这里只生成选择，不会立即删除；下一步仍会显示永久删除与回收站容量明细。',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ],
               ),
-              if (reviewCount > 0) ...<Widget>[
-                const SizedBox(height: 10),
-                Text('$reviewCount 项需复核，已保留在列表中且不会被智能选择。'),
-              ],
-              if (emptiesRecycleBin) ...<Widget>[
-                const SizedBox(height: 10),
-                const Text(
-                  '⚠ 包含清空系统回收站：本次移入及回收站原有内容将无法恢复。',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('取消'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(
+                  _SmartCleanupSelection(
+                    includeReview: includeReview,
+                    includeRecycleBin: includeRecycleBin,
+                  ),
                 ),
-              ],
+                child: const Text('使用此计划'),
+              ),
             ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确认选择'),
-          ),
-        ],
+          );
+        },
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (selection == null || !mounted) return;
+    final List<CleanupCandidate> plan = <CleanupCandidate>[
+      ...recommended,
+      if (selection.includeReview) ...review,
+      if (selection.includeRecycleBin) ...recycleBin,
+    ];
     setState(() {
       _selected
         ..clear()
         ..addAll(plan.map((CleanupCandidate candidate) => candidate.path));
     });
   }
+
+  bool _planEmptiesRecycleBin(Iterable<CleanupCandidate> plan) => plan.any(
+    (CleanupCandidate candidate) =>
+        candidate.category == CleanupCategory.recycleBin,
+  );
 
   Future<void> _clean() async {
     final List<CleanupCandidate> plan = _candidates
@@ -626,55 +680,88 @@ class _CleanerTabState extends State<CleanerTab> {
     final bool hasRegenerableCache = plan.any(
       (CleanupCandidate candidate) => candidate.allowsPermanentFallback,
     );
+    final bool emptiesRecycleBin = _planEmptiesRecycleBin(plan);
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter setDialogState) =>
-            AlertDialog(
-              title: const Text('确认清理'),
-              content: SizedBox(
-                width: 520,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      '将 ${plan.length} 个项目（${_formatSize(planSize)}）优先移入回收站。',
+        builder: (BuildContext context, StateSetter setDialogState) => AlertDialog(
+          title: const Text('确认清理'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('将处理 ${plan.length} 个项目（${_formatSize(planSize)}）。'),
+                if (hasRegenerableCache) ...<Widget>[
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: permanentFallback,
+                    title: const Text('强力清理可再生成缓存'),
+                    subtitle: const Text(
+                      '回收站拒绝时永久删除浏览器、应用、开发、插件下载及调试缓存；不用于下载目录和旧插件。',
                     ),
-                    if (hasRegenerableCache) ...<Widget>[
-                      const SizedBox(height: 12),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        value: permanentFallback,
-                        title: const Text('强力清理可再生成缓存'),
-                        subtitle: const Text(
-                          '回收站拒绝时永久删除浏览器、应用、开发、插件下载及调试缓存；不用于下载目录和旧插件。',
-                        ),
-                        onChanged: (bool? value) => setDialogState(
-                          () => permanentFallback = value ?? false,
+                    onChanged: (bool? value) => setDialogState(
+                      () => permanentFallback = value ?? false,
+                    ),
+                  ),
+                ],
+                Builder(
+                  builder: (BuildContext context) {
+                    final int permanentBytes = permanentFallback
+                        ? plan
+                              .where(
+                                (CleanupCandidate item) =>
+                                    item.allowsPermanentFallback,
+                              )
+                              .fold<int>(0, (int sum, item) => sum + item.size)
+                        : 0;
+                    final int recycleCandidateBytes = plan
+                        .where(
+                          (CleanupCandidate item) =>
+                              item.category == CleanupCategory.recycleBin,
+                        )
+                        .fold<int>(0, (int sum, item) => sum + item.size);
+                    final int movedBytes =
+                        planSize - permanentBytes - recycleCandidateBytes;
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        emptiesRecycleBin
+                            ? '预计真正释放：最多 ${_formatSize(planSize)}（直接删除 ${_formatSize(permanentBytes)}；其余移入后连同原回收站永久清空）。'
+                            : '预计直接释放 ${_formatSize(permanentBytes)}；另有 ${_formatSize(movedBytes)} 只移入回收站，不会增加磁盘可用空间。',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: emptiesRecycleBin
+                              ? VibekitsColors.warning
+                              : context.vibe.muted,
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 8),
-                    const Text(
-                      '正在被浏览器、编辑器或包管理器占用的文件仍需关闭对应程序后重试。',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
+                    );
+                  },
                 ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('取消'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('清理'),
+                const SizedBox(height: 8),
+                const Text(
+                  '正在被浏览器、编辑器或包管理器占用的文件仍需关闭对应程序后重试。',
+                  style: TextStyle(fontSize: 12),
                 ),
               ],
             ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('清理'),
+            ),
+          ],
+        ),
       ),
     );
     if (confirm != true) return;
@@ -714,7 +801,18 @@ class _CleanerTabState extends State<CleanerTab> {
             );
       final DiskSpaceSnapshot? diskAfter = diskReader(systemDiskPath);
       if (!mounted) return;
-      final int nextTotal = _totalReleasedBytes + result.releasedBytes;
+      final int actualReleased = diskBefore != null && diskAfter != null
+          ? (diskAfter.availableBytes - diskBefore.availableBytes)
+                .clamp(0, diskAfter.totalBytes)
+                .toInt()
+          : result.releasedBytes;
+      final CleanupDeleteResult measuredResult = CleanupDeleteResult(
+        items: result.items,
+        cancelled: result.cancelled,
+        releasedBytes: actualReleased,
+        recycledBytes: result.recycledBytes,
+      );
+      final int nextTotal = _totalReleasedBytes + actualReleased;
       final int nextRuns = _completedRuns + (result.items.isEmpty ? 0 : 1);
       final Set<String> succeededPaths = result.items
           .where(
@@ -725,7 +823,7 @@ class _CleanerTabState extends State<CleanerTab> {
           .toSet();
       setState(() {
         _cleaning = false;
-        _lastResult = result;
+        _lastResult = measuredResult;
         _lastReport = null;
         _diskAfter = diskAfter;
         _totalReleasedBytes = nextTotal;
@@ -737,7 +835,11 @@ class _CleanerTabState extends State<CleanerTab> {
             )
             .toList();
         _selected.removeAll(succeededPaths);
-        _message = result.cancelled ? '清理已取消，已完成部分见报告' : '清理完成';
+        _message = result.cancelled
+            ? '清理已取消，已完成部分见报告'
+            : actualReleased == 0 && result.recycledBytes > 0
+            ? '项目已移入回收站，磁盘空间尚未释放'
+            : '清理完成，实际释放 ${_formatSize(actualReleased)}';
       });
       shouldAnalyze = !result.cancelled && result.items.isNotEmpty;
       try {
@@ -749,7 +851,7 @@ class _CleanerTabState extends State<CleanerTab> {
       }
       try {
         final File report = await CleanupReportWriter.write(
-          result,
+          measuredResult,
           startedAt: startedAt,
           finishedAt: DateTime.now(),
         );
@@ -2844,11 +2946,15 @@ class _CleanerTabState extends State<CleanerTab> {
     if (_loadingInstalledApplications) {
       return const Center(child: CircularProgressIndicator());
     }
+    final DateTime now = DateTime.now();
     final List<InstalledApplication> applications =
-        List<InstalledApplication>.of(_installedApplications)..sort(
-          (InstalledApplication left, InstalledApplication right) =>
-              right.estimatedSizeBytes.compareTo(left.estimatedSizeBytes),
-        );
+        List<InstalledApplication>.of(_installedApplications)
+          ..sort((InstalledApplication left, InstalledApplication right) {
+            final int recommendation = (right.unusedForSixMonthsAt(now) ? 1 : 0)
+                .compareTo(left.unusedForSixMonthsAt(now) ? 1 : 0);
+            if (recommendation != 0) return recommendation;
+            return right.estimatedSizeBytes.compareTo(left.estimatedSizeBytes);
+          });
     if (applications.isEmpty) {
       return const Center(child: Text('没有读取到可管理的已安装软件'));
     }
@@ -2858,9 +2964,10 @@ class _CleanerTabState extends State<CleanerTab> {
           width: double.infinity,
           color: VibekitsColors.warning.withValues(alpha: 0.08),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: const Text(
-            '当前先按安装体积列出软件。没有可靠最近使用证据前，不会擅自标记为“不常用”；后续接入本地使用频率数据库。',
-            style: TextStyle(fontSize: 11),
+          child: Text(
+            '半年未使用建议 ${applications.where((item) => item.unusedForSixMonthsAt(now)).length} 项。'
+            '依据 Windows Prefetch 的可靠启动痕迹；没有证据的显示“无法判断”，不会自动卸载。',
+            style: const TextStyle(fontSize: 11),
           ),
         ),
         Expanded(
@@ -2869,14 +2976,43 @@ class _CleanerTabState extends State<CleanerTab> {
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (BuildContext context, int index) {
               final InstalledApplication application = applications[index];
+              final bool unused = application.unusedForSixMonthsAt(now);
+              final String usage = application.lastUsedAt == null
+                  ? '最近使用：无法判断（没有可靠系统证据）'
+                  : '最近使用：${_formatDate(application.lastUsedAt!)} · '
+                        '${application.usageEvidence}';
               return ListTile(
                 dense: true,
-                leading: const Icon(Icons.apps_outlined, size: 19),
-                title: Text(application.name, overflow: TextOverflow.ellipsis),
+                leading: Icon(
+                  unused ? Icons.inventory_2_outlined : Icons.apps_outlined,
+                  size: 19,
+                  color: unused ? VibekitsColors.warning : null,
+                ),
+                title: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        application.name,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (unused)
+                      const Text(
+                        '半年未使用 · 建议卸载',
+                        style: TextStyle(
+                          color: VibekitsColors.warning,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
                 subtitle: Text(
                   '${application.publisher.isEmpty ? '未知发布者' : application.publisher}'
-                  '${application.version.isEmpty ? '' : ' · ${application.version}'}',
-                  maxLines: 1,
+                  '${application.version.isEmpty ? '' : ' · ${application.version}'}\n'
+                  '$usage\n'
+                  '安装路径：${application.installLocation.isEmpty ? '系统未报告' : application.installLocation}',
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
                 trailing: Row(
@@ -2977,9 +3113,15 @@ class _CleanerTabState extends State<CleanerTab> {
             runSpacing: 8,
             children: <Widget>[
               _SummaryMetric(
-                label: '本次清理',
+                label: '实际释放',
                 value: _formatSize(result.releasedBytes),
               ),
+              if (result.recycledBytes > 0)
+                _SummaryMetric(
+                  label: '仍在回收站',
+                  value: _formatSize(result.recycledBytes),
+                  detail: '尚未释放',
+                ),
               _SummaryMetric(
                 label: '累计清理',
                 value: _formatSize(_totalReleasedBytes),
@@ -3038,6 +3180,8 @@ class _CleanerTabState extends State<CleanerTab> {
                 '成功 ${result.succeeded}，跳过 ${result.skipped}，失败 ${result.failed}',
               ),
               Text('本次清理 ${_formatSize(result.releasedBytes)}'),
+              if (result.recycledBytes > 0)
+                Text('移入回收站但尚未释放 ${_formatSize(result.recycledBytes)}'),
               Text(
                 '历史累计 ${_formatSize(_totalReleasedBytes)}（$_completedRuns 次）',
               ),
@@ -3321,6 +3465,16 @@ class _CleanerTabState extends State<CleanerTab> {
     }
     return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
+}
+
+class _SmartCleanupSelection {
+  const _SmartCleanupSelection({
+    required this.includeReview,
+    required this.includeRecycleBin,
+  });
+
+  final bool includeReview;
+  final bool includeRecycleBin;
 }
 
 class _SummaryMetric extends StatelessWidget {

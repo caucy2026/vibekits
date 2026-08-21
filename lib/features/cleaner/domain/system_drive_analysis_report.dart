@@ -68,6 +68,9 @@ abstract final class SystemDriveAnalysisSnapshotStore {
               'installLocation': app.installLocation,
               'estimatedSizeBytes': app.estimatedSizeBytes,
               'uninstallCommand': app.uninstallCommand,
+              'installedAt': app.installedAt?.toUtc().toIso8601String(),
+              'lastUsedAt': app.lastUsedAt?.toUtc().toIso8601String(),
+              'usageEvidence': app.usageEvidence,
             },
           )
           .toList(growable: false),
@@ -122,6 +125,12 @@ abstract final class SystemDriveAnalysisSnapshotStore {
             installLocation: value['installLocation']?.toString() ?? '',
             estimatedSizeBytes: _int(value['estimatedSizeBytes']),
             uninstallCommand: value['uninstallCommand']?.toString() ?? '',
+            installedAt: DateTime.tryParse(
+              value['installedAt']?.toString() ?? '',
+            )?.toLocal(),
+            lastUsedAt: DateTime.tryParse(value['lastUsedAt']?.toString() ?? '')
+                ?.toLocal(),
+            usageEvidence: value['usageEvidence']?.toString() ?? '',
           ),
         );
       }

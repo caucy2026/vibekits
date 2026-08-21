@@ -175,7 +175,7 @@ void main() {
     expect(find.byTooltip('白名单（1）'), findsOneWidget);
   });
 
-  testWidgets('智能选择只选安全项并保留应用运行包和回收站', (WidgetTester tester) async {
+  testWidgets('智能选择一次组成十 GiB 分级计划且排除下载文件', (WidgetTester tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -244,11 +244,77 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('智能选择清理计划'), findsOneWidget);
-    expect(find.textContaining('不会被智能选择'), findsOneWidget);
-    expect(find.textContaining('预计 8.50 GB'), findsOneWidget);
-    await tester.tap(find.text('确认选择'));
+    expect(find.textContaining('达到 10 GiB 目标'), findsOneWidget);
+    expect(find.textContaining('永久清空系统回收站 2.00 GB'), findsOneWidget);
+    await tester.tap(find.text('使用此计划'));
     await tester.pumpAndSettle();
-    expect(find.text('清理 2 项'), findsOneWidget);
+    expect(find.text('清理 5 项'), findsOneWidget);
+  });
+
+  testWidgets('半年未使用软件显示证据、路径和直接卸载入口', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    String? launched;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            persistDriveAnalysisReport: false,
+            availableTargets: testTargets,
+            installedApplicationLoader: () async => <InstalledApplication>[
+              InstalledApplication(
+                id: 'old-app',
+                name: '旧开发工具',
+                installLocation: r'C:\Program Files\OldTool',
+                uninstallCommand: r'C:\Program Files\OldTool\uninstall.exe',
+                lastUsedAt: DateTime.now().subtract(const Duration(days: 200)),
+                usageEvidence: 'Windows Prefetch · OLDTOOL.EXE',
+              ),
+            ],
+            applicationUninstallLauncher: (InstalledApplication app) async {
+              launched = app.name;
+              return true;
+            },
+            scanRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(CleanupScanProgress progress)
+                  onProgress,
+                }) async => const CleanupScanResult(
+                  candidates: <CleanupCandidate>[
+                    CleanupCandidate(
+                      path: r'C:\Cache\one.tmp',
+                      size: 1,
+                      category: CleanupCategory.applicationCache,
+                      reason: '缓存',
+                    ),
+                  ],
+                  cancelled: false,
+                  unreadablePaths: 0,
+                ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('扫描可清理项'));
+    await tester.pumpAndSettle();
+    final Finder tab = find.byKey(
+      const ValueKey<String>('cleanup-view-unusedSoftware'),
+    );
+    await tester.ensureVisible(tab);
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+    expect(find.text('半年未使用 · 建议卸载'), findsOneWidget);
+    expect(
+      find.textContaining('Windows Prefetch · OLDTOOL.EXE'),
+      findsOneWidget,
+    );
+    expect(find.textContaining(r'C:\Program Files\OldTool'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, '卸载'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '打开卸载器'));
+    await tester.pumpAndSettle();
+    expect(launched, '旧开发工具');
   });
 
   testWidgets('大量候选按分类折叠并分批显示', (WidgetTester tester) async {
@@ -408,7 +474,7 @@ void main() {
     await tester.tap(find.widgetWithText(ElevatedButton, '清理'));
     await tester.pumpAndSettle();
 
-    expect(find.text('本次清理'), findsOneWidget);
+    expect(find.text('实际释放'), findsOneWidget);
     expect(find.text('累计清理'), findsOneWidget);
     expect(find.text('系统盘总容量'), findsOneWidget);
     expect(find.text('当前可用'), findsOneWidget);
@@ -418,7 +484,7 @@ void main() {
     expect(find.textContaining('还差'), findsWidgets);
     expect(find.text('2.0 KB'), findsOneWidget);
     expect(find.text('3.0 KB'), findsOneWidget);
-    expect(persistedTotal, 3072);
+    expect(persistedTotal, 3024);
     expect(persistedRuns, 3);
   });
 
@@ -429,6 +495,8 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            installedApplicationLoader: () async =>
+                const <InstalledApplication>[],
             driveAnalysisRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -601,6 +669,8 @@ void main() {
           body: CleanerTab(
             availableTargets: testTargets,
             persistDriveAnalysisReport: false,
+            installedApplicationLoader: () async =>
+                const <InstalledApplication>[],
             driveAnalysisRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
