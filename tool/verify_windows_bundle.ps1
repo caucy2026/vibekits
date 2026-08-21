@@ -34,6 +34,7 @@ $required = @(
   'tools\harness\node.exe',
   'tools\harness\harness-runtime.json',
   'tools\harness\vibekits-mcp-server.mjs',
+  'tools\harness\vibekits-codex-mcp.mjs',
   'tools\harness\vibekits-approval.mjs',
   'tools\mihomo\mihomo.exe',
   'tools\mihomo\vibekits-mihomo-runtime.json',

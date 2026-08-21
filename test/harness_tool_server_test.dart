@@ -51,6 +51,29 @@ void main() {
     expect(result.toString(), contains('ba7816bf8f01cfea'));
   });
 
+  test('外部 Codex connection file 原子发布并在关闭时移除', () async {
+    final Directory directory = await Directory.systemTemp.createTemp(
+      'vibekits_mcp_connection_test',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final File connection = File(
+      '${directory.path}${Platform.pathSeparator}tool-bridge.json',
+    );
+    final HarnessToolServer server = await HarnessToolServer.start(
+      connectionFile: connection,
+    );
+    expect(await connection.exists(), isTrue);
+    final Map<String, Object?> published = Map<String, Object?>.from(
+      jsonDecode(await connection.readAsString()) as Map,
+    );
+    expect(published['version'], 1);
+    expect(published['endpoint'], server.endpoint.toString());
+    expect(published['token'], server.token);
+    expect(Uri.parse('${published['endpoint']}').host, '127.0.0.1');
+    await server.close();
+    expect(await connection.exists(), isFalse);
+  });
+
   test('未提供界面审批时高风险工具默认拒绝', () async {
     final HarnessToolServer server = await HarnessToolServer.start();
     addTearDown(server.close);
@@ -115,18 +138,29 @@ void main() {
   });
 
   test('内置 Node MCP 进程发现并调用 Vibekits 工具', () async {
-    final HarnessToolServer bridge = await HarnessToolServer.start();
+    final Directory connectionDirectory = await Directory.systemTemp.createTemp(
+      'vibekits_mcp_node_test',
+    );
+    addTearDown(() => connectionDirectory.delete(recursive: true));
+    final File connectionFile = File(
+      '${connectionDirectory.path}${Platform.pathSeparator}tool-bridge.json',
+    );
+    final HarnessToolServer bridge = await HarnessToolServer.start(
+      connectionFile: connectionFile,
+    );
     addTearDown(bridge.close);
     final String root = Directory.current.path;
     final String runtime =
         '$root${Platform.pathSeparator}native${Platform.pathSeparator}harness'
         '${Platform.pathSeparator}windows${Platform.pathSeparator}runtime';
+    final String externalMcp =
+        '$root${Platform.pathSeparator}native${Platform.pathSeparator}harness'
+        '${Platform.pathSeparator}vibekits-codex-mcp.mjs';
     final Process process = await Process.start(
       '$runtime${Platform.pathSeparator}node.exe',
-      <String>['$runtime${Platform.pathSeparator}vibekits-mcp-server.mjs'],
+      <String>[externalMcp],
       environment: <String, String>{
-        'VIBEKITS_TOOL_BRIDGE_URL': bridge.endpoint.toString(),
-        'VIBEKITS_TOOL_BRIDGE_TOKEN': bridge.token,
+        'VIBEKITS_TOOL_BRIDGE_FILE': connectionFile.path,
       },
       includeParentEnvironment: true,
       runInShell: false,

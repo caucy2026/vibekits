@@ -2,6 +2,12 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-21 · v1.9.0-dev.63 外部 Codex MCP 注册闭环
+
+- 修复“APP 有工具但外部 Codex 无法发现”的生命周期缺口：VibeKits 启动即发布 loopback bridge，退出即删除短期连接文件，不再要求先进入 Harness 页面。
+- 新增 Windows STDIO 启动器与项目级 `.codex/config.toml`；启动器使用随包 Node/MCP，必要时自动启动 Release APP，不依赖 npm/npx 或局域网 HTTP 服务。
+- 外部调用复用 `vibekits.tools.v1` 单一目录和活动日志；无界面审批时写入、设备控制和破坏性工具默认拒绝，避免用普通 SSH/shell 绕过身份登记。
+
 ## 2026-08-21 · v1.9.0-dev.62 智能体节点工具合同补齐
 
 - 新增 `vibekits.windows_node.helper_status` 真实只读处理器，返回当前 Release helper 固定路径、签名/manifest 可用性、协议版本、可执行动作和明确阻断原因；缺失 helper 时不伪装可用。

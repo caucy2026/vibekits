@@ -1,5 +1,11 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../features/dev_tools/domain/harness_tool_activity_store.dart';
+import '../features/dev_tools/domain/harness_tool_bridge.dart';
+import '../features/dev_tools/domain/harness_tool_server.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
 import 'dropped_file_router.dart';
@@ -27,14 +33,82 @@ class VibekitsApp extends StatefulWidget {
 }
 
 class _VibekitsAppState extends State<VibekitsApp> {
+  static final bool _isFlutterTest = Platform.environment.containsKey(
+    'FLUTTER_TEST',
+  );
+
   late final AppSettingsController _settings =
       widget.settingsController ?? AppSettingsController();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  HarnessToolServer? _externalToolServer;
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_refresh);
     if (widget.settingsController == null) _settings.load();
+    if (!_isFlutterTest) unawaited(_startExternalToolServer());
+  }
+
+  Future<void> _startExternalToolServer() async {
+    try {
+      final HarnessToolServer server = await HarnessToolServer.start(
+        bridge: VibekitsHarnessToolBridge(
+          activityRecorder: HarnessToolActivityStore.record,
+        ),
+        approve: _approveExternalTool,
+        connectionFile: HarnessToolServer.defaultConnectionFile(),
+      );
+      if (!mounted) {
+        await server.close();
+        return;
+      }
+      _externalToolServer = server;
+    } on Object {
+      // MCP is an optional integration. A publishing failure must never block
+      // the desktop UI or unrelated offline tools.
+    }
+  }
+
+  Future<bool> _approveExternalTool(HarnessToolApprovalRequest request) async {
+    if (request.tool.risk == HarnessToolRisk.readOnly) return true;
+    if (!mounted) return false;
+    final BuildContext? navigatorContext = _navigatorKey.currentContext;
+    if (navigatorContext == null) return false;
+    final bool? approved = await showDialog<bool>(
+      context: navigatorContext,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text('允许外部 Codex 调用 ${request.tool.name}？'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(request.tool.description),
+              if (request.target.trim().isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                Text('目标：${request.target}'),
+              ],
+              const SizedBox(height: 12),
+              const Text('本次批准只用于这一项工具调用，不会自动批准后续操作。'),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('拒绝'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('允许一次'),
+          ),
+        ],
+      ),
+    );
+    return approved ?? false;
   }
 
   void _refresh() => setState(() {});
@@ -42,6 +116,8 @@ class _VibekitsAppState extends State<VibekitsApp> {
   @override
   void dispose() {
     _settings.removeListener(_refresh);
+    final HarnessToolServer? server = _externalToolServer;
+    if (server != null) unawaited(server.close());
     if (widget.settingsController == null) _settings.dispose();
     super.dispose();
   }
@@ -49,6 +125,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Vibekits',
       debugShowCheckedModeBanner: false,
       theme: VibekitsTheme.light(),

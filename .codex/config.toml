@@ -1,0 +1,9 @@
+[mcp_servers.vibekits]
+command = "powershell.exe"
+args = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "D:\\vibecode\\vibekits\\tool\\start_vibekits_mcp.ps1"]
+cwd = "D:\\vibecode\\vibekits"
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+enabled = true
+required = false
+default_tools_approval_mode = "writes"

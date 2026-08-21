@@ -49,3 +49,50 @@ helper_status → inspect → plan → apply
 ## 可用性发现
 
 智能体以 MCP `tools/list` 为准：handler、签名 helper 或平台适配器缺失的工具只存在于完整能力说明，不会出现在 executable catalog。不要用任意 PowerShell、管理员 shell、共享私钥或全局代理绕过门禁。
+
+## 外部 Codex 的本机 STDIO 配置
+
+VibeKits APP 启动后会在当前用户目录原子发布短期 connection file；内容只包含 loopback endpoint、随机 token、进程 ID 和创建时间。工具桥关闭时自动删除，Codex 不需要保存或复制 token。外部工具调用写入与 Harness 相同的可删除活动日志；非只读调用在 APP 内逐次批准，APP 无法显示审批界面时默认拒绝。
+
+Windows 默认 connection file：
+
+```text
+%LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json
+```
+
+仓库提供的 Windows 启动命令：
+
+```powershell
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:\vibecode\vibekits\tool\start_vibekits_mcp.ps1
+```
+
+脚本优先使用 Release 内置 Node/MCP；VibeKits 未运行时会启动 Release APP，并等待 loopback bridge 就绪。项目级配置已写入 `.codex/config.toml`。如需所有本地项目共享，可执行：
+
+```powershell
+codex mcp add vibekits -- powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:\vibecode\vibekits\tool\start_vibekits_mcp.ps1
+```
+
+macOS 默认 connection file：
+
+```text
+~/Library/Application Support/Vibekits/Mcp/tool-bridge.json
+```
+
+在 `~/.codex/config.toml` 注册外部 Codex stdio MCP。启动器只使用 Node 标准库，不需要额外安装 MCP SDK：
+
+```toml
+[mcp_servers.vibekits]
+command = "/usr/bin/env"
+args = ["node", "/绝对路径/vibekits/native/harness/vibekits-codex-mcp.mjs"]
+startup_timeout_sec = 30
+```
+
+操作顺序：
+
+1. 启动 VibeKits；App 启动即发布本机桥，无需先进入 Harness 页面；
+2. 保存 Codex MCP 配置并重启 Codex；
+3. 在 Codex 输入 `/mcp` 或运行 `codex mcp list` 检查 `vibekits`；
+4. 以实际 `tools/list` 为准调用工具；
+5. VibeKits 退出后 connection file 自动删除，后续调用安全失败。
+
+把 `/绝对路径/vibekits` 替换为 Mac 上的真实仓库路径。如果 Mac 的 Node 不在 shell PATH，也可以把 `command` 改为 Node 的绝对路径，并把 `args` 改为只包含脚本绝对路径。也可通过 `VIBEKITS_TOOL_BRIDGE_FILE` 指定非默认 connection file。写入或设备控制工具会在 VibeKits 窗口逐次显示“允许一次/拒绝”，没有可见窗口或用户未批准时安全拒绝。禁止配置局域网 HTTP URL；bridge 必须保持 `127.0.0.1`。

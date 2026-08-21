@@ -140,6 +140,9 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-mcp-server.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-codex-mcp.mjs"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-approval.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)

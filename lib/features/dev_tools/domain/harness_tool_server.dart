@@ -9,7 +9,13 @@ import 'harness_tool_bridge.dart';
 /// The random bearer token is passed only to the child process environment.
 /// Requests, responses and logs never contain the user's model credential.
 class HarnessToolServer {
-  HarnessToolServer._(this._server, this._bridge, this._approve, this.token);
+  HarnessToolServer._(
+    this._server,
+    this._bridge,
+    this._approve,
+    this.token,
+    this._connectionFile,
+  );
 
   static const int maxRequestBytes = 1024 * 1024;
 
@@ -17,12 +23,14 @@ class HarnessToolServer {
   final VibekitsHarnessToolBridge _bridge;
   final HarnessToolApproval _approve;
   final String token;
+  final File? _connectionFile;
 
   Uri get endpoint => Uri.parse('http://127.0.0.1:${_server.port}');
 
   static Future<HarnessToolServer> start({
     VibekitsHarnessToolBridge? bridge,
     HarnessToolApproval? approve,
+    File? connectionFile,
   }) async {
     final HttpServer server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
@@ -34,12 +42,94 @@ class HarnessToolServer {
       bridge ?? VibekitsHarnessToolBridge(),
       approve ?? _denyRiskyTool,
       _randomToken(),
+      connectionFile,
     );
     server.listen(result._handle, onError: (_) {});
+    if (connectionFile != null) {
+      try {
+        await result._publishConnection();
+      } on Object {
+        await server.close(force: true);
+        rethrow;
+      }
+    }
     return result;
   }
 
-  Future<void> close() => _server.close(force: true);
+  static File defaultConnectionFile() {
+    final String base;
+    if (Platform.isWindows) {
+      base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+      return File(
+        '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Mcp'
+        '${Platform.pathSeparator}tool-bridge.json',
+      );
+    }
+    final String home =
+        Platform.environment['HOME'] ?? Directory.systemTemp.path;
+    if (Platform.isMacOS) {
+      return File(
+        '$home${Platform.pathSeparator}Library${Platform.pathSeparator}'
+        'Application Support${Platform.pathSeparator}Vibekits'
+        '${Platform.pathSeparator}Mcp${Platform.pathSeparator}tool-bridge.json',
+      );
+    }
+    base =
+        Platform.environment['XDG_RUNTIME_DIR'] ??
+        '$home${Platform.pathSeparator}.local${Platform.pathSeparator}share';
+    return File(
+      '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Mcp'
+      '${Platform.pathSeparator}tool-bridge.json',
+    );
+  }
+
+  Future<void> close() async {
+    await _removePublishedConnection();
+    await _server.close(force: true);
+  }
+
+  Future<void> _publishConnection() async {
+    final File target = _connectionFile!;
+    await target.parent.create(recursive: true);
+    final File temporary = File(
+      '${target.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
+    await temporary.writeAsString(
+      jsonEncode(<String, Object?>{
+        'version': 1,
+        'endpoint': endpoint.toString(),
+        'token': token,
+        'processId': pid,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+      }),
+      flush: true,
+    );
+    if (!Platform.isWindows) {
+      final ProcessResult chmod = await Process.run('chmod', <String>[
+        '600',
+        temporary.path,
+      ], runInShell: false);
+      if (chmod.exitCode != 0) {
+        await temporary.delete();
+        throw StateError('无法保护 VibeKits MCP connection file');
+      }
+    }
+    if (await target.exists()) await target.delete();
+    await temporary.rename(target.path);
+  }
+
+  Future<void> _removePublishedConnection() async {
+    final File? file = _connectionFile;
+    if (file == null || !await file.exists()) return;
+    try {
+      final Object? decoded = jsonDecode(await file.readAsString());
+      if (decoded is Map && decoded['token'] == token) {
+        await file.delete();
+      }
+    } on Object {
+      // Never delete a file that cannot be proven to belong to this server.
+    }
+  }
 
   Future<void> _handle(HttpRequest request) async {
     request.response.headers.contentType = ContentType.json;

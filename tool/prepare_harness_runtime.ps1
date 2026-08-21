@@ -41,6 +41,7 @@ New-Item -ItemType Directory -Path (Join-Path $target 'profile') | Out-Null
 Copy-Item -LiteralPath (Join-Path $NodeDirectory 'node.exe') -Destination $target
 Copy-Item -LiteralPath (Join-Path $staging 'node_modules') -Destination $target -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-mcp-server.mjs') -Destination $target
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-codex-mcp.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval.mjs') -Destination $target
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
