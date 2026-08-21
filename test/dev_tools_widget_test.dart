@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/file_hash_service.dart';
 import 'package:vibekits/features/dev_tools/domain/serial_port_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
+import 'package:vibekits/features/dev_tools/presentation/utility_collection_workspace.dart';
 
 void main() {
   Future<Finder> pumpTools(WidgetTester tester) async {
@@ -24,6 +25,21 @@ void main() {
     expect(find.text('Base64 编码'), findsOneWidget);
     return find.byKey(const Key('utility-input'));
   }
+
+  testWidgets('新增语义版本比较可从转换工作区直接执行', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: UtilityCollectionWorkspace(initialToolId: 'semver_compare'),
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(const Key('utility-input')), '2.0.0');
+    await tester.enterText(find.widgetWithText(TextField, '另一个版本'), '1.9.9');
+    await tester.tap(find.text('执行'));
+    await tester.pump();
+    expect(find.textContaining('greater'), findsOneWidget);
+  });
 
   testWidgets('程序员计算器默认打开且输入即算', (WidgetTester tester) async {
     await tester.pumpWidget(
@@ -104,7 +120,21 @@ void main() {
     final Finder input = await pumpTools(tester);
 
     // 选择 Base64 解码工具。
-    await tester.tap(find.text('Base64 解码'));
+    final Finder decoder = find.byKey(
+      const ValueKey<String>('utility-base64_decode'),
+    );
+    final Finder strip = find.byKey(
+      const ValueKey<String>('utility-tool-strip-编码转换'),
+    );
+    for (
+      int attempt = 0;
+      attempt < 8 && decoder.evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.drag(strip, const Offset(-480, 0));
+      await tester.pump();
+    }
+    await tester.tap(decoder);
     await tester.pump();
 
     await tester.enterText(input, '!!!');

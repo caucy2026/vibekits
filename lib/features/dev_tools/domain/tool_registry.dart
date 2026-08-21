@@ -9,6 +9,7 @@ import 'network_tools.dart';
 import 'micro_benchmark_service.dart';
 import 'time_tools.dart';
 import 'tool_result.dart';
+import 'utility_plus_tools.dart';
 
 /// 工具组（按 docs/06 §6.1 分组）。
 abstract final class ToolGroups {
@@ -55,6 +56,25 @@ class ToolSpec {
   final ToolResult Function(String input, String params)? run;
   final Future<ToolResult> Function(String input, String params)? runAsync;
 }
+
+ToolSpec _plusTool({
+  required String id,
+  required String name,
+  required String group,
+  required String description,
+  required ToolResult Function(String input, String params) run,
+  String? paramLabel,
+}) => ToolSpec(
+  id: id,
+  name: name,
+  group: group,
+  description: description,
+  paramLabel: paramLabel,
+  aiUseWhen: '需要确定、离线地完成$name时。',
+  aiAvoidWhen: '输入格式不明确、需要联网验证或需要修改源文件时不要使用。',
+  aiExamples: <String>['使用$name处理当前输入'],
+  run: run,
+);
 
 /// 完整能力清单。左侧导航只展示独立工作区，微工具由集合工作区消费。
 final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
@@ -180,6 +200,224 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
       'vibekits.vm.stop',
       'vibekits.runtime.status',
     ],
+  ),
+  _plusTool(
+    id: 'json_minify',
+    name: 'JSON 压缩',
+    group: ToolGroups.format,
+    description: '校验 JSON 并移除无意义空白。',
+    run: (input, params) => UtilityPlusTools.jsonMinify(input),
+  ),
+  _plusTool(
+    id: 'json_escape',
+    name: 'JSON 字符串转义',
+    group: ToolGroups.format,
+    description: '把任意文本转换为合法 JSON 字符串字面量。',
+    run: (input, params) => UtilityPlusTools.jsonEscape(input),
+  ),
+  _plusTool(
+    id: 'json_unescape',
+    name: 'JSON 字符串反转义',
+    group: ToolGroups.format,
+    description: '解析 JSON 字符串字面量并还原原文。',
+    run: (input, params) => UtilityPlusTools.jsonUnescape(input),
+  ),
+  _plusTool(
+    id: 'xml_format',
+    name: 'XML 格式化',
+    group: ToolGroups.format,
+    description: '校验并缩进 XML。',
+    run: (input, params) => UtilityPlusTools.xmlFormat(input),
+  ),
+  _plusTool(
+    id: 'xml_minify',
+    name: 'XML 压缩',
+    group: ToolGroups.format,
+    description: '校验 XML 并移除格式化空白。',
+    run: (input, params) => UtilityPlusTools.xmlMinify(input),
+  ),
+  _plusTool(
+    id: 'csv_to_json',
+    name: 'CSV 转 JSON',
+    group: ToolGroups.format,
+    description: '以首行为表头，将标准 CSV 转为对象数组。',
+    run: (input, params) => UtilityPlusTools.csvToJson(input),
+  ),
+  _plusTool(
+    id: 'json_to_csv',
+    name: 'JSON 转 CSV',
+    group: ToolGroups.format,
+    description: '将 JSON 对象数组转换为带表头的 CSV。',
+    run: (input, params) => UtilityPlusTools.jsonToCsv(input),
+  ),
+  _plusTool(
+    id: 'jwt_decode',
+    name: 'JWT 解码',
+    group: ToolGroups.crypto,
+    description: '离线解码 JWT header/payload，并明确标注未验证签名。',
+    run: (input, params) => UtilityPlusTools.jwtDecode(input),
+  ),
+  _plusTool(
+    id: 'jwt_expiry',
+    name: 'JWT 过期检查',
+    group: ToolGroups.crypto,
+    description: '读取 JWT exp 并计算过期时间；不验证签名。',
+    run: (input, params) => UtilityPlusTools.jwtExpiry(input),
+  ),
+  _plusTool(
+    id: 'number_base_convert',
+    name: '2～36 进制转换',
+    group: ToolGroups.calculate,
+    description: '使用任意精度整数在 2～36 进制间转换。',
+    paramLabel: '源进制|目标进制',
+    run: UtilityPlusTools.numberBaseConvert,
+  ),
+  _plusTool(
+    id: 'endian_swap',
+    name: '字节序反转',
+    group: ToolGroups.calculate,
+    description: '按字节反转十六进制数据的端序。',
+    run: (input, params) => UtilityPlusTools.endianSwap(input),
+  ),
+  _plusTool(
+    id: 'ascii_inspect',
+    name: '字符码检查',
+    group: ToolGroups.encoding,
+    description: '列出字符的 Unicode、十进制码点和原字符。',
+    run: (input, params) => UtilityPlusTools.asciiInspect(input),
+  ),
+  _plusTool(
+    id: 'chmod_decode',
+    name: 'chmod 权限解码',
+    group: ToolGroups.calculate,
+    description: '将八进制 Unix 权限转换为 rwx 符号。',
+    run: (input, params) => UtilityPlusTools.chmodDecode(input),
+  ),
+  _plusTool(
+    id: 'chmod_encode',
+    name: 'chmod 权限编码',
+    group: ToolGroups.calculate,
+    description: '将九位 rwx 符号转换为八进制权限。',
+    run: (input, params) => UtilityPlusTools.chmodEncode(input),
+  ),
+  _plusTool(
+    id: 'semver_compare',
+    name: '语义版本比较',
+    group: ToolGroups.calculate,
+    description: '按 SemVer 规则比较正式版和预发布版本。',
+    paramLabel: '另一个版本',
+    run: UtilityPlusTools.semverCompare,
+  ),
+  _plusTool(
+    id: 'bytes_convert',
+    name: '存储单位转换',
+    group: ToolGroups.calculate,
+    description: '转换 B/KB/MB/GB 与 KiB/MiB/GiB。',
+    paramLabel: '源单位|目标单位',
+    run: UtilityPlusTools.bytesConvert,
+  ),
+  _plusTool(
+    id: 'duration_convert',
+    name: '时间单位转换',
+    group: ToolGroups.calculate,
+    description: '转换毫秒、秒、分钟、小时和天。',
+    paramLabel: '源单位|目标单位',
+    run: UtilityPlusTools.durationConvert,
+  ),
+  _plusTool(
+    id: 'hex_to_rgb',
+    name: 'HEX 转 RGB',
+    group: ToolGroups.encoding,
+    description: '将 #RGB/#RRGGBB 转为结构化 RGB。',
+    run: (input, params) => UtilityPlusTools.hexToRgb(input),
+  ),
+  _plusTool(
+    id: 'rgb_to_hex',
+    name: 'RGB 转 HEX',
+    group: ToolGroups.encoding,
+    description: '将三个 RGB 分量转换为十六进制颜色。',
+    run: (input, params) => UtilityPlusTools.rgbToHex(input),
+  ),
+  _plusTool(
+    id: 'query_parse',
+    name: '查询参数解析',
+    group: ToolGroups.network,
+    description: '把 URL query string 解析为保留重复键的 JSON。',
+    run: (input, params) => UtilityPlusTools.queryParse(input),
+  ),
+  _plusTool(
+    id: 'query_build',
+    name: '查询参数生成',
+    group: ToolGroups.network,
+    description: '把 JSON 对象编码为 URL query string。',
+    run: (input, params) => UtilityPlusTools.queryBuild(input),
+  ),
+  _plusTool(
+    id: 'regex_escape',
+    name: '正则字面量转义',
+    group: ToolGroups.time,
+    description: '把普通文本安全转义为正则字面量。',
+    run: (input, params) => UtilityPlusTools.regexEscape(input),
+  ),
+  _plusTool(
+    id: 'glob_test',
+    name: 'Glob 匹配测试',
+    group: ToolGroups.time,
+    description: '测试路径是否匹配 *, ** 和 ? glob。',
+    paramLabel: 'Glob 模式',
+    run: UtilityPlusTools.globTest,
+  ),
+  _plusTool(
+    id: 'line_sort',
+    name: '文本行排序',
+    group: ToolGroups.time,
+    description: '按 Unicode 顺序排列文本行。',
+    paramLabel: 'asc 或 desc',
+    run: UtilityPlusTools.lineSort,
+  ),
+  _plusTool(
+    id: 'line_unique',
+    name: '文本行去重',
+    group: ToolGroups.time,
+    description: '保持首次出现顺序删除重复行。',
+    run: (input, params) => UtilityPlusTools.lineUnique(input),
+  ),
+  _plusTool(
+    id: 'text_statistics',
+    name: '文本统计',
+    group: ToolGroups.time,
+    description: '统计字符、UTF-8 字节、单词和行数。',
+    run: (input, params) => UtilityPlusTools.textStatistics(input),
+  ),
+  _plusTool(
+    id: 'case_convert',
+    name: '命名风格转换',
+    group: ToolGroups.time,
+    description: '转换大小写、snake、kebab、camel、Pascal 和标题格式。',
+    paramLabel: '目标格式',
+    run: UtilityPlusTools.caseConvert,
+  ),
+  _plusTool(
+    id: 'line_ending_normalize',
+    name: '换行符规范化',
+    group: ToolGroups.time,
+    description: '统一为 LF 或 CRLF，不修改原文件。',
+    paramLabel: 'lf 或 crlf',
+    run: UtilityPlusTools.normalizeLineEndings,
+  ),
+  _plusTool(
+    id: 'http_status_lookup',
+    name: 'HTTP 状态码查询',
+    group: ToolGroups.network,
+    description: '查询常见 HTTP 状态码名称和类别。',
+    run: (input, params) => UtilityPlusTools.httpStatusLookup(input),
+  ),
+  _plusTool(
+    id: 'mime_lookup',
+    name: 'MIME 类型查询',
+    group: ToolGroups.network,
+    description: '按文件扩展名查询常见 MIME 类型。',
+    run: (input, params) => UtilityPlusTools.mimeLookup(input),
   ),
   ToolSpec(
     id: 'next_action_recommendation',

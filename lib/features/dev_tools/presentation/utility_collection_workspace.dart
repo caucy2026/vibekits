@@ -197,6 +197,7 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
           SizedBox(
             height: 36,
             child: ListView.separated(
+              key: ValueKey<String>('utility-tool-strip-$group'),
               scrollDirection: Axis.horizontal,
               itemCount: tools.length,
               separatorBuilder: (_, _) => const SizedBox(width: 6),

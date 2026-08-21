@@ -109,3 +109,4 @@ ToolSpec
 | 已落地 | ast-grep | 融合为有界只读声明结构搜索；不开放自动改写，不冒充完整 AST/LSP |
 | 已落地 | yq | 同一结构化查询已扩展 YAML/XML/TOML，不增加独立 yq 页面 |
 | 已落地 | hyperfine | 融合预热/多轮/百分位统计，仅允许三种内置操作，禁止任意命令 |
+| 已落地 | DevToys / CyberChef / Hexkit | 去重后补齐 30 项离线微工具；统一分类 Tab、ToolSpec、Harness 和日志，不复制品牌 UI 或整仓代码 |

@@ -1,8 +1,8 @@
 # 第三方组件、模型与供应链记录
 
-更新日期：2026-08-19
+更新日期：2026-08-22
 
-适用版本：`1.9.0-dev.23+33`
+适用版本：`1.9.0-dev.65+75`
 
 ## 发布时直接使用的关键组件
 
@@ -49,6 +49,8 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 - Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。macOS 真启动、WebView 容器和停止后无残留进程仍待验收。
 
 ## 开源借鉴边界
+
+- 2026-08-22 复核 [DevToys](https://github.com/DevToys-app/DevToys)（MIT）、[CyberChef](https://github.com/gchq/CyberChef)（Apache-2.0）和 [Hexkit](https://github.com/trinvh/hexkit)（MIT）的公开能力分类、离线操作和组合式任务模型。Vibekits 未复制它们的源码、资源或 UI，也未增加其二进制；30 项补充工具为独立 Dart 实现，复用项目已有 `xml`/Dart 标准库和统一 ToolSpec/Harness/日志合同，因此本轮没有新增发布依赖。
 
 - Windows 清理规则研究参考 Microsoft Known Folders、Storage Sense、Disk Cleanup、WER 与 Delivery Optimization 官方文档，并审阅 Winapp2 与 BleachBit。Vibekits 使用独立编写的版本化规则库：未复制 Winapp2 规则（仓库基础规则许可不明确），未移植 GPL-3.0 的 BleachBit 源码/cleaner definitions。
 - 2026-08-18 继续审阅 [Kudu](https://github.com/AdventDevInc/kudu)（MIT）、[constUP Garbage Cleaner](https://github.com/constup-foss/garbage-cleaner-powershell)（MPL-2.0）与 [BitCleanerX](https://github.com/paulocoutinhox/bitcleanerx)（MIT）。Vibekits 没有嵌入上游源码或规则文件；独立实现了最小年龄、最大扫描深度、直接文件名白名单和 dry-run 候选模型，并根据公开路径语义增加 JetBrains/WSLg/Gradio/.NET/Scoop 等受限规则。MPL 上游实现未复制，因此不引入其文件级许可证传播要求。

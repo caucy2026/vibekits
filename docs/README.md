@@ -39,6 +39,7 @@
 33. [Windows 节点智能体工具接口](29_AGENT_WINDOWS_NODE_TOOL_API.md)——Harness/Codex 调用顺序、参数、返回、STDIO 注册和可用性发现
 34. [dev.63 外部 Codex MCP 验收](acceptance/V1_9_0_DEV63_CODEX_MCP_2026-08-21.md)——全局注册、77 工具发现、节点调用与 Release 证据
 35. [dev.64 清理经验决策引擎验收](acceptance/V1_9_0_DEV64_CLEANUP_DECISION_2026-08-22.md)——同机只读复扫、四级决策、安全边界与性能数据
+36. [dev.65 30 项高频微工具验收](acceptance/V1_9_0_DEV65_UTILITY_PLUS_30_2026-08-22.md)——GitHub 能力去重、界面/Harness/日志闭环与性能数据
 
 ## 完成定义
 
