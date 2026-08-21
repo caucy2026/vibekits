@@ -859,4 +859,41 @@ void main() {
     expect(logs.strategy, CleanupTargetStrategy.directoryContents);
     expect(recycle.path, logs.path);
   });
+
+  test('过期子目录按会话聚合且目录名称过滤有效', () async {
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vk_stale_child_dirs',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory stale = Directory(
+      '${sandbox.path}${Platform.pathSeparator}16.1.old',
+    )..createSync();
+    File('${stale.path}${Platform.pathSeparator}payload.bin')
+        .writeAsBytesSync(List<int>.filled(4096, 7));
+    final Directory current = Directory(
+      '${sandbox.path}${Platform.pathSeparator}16.2.current',
+    )..createSync();
+    File('${current.path}${Platform.pathSeparator}payload.bin')
+        .writeAsBytesSync(List<int>.filled(8192, 8));
+
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[
+        CleanupScanTarget(
+          id: 'stale-folders',
+          label: '旧版本目录',
+          path: sandbox.path,
+          category: CleanupCategory.pluginResidual,
+          defaultEnabled: true,
+          strategy: CleanupTargetStrategy.staleChildDirectories,
+          includePatterns: const <String>['*.old'],
+          riskLevel: CleanupRiskLevel.cautious,
+        ),
+      ],
+    );
+
+    expect(result.candidates, hasLength(1));
+    expect(result.candidates.single.path, stale.path);
+    expect(result.candidates.single.size, 4096);
+    expect(result.candidates.single.defaultSelected, isFalse);
+  });
 }

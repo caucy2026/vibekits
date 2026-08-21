@@ -7,6 +7,7 @@ import 'windows_cleanup_rule_catalog.dart';
 
 enum CleanupTargetStrategy {
   directoryContents,
+  staleChildDirectories,
   downloadSuggestions,
   staleVsCodeExtensions,
   recycleBin,
@@ -82,6 +83,20 @@ abstract final class CleanupTargetDiscovery {
       _addDebugTempDirectories(targets, temp);
     }
     if (roaming != null && roaming.trim().isNotEmpty) {
+      _addExisting(
+        targets,
+        id: '360-browser-old-kernel-residuals',
+        label: '360 浏览器旧内核残留',
+        path: _join(roaming, <String>['secoresdk', '360se6', 'Application']),
+        category: CleanupCategory.pluginResidual,
+        defaultEnabled: true,
+        strategy: CleanupTargetStrategy.staleChildDirectories,
+        minimumAgeHours: 24 * 7,
+        maxEntries: 100000,
+        includePatterns: const <String>['*.old'],
+        riskLevel: CleanupRiskLevel.cautious,
+        safetyNote: '只列出名称明确以 .old 结尾的旧内核目录；当前版本和用户数据不会删除',
+      );
       for (final (String id, String product, String folder)
           in <(String, String, String)>[
             ('vscode', 'Visual Studio Code', 'Code'),
@@ -130,6 +145,49 @@ abstract final class CleanupTargetDiscovery {
       }
     }
     if (userProfile != null && userProfile.trim().isNotEmpty) {
+      _addExisting(
+        targets,
+        id: 'antigravity-stale-task-artifacts',
+        label: 'Antigravity / Gemini 旧任务调试产物',
+        path: _join(userProfile, <String>['.gemini', 'antigravity', 'brain']),
+        category: CleanupCategory.debugArtifacts,
+        defaultEnabled: true,
+        strategy: CleanupTargetStrategy.staleChildDirectories,
+        minimumAgeHours: 24 * 14,
+        maxEntries: 100000,
+        riskLevel: CleanupRiskLevel.cautious,
+        safetyNote: '按旧任务会话整包列出，包含截图、日志和任务上下文；删除后无法查看对应旧任务的调试证据',
+      );
+      _addExisting(
+        targets,
+        id: 'antigravity-stale-conversations',
+        label: 'Antigravity / Gemini 旧会话数据库',
+        path: _join(userProfile, <String>[
+          '.gemini',
+          'antigravity',
+          'conversations',
+        ]),
+        category: CleanupCategory.debugArtifacts,
+        defaultEnabled: true,
+        minimumAgeHours: 24 * 14,
+        maxEntries: 1000,
+        includePatterns: const <String>['*.db'],
+        riskLevel: CleanupRiskLevel.cautious,
+        safetyNote: '旧智能体会话正文；删除后旧会话不能恢复，默认不勾选',
+      );
+      _addExisting(
+        targets,
+        id: 'gradle-stale-distributions',
+        label: 'Gradle 过期发行包',
+        path: _join(userProfile, <String>['.gradle', 'wrapper', 'dists']),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
+        strategy: CleanupTargetStrategy.staleChildDirectories,
+        minimumAgeHours: 24 * 30,
+        maxEntries: 100000,
+        riskLevel: CleanupRiskLevel.cautious,
+        safetyNote: '仅列出 30 天未更新的 Gradle 版本；旧项目再次构建时会重新下载',
+      );
       _addExisting(
         targets,
         id: 'gradle-cache',

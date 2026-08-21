@@ -513,6 +513,11 @@ class _CleanerTabState extends State<CleanerTab> {
       .where((CleanupCandidate c) => _selected.contains(c.path))
       .fold<int>(0, (int sum, CleanupCandidate c) => sum + c.size);
 
+  int _candidateBytesWhere(bool Function(CleanupCandidate) predicate) =>
+      _candidates
+          .where(predicate)
+          .fold<int>(0, (int sum, CleanupCandidate item) => sum + item.size);
+
   Future<void> _smartSelect() async {
     final List<CleanupCandidate> plan = _candidates
         .where((candidate) {
@@ -2720,6 +2725,7 @@ class _CleanerTabState extends State<CleanerTab> {
         _groupCandidates(visible);
     return Column(
       children: <Widget>[
+        _buildCandidateRiskSummary(),
         _buildCleanupTaskNavigation(),
         Expanded(
           child: _cleanupResultView == _CleanupResultView.unusedSoftware
@@ -2741,6 +2747,56 @@ class _CleanerTabState extends State<CleanerTab> {
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildCandidateRiskSummary() {
+    final int safe = _candidateBytesWhere(
+      (CleanupCandidate item) => !item.highRisk,
+    );
+    final int managed = _candidateBytesWhere(
+      (CleanupCandidate item) =>
+          item.riskLevel == CleanupRiskLevel.systemManaged,
+    );
+    final int review = _candidateBytesWhere(
+      (CleanupCandidate item) =>
+          item.highRisk && item.riskLevel != CleanupRiskLevel.systemManaged,
+    );
+    final int total = safe + review + managed;
+    return Container(
+      key: const ValueKey<String>('cleanup-risk-summary'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: context.vibe.panel,
+        border: Border(bottom: BorderSide(color: context.vibe.border)),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 4,
+        children: <Widget>[
+          Text(
+            '可释放潜力 ${_formatSize(total)}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          Text(
+            '推荐 ${_formatSize(safe)}',
+            style: TextStyle(color: context.vibe.success),
+          ),
+          Text(
+            '需确认 ${_formatSize(review)}',
+            style: const TextStyle(color: VibekitsColors.warning),
+          ),
+          Text(
+            '系统管理 ${_formatSize(managed)}',
+            style: TextStyle(color: context.vibe.muted),
+          ),
+          Text(
+            '“潜力”不是实际释放；顶部 10G 验收只按清理后的磁盘增量计算',
+            style: TextStyle(fontSize: 11, color: context.vibe.muted),
+          ),
+        ],
+      ),
     );
   }
 

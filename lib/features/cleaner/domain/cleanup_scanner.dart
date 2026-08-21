@@ -375,6 +375,12 @@ abstract final class CleanupScanner {
             riskLevel: target.riskLevel,
             impactNote: target.safetyNote,
           ),
+        CleanupTargetStrategy.staleChildDirectories =>
+          await _scanStaleChildDirectories(
+            target,
+            cancellationToken: token,
+            onProgress: targetProgress,
+          ),
         CleanupTargetStrategy.downloadSuggestions =>
           await _scanDownloadSuggestions(
             target,
@@ -405,6 +411,131 @@ abstract final class CleanupScanner {
       unreadablePaths: unreadable,
       visitedEntries: visitedOffset,
       candidateBytes: bytesOffset,
+    );
+  }
+
+  /// 把已过期的直属子目录聚合成单个候选。
+  ///
+  /// 智能体任务和构建发行包通常包含成千上万个小文件。逐文件列出不仅难以
+  /// 审核，删除时也非常慢；按会话/版本目录聚合后，用户能看懂边界，清理器
+  /// 也只需处理少量目录。扫描仍不跟随链接或目录联接点。
+  static Future<CleanupScanResult> _scanStaleChildDirectories(
+    CleanupScanTarget target, {
+    required CleanupCancellationToken cancellationToken,
+    void Function(CleanupScanProgress progress)? onProgress,
+  }) async {
+    final Directory root = Directory(target.path);
+    if (!root.existsSync()) {
+      return const CleanupScanResult(
+        candidates: <CleanupCandidate>[],
+        cancelled: false,
+        unreadablePaths: 0,
+      );
+    }
+    final DateTime cutoff = DateTime.now().subtract(
+      Duration(hours: target.minimumAgeHours),
+    );
+    final List<CleanupCandidate> candidates = <CleanupCandidate>[];
+    int visited = 0;
+    int unreadable = 0;
+    int bytes = 0;
+
+    Future<int> measure(Directory directory) async {
+      int total = 0;
+      try {
+        await for (final FileSystemEntity entity in directory.list(
+          followLinks: false,
+        )) {
+          if (cancellationToken.isCancelled || visited >= target.maxEntries) {
+            break;
+          }
+          visited++;
+          final FileSystemEntityType type = FileSystemEntity.typeSync(
+            entity.path,
+            followLinks: false,
+          );
+          if (type == FileSystemEntityType.file) {
+            total += await File(entity.path).length();
+          } else if (type == FileSystemEntityType.directory) {
+            total += await measure(Directory(entity.path));
+          }
+          if (visited % 32 == 0) {
+            onProgress?.call(
+              CleanupScanProgress(
+                currentPath: entity.path,
+                visitedEntries: visited,
+                candidateCount: candidates.length,
+                candidateBytes: bytes + total,
+              ),
+            );
+            await Future<void>.delayed(Duration.zero);
+          }
+        }
+      } on FileSystemException {
+        unreadable++;
+      }
+      return total;
+    }
+
+    try {
+      await for (final FileSystemEntity entity in root.list(
+        followLinks: false,
+      )) {
+        if (cancellationToken.isCancelled || visited >= target.maxEntries) {
+          break;
+        }
+        if (FileSystemEntity.typeSync(entity.path, followLinks: false) !=
+            FileSystemEntityType.directory) {
+          continue;
+        }
+        final String name = _baseName(entity.path).toLowerCase();
+        if (target.includePatterns.isNotEmpty &&
+            !target.includePatterns.any(
+              (String pattern) => _wildcardMatches(name, pattern),
+            )) {
+          continue;
+        }
+        if (target.excludePatterns.any(
+          (String pattern) => _wildcardMatches(name, pattern),
+        )) {
+          continue;
+        }
+        final DateTime modified = Directory(entity.path).statSync().modified;
+        if (target.minimumAgeHours > 0 && modified.isAfter(cutoff)) continue;
+        final int size = await measure(Directory(entity.path));
+        if (size < target.minimumSizeBytes) continue;
+        bytes += size;
+        candidates.add(
+          CleanupCandidate(
+            path: entity.path,
+            size: size,
+            category: target.category,
+            reason: target.label,
+            modified: modified,
+            identity: CleanupFileIdentity.read(entity.path),
+            sourceLabel: target.label,
+            riskLevel: target.riskLevel,
+            impactNote: target.safetyNote,
+          ),
+        );
+        onProgress?.call(
+          CleanupScanProgress(
+            currentPath: entity.path,
+            visitedEntries: visited,
+            candidateCount: candidates.length,
+            candidateBytes: bytes,
+          ),
+        );
+      }
+    } on FileSystemException {
+      unreadable++;
+    }
+    return CleanupScanResult(
+      candidates: candidates,
+      cancelled: cancellationToken.isCancelled,
+      unreadablePaths: unreadable,
+      visitedEntries: visited,
+      candidateBytes: bytes,
     );
   }
 
