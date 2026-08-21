@@ -35,12 +35,15 @@ abstract final class GithubDiagnosticsService {
   static Future<GithubDiagnosticsReport> run() async {
     final List<DiagnosticCheck> checks = await Future.wait(
       <Future<DiagnosticCheck>>[
+        _credentials(),
         _dns(),
+        _tcp('tcp443', 'GitHub TCP 443', 'github.com', 443),
         _tls(),
         _https(),
         _tcp('ssh22', 'SSH 端口 22', 'github.com', 22),
         _tcp('ssh443', 'SSH 备用端口 443', 'ssh.github.com', 443),
         _proxy(),
+        _gitRoute(),
         Future<DiagnosticCheck>.value(_hosts()),
       ],
     );
@@ -54,10 +57,19 @@ abstract final class GithubDiagnosticsService {
     DiagnosticCheck? byId(String id) =>
         checks.where((DiagnosticCheck item) => item.id == id).firstOrNull;
     final DiagnosticCheck? https = byId('https');
+    final DiagnosticCheck? credentials = byId('credentials');
+    final DiagnosticCheck? gitRoute = byId('gitRoute');
     final DiagnosticCheck? ssh22 = byId('ssh22');
     final DiagnosticCheck? ssh443 = byId('ssh443');
     if (https?.status == DiagnosticStatus.failed) {
       return 'HTTPS 基础连接失败：先检查系统时间、代理、防火墙和 DNS；不要通过关闭 TLS 校验解决。';
+    }
+    if (credentials?.status != DiagnosticStatus.ok) {
+      return '未确认 Git Credential Manager 账号；这与网络可达是两个独立状态，请先完成凭据登录。';
+    }
+    if (gitRoute?.status == DiagnosticStatus.failed &&
+        https?.status == DiagnosticStatus.ok) {
+      return '浏览器 HTTPS 可达但内置 Git 路由失败；检查 Git host-scoped 代理、凭据和远端权限。';
     }
     if (ssh22?.status == DiagnosticStatus.failed &&
         ssh443?.status == DiagnosticStatus.ok) {
@@ -84,6 +96,57 @@ abstract final class GithubDiagnosticsService {
     }
     return value.replaceAll(RegExp(r'//[^/@\s]+@'), '//***@');
   }
+
+  static Future<DiagnosticCheck> _credentials() async {
+    final Stopwatch watch = Stopwatch()..start();
+    try {
+      final ProcessResult result = await Process.run(
+        GitRepositoryService.bundledExecutable,
+        <String>['credential-manager', 'github', 'list'],
+        runInShell: false,
+      ).timeout(const Duration(seconds: 6));
+      watch.stop();
+      final String output = '${result.stdout}'.trim();
+      if (result.exitCode != 0 || output.isEmpty) {
+        return DiagnosticCheck(
+          id: 'credentials',
+          label: 'GitHub 凭据账号',
+          status: DiagnosticStatus.warning,
+          detail: 'Git Credential Manager 未报告账号；未读取 Token',
+          elapsed: watch.elapsed,
+        );
+      }
+      final List<String> labels = output
+          .split(RegExp(r'[\r\n]+'))
+          .map(_redactCredentialLine)
+          .where((String line) => line.isNotEmpty)
+          .take(10)
+          .toList(growable: false);
+      return DiagnosticCheck(
+        id: 'credentials',
+        label: 'GitHub 凭据账号',
+        status: labels.isEmpty ? DiagnosticStatus.warning : DiagnosticStatus.ok,
+        detail: labels.isEmpty ? '存在凭据记录但未取得账号标签' : labels.join('\n'),
+        elapsed: watch.elapsed,
+      );
+    } on Object catch (error) {
+      return DiagnosticCheck(
+        id: 'credentials',
+        label: 'GitHub 凭据账号',
+        status: DiagnosticStatus.warning,
+        detail: '无法读取账号标签：${error.runtimeType}；未读取 Token',
+        elapsed: watch.elapsed,
+      );
+    }
+  }
+
+  static String _redactCredentialLine(String value) => value
+      .replaceAll(
+        RegExp(r'(password|token|secret)\s*[:=]\s*\S+', caseSensitive: false),
+        r'$1=***',
+      )
+      .replaceAll(RegExp(r'https?://[^/@\s]+@'), 'https://***@')
+      .trim();
 
   static Future<DiagnosticCheck> _dns() async {
     final Stopwatch watch = Stopwatch()..start();
@@ -245,12 +308,73 @@ abstract final class GithubDiagnosticsService {
     } on Object {
       // Git is optional for the proxy inventory.
     }
+    if (Platform.isWindows) {
+      try {
+        final ProcessResult winInet = await Process.run('reg.exe', <String>[
+          'query',
+          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
+          '/v',
+          'ProxyEnable',
+        ], runInShell: false).timeout(const Duration(seconds: 3));
+        final String output = '${winInet.stdout}'.trim();
+        values.add(output.contains('0x1') ? 'WinINet=已启用' : 'WinINet=未启用');
+      } on Object {
+        values.add('WinINet=无法读取');
+      }
+      try {
+        final ProcessResult winHttp = await Process.run('netsh.exe', <String>[
+          'winhttp',
+          'show',
+          'proxy',
+        ], runInShell: false).timeout(const Duration(seconds: 3));
+        final String output = '${winHttp.stdout}'
+            .replaceAll(RegExp(r'[\r\n]+'), ' ')
+            .trim();
+        values.add(
+          'WinHTTP=${redactProxy(output.length > 300 ? output.substring(0, 300) : output)}',
+        );
+      } on Object {
+        values.add('WinHTTP=无法读取');
+      }
+    }
     return DiagnosticCheck(
       id: 'proxy',
       label: '代理配置',
       status: values.isEmpty ? DiagnosticStatus.ok : DiagnosticStatus.warning,
       detail: values.isEmpty ? '未发现环境变量或全局 Git 代理' : values.join('\n'),
     );
+  }
+
+  static Future<DiagnosticCheck> _gitRoute() async {
+    final Stopwatch watch = Stopwatch()..start();
+    try {
+      final ProcessResult result = await Process.run(
+        GitRepositoryService.bundledExecutable,
+        <String>['ls-remote', 'https://github.com/git/git.git', 'HEAD'],
+        runInShell: false,
+      ).timeout(const Duration(seconds: 15));
+      watch.stop();
+      final String output = '${result.stdout}'.trim();
+      return DiagnosticCheck(
+        id: 'gitRoute',
+        label: '内置 Git 路由',
+        status: result.exitCode == 0 && output.isNotEmpty
+            ? DiagnosticStatus.ok
+            : DiagnosticStatus.failed,
+        detail: result.exitCode == 0
+            ? 'MinGit ls-remote HEAD 成功'
+            : '失败：${_redactCredentialLine('${result.stderr}')}',
+        elapsed: watch.elapsed,
+      );
+    } on Object catch (error) {
+      return DiagnosticCheck(
+        id: 'gitRoute',
+        label: '内置 Git 路由',
+        status: DiagnosticStatus.failed,
+        detail: '失败：${error.runtimeType}',
+        elapsed: watch.elapsed,
+      );
+    }
   }
 
   static DiagnosticCheck _hosts() {

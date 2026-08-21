@@ -83,6 +83,9 @@
 | DEV-122 | Harness 调试目录 | 设置中指定日志、截图和临时文件根目录；默认 EXE 同级 `tmp`；跨重启保存；实际分流到 `logs/screenshots/temp`；日志不得含 Key | AppSettings 持久化、目录选择/创建、OCR 截图路由、Harness TEMP/TMP/日志环境与 stdout/stderr 文件落盘已接入；Windows 构建和实机目录检查见 dev.16 验收 |
 | DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows Git/ADB/7-Zip/Harness/Node 已随包；SSH/SFTP/转发为编译依赖；Release 对 Git/Harness 缺失执行构建失败；macOS Git/Harness/OCR 运行时仍待准备和实机验收 |
 | DEV-124 | 下载目录可配置 | 设置中显示并可选择工具与模型下载目录；默认 `%LOCALAPPDATA%\Vibekits\downloads`；下载使用 `.part` 暂存、哈希通过后原子改名；设置跨重启保存 | Windows 设置、持久化和模型下载路由已接入；随包工具固定在 Release 同级 `tools`，不与运行时下载混用 |
+| NODE-001～010 | Windows 真机成为局域网测试节点 | 只读体检、幂等计划、窄权限 UAC、D 盘门禁、OpenSSH/LAN 防火墙、独立设备公钥、真实跨设备验收与精确回滚 | NODE-001/002/004 的领域、Harness、UI、真实 Windows 只读探测已闭环；签名 helper、设备登记/撤销、跨设备验证仍为阻断项，不伪报完成 |
+| NET-201～204 | 诊断真实代理端口并仅修复 GitHub Git | 分层区分凭据/网络/代理/Git；loopback 候选；host-scoped 配置；失败自动恢复旧值 | NET-001～003 已实现并自动测试：真实监听发现、HTTPS/Git 候选验证、计划、host-scoped 应用和失败恢复；系统代理/TUN 按边界未开放 |
+| GIT-201～203 | Harness 安全提交并推送既有 GitHub 仓库备份 | preview 阻断秘密；commit/push 分离审批；默认 backup 分支；远端 SHA 核验；禁止 force/删 ref/改 tag | 领域、Harness 和 UI 已完成，本地 bare remote 真 commit/push/SHA 通过；真实私有 GitHub 仓库仍需验收智能体在用户审批下补证 |
 
 ## 5. 本地智能与开源移植
 

@@ -57,9 +57,19 @@ void main() {
       VibekitsHarnessToolBridge.gitInspectId,
       VibekitsHarnessToolBridge.gitCompareRefsId,
       VibekitsHarnessToolBridge.gitCreateLocalBranchId,
+      VibekitsHarnessToolBridge.gitBackupPreviewId,
+      VibekitsHarnessToolBridge.gitBackupCommitId,
+      VibekitsHarnessToolBridge.gitBackupPushId,
+      VibekitsHarnessToolBridge.gitVerifyRemoteRefId,
       VibekitsHarnessToolBridge.fileSearchId,
       VibekitsHarnessToolBridge.apiRequestId,
       VibekitsHarnessToolBridge.githubDiagnosticsId,
+      VibekitsHarnessToolBridge.githubProxyCandidatesId,
+      VibekitsHarnessToolBridge.githubProxyPlanId,
+      VibekitsHarnessToolBridge.githubProxyApplyId,
+      VibekitsHarnessToolBridge.githubProxyRollbackId,
+      VibekitsHarnessToolBridge.windowsNodeInspectId,
+      VibekitsHarnessToolBridge.windowsNodePlanId,
       VibekitsHarnessToolBridge.programmerCalculatorId,
       VibekitsHarnessToolBridge.remoteListProfilesId,
       VibekitsHarnessToolBridge.remoteSshExecId,
@@ -74,6 +84,21 @@ void main() {
       VibekitsHarnessToolBridge.systemDriveAnalyzeId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
+    }
+    final Set<String> fullIds = bridge.fullCatalog
+        .map((HarnessToolDefinition tool) => tool.id)
+        .toSet();
+    for (final String id in <String>[
+      VibekitsHarnessToolBridge.windowsNodeApplyId,
+      VibekitsHarnessToolBridge.windowsNodeVerifyId,
+      VibekitsHarnessToolBridge.windowsNodeListDevicesId,
+      VibekitsHarnessToolBridge.windowsNodeEnrollDeviceId,
+      VibekitsHarnessToolBridge.windowsNodeRevokeDeviceId,
+      VibekitsHarnessToolBridge.windowsNodeExportOnboardingId,
+      VibekitsHarnessToolBridge.windowsNodeRollbackId,
+    ]) {
+      expect(fullIds, contains(id));
+      expect(tools.any((dynamic tool) => tool['id'] == id), isFalse);
     }
   });
 

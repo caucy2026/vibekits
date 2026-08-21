@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 class GitRepositorySnapshot {
   const GitRepositorySnapshot({
@@ -41,8 +45,124 @@ class GitReferenceComparison {
   final String diff;
 }
 
+class GitBackupPreview {
+  const GitBackupPreview({
+    required this.id,
+    required this.repositoryRoot,
+    required this.repositoryStateDigest,
+    required this.currentBranch,
+    required this.remoteId,
+    required this.remoteUrl,
+    required this.targetBranch,
+    required this.includedPaths,
+    required this.stagedCount,
+    required this.unstagedCount,
+    required this.untrackedCount,
+    required this.blockers,
+    required this.warnings,
+    required this.remoteReachable,
+    required this.expiresAt,
+    this.commitSha,
+  });
+
+  final String id;
+  final String repositoryRoot;
+  final String repositoryStateDigest;
+  final String currentBranch;
+  final String remoteId;
+  final String remoteUrl;
+  final String targetBranch;
+  final List<String> includedPaths;
+  final int stagedCount;
+  final int unstagedCount;
+  final int untrackedCount;
+  final List<String> blockers;
+  final List<String> warnings;
+  final bool remoteReachable;
+  final DateTime expiresAt;
+  final String? commitSha;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'previewId': id,
+    'repositoryRoot': repositoryRoot,
+    'repositoryStateDigest': repositoryStateDigest,
+    'currentBranch': currentBranch,
+    'remoteId': remoteId,
+    'remoteUrl': remoteUrl,
+    'targetBranch': targetBranch,
+    'includedPaths': includedPaths,
+    'stagedCount': stagedCount,
+    'unstagedCount': unstagedCount,
+    'untrackedCount': untrackedCount,
+    'blockers': blockers,
+    'warnings': warnings,
+    'remoteReachable': remoteReachable,
+    'expiresAt': expiresAt.toUtc().toIso8601String(),
+    if (commitSha != null) 'commitSha': commitSha,
+  };
+}
+
+class GitBackupCommitResult {
+  const GitBackupCommitResult({
+    required this.previewId,
+    required this.commitSha,
+    required this.targetBranch,
+    required this.pathCount,
+  });
+
+  final String previewId;
+  final String commitSha;
+  final String targetBranch;
+  final int pathCount;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'previewId': previewId,
+    'commitSha': commitSha,
+    'targetBranch': targetBranch,
+    'pathCount': pathCount,
+    'pushRequired': true,
+  };
+}
+
+class GitBackupPushResult {
+  const GitBackupPushResult({
+    required this.previewId,
+    required this.remoteId,
+    required this.targetBranch,
+    required this.localCommitSha,
+    required this.remoteCommitSha,
+    required this.verified,
+  });
+
+  final String previewId;
+  final String remoteId;
+  final String targetBranch;
+  final String localCommitSha;
+  final String remoteCommitSha;
+  final bool verified;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'previewId': previewId,
+    'remoteId': remoteId,
+    'targetBranch': targetBranch,
+    'localCommitSha': localCommitSha,
+    'remoteCommitSha': remoteCommitSha,
+    'verified': verified,
+  };
+}
+
+class _GitBackupPlanState {
+  _GitBackupPlanState(this.preview);
+
+  GitBackupPreview preview;
+}
+
 abstract final class GitRepositoryService {
   static const int _maxOutputBytes = 2 * 1024 * 1024;
+  static const int _largeFileWarningBytes = 50 * 1024 * 1024;
+  static const Duration _backupPlanLifetime = Duration(minutes: 15);
+  static final Map<String, _GitBackupPlanState> _backupPlans =
+      <String, _GitBackupPlanState>{};
 
   static String get bundledExecutable => _resolveGitExecutable();
 
@@ -183,6 +303,428 @@ abstract final class GitRepositoryService {
     return branch;
   }
 
+  static Future<GitBackupPreview> previewBackup(
+    String directory, {
+    required String remoteId,
+    String? deviceLabel,
+    DateTime? now,
+  }) async {
+    final DateTime createdAt = now ?? DateTime.now();
+    _pruneBackupPlans(createdAt);
+    final String root = await _repositoryRoot(directory);
+    final String remote = _requiredRemoteId(remoteId);
+    final String remoteUrl = (await _git(root, <String>[
+      'remote',
+      'get-url',
+      '--',
+      remote,
+    ])).trim();
+    final String porcelain = await _git(root, <String>[
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+    ]);
+    final List<_GitStatusPath> changed = _parsePorcelain(porcelain);
+    if (changed.isEmpty) throw const FormatException('工作区没有可备份的变更');
+    final List<String> paths =
+        changed
+            .map((_GitStatusPath item) => item.path)
+            .toSet()
+            .toList(growable: false)
+          ..sort();
+    final Map<String, List<String>> safety = await Isolate.run(
+      () => _inspectBackupPaths(root, paths),
+    );
+    final List<String> blockers = safety['blockers'] ?? <String>[];
+    final List<String> warnings = safety['warnings'] ?? <String>[];
+    final String branch = (await _git(root, <String>[
+      'branch',
+      '--show-current',
+    ])).trim();
+    final String project = _safeBranchPart(
+      root
+          .split(Platform.pathSeparator)
+          .where((String part) => part.isNotEmpty)
+          .last,
+    );
+    final String device = _safeBranchPart(
+      (deviceLabel ?? Platform.localHostname).trim(),
+    );
+    final String date =
+        '${createdAt.year.toString().padLeft(4, '0')}'
+        '${createdAt.month.toString().padLeft(2, '0')}'
+        '${createdAt.day.toString().padLeft(2, '0')}';
+    bool remoteReachable = false;
+    try {
+      await _git(root, <String>[
+        'ls-remote',
+        '--heads',
+        remote,
+      ], timeout: const Duration(seconds: 20));
+      remoteReachable = true;
+    } on Object catch (error) {
+      warnings.add('远端当前不可达：${_safeGitError(error)}；本地提交后可重试 push');
+    }
+    final String digest = sha256.convert(utf8.encode(porcelain)).toString();
+    final String id = _randomPlanId();
+    final GitBackupPreview preview = GitBackupPreview(
+      id: id,
+      repositoryRoot: root,
+      repositoryStateDigest: digest,
+      currentBranch: branch.isEmpty ? 'detached' : branch,
+      remoteId: remote,
+      remoteUrl: _redactRemoteUrl(remoteUrl),
+      targetBranch: 'backup/$device/$project/$date',
+      includedPaths: List<String>.unmodifiable(paths),
+      stagedCount: changed.where((_GitStatusPath item) => item.staged).length,
+      unstagedCount: changed
+          .where((_GitStatusPath item) => item.unstaged)
+          .length,
+      untrackedCount: changed
+          .where((_GitStatusPath item) => item.untracked)
+          .length,
+      blockers: List<String>.unmodifiable(blockers),
+      warnings: List<String>.unmodifiable(warnings),
+      remoteReachable: remoteReachable,
+      expiresAt: createdAt.add(_backupPlanLifetime),
+    );
+    _backupPlans[id] = _GitBackupPlanState(preview);
+    return preview;
+  }
+
+  static Future<GitBackupCommitResult> commitBackup({
+    required String previewId,
+    required List<String> includedPaths,
+    required String message,
+    DateTime? now,
+  }) async {
+    final _GitBackupPlanState plan = await _validatedBackupPlan(
+      previewId,
+      now: now,
+      requireUnchangedState: true,
+    );
+    if (plan.preview.blockers.isNotEmpty) {
+      throw FormatException('备份被安全检查阻断：${plan.preview.blockers.join('；')}');
+    }
+    if (plan.preview.commitSha != null) {
+      return GitBackupCommitResult(
+        previewId: previewId,
+        commitSha: plan.preview.commitSha!,
+        targetBranch: plan.preview.targetBranch,
+        pathCount: plan.preview.includedPaths.length,
+      );
+    }
+    final String commitMessage = message.trim();
+    if (commitMessage.isEmpty || commitMessage.length > 200) {
+      throw const FormatException('提交说明必须为 1～200 个字符');
+    }
+    final Set<String> allowed = plan.preview.includedPaths.toSet();
+    final List<String> selected = includedPaths.toSet().toList()..sort();
+    if (selected.isEmpty ||
+        selected.any((String path) => !allowed.contains(path))) {
+      throw const FormatException('提交文件必须是 preview 返回的非空文件子集');
+    }
+    await _git(plan.preview.repositoryRoot, <String>['add', '--', ...selected]);
+    await _git(plan.preview.repositoryRoot, <String>[
+      'commit',
+      '-m',
+      commitMessage,
+      '--',
+      ...selected,
+    ], timeout: const Duration(minutes: 2));
+    final String sha = (await _git(plan.preview.repositoryRoot, <String>[
+      'rev-parse',
+      'HEAD^{commit}',
+    ])).trim();
+    plan.preview = GitBackupPreview(
+      id: plan.preview.id,
+      repositoryRoot: plan.preview.repositoryRoot,
+      repositoryStateDigest: plan.preview.repositoryStateDigest,
+      currentBranch: plan.preview.currentBranch,
+      remoteId: plan.preview.remoteId,
+      remoteUrl: plan.preview.remoteUrl,
+      targetBranch: plan.preview.targetBranch,
+      includedPaths: plan.preview.includedPaths,
+      stagedCount: plan.preview.stagedCount,
+      unstagedCount: plan.preview.unstagedCount,
+      untrackedCount: plan.preview.untrackedCount,
+      blockers: plan.preview.blockers,
+      warnings: plan.preview.warnings,
+      remoteReachable: plan.preview.remoteReachable,
+      expiresAt: plan.preview.expiresAt,
+      commitSha: sha,
+    );
+    return GitBackupCommitResult(
+      previewId: previewId,
+      commitSha: sha,
+      targetBranch: plan.preview.targetBranch,
+      pathCount: selected.length,
+    );
+  }
+
+  static Future<GitBackupPushResult> pushBackup({
+    required String previewId,
+    required String commitSha,
+    DateTime? now,
+  }) async {
+    final _GitBackupPlanState plan = await _validatedBackupPlan(
+      previewId,
+      now: now,
+      requireUnchangedState: false,
+    );
+    final String expectedSha = plan.preview.commitSha ?? '';
+    if (expectedSha.isEmpty || commitSha.trim() != expectedSha) {
+      throw const FormatException('push 只接受本 preview 已生成的 commit SHA');
+    }
+    final String ref = 'refs/heads/${plan.preview.targetBranch}';
+    await _git(plan.preview.repositoryRoot, <String>[
+      'push',
+      '--porcelain',
+      plan.preview.remoteId,
+      '$expectedSha:$ref',
+    ], timeout: const Duration(minutes: 3));
+    final String remoteSha = await verifyRemoteRef(
+      plan.preview.repositoryRoot,
+      remoteId: plan.preview.remoteId,
+      targetBranch: plan.preview.targetBranch,
+    );
+    return GitBackupPushResult(
+      previewId: previewId,
+      remoteId: plan.preview.remoteId,
+      targetBranch: plan.preview.targetBranch,
+      localCommitSha: expectedSha,
+      remoteCommitSha: remoteSha,
+      verified: remoteSha == expectedSha,
+    );
+  }
+
+  static Future<String> verifyRemoteRef(
+    String directory, {
+    required String remoteId,
+    required String targetBranch,
+  }) async {
+    final String root = await _repositoryRoot(directory);
+    final String remote = _requiredRemoteId(remoteId);
+    final String branch = _requiredBackupBranch(targetBranch);
+    final String output = (await _git(root, <String>[
+      'ls-remote',
+      '--heads',
+      remote,
+      'refs/heads/$branch',
+    ], timeout: const Duration(seconds: 30))).trim();
+    if (output.isEmpty) throw const FormatException('远端未找到目标备份分支');
+    final String sha = output.split(RegExp(r'\s+')).first;
+    if (!RegExp(r'^[0-9a-fA-F]{40,64}$').hasMatch(sha)) {
+      throw const FormatException('远端返回了无效 commit SHA');
+    }
+    return sha.toLowerCase();
+  }
+
+  static Future<_GitBackupPlanState> _validatedBackupPlan(
+    String id, {
+    DateTime? now,
+    required bool requireUnchangedState,
+  }) async {
+    final DateTime current = now ?? DateTime.now();
+    _pruneBackupPlans(current);
+    final _GitBackupPlanState? plan = _backupPlans[id.trim()];
+    if (plan == null) throw const FormatException('preview 不存在或已过期，请重新预览');
+    if (requireUnchangedState) {
+      final String porcelain = await _git(plan.preview.repositoryRoot, <String>[
+        'status',
+        '--porcelain=v1',
+        '-z',
+        '--untracked-files=all',
+      ]);
+      final String digest = sha256.convert(utf8.encode(porcelain)).toString();
+      if (digest != plan.preview.repositoryStateDigest) {
+        throw const FormatException('仓库状态已变化，旧 preview 已失效，请重新预览');
+      }
+    }
+    return plan;
+  }
+
+  static void _pruneBackupPlans(DateTime now) {
+    _backupPlans.removeWhere(
+      (String _, _GitBackupPlanState value) =>
+          !value.preview.expiresAt.isAfter(now),
+    );
+  }
+
+  static void _inspectBackupPath(
+    String root,
+    String relativePath,
+    List<String> blockers,
+    List<String> warnings,
+  ) {
+    final String normalized = relativePath.replaceAll('\\', '/');
+    final String lower = normalized.toLowerCase();
+    final List<String> segments = lower.split('/');
+    final String name = segments.last;
+    if (_isSecretFileName(name, lower)) {
+      blockers.add('$relativePath：疑似凭据、私钥或环境秘密文件');
+      return;
+    }
+    if (segments.any(
+      const <String>{
+        'build',
+        '.dart_tool',
+        'node_modules',
+        '.gradle',
+        'dist',
+        'target',
+      }.contains,
+    )) {
+      warnings.add('$relativePath：疑似构建产物或依赖目录');
+    }
+    final File file = File(
+      '$root${Platform.pathSeparator}${relativePath.replaceAll('/', Platform.pathSeparator)}',
+    );
+    if (!file.existsSync()) return;
+    final int length = file.lengthSync();
+    if (length > _largeFileWarningBytes) {
+      warnings.add('$relativePath：大文件 ${_formatBytes(length)}');
+    }
+    if (length > 1024 * 1024 || _looksBinaryExtension(name)) return;
+    try {
+      final String decoded = file.readAsStringSync();
+      final String content = decoded.substring(
+        0,
+        decoded.length.clamp(0, 1024 * 1024),
+      );
+      if (_containsSecret(content)) {
+        blockers.add('$relativePath：内容疑似包含 Token、密码或私钥');
+      }
+    } on Object {
+      // Binary or undecodable content is handled through filename/size policy.
+    }
+  }
+
+  static Map<String, List<String>> _inspectBackupPaths(
+    String root,
+    List<String> paths,
+  ) {
+    final List<String> blockers = <String>[];
+    final List<String> warnings = <String>[];
+    for (final String relativePath in paths) {
+      _inspectBackupPath(root, relativePath, blockers, warnings);
+    }
+    return <String, List<String>>{'blockers': blockers, 'warnings': warnings};
+  }
+
+  static bool _isSecretFileName(String name, String path) {
+    if (name == '.env' ||
+        (name.startsWith('.env.') && !name.endsWith('.example'))) {
+      return true;
+    }
+    if (const <String>{
+      'id_rsa',
+      'id_dsa',
+      'id_ecdsa',
+      'id_ed25519',
+      'credentials',
+      'credentials.json',
+      '.netrc',
+      '_netrc',
+    }.contains(name)) {
+      return true;
+    }
+    if (RegExp(r'(^|/)(secrets?|credentials?)(\.|/|$)').hasMatch(path)) {
+      return true;
+    }
+    return name.endsWith('.p12') ||
+        name.endsWith('.pfx') ||
+        name.endsWith('.key');
+  }
+
+  static bool _containsSecret(String content) {
+    final String sample = content.length > 1024 * 1024
+        ? content.substring(0, 1024 * 1024)
+        : content;
+    return RegExp(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
+            .hasMatch(sample) ||
+        RegExp(
+          r'(?:github|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}',
+          caseSensitive: false,
+        ).hasMatch(sample) ||
+        RegExp(
+          r'''(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)\s*[:=]\s*['"]?[^\s'"]{12,}''',
+          caseSensitive: false,
+        ).hasMatch(sample);
+  }
+
+  static bool _looksBinaryExtension(String name) => const <String>{
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.webp',
+    '.zip',
+    '.7z',
+    '.rar',
+    '.pdf',
+    '.exe',
+    '.dll',
+    '.so',
+    '.dylib',
+    '.bin',
+    '.db',
+    '.sqlite',
+    '.onnx',
+  }.any(name.endsWith);
+
+  static String _requiredRemoteId(String value) {
+    final String remote = value.trim();
+    if (!RegExp(r'^[A-Za-z0-9._-]{1,64}$').hasMatch(remote) ||
+        remote.startsWith('-')) {
+      throw const FormatException('remote 必须是仓库中已有的安全名称');
+    }
+    return remote;
+  }
+
+  static String _requiredBackupBranch(String value) {
+    final String branch = value.trim();
+    if (!branch.startsWith('backup/') ||
+        branch.contains('..') ||
+        branch.startsWith('-')) {
+      throw const FormatException('目标必须是 preview 生成的 backup/ 分支');
+    }
+    return branch;
+  }
+
+  static String _safeBranchPart(String value) {
+    final String safe = value
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
+        .replaceAll(RegExp(r'^[-.]+|[-.]+$'), '');
+    return safe.isEmpty
+        ? 'device'
+        : safe.substring(0, safe.length.clamp(0, 48));
+  }
+
+  static String _randomPlanId() {
+    final Random random = Random.secure();
+    return base64UrlEncode(List<int>.generate(24, (_) => random.nextInt(256)))
+        .replaceAll('=', '');
+  }
+
+  static String _redactRemoteUrl(String value) {
+    final Uri? uri = Uri.tryParse(value);
+    if (uri != null && uri.hasAuthority && uri.userInfo.isNotEmpty) {
+      return uri.replace(userInfo: '***').toString();
+    }
+    return value.replaceAll(RegExp(r'//[^/@\s]+@'), '//***@');
+  }
+
+  static String _safeGitError(Object error) => '$error'
+      .replaceFirst('FormatException: ', '')
+      .replaceAll(RegExp(r'https?://[^/@\s]+@'), 'https://***@');
+
+  static String _formatBytes(int bytes) => bytes >= 1024 * 1024 * 1024
+      ? '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GiB'
+      : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MiB';
+
   static Future<String> _repositoryRoot(String directory) async {
     final String path = directory.trim();
     if (FileSystemEntity.typeSync(path, followLinks: false) !=
@@ -199,7 +741,11 @@ abstract final class GitRepositoryService {
     return result;
   }
 
-  static Future<String> _git(String directory, List<String> arguments) async {
+  static Future<String> _git(
+    String directory,
+    List<String> arguments, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     final Process process;
     try {
       process = await Process.start(_resolveGitExecutable(), <String>[
@@ -215,7 +761,7 @@ abstract final class GitRepositoryService {
     final Future<List<int>> stderr = _boundedBytes(process.stderr, process);
     final int exitCode;
     try {
-      exitCode = await process.exitCode.timeout(const Duration(seconds: 10));
+      exitCode = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill();
       throw const FormatException('Git 命令超过 10 秒，已停止');
@@ -274,4 +820,51 @@ abstract final class GitRepositoryService {
     }
     return builder.takeBytes();
   }
+}
+
+class _GitStatusPath {
+  const _GitStatusPath({
+    required this.path,
+    required this.staged,
+    required this.unstaged,
+    required this.untracked,
+  });
+
+  final String path;
+  final bool staged;
+  final bool unstaged;
+  final bool untracked;
+}
+
+List<_GitStatusPath> _parsePorcelain(String value) {
+  final List<String> records = value.split('\u0000');
+  final List<_GitStatusPath> result = <_GitStatusPath>[];
+  for (int index = 0; index < records.length; index++) {
+    final String record = records[index];
+    if (record.length < 4) continue;
+    final String x = record[0];
+    final String y = record[1];
+    final String path = record.substring(3);
+    String? pairedPath;
+    if ((x == 'R' || x == 'C') && index + 1 < records.length) {
+      pairedPath = records[++index];
+    }
+    for (final String candidate in <String>[path, ?pairedPath]) {
+      if (candidate.isEmpty ||
+          candidate.startsWith('/') ||
+          candidate.startsWith('\\') ||
+          candidate.split(RegExp(r'[\\/]')).contains('..')) {
+        continue;
+      }
+      result.add(
+        _GitStatusPath(
+          path: candidate.replaceAll('\\', '/'),
+          staged: x != ' ' && x != '?',
+          unstaged: y != ' ',
+          untracked: x == '?' && y == '?',
+        ),
+      );
+    }
+  }
+  return result;
 }

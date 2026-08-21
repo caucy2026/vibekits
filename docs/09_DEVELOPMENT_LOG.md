@@ -2,6 +2,14 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-21 · v1.9.0-dev.58 Windows 测试节点、GitHub 代理与受控备份
+
+- 将外部输入稿迁移为 `25_WINDOWS_TEST_NODE_AND_GITHUB_BACKUP.md`，同步阅读顺序、需求总账和三条融合工作流；未取得签名 helper、两台 Mac 与私有仓库实证的项目继续标为待验收。
+- Windows 测试节点新增普通权限只读体检和短期幂等计划：固定 `D:\KEMI-Test`、D 盘 30 GiB 门禁，合并 Windows/硬件/网络/OpenSSH/防火墙/运行时/电源/账户/公钥事实；摘要篡改、过期、路径越界或阻断项会拒绝执行。签名窄权限 UAC helper 尚未交付，因此 apply/rollback 不伪装为可用。
+- GitHub 网络诊断补齐 GCM 标签、TCP 443、DNS、TLS/HTTPS、SSH 22/443、WinINet/WinHTTP/环境/Git 代理、hosts 和内置 Git `ls-remote`；代理候选从 Mihomo/Clash 真实 loopback 监听发现并分别验证 HTTPS/Git，不假设 7890。修复只写 `http.https://github.com.proxy`，验证失败自动恢复旧值。
+- Git 工作区新增安全备份：已有 remote 预览、秘密阻断、构建/大文件警告、短期状态摘要、明确文件集合；commit 与 push 两次独立审批，push 只进入 `backup/` 分支且远端 SHA 二次核验，不提供 force/删 ref/改 tag。秘密扫描进入独立 Isolate，避免卡住界面。
+- ToolSpec/Harness 统一注册新增 ID；已完成的 inspect/plan/proxy/backup 工具进入可执行目录，依赖签名 helper 或跨设备证据的节点工具只进入完整能力目录并明确不可用，防止模型误调用。定向领域、桥接、Git/诊断/节点界面及 SSH/SFTP 回归（含真实 Windows 只读探测）49/49 通过。
+
 ## 2026-08-21 · v1.9.0-dev.57 清理分析列表自适应满屏
 
 - 移除磁盘分析卡片固定 370 像素高度，分析结果和扫描中间结果使用清理工作区全部剩余高度，软件/磁盘列表不再只露出两行。

@@ -19,6 +19,7 @@ import 'file_diff_service.dart';
 import 'file_search_service.dart';
 import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
+import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_work_status.dart';
 import 'network_virtualization_service.dart';
@@ -32,6 +33,7 @@ import 'sftp_service.dart';
 import 'sqlite_database_service.dart';
 import 'tool_registry.dart';
 import 'tool_result.dart';
+import 'windows_test_node_service.dart';
 
 enum HarnessToolRisk { readOnly, writesData, controlsDevice, destructive }
 
@@ -161,6 +163,8 @@ class VibekitsHarnessToolBridge {
     HarnessRemoteDatabaseQuerier? remoteDatabaseQuerier,
     HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher,
     HarnessScreenshotOcrRunner? screenshotOcrRunner,
+    GithubProxyService? githubProxyService,
+    WindowsTestNodeService? windowsTestNodeService,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -175,6 +179,8 @@ class VibekitsHarnessToolBridge {
     remoteDatabaseQuerier,
     remoteWorkspaceLauncher,
     screenshotOcrRunner,
+    githubProxyService ?? GithubProxyService(),
+    windowsTestNodeService ?? WindowsTestNodeService(),
   );
 
   VibekitsHarnessToolBridge._(
@@ -191,6 +197,8 @@ class VibekitsHarnessToolBridge {
     this._remoteDatabaseQuerier,
     this._remoteWorkspaceLauncher,
     this._screenshotOcrRunner,
+    this._githubProxyService,
+    this._windowsTestNodeService,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -205,9 +213,31 @@ class VibekitsHarnessToolBridge {
   static const String gitCompareRefsId = 'vibekits.git.compare_refs';
   static const String gitCreateLocalBranchId =
       'vibekits.git.create_local_branch';
+  static const String gitBackupPreviewId = 'vibekits.git.backup_preview';
+  static const String gitBackupCommitId = 'vibekits.git.backup_commit';
+  static const String gitBackupPushId = 'vibekits.git.backup_push';
+  static const String gitVerifyRemoteRefId = 'vibekits.git.verify_remote_ref';
   static const String fileSearchId = 'vibekits.files.search';
   static const String apiRequestId = 'vibekits.http.request';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
+  static const String githubProxyCandidatesId =
+      'vibekits.github.proxy_candidates';
+  static const String githubProxyPlanId = 'vibekits.github.proxy_plan';
+  static const String githubProxyApplyId = 'vibekits.github.proxy_apply';
+  static const String githubProxyRollbackId = 'vibekits.github.proxy_rollback';
+  static const String windowsNodeInspectId = 'vibekits.windows_node.inspect';
+  static const String windowsNodePlanId = 'vibekits.windows_node.plan';
+  static const String windowsNodeApplyId = 'vibekits.windows_node.apply';
+  static const String windowsNodeVerifyId = 'vibekits.windows_node.verify';
+  static const String windowsNodeListDevicesId =
+      'vibekits.windows_node.list_devices';
+  static const String windowsNodeEnrollDeviceId =
+      'vibekits.windows_node.enroll_device';
+  static const String windowsNodeRevokeDeviceId =
+      'vibekits.windows_node.revoke_device';
+  static const String windowsNodeExportOnboardingId =
+      'vibekits.windows_node.export_onboarding';
+  static const String windowsNodeRollbackId = 'vibekits.windows_node.rollback';
   static const String programmerCalculatorId = 'vibekits.calculator.programmer';
   static const String remoteListProfilesId = 'vibekits.remote.list_profiles';
   static const String remoteSshExecId = 'vibekits.remote.ssh_exec';
@@ -245,420 +275,556 @@ class VibekitsHarnessToolBridge {
   final HarnessRemoteDatabaseQuerier? _remoteDatabaseQuerier;
   final HarnessRemoteWorkspaceLauncher? _remoteWorkspaceLauncher;
   final HarnessScreenshotOcrRunner? _screenshotOcrRunner;
+  final GithubProxyService _githubProxyService;
+  final WindowsTestNodeService _windowsTestNodeService;
 
-  late final Map<String, HarnessToolDefinition> _definitions =
-      <String, HarnessToolDefinition>{
-        for (final ToolSpec spec in allDevToolRegistry)
-          'vibekits.${spec.id}': _fromToolSpec(spec),
-        adbListDevicesId: const HarnessToolDefinition(
-          id: adbListDevicesId,
-          name: '列出 ADB 设备',
-          description: '读取已连接的 Android USB/无线调试设备及授权状态。',
-          risk: HarnessToolRisk.readOnly,
-          inputSchema: <String, Object?>{
-            'type': 'object',
-            'properties': <String, Object?>{},
-            'additionalProperties': false,
+  late final Map<String, HarnessToolDefinition>
+  _definitions = <String, HarnessToolDefinition>{
+    for (final ToolSpec spec in allDevToolRegistry)
+      'vibekits.${spec.id}': _fromToolSpec(spec),
+    adbListDevicesId: const HarnessToolDefinition(
+      id: adbListDevicesId,
+      name: '列出 ADB 设备',
+      description: '读取已连接的 Android USB/无线调试设备及授权状态。',
+      risk: HarnessToolRisk.readOnly,
+      inputSchema: <String, Object?>{
+        'type': 'object',
+        'properties': <String, Object?>{},
+        'additionalProperties': false,
+      },
+      available: true,
+    ),
+    adbConnectId: const HarnessToolDefinition(
+      id: adbConnectId,
+      name: '连接 ADB 设备',
+      description: '连接用户明确指定的 Android 无线调试地址。',
+      risk: HarnessToolRisk.controlsDevice,
+      inputSchema: <String, Object?>{
+        'type': 'object',
+        'properties': <String, Object?>{
+          'address': <String, Object?>{
+            'type': 'string',
+            'description': 'IP 或 IP:端口，例如 192.168.3.63:5555',
           },
-          available: true,
-        ),
-        adbConnectId: const HarnessToolDefinition(
-          id: adbConnectId,
-          name: '连接 ADB 设备',
-          description: '连接用户明确指定的 Android 无线调试地址。',
-          risk: HarnessToolRisk.controlsDevice,
-          inputSchema: <String, Object?>{
-            'type': 'object',
-            'properties': <String, Object?>{
-              'address': <String, Object?>{
-                'type': 'string',
-                'description': 'IP 或 IP:端口，例如 192.168.3.63:5555',
-              },
-            },
-            'required': <String>['address'],
-            'additionalProperties': false,
+        },
+        'required': <String>['address'],
+        'additionalProperties': false,
+      },
+      available: true,
+    ),
+    adbCommandId: _definition(
+      id: adbCommandId,
+      name: '执行 ADB 命令',
+      description: '对明确设备执行受限 ADB 参数；禁止 start-server、kill-server 和任意本机程序。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'arguments': <String, Object?>{
+          'type': 'array',
+          'items': <String, Object?>{'type': 'string'},
+          'minItems': 1,
+          'maxItems': 32,
+        },
+      },
+      required: <String>['serial', 'arguments'],
+    ),
+    serialListPortsId: _definition(
+      id: serialListPortsId,
+      name: '列出串口',
+      description: '在后台线程读取 Windows/macOS 可用串口及 USB 描述。',
+      properties: const <String, Object?>{},
+    ),
+    serialTransactId: _definition(
+      id: serialTransactId,
+      name: '串口一次收发',
+      description: '后台打开串口、发送文本或 HEX、短暂接收后自动关闭。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'port': _string('串口名，例如 COM3'),
+        'baudRate': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 12000000,
+        },
+        'data': _string('待发送文本或 HEX 字节'),
+        'mode': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['text', 'hex'],
+        },
+        'waitMs': <String, Object?>{
+          'type': 'integer',
+          'minimum': 50,
+          'maximum': 5000,
+        },
+      },
+      required: <String>['port', 'data'],
+    ),
+    sqliteInspectId: _definition(
+      id: sqliteInspectId,
+      name: '检查 SQLite 数据库',
+      description: '只读列出本地 SQLite 数据库中的表、视图和建表语句。',
+      properties: <String, Object?>{'path': _string('数据库绝对路径')},
+      required: <String>['path'],
+    ),
+    sqliteQueryId: _definition(
+      id: sqliteQueryId,
+      name: '查询 SQLite 数据库',
+      description: '在隔离线程执行单条只读 SQL，最多返回 500 行。',
+      properties: <String, Object?>{
+        'path': _string('数据库绝对路径'),
+        'sql': _string('单条只读 SQL'),
+        'maxRows': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 500,
+        },
+      },
+      required: <String>['path', 'sql'],
+    ),
+    gitInspectId: _definition(
+      id: gitInspectId,
+      name: '检查 Git 工作区',
+      description: '只读返回分支、状态、diff 和最近提交。',
+      properties: <String, Object?>{'path': _string('仓库或其子目录')},
+      required: <String>['path'],
+    ),
+    gitCompareRefsId: _definition(
+      id: gitCompareRefsId,
+      name: '对比 Git 两个版本',
+      description: '只读校验两个提交、标签或分支，并返回文件列表、统计和文本差异。',
+      properties: <String, Object?>{
+        'path': _string('仓库或其子目录'),
+        'baseRef': _string('基准提交、标签或分支'),
+        'targetRef': _string('目标提交、标签或分支'),
+      },
+      required: <String>['path', 'baseRef', 'targetRef'],
+    ),
+    gitCreateLocalBranchId: _definition(
+      id: gitCreateLocalBranchId,
+      name: '创建 Git 本地安全分支',
+      description: '从指定版本创建本地分支但不切换工作区；需要按当前权限模式批准。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'path': _string('仓库或其子目录'),
+        'name': _string('新本地分支名称'),
+        'startPoint': _string('起点提交、标签或分支，默认 HEAD'),
+      },
+      required: <String>['path', 'name'],
+    ),
+    gitBackupPreviewId: _definition(
+      id: gitBackupPreviewId,
+      name: '预览 GitHub 备份',
+      description: '只读检查已打开仓库的变更、已有 remote、大文件、构建产物和秘密阻断项，生成短期备份计划。',
+      properties: <String, Object?>{
+        'path': _string('已打开的本地 Git 仓库或其子目录'),
+        'remoteId': _string('仓库中已经存在的 remote 名称，不接受 URL'),
+        'deviceLabel': _string('可选设备标签，用于 backup/ 分支'),
+      },
+      required: <String>['path', 'remoteId'],
+    ),
+    gitBackupCommitId: _definition(
+      id: gitBackupCommitId,
+      name: '提交 Git 备份',
+      description: '只暂存 preview 允许且用户确认的文件并创建本地提交；不会自动 push。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'previewId': _string('短期备份 preview ID'),
+        'includedPaths': <String, Object?>{
+          'type': 'array',
+          'items': <String, Object?>{'type': 'string'},
+          'minItems': 1,
+          'maxItems': 2000,
+        },
+        'message': _string('1～200 字符提交说明'),
+      },
+      required: <String>['previewId', 'includedPaths', 'message'],
+    ),
+    gitBackupPushId: _definition(
+      id: gitBackupPushId,
+      name: '推送 Git 备份',
+      description:
+          '独立审批后把 preview 生成的 commit 推送到 backup/ 分支，并读取远端 ref 核对 SHA；禁止 force。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'previewId': _string('已经完成本地 commit 的 preview ID'),
+        'commitSha': _string('该 preview 返回的 commit SHA'),
+      },
+      required: <String>['previewId', 'commitSha'],
+    ),
+    gitVerifyRemoteRefId: _definition(
+      id: gitVerifyRemoteRefId,
+      name: '核验远端备份 SHA',
+      description: '只读查询已有 remote 的 backup/ 分支并返回远端 commit SHA。',
+      properties: <String, Object?>{
+        'path': _string('本地仓库'),
+        'remoteId': _string('已有 remote 名称'),
+        'targetBranch': _string('backup/ 开头的目标分支'),
+      },
+      required: <String>['path', 'remoteId', 'targetBranch'],
+    ),
+    fileSearchId: _definition(
+      id: fileSearchId,
+      name: '搜索文件',
+      description: '按文件名或文本内容进行有界搜索，不跟随符号链接。',
+      properties: <String, Object?>{
+        'root': _string('搜索根目录'),
+        'query': _string('关键词'),
+        'mode': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['name', 'content'],
+        },
+        'maxResults': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 500,
+        },
+      },
+      required: <String>['root', 'query'],
+    ),
+    apiRequestId: _definition(
+      id: apiRequestId,
+      name: '发送 HTTP 请求',
+      description: '发送有界 HTTP 请求并返回状态、响应头和正文；所有请求均需确认目标。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'method': <String, Object?>{
+          'type': 'string',
+          'enum': <String>[
+            'GET',
+            'POST',
+            'PUT',
+            'PATCH',
+            'DELETE',
+            'HEAD',
+            'OPTIONS',
+          ],
+        },
+        'url': _string('完整 HTTP/HTTPS URL'),
+        'headers': <String, Object?>{
+          'type': 'object',
+          'additionalProperties': <String, Object?>{'type': 'string'},
+        },
+        'body': <String, Object?>{'type': 'string'},
+      },
+      required: <String>['method', 'url'],
+    ),
+    githubDiagnosticsId: _definition(
+      id: githubDiagnosticsId,
+      name: 'GitHub 网络诊断',
+      description: '并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。',
+      properties: const <String, Object?>{},
+    ),
+    githubProxyCandidatesId: _definition(
+      id: githubProxyCandidatesId,
+      name: '发现 GitHub 代理候选',
+      description: '只读发现 Mihomo/Clash 的真实回环监听端口，不读取订阅、节点或配置正文。',
+      properties: const <String, Object?>{},
+    ),
+    githubProxyPlanId: _definition(
+      id: githubProxyPlanId,
+      name: '预览 GitHub 专用代理',
+      description: '读取现有 host-scoped Git 配置，生成带旧值、摘要、到期时间和回滚动作的短期计划。',
+      properties: <String, Object?>{'candidateId': _string('代理候选 ID')},
+      required: <String>['candidateId'],
+    ),
+    githubProxyApplyId: _definition(
+      id: githubProxyApplyId,
+      name: '应用 GitHub 专用代理',
+      description: '只修改 http.https://github.com.proxy；随后真实 ls-remote，失败自动恢复旧值。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{'planId': _string('代理计划 ID')},
+      required: <String>['planId'],
+    ),
+    githubProxyRollbackId: _definition(
+      id: githubProxyRollbackId,
+      name: '恢复 GitHub 代理旧值',
+      description: '按计划保存的原值精确恢复 GitHub host-scoped Git 代理。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{'planId': _string('曾应用的代理计划 ID')},
+      required: <String>['planId'],
+    ),
+    windowsNodeInspectId: _definition(
+      id: windowsNodeInspectId,
+      name: '体检 Windows 测试节点',
+      description: '普通权限只读检查 Windows、硬件、D 盘、网络、OpenSSH、防火墙、运行时、电源、目录、账户和公钥。',
+      properties: <String, Object?>{'rootPath': _string(r'固定为 D:\KEMI-Test')},
+    ),
+    windowsNodePlanId: _definition(
+      id: windowsNodePlanId,
+      name: '生成 Windows 节点变更计划',
+      description: '根据短期体检 ID 生成幂等动作、风险、依赖、取消边界、回滚和摘要；不执行系统修改。',
+      properties: <String, Object?>{
+        'inspectionId': _string('windows_node.inspect 返回的短期 ID'),
+      },
+      required: <String>['inspectionId'],
+    ),
+    windowsNodeApplyId: _unavailableDefinition(
+      id: windowsNodeApplyId,
+      name: '应用 Windows 节点计划',
+      description: '等待签名窄权限 UAC helper 随 Release 交付；不回退为任意管理员 PowerShell。',
+      risk: HarnessToolRisk.controlsDevice,
+    ),
+    windowsNodeVerifyId: _unavailableDefinition(
+      id: windowsNodeVerifyId,
+      name: '跨设备验证 Windows 节点',
+      description: '必须从另一台真实设备执行 SSH/SFTP、SHA-256、取消和断网验收，本机 localhost 不替代。',
+    ),
+    windowsNodeListDevicesId: _unavailableDefinition(
+      id: windowsNodeListDevicesId,
+      name: '列出节点设备',
+      description: '等待公钥设备注册表与真实登录时间接入。',
+    ),
+    windowsNodeEnrollDeviceId: _unavailableDefinition(
+      id: windowsNodeEnrollDeviceId,
+      name: '登记节点设备公钥',
+      description: '等待签名 helper 提供原子 authorized_keys 与 ACL 操作；不接收私钥。',
+      risk: HarnessToolRisk.writesData,
+    ),
+    windowsNodeRevokeDeviceId: _unavailableDefinition(
+      id: windowsNodeRevokeDeviceId,
+      name: '撤销节点设备',
+      description: '等待单设备撤销和其他设备不受影响的真实验收。',
+      risk: HarnessToolRisk.writesData,
+    ),
+    windowsNodeExportOnboardingId: _unavailableDefinition(
+      id: windowsNodeExportOnboardingId,
+      name: '导出节点 onboarding',
+      description: '仅允许导出主机、端口、用户名、host key 指纹和说明；等待设备注册闭环。',
+      risk: HarnessToolRisk.writesData,
+    ),
+    windowsNodeRollbackId: _unavailableDefinition(
+      id: windowsNodeRollbackId,
+      name: '回滚 Windows 节点变更',
+      description: '等待签名 helper 和修改前状态审计闭环；禁止用删除账户或卸载组件冒充回滚。',
+      risk: HarnessToolRisk.controlsDevice,
+    ),
+    remoteListProfilesId: _definition(
+      id: remoteListProfilesId,
+      name: '列出远程会话',
+      description: '列出已保存且已确认主机指纹的 SSH/SFTP 会话；不返回密码或私钥内容。',
+      properties: const <String, Object?>{},
+    ),
+    remoteOpenInteractiveId: HarnessToolDefinition(
+      id: remoteOpenInteractiveId,
+      name: '打开 SSH 与 SFTP 工作流',
+      description: '在 Vibekits 中打开指定主机的 SSH 登录界面；用户认证一次后自动复用该连接展示 SFTP 双栏文件。',
+      risk: HarnessToolRisk.readOnly,
+      inputSchema: <String, Object?>{
+        'type': 'object',
+        'properties': <String, Object?>{
+          'host': <String, Object?>{
+            'type': 'string',
+            'description': 'IP 地址或主机名',
           },
-          available: true,
-        ),
-        adbCommandId: _definition(
-          id: adbCommandId,
-          name: '执行 ADB 命令',
-          description: '对明确设备执行受限 ADB 参数；禁止 start-server、kill-server 和任意本机程序。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'serial': _string('设备序列号或 IP:端口'),
-            'arguments': <String, Object?>{
-              'type': 'array',
-              'items': <String, Object?>{'type': 'string'},
-              'minItems': 1,
-              'maxItems': 32,
-            },
+          'user': <String, Object?>{
+            'type': 'string',
+            'description': 'SSH 用户名；未知时可留空让用户填写',
           },
-          required: <String>['serial', 'arguments'],
-        ),
-        serialListPortsId: _definition(
-          id: serialListPortsId,
-          name: '列出串口',
-          description: '在后台线程读取 Windows/macOS 可用串口及 USB 描述。',
-          properties: const <String, Object?>{},
-        ),
-        serialTransactId: _definition(
-          id: serialTransactId,
-          name: '串口一次收发',
-          description: '后台打开串口、发送文本或 HEX、短暂接收后自动关闭。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'port': _string('串口名，例如 COM3'),
-            'baudRate': <String, Object?>{
-              'type': 'integer',
-              'minimum': 1,
-              'maximum': 12000000,
-            },
-            'data': _string('待发送文本或 HEX 字节'),
-            'mode': <String, Object?>{
-              'type': 'string',
-              'enum': <String>['text', 'hex'],
-            },
-            'waitMs': <String, Object?>{
-              'type': 'integer',
-              'minimum': 50,
-              'maximum': 5000,
-            },
+          'port': <String, Object?>{
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 65535,
           },
-          required: <String>['port', 'data'],
-        ),
-        sqliteInspectId: _definition(
-          id: sqliteInspectId,
-          name: '检查 SQLite 数据库',
-          description: '只读列出本地 SQLite 数据库中的表、视图和建表语句。',
-          properties: <String, Object?>{'path': _string('数据库绝对路径')},
-          required: <String>['path'],
-        ),
-        sqliteQueryId: _definition(
-          id: sqliteQueryId,
-          name: '查询 SQLite 数据库',
-          description: '在隔离线程执行单条只读 SQL，最多返回 500 行。',
-          properties: <String, Object?>{
-            'path': _string('数据库绝对路径'),
-            'sql': _string('单条只读 SQL'),
-            'maxRows': <String, Object?>{
-              'type': 'integer',
-              'minimum': 1,
-              'maximum': 500,
-            },
-          },
-          required: <String>['path', 'sql'],
-        ),
-        gitInspectId: _definition(
-          id: gitInspectId,
-          name: '检查 Git 工作区',
-          description: '只读返回分支、状态、diff 和最近提交。',
-          properties: <String, Object?>{'path': _string('仓库或其子目录')},
-          required: <String>['path'],
-        ),
-        gitCompareRefsId: _definition(
-          id: gitCompareRefsId,
-          name: '对比 Git 两个版本',
-          description: '只读校验两个提交、标签或分支，并返回文件列表、统计和文本差异。',
-          properties: <String, Object?>{
-            'path': _string('仓库或其子目录'),
-            'baseRef': _string('基准提交、标签或分支'),
-            'targetRef': _string('目标提交、标签或分支'),
-          },
-          required: <String>['path', 'baseRef', 'targetRef'],
-        ),
-        gitCreateLocalBranchId: _definition(
-          id: gitCreateLocalBranchId,
-          name: '创建 Git 本地安全分支',
-          description: '从指定版本创建本地分支但不切换工作区；需要按当前权限模式批准。',
-          risk: HarnessToolRisk.writesData,
-          properties: <String, Object?>{
-            'path': _string('仓库或其子目录'),
-            'name': _string('新本地分支名称'),
-            'startPoint': _string('起点提交、标签或分支，默认 HEAD'),
-          },
-          required: <String>['path', 'name'],
-        ),
-        fileSearchId: _definition(
-          id: fileSearchId,
-          name: '搜索文件',
-          description: '按文件名或文本内容进行有界搜索，不跟随符号链接。',
-          properties: <String, Object?>{
-            'root': _string('搜索根目录'),
-            'query': _string('关键词'),
-            'mode': <String, Object?>{
-              'type': 'string',
-              'enum': <String>['name', 'content'],
-            },
-            'maxResults': <String, Object?>{
-              'type': 'integer',
-              'minimum': 1,
-              'maximum': 500,
-            },
-          },
-          required: <String>['root', 'query'],
-        ),
-        apiRequestId: _definition(
-          id: apiRequestId,
-          name: '发送 HTTP 请求',
-          description: '发送有界 HTTP 请求并返回状态、响应头和正文；所有请求均需确认目标。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'method': <String, Object?>{
-              'type': 'string',
-              'enum': <String>[
-                'GET',
-                'POST',
-                'PUT',
-                'PATCH',
-                'DELETE',
-                'HEAD',
-                'OPTIONS',
-              ],
-            },
-            'url': _string('完整 HTTP/HTTPS URL'),
-            'headers': <String, Object?>{
-              'type': 'object',
-              'additionalProperties': <String, Object?>{'type': 'string'},
-            },
-            'body': <String, Object?>{'type': 'string'},
-          },
-          required: <String>['method', 'url'],
-        ),
-        githubDiagnosticsId: _definition(
-          id: githubDiagnosticsId,
-          name: 'GitHub 网络诊断',
-          description: '并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。',
-          properties: const <String, Object?>{},
-        ),
-        remoteListProfilesId: _definition(
-          id: remoteListProfilesId,
-          name: '列出远程会话',
-          description: '列出已保存且已确认主机指纹的 SSH/SFTP 会话；不返回密码或私钥内容。',
-          properties: const <String, Object?>{},
-        ),
-        remoteOpenInteractiveId: HarnessToolDefinition(
-          id: remoteOpenInteractiveId,
-          name: '打开 SSH 与 SFTP 工作流',
-          description:
-              '在 Vibekits 中打开指定主机的 SSH 登录界面；用户认证一次后自动复用该连接展示 SFTP 双栏文件。',
-          risk: HarnessToolRisk.readOnly,
-          inputSchema: <String, Object?>{
-            'type': 'object',
-            'properties': <String, Object?>{
-              'host': <String, Object?>{
-                'type': 'string',
-                'description': 'IP 地址或主机名',
-              },
-              'user': <String, Object?>{
-                'type': 'string',
-                'description': 'SSH 用户名；未知时可留空让用户填写',
-              },
-              'port': <String, Object?>{
-                'type': 'integer',
-                'minimum': 1,
-                'maximum': 65535,
-              },
-              'openSftp': <String, Object?>{'type': 'boolean'},
-            },
-            'required': <String>['host'],
-            'additionalProperties': false,
-          },
-          available: _remoteWorkspaceLauncher != null,
-        ),
-        remoteSshExecId: _definition(
-          id: remoteSshExecId,
-          name: '执行 SSH 命令',
-          description: '使用已保存会话和系统凭据执行一条有界远程命令，严格校验已绑定主机指纹。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'profileId': _string('远程工作台保存的会话 ID'),
-            'command': _string('要在远端执行的单条命令'),
-          },
-          required: <String>['profileId', 'command'],
-        ),
-        remoteSftpListId: _definition(
-          id: remoteSftpListId,
-          name: '列出 SFTP 目录',
-          description: '复用已保存 SSH 会话的凭据和主机指纹，只读列出远端目录。',
-          properties: <String, Object?>{
-            'profileId': _string('远程工作台保存的会话 ID'),
-            'remotePath': _string('远端目录，默认当前用户主目录'),
-          },
-          required: <String>['profileId'],
-        ),
-        remoteSftpUploadId: _definition(
-          id: remoteSftpUploadId,
-          name: 'SFTP 上传文件',
-          description: '通过已保存 SSH 会话上传一个本地文件；覆盖已有文件必须明确指定。',
-          risk: HarnessToolRisk.writesData,
-          properties: <String, Object?>{
-            'profileId': _string('远程工作台保存的会话 ID'),
-            'localPath': _string('本地文件绝对路径'),
-            'remotePath': _string('远端目标绝对路径'),
-            'overwrite': <String, Object?>{'type': 'boolean'},
-          },
-          required: <String>['profileId', 'localPath', 'remotePath'],
-        ),
-        remoteSftpDownloadId: _definition(
-          id: remoteSftpDownloadId,
-          name: 'SFTP 下载文件',
-          description: '通过已保存 SSH 会话下载一个远端文件；覆盖本地文件必须明确指定。',
-          risk: HarnessToolRisk.writesData,
-          properties: <String, Object?>{
-            'profileId': _string('远程工作台保存的会话 ID'),
-            'remotePath': _string('远端文件绝对路径'),
-            'localPath': _string('本地目标绝对路径'),
-            'overwrite': <String, Object?>{'type': 'boolean'},
-          },
-          required: <String>['profileId', 'remotePath', 'localPath'],
-        ),
-        remoteDatabaseListProfilesId: _definition(
-          id: remoteDatabaseListProfilesId,
-          name: '列出远程数据库会话',
-          description: '列出已保存的 PostgreSQL、MySQL 和 MariaDB 会话；不返回密码。',
-          properties: const <String, Object?>{},
-        ),
-        remoteDatabaseInspectId: _definition(
-          id: remoteDatabaseInspectId,
-          name: '检查远程数据库',
-          description: '使用系统凭据在后台线程连接已保存的远程数据库，并只读列出对象。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{'profileId': _string('数据库工作区保存的会话 ID')},
-          required: <String>['profileId'],
-        ),
-        remoteDatabaseQueryId: _definition(
-          id: remoteDatabaseQueryId,
-          name: '查询远程数据库',
-          description: '使用已保存会话执行一条有界只读 SQL，最多返回 500 行。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'profileId': _string('数据库工作区保存的会话 ID'),
-            'sql': _string('只读 SQL'),
-          },
-          required: <String>['profileId', 'sql'],
-        ),
-        duplicateScanId: _definition(
-          id: duplicateScanId,
-          name: '扫描重复文件',
-          description: '在独立后台线程按大小和完整 SHA-256 扫描重复文件；只返回建议，不自动删除。',
-          properties: <String, Object?>{
-            'root': _string('扫描根目录'),
-            'recursive': <String, Object?>{'type': 'boolean'},
-            'minimumSize': <String, Object?>{
-              'type': 'integer',
-              'minimum': 1,
-              'maximum': 1099511627776,
-            },
-          },
-          required: <String>['root'],
-        ),
-        fileDiffId: _definition(
-          id: fileDiffId,
-          name: '比较两个文件',
-          description: '在独立后台线程读取两个有界文本或源码文件，自动识别编码并返回行级差异；不修改文件。',
-          properties: <String, Object?>{
-            'leftPath': _string('左侧原文件路径'),
-            'rightPath': _string('右侧新文件路径'),
-            'ignoreWhitespace': <String, Object?>{'type': 'boolean'},
-            'ignoreCase': <String, Object?>{'type': 'boolean'},
-          },
-          required: <String>['leftPath', 'rightPath'],
-        ),
-        systemDriveAnalyzeId: _definition(
-          id: systemDriveAnalyzeId,
-          name: '分析磁盘占用',
-          description: '在独立后台线程分析指定磁盘根目录，按系统、软件和用户数据解释占用是否合理并给出安全建议；不删除任何文件。',
-          properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
-          required: <String>['root'],
-        ),
-        screenshotOcrId: HarnessToolDefinition(
-          id: screenshotOcrId,
-          name: '截图并 OCR 分析',
-          description: '让用户框选屏幕区域，使用 App 内置 PP-OCRv6 tiny 在本机识别，并把文字返回智能体。',
-          risk: HarnessToolRisk.controlsDevice,
-          inputSchema: <String, Object?>{
-            'type': 'object',
-            'properties': <String, Object?>{},
-            'additionalProperties': false,
-          },
-          available: _screenshotOcrRunner != null,
-        ),
-        runtimeInspectId: _definition(
-          id: runtimeInspectId,
-          name: '检查代理与虚拟机运行时',
-          description: '只读检查 Vibekits 发布包中的 Mihomo 与 QEMU 版本和绝对路径。',
-          properties: const <String, Object?>{},
-        ),
-        runtimeStatusId: _definition(
-          id: runtimeStatusId,
-          name: '读取代理与虚拟机状态',
-          description: '只读返回 Mihomo/QEMU 运行状态、进程号和有界日志。',
-          properties: const <String, Object?>{},
-        ),
-        proxyStartId: _definition(
-          id: proxyStartId,
-          name: '启动 Clash Verge 内核',
-          description: '使用用户明确选择的 YAML 配置启动内置 Mihomo；不自动修改系统代理或 TUN。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'configPath': _string('Clash YAML 配置绝对路径'),
-            'dataDirectory': _string('Mihomo 数据目录'),
-          },
-          required: <String>['configPath', 'dataDirectory'],
-        ),
-        proxyStopId: _definition(
-          id: proxyStopId,
-          name: '停止 Clash Verge 内核',
-          description: '停止由 Vibekits 启动的 Mihomo 子进程。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: const <String, Object?>{},
-        ),
-        vmStartId: _definition(
-          id: vmStartId,
-          name: '启动轻量虚拟机',
-          description: '使用内置 QEMU 启动用户明确指定的虚拟磁盘或 ISO。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: <String, Object?>{
-            'diskPath': _string('可选虚拟磁盘绝对路径'),
-            'isoPath': _string('可选 ISO 绝对路径'),
-            'memoryMiB': <String, Object?>{
-              'type': 'integer',
-              'minimum': 256,
-              'maximum': 32768,
-            },
-            'cpuCount': <String, Object?>{
-              'type': 'integer',
-              'minimum': 1,
-              'maximum': 16,
-            },
-          },
-        ),
-        vmStopId: _definition(
-          id: vmStopId,
-          name: '停止轻量虚拟机',
-          description: '停止由 Vibekits 启动的 QEMU 子进程。',
-          risk: HarnessToolRisk.controlsDevice,
-          properties: const <String, Object?>{},
-        ),
-        programmerCalculatorId: _definition(
-          id: programmerCalculatorId,
-          name: '程序员计算器',
-          description: '计算整数、进制和位运算表达式，并返回固定位宽的二/八/十/十六进制结果。',
-          properties: <String, Object?>{
-            'expression': _string('整数表达式，例如 (0xFF << 2) | 3'),
-            'width': <String, Object?>{
-              'type': 'integer',
-              'enum': <int>[8, 16, 32, 64, 128],
-            },
-            'inputRadix': <String, Object?>{
-              'type': 'integer',
-              'enum': <int>[2, 8, 10, 16],
-            },
-          },
-          required: <String>['expression'],
-        ),
-      };
+          'openSftp': <String, Object?>{'type': 'boolean'},
+        },
+        'required': <String>['host'],
+        'additionalProperties': false,
+      },
+      available: _remoteWorkspaceLauncher != null,
+    ),
+    remoteSshExecId: _definition(
+      id: remoteSshExecId,
+      name: '执行 SSH 命令',
+      description: '使用已保存会话和系统凭据执行一条有界远程命令，严格校验已绑定主机指纹。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'profileId': _string('远程工作台保存的会话 ID'),
+        'command': _string('要在远端执行的单条命令'),
+      },
+      required: <String>['profileId', 'command'],
+    ),
+    remoteSftpListId: _definition(
+      id: remoteSftpListId,
+      name: '列出 SFTP 目录',
+      description: '复用已保存 SSH 会话的凭据和主机指纹，只读列出远端目录。',
+      properties: <String, Object?>{
+        'profileId': _string('远程工作台保存的会话 ID'),
+        'remotePath': _string('远端目录，默认当前用户主目录'),
+      },
+      required: <String>['profileId'],
+    ),
+    remoteSftpUploadId: _definition(
+      id: remoteSftpUploadId,
+      name: 'SFTP 上传文件',
+      description: '通过已保存 SSH 会话上传一个本地文件；覆盖已有文件必须明确指定。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'profileId': _string('远程工作台保存的会话 ID'),
+        'localPath': _string('本地文件绝对路径'),
+        'remotePath': _string('远端目标绝对路径'),
+        'overwrite': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['profileId', 'localPath', 'remotePath'],
+    ),
+    remoteSftpDownloadId: _definition(
+      id: remoteSftpDownloadId,
+      name: 'SFTP 下载文件',
+      description: '通过已保存 SSH 会话下载一个远端文件；覆盖本地文件必须明确指定。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'profileId': _string('远程工作台保存的会话 ID'),
+        'remotePath': _string('远端文件绝对路径'),
+        'localPath': _string('本地目标绝对路径'),
+        'overwrite': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['profileId', 'remotePath', 'localPath'],
+    ),
+    remoteDatabaseListProfilesId: _definition(
+      id: remoteDatabaseListProfilesId,
+      name: '列出远程数据库会话',
+      description: '列出已保存的 PostgreSQL、MySQL 和 MariaDB 会话；不返回密码。',
+      properties: const <String, Object?>{},
+    ),
+    remoteDatabaseInspectId: _definition(
+      id: remoteDatabaseInspectId,
+      name: '检查远程数据库',
+      description: '使用系统凭据在后台线程连接已保存的远程数据库，并只读列出对象。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'profileId': _string('数据库工作区保存的会话 ID')},
+      required: <String>['profileId'],
+    ),
+    remoteDatabaseQueryId: _definition(
+      id: remoteDatabaseQueryId,
+      name: '查询远程数据库',
+      description: '使用已保存会话执行一条有界只读 SQL，最多返回 500 行。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'profileId': _string('数据库工作区保存的会话 ID'),
+        'sql': _string('只读 SQL'),
+      },
+      required: <String>['profileId', 'sql'],
+    ),
+    duplicateScanId: _definition(
+      id: duplicateScanId,
+      name: '扫描重复文件',
+      description: '在独立后台线程按大小和完整 SHA-256 扫描重复文件；只返回建议，不自动删除。',
+      properties: <String, Object?>{
+        'root': _string('扫描根目录'),
+        'recursive': <String, Object?>{'type': 'boolean'},
+        'minimumSize': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 1099511627776,
+        },
+      },
+      required: <String>['root'],
+    ),
+    fileDiffId: _definition(
+      id: fileDiffId,
+      name: '比较两个文件',
+      description: '在独立后台线程读取两个有界文本或源码文件，自动识别编码并返回行级差异；不修改文件。',
+      properties: <String, Object?>{
+        'leftPath': _string('左侧原文件路径'),
+        'rightPath': _string('右侧新文件路径'),
+        'ignoreWhitespace': <String, Object?>{'type': 'boolean'},
+        'ignoreCase': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['leftPath', 'rightPath'],
+    ),
+    systemDriveAnalyzeId: _definition(
+      id: systemDriveAnalyzeId,
+      name: '分析磁盘占用',
+      description: '在独立后台线程分析指定磁盘根目录，按系统、软件和用户数据解释占用是否合理并给出安全建议；不删除任何文件。',
+      properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
+      required: <String>['root'],
+    ),
+    screenshotOcrId: HarnessToolDefinition(
+      id: screenshotOcrId,
+      name: '截图并 OCR 分析',
+      description: '让用户框选屏幕区域，使用 App 内置 PP-OCRv6 tiny 在本机识别，并把文字返回智能体。',
+      risk: HarnessToolRisk.controlsDevice,
+      inputSchema: <String, Object?>{
+        'type': 'object',
+        'properties': <String, Object?>{},
+        'additionalProperties': false,
+      },
+      available: _screenshotOcrRunner != null,
+    ),
+    runtimeInspectId: _definition(
+      id: runtimeInspectId,
+      name: '检查代理与虚拟机运行时',
+      description: '只读检查 Vibekits 发布包中的 Mihomo 与 QEMU 版本和绝对路径。',
+      properties: const <String, Object?>{},
+    ),
+    runtimeStatusId: _definition(
+      id: runtimeStatusId,
+      name: '读取代理与虚拟机状态',
+      description: '只读返回 Mihomo/QEMU 运行状态、进程号和有界日志。',
+      properties: const <String, Object?>{},
+    ),
+    proxyStartId: _definition(
+      id: proxyStartId,
+      name: '启动 Clash Verge 内核',
+      description: '使用用户明确选择的 YAML 配置启动内置 Mihomo；不自动修改系统代理或 TUN。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'configPath': _string('Clash YAML 配置绝对路径'),
+        'dataDirectory': _string('Mihomo 数据目录'),
+      },
+      required: <String>['configPath', 'dataDirectory'],
+    ),
+    proxyStopId: _definition(
+      id: proxyStopId,
+      name: '停止 Clash Verge 内核',
+      description: '停止由 Vibekits 启动的 Mihomo 子进程。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
+    ),
+    vmStartId: _definition(
+      id: vmStartId,
+      name: '启动轻量虚拟机',
+      description: '使用内置 QEMU 启动用户明确指定的虚拟磁盘或 ISO。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'diskPath': _string('可选虚拟磁盘绝对路径'),
+        'isoPath': _string('可选 ISO 绝对路径'),
+        'memoryMiB': <String, Object?>{
+          'type': 'integer',
+          'minimum': 256,
+          'maximum': 32768,
+        },
+        'cpuCount': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 16,
+        },
+      },
+    ),
+    vmStopId: _definition(
+      id: vmStopId,
+      name: '停止轻量虚拟机',
+      description: '停止由 Vibekits 启动的 QEMU 子进程。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
+    ),
+    programmerCalculatorId: _definition(
+      id: programmerCalculatorId,
+      name: '程序员计算器',
+      description: '计算整数、进制和位运算表达式，并返回固定位宽的二/八/十/十六进制结果。',
+      properties: <String, Object?>{
+        'expression': _string('整数表达式，例如 (0xFF << 2) | 3'),
+        'width': <String, Object?>{
+          'type': 'integer',
+          'enum': <int>[8, 16, 32, 64, 128],
+        },
+        'inputRadix': <String, Object?>{
+          'type': 'integer',
+          'enum': <int>[2, 8, 10, 16],
+        },
+      },
+      required: <String>['expression'],
+    ),
+  };
 
   List<HarnessToolDefinition> get fullCatalog =>
       List<HarnessToolDefinition>.unmodifiable(_definitions.values);
@@ -856,9 +1022,19 @@ class VibekitsHarnessToolBridge {
     if (toolId == gitInspectId) return _inspectGit;
     if (toolId == gitCompareRefsId) return _compareGitRefs;
     if (toolId == gitCreateLocalBranchId) return _createGitLocalBranch;
+    if (toolId == gitBackupPreviewId) return _previewGitBackup;
+    if (toolId == gitBackupCommitId) return _commitGitBackup;
+    if (toolId == gitBackupPushId) return _pushGitBackup;
+    if (toolId == gitVerifyRemoteRefId) return _verifyGitRemoteRef;
     if (toolId == fileSearchId) return _searchFiles;
     if (toolId == apiRequestId) return _requestHttp;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
+    if (toolId == githubProxyCandidatesId) return _githubProxyCandidates;
+    if (toolId == githubProxyPlanId) return _githubProxyPlan;
+    if (toolId == githubProxyApplyId) return _githubProxyApply;
+    if (toolId == githubProxyRollbackId) return _githubProxyRollback;
+    if (toolId == windowsNodeInspectId) return _inspectWindowsNode;
+    if (toolId == windowsNodePlanId) return _planWindowsNode;
     if (toolId == remoteListProfilesId) return _listRemoteProfiles;
     if (toolId == remoteOpenInteractiveId) return _openInteractiveRemote;
     if (toolId == remoteSshExecId) return _runRemoteSshCommand;
@@ -1199,6 +1375,46 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _previewGitBackup(
+    Map<String, Object?> arguments,
+  ) async => (await GitRepositoryService.previewBackup(
+    (arguments['path'] ?? '').toString(),
+    remoteId: (arguments['remoteId'] ?? '').toString(),
+    deviceLabel: (arguments['deviceLabel'] ?? '').toString().trim().isEmpty
+        ? null
+        : (arguments['deviceLabel'] ?? '').toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _commitGitBackup(
+    Map<String, Object?> arguments,
+  ) async => (await GitRepositoryService.commitBackup(
+    previewId: (arguments['previewId'] ?? '').toString(),
+    includedPaths: _stringList(arguments['includedPaths']),
+    message: (arguments['message'] ?? '').toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _pushGitBackup(
+    Map<String, Object?> arguments,
+  ) async => (await GitRepositoryService.pushBackup(
+    previewId: (arguments['previewId'] ?? '').toString(),
+    commitSha: (arguments['commitSha'] ?? '').toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _verifyGitRemoteRef(
+    Map<String, Object?> arguments,
+  ) async {
+    final String sha = await GitRepositoryService.verifyRemoteRef(
+      (arguments['path'] ?? '').toString(),
+      remoteId: (arguments['remoteId'] ?? '').toString(),
+      targetBranch: (arguments['targetBranch'] ?? '').toString(),
+    );
+    return <String, Object?>{
+      'remoteId': (arguments['remoteId'] ?? '').toString(),
+      'targetBranch': (arguments['targetBranch'] ?? '').toString(),
+      'remoteCommitSha': sha,
+    };
+  }
+
   Future<Map<String, Object?>> _searchFiles(
     Map<String, Object?> arguments,
   ) async {
@@ -1275,6 +1491,46 @@ class VibekitsHarnessToolBridge {
       'recommendation': report.recommendation,
     };
   }
+
+  Future<Map<String, Object?>> _githubProxyCandidates(
+    Map<String, Object?> arguments,
+  ) async => <String, Object?>{
+    'candidates': (await _githubProxyService.discoverCandidates())
+        .map((GithubProxyCandidate item) => item.toJson())
+        .toList(growable: false),
+    'scope': '仅 GitHub Git',
+  };
+
+  Future<Map<String, Object?>> _githubProxyPlan(
+    Map<String, Object?> arguments,
+  ) async => (await _githubProxyService.createPlan(
+    (arguments['candidateId'] ?? '').toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _githubProxyApply(
+    Map<String, Object?> arguments,
+  ) async =>
+      (await _githubProxyService.apply((arguments['planId'] ?? '').toString()))
+          .toJson();
+
+  Future<Map<String, Object?>> _githubProxyRollback(
+    Map<String, Object?> arguments,
+  ) async => (await _githubProxyService.rollback(
+    (arguments['planId'] ?? '').toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _inspectWindowsNode(
+    Map<String, Object?> arguments,
+  ) async => (await _windowsTestNodeService.inspect(
+    rootPath: (arguments['rootPath'] ?? WindowsTestNodeService.requiredRoot)
+        .toString(),
+  )).toJson();
+
+  Future<Map<String, Object?>> _planWindowsNode(
+    Map<String, Object?> arguments,
+  ) async => _windowsTestNodeService
+      .plan((arguments['inspectionId'] ?? '').toString())
+      .toJson();
 
   Future<List<RemoteConnectionRecord>> _loadRemoteProfiles() async {
     final HarnessRemoteProfileLoader? loader = _remoteProfileLoader;
@@ -1882,6 +2138,24 @@ class VibekitsHarnessToolBridge {
     available: true,
   );
 
+  static HarnessToolDefinition _unavailableDefinition({
+    required String id,
+    required String name,
+    required String description,
+    HarnessToolRisk risk = HarnessToolRisk.readOnly,
+  }) => HarnessToolDefinition(
+    id: id,
+    name: name,
+    description: description,
+    risk: risk,
+    inputSchema: const <String, Object?>{
+      'type': 'object',
+      'properties': <String, Object?>{},
+      'additionalProperties': false,
+    },
+    available: false,
+  );
+
   static HarnessToolRisk _riskFor(String id) => switch (id) {
     'batch_rename' || 'duplicate_files' => HarnessToolRisk.writesData,
     'serial_port' ||
@@ -1922,8 +2196,20 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == gitInspectId ||
         toolId == gitCompareRefsId ||
-        toolId == gitCreateLocalBranchId) {
+        toolId == gitCreateLocalBranchId ||
+        toolId == gitBackupPreviewId ||
+        toolId == gitVerifyRemoteRefId) {
       return (arguments['path'] ?? '').toString();
+    }
+    if (toolId == gitBackupCommitId || toolId == gitBackupPushId) {
+      return (arguments['previewId'] ?? '').toString();
+    }
+    if (toolId == githubProxyApplyId || toolId == githubProxyRollbackId) {
+      return (arguments['planId'] ?? '').toString();
+    }
+    if (toolId.startsWith('vibekits.windows_node.')) {
+      return (arguments['rootPath'] ?? WindowsTestNodeService.requiredRoot)
+          .toString();
     }
     return (arguments['input'] ?? toolId).toString();
   }

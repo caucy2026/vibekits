@@ -97,4 +97,121 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  test('备份预览阻断秘密文件且仓库变化使旧计划失效', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_git_backup_secret_',
+    );
+    final Directory remote = Directory.systemTemp.createTempSync(
+      'vk_git_backup_remote_',
+    );
+    addTearDown(() {
+      sandbox.deleteSync(recursive: true);
+      remote.deleteSync(recursive: true);
+    });
+
+    void run(String directory, List<String> arguments) {
+      final ProcessResult result = Process.runSync(
+        GitRepositoryService.bundledExecutable,
+        <String>['-C', directory, ...arguments],
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+    }
+
+    run(remote.path, <String>['init', '--bare']);
+    run(sandbox.path, <String>['init']);
+    run(sandbox.path, <String>['config', 'user.name', 'Vibekits Test']);
+    run(sandbox.path, <String>['config', 'user.email', 'test@vibekits.local']);
+    File('${sandbox.path}${Platform.pathSeparator}README.md')
+        .writeAsStringSync('safe\n');
+    run(sandbox.path, <String>['add', 'README.md']);
+    run(sandbox.path, <String>['commit', '-m', 'initial']);
+    run(sandbox.path, <String>['remote', 'add', 'backup', remote.path]);
+    File('${sandbox.path}${Platform.pathSeparator}.env')
+        .writeAsStringSync('API_KEY=super-secret-value-12345\n');
+
+    final GitBackupPreview preview = await GitRepositoryService.previewBackup(
+      sandbox.path,
+      remoteId: 'backup',
+      deviceLabel: 'test-device',
+      now: DateTime(2026, 8, 21),
+    );
+    expect(preview.blockers, isNotEmpty);
+    expect(preview.includedPaths, contains('.env'));
+    expect(preview.targetBranch, startsWith('backup/test-device/'));
+    await expectLater(
+      GitRepositoryService.commitBackup(
+        previewId: preview.id,
+        includedPaths: preview.includedPaths,
+        message: 'must be blocked',
+        now: DateTime(2026, 8, 21, 0, 1),
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('备份 commit 与 push 分离并核对远端 SHA', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_git_backup_',
+    );
+    final Directory remote = Directory.systemTemp.createTempSync(
+      'vk_git_backup_bare_',
+    );
+    addTearDown(() {
+      sandbox.deleteSync(recursive: true);
+      remote.deleteSync(recursive: true);
+    });
+
+    String run(String directory, List<String> arguments) {
+      final ProcessResult result = Process.runSync(
+        GitRepositoryService.bundledExecutable,
+        <String>['-C', directory, ...arguments],
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      return '${result.stdout}'.trim();
+    }
+
+    run(remote.path, <String>['init', '--bare']);
+    run(sandbox.path, <String>['init']);
+    run(sandbox.path, <String>['config', 'user.name', 'Vibekits Test']);
+    run(sandbox.path, <String>['config', 'user.email', 'test@vibekits.local']);
+    final File source = File('${sandbox.path}${Platform.pathSeparator}main.txt')
+      ..writeAsStringSync('one\n');
+    run(sandbox.path, <String>['add', 'main.txt']);
+    run(sandbox.path, <String>['commit', '-m', 'initial']);
+    run(sandbox.path, <String>['remote', 'add', 'backup', remote.path]);
+    source.writeAsStringSync('two\n');
+
+    final GitBackupPreview preview = await GitRepositoryService.previewBackup(
+      sandbox.path,
+      remoteId: 'backup',
+      deviceLabel: 'qa-machine',
+      now: DateTime(2026, 8, 21),
+    );
+    expect(preview.blockers, isEmpty);
+    expect(preview.remoteReachable, isTrue);
+    expect(preview.includedPaths, <String>['main.txt']);
+
+    final GitBackupCommitResult committed =
+        await GitRepositoryService.commitBackup(
+          previewId: preview.id,
+          includedPaths: preview.includedPaths,
+          message: 'backup test',
+          now: DateTime(2026, 8, 21, 0, 1),
+        );
+    expect(committed.commitSha, hasLength(40));
+    expect(
+      run(sandbox.path, <String>['ls-remote', '--heads', 'backup']),
+      isEmpty,
+      reason: 'commit 审批不能隐式执行 push',
+    );
+
+    final GitBackupPushResult pushed = await GitRepositoryService.pushBackup(
+      previewId: preview.id,
+      commitSha: committed.commitSha,
+      now: DateTime(2026, 8, 21, 0, 2),
+    );
+    expect(pushed.verified, isTrue);
+    expect(pushed.remoteCommitSha, committed.commitSha);
+  });
 }

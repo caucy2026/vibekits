@@ -30,6 +30,7 @@
 24. [能力融合与智能体自动发现最高准则](22_CAPABILITY_INTEGRATION_STANDARD.md)——新增或移植任何工具时必须遵循
 25. [创新能力交付路线](23_INNOVATION_DELIVERY_ROADMAP.md)
 26. [智能清理产品与架构准则](24_CLEANER_COMPETITIVE_ARCHITECTURE.md)——清理竞品结论、五任务入口、规则数据库和超越路线
+27. [Windows 测试节点与 GitHub 受控备份](25_WINDOWS_TEST_NODE_AND_GITHUB_BACKUP.md)——节点生命周期、GitHub 代理回滚和分离审批备份合同
 
 ## 完成定义
 

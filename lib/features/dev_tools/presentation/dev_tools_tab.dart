@@ -18,6 +18,7 @@ import 'network_virtualization_workspace.dart';
 import 'harness_tool_activity_dialog.dart';
 import 'programmer_calculator_workspace.dart';
 import 'remote_workspace.dart';
+import 'windows_test_node_workspace.dart';
 import 'serial_port_workspace.dart';
 import 'utility_collection_workspace.dart';
 
@@ -57,6 +58,9 @@ class DevToolsTab extends StatefulWidget {
     this.apiExecute,
     this.gitInspect,
     this.gitPickDirectory,
+    this.gitBackupPreview,
+    this.gitBackupCommit,
+    this.gitBackupPush,
     this.githubDiagnostics,
     this.remoteWorkspaceIntent,
     this.remoteWorkspaceIntentSerial = 0,
@@ -93,6 +97,9 @@ class DevToolsTab extends StatefulWidget {
   final ApiExecutor? apiExecute;
   final GitInspector? gitInspect;
   final GitDirectoryPicker? gitPickDirectory;
+  final GitBackupPreviewer? gitBackupPreview;
+  final GitBackupCommitter? gitBackupCommit;
+  final GitBackupPusher? gitBackupPush;
   final GithubDiagnosticsRunner? githubDiagnostics;
   final RemoteWorkspaceIntent? remoteWorkspaceIntent;
   final int remoteWorkspaceIntentSerial;
@@ -370,16 +377,36 @@ class _DevToolsTabState extends State<DevToolsTab> {
       );
     }
     if (tool.id == 'remote_workspace') {
-      return RemoteWorkspace(
-        startSession: widget.remoteStartSession,
-        initialProfiles: widget.initialRemoteSessionProfiles,
-        onProfilesChanged: widget.onRemoteSessionProfilesChanged,
-        readCredential: widget.remoteCredentialRead,
-        writeCredential: widget.remoteCredentialWrite,
-        deleteCredential: widget.remoteCredentialDelete,
-        profileIdGenerator: widget.remoteProfileIdGenerator,
-        launchIntent: widget.remoteWorkspaceIntent,
-        launchIntentSerial: widget.remoteWorkspaceIntentSerial,
+      return DefaultTabController(
+        length: 2,
+        child: Column(
+          children: <Widget>[
+            const TabBar(
+              tabs: <Widget>[
+                Tab(text: 'SSH / SFTP'),
+                Tab(text: '测试节点'),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                children: <Widget>[
+                  RemoteWorkspace(
+                    startSession: widget.remoteStartSession,
+                    initialProfiles: widget.initialRemoteSessionProfiles,
+                    onProfilesChanged: widget.onRemoteSessionProfilesChanged,
+                    readCredential: widget.remoteCredentialRead,
+                    writeCredential: widget.remoteCredentialWrite,
+                    deleteCredential: widget.remoteCredentialDelete,
+                    profileIdGenerator: widget.remoteProfileIdGenerator,
+                    launchIntent: widget.remoteWorkspaceIntent,
+                    launchIntentSerial: widget.remoteWorkspaceIntentSerial,
+                  ),
+                  const WindowsTestNodeWorkspace(),
+                ],
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (tool.id == 'serial_port') {
@@ -400,6 +427,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
       return GitWorkspace(
         inspect: widget.gitInspect,
         pickDirectory: widget.gitPickDirectory,
+        previewBackup: widget.gitBackupPreview,
+        commitBackup: widget.gitBackupCommit,
+        pushBackup: widget.gitBackupPush,
       );
     }
     if (tool.id == 'github_diagnostics') {
