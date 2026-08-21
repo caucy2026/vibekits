@@ -35,6 +35,11 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
     length: _groups.length,
     vsync: this,
   );
+  late final Map<String, ScrollController> _toolScrollControllers =
+      <String, ScrollController>{
+        for (final String group in _groups) group: ScrollController(),
+      };
+  final Map<String, GlobalKey> _toolKeys = <String, GlobalKey>{};
   final TextEditingController _input = TextEditingController();
   final TextEditingController _params = TextEditingController();
   final TextEditingController _output = TextEditingController();
@@ -61,6 +66,9 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
     _tabs
       ..removeListener(_handleTabChange)
       ..dispose();
+    for (final ScrollController controller in _toolScrollControllers.values) {
+      controller.dispose();
+    }
     _input.dispose();
     _params.dispose();
     _output.dispose();
@@ -68,7 +76,10 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
   }
 
   void _handleTabChange() {
-    if (!_tabs.indexIsChanging && mounted) setState(() {});
+    if (!_tabs.indexIsChanging && mounted) {
+      setState(() {});
+      _revealTool(_activeTool.id);
+    }
   }
 
   void _selectInitial(String? toolId) {
@@ -79,6 +90,7 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
     _selectedByGroup[tool.group] = tool;
     final int index = _groups.indexOf(tool.group);
     if (index >= 0) _tabs.index = index;
+    _revealTool(tool.id);
   }
 
   ToolSpec get _activeTool => _selectedByGroup[_groups[_tabs.index]]!;
@@ -90,6 +102,41 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
       _output.clear();
       _outputIsError = false;
     });
+    _revealTool(tool.id);
+  }
+
+  void _revealTool(String toolId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? target = _toolKeys[toolId]?.currentContext;
+      if (!mounted || target == null) return;
+      Scrollable.ensureVisible(
+        target,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  void _scrollToolStrip(String group, double direction) {
+    final ScrollController controller = _toolScrollControllers[group]!;
+    if (!controller.hasClients) return;
+    final double target = (controller.offset + direction * 320).clamp(
+      0,
+      controller.position.maxScrollExtent,
+    );
+    controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<void> _copyToolId(ToolSpec tool) async {
+    await Clipboard.setData(ClipboardData(text: 'vibekits.${tool.id}'));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('智能体接口 ID 已复制')));
   }
 
   Future<void> _execute() async {
@@ -144,43 +191,56 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          child: Row(
-            children: <Widget>[
-              const Icon(Icons.auto_awesome_mosaic_outlined, size: 21),
-              const SizedBox(width: 8),
-              const Text(
-                '转换与检查',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                '同一个输入区，切换 Tab 即可换工具',
-                style: TextStyle(fontSize: 12, color: context.vibe.muted),
-              ),
-            ],
+    return Focus(
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.enter &&
+            HardwareKeyboard.instance.isControlPressed) {
+          if (!_executing) _execute();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.auto_awesome_mosaic_outlined, size: 21),
+                const SizedBox(width: 8),
+                const Text(
+                  '转换与检查',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '同一个输入区，切换 Tab 即可换工具',
+                  style: TextStyle(fontSize: 12, color: context.vibe.muted),
+                ),
+              ],
+            ),
           ),
-        ),
-        TabBar(
-          key: const Key('utility-category-tabs'),
-          controller: _tabs,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          tabs: <Widget>[for (final String group in _groups) Tab(text: group)],
-        ),
-        Expanded(
-          child: TabBarView(
+          TabBar(
+            key: const Key('utility-category-tabs'),
             controller: _tabs,
-            children: <Widget>[
-              for (final String group in _groups) _buildGroup(group),
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            tabs: <Widget>[
+              for (final String group in _groups) Tab(text: group),
             ],
           ),
-        ),
-      ],
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: <Widget>[
+                for (final String group in _groups) _buildGroup(group),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -194,29 +254,95 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              key: ValueKey<String>('utility-tool-strip-$group'),
-              scrollDirection: Axis.horizontal,
-              itemCount: tools.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 6),
-              itemBuilder: (BuildContext context, int index) {
-                final ToolSpec tool = tools[index];
-                return ChoiceChip(
-                  key: ValueKey<String>('utility-${tool.id}'),
-                  selected: selected.id == tool.id,
-                  showCheckmark: false,
-                  label: Text(tool.name),
-                  onSelected: (_) => _selectTool(tool),
-                );
-              },
-            ),
+          Row(
+            children: <Widget>[
+              IconButton(
+                key: ValueKey<String>('utility-tool-previous-$group'),
+                tooltip: '向前浏览工具',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _scrollToolStrip(group, -1),
+                icon: const Icon(Icons.chevron_left, size: 20),
+              ),
+              Expanded(
+                child: SizedBox(
+                  height: 36,
+                  child: SingleChildScrollView(
+                    key: ValueKey<String>('utility-tool-strip-$group'),
+                    controller: _toolScrollControllers[group],
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: <Widget>[
+                        for (int index = 0; index < tools.length; index++) ...[
+                          if (index > 0) const SizedBox(width: 6),
+                          KeyedSubtree(
+                            key: _toolKeys.putIfAbsent(
+                              tools[index].id,
+                              GlobalKey.new,
+                            ),
+                            child: ChoiceChip(
+                              key: ValueKey<String>(
+                                'utility-${tools[index].id}',
+                              ),
+                              selected: selected.id == tools[index].id,
+                              showCheckmark: false,
+                              label: Text(tools[index].name),
+                              onSelected: (_) => _selectTool(tools[index]),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                key: ValueKey<String>('utility-tool-next-$group'),
+                tooltip: '向后浏览工具',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _scrollToolStrip(group, 1),
+                icon: const Icon(Icons.chevron_right, size: 20),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
-          Text(
-            selected.description,
-            style: TextStyle(color: context.vibe.muted),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final Widget description = Text(
+                selected.description,
+                style: TextStyle(color: context.vibe.muted),
+              );
+              final Widget agentInterface = ActionChip(
+                key: const Key('utility-agent-interface'),
+                avatar: const Icon(Icons.smart_toy_outlined, size: 16),
+                tooltip: '复制 Harness/MCP 工具 ID',
+                onPressed: () => _copyToolId(selected),
+                label: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  child: Text(
+                    '智能体 · vibekits.${selected.id}',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              );
+              if (constraints.maxWidth < 680) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    description,
+                    const SizedBox(height: 6),
+                    agentInterface,
+                  ],
+                );
+              }
+              return Row(
+                children: <Widget>[
+                  Expanded(child: description),
+                  const SizedBox(width: 12),
+                  agentInterface,
+                ],
+              );
+            },
           ),
           if (<String>{
             'code_statistics',
@@ -289,7 +415,7 @@ class _UtilityCollectionWorkspaceState extends State<UtilityCollectionWorkspace>
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.play_arrow, size: 18),
-                label: Text(_executing ? '处理中…' : '执行'),
+                label: Text(_executing ? '处理中…' : '执行  Ctrl+Enter'),
               ),
               const SizedBox(width: 8),
               OutlinedButton(

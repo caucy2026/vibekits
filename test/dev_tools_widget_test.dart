@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/features/dev_tools/domain/file_hash_service.dart';
@@ -27,6 +28,8 @@ void main() {
   }
 
   testWidgets('新增语义版本比较可从转换工作区直接执行', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(640, 720));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -36,9 +39,17 @@ void main() {
     );
     await tester.enterText(find.byKey(const Key('utility-input')), '2.0.0');
     await tester.enterText(find.widgetWithText(TextField, '另一个版本'), '1.9.9');
-    await tester.tap(find.text('执行'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(find.textContaining('greater'), findsOneWidget);
+    expect(find.byKey(const Key('utility-agent-interface')), findsOneWidget);
+    expect(find.textContaining('vibekits.semver_compare'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('utility-tool-next-计算调试')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('程序员计算器默认打开且输入即算', (WidgetTester tester) async {
@@ -103,7 +114,7 @@ void main() {
     final Finder input = await pumpTools(tester);
 
     await tester.enterText(input, 'Hello');
-    await tester.tap(find.text('执行'));
+    await tester.tap(find.byKey(const Key('utility-run')));
     await tester.pump();
 
     // 输出区显示 Base64 结果。
@@ -138,7 +149,7 @@ void main() {
     await tester.pump();
 
     await tester.enterText(input, '!!!');
-    await tester.tap(find.text('执行'));
+    await tester.tap(find.byKey(const Key('utility-run')));
     await tester.pump();
 
     // 错误出现在输出区，输入未被清除。
@@ -150,7 +161,7 @@ void main() {
     final Finder input = await pumpTools(tester);
 
     await tester.enterText(input, 'Hello');
-    await tester.tap(find.text('执行'));
+    await tester.tap(find.byKey(const Key('utility-run')));
     await tester.pump();
     expect(find.text('SGVsbG8='), findsOneWidget);
 

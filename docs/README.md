@@ -40,6 +40,7 @@
 34. [dev.63 外部 Codex MCP 验收](acceptance/V1_9_0_DEV63_CODEX_MCP_2026-08-21.md)——全局注册、77 工具发现、节点调用与 Release 证据
 35. [dev.64 清理经验决策引擎验收](acceptance/V1_9_0_DEV64_CLEANUP_DECISION_2026-08-22.md)——同机只读复扫、四级决策、安全边界与性能数据
 36. [dev.65 30 项高频微工具验收](acceptance/V1_9_0_DEV65_UTILITY_PLUS_30_2026-08-22.md)——GitHub 能力去重、界面/Harness/日志闭环与性能数据
+37. [dev.66 工具集 UI 与智能体接口验收](acceptance/V1_9_0_DEV66_UTILITY_UI_AGENT_2026-08-22.md)——自动可见工具条、小窗口、自带接口 ID 与快捷执行
 
 ## 完成定义
 
