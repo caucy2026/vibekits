@@ -1,7 +1,7 @@
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
-  [string]$ExpectedVersion = '1.9.0-dev.55+65',
+  [string]$ExpectedVersion = '1.9.0-dev.56+66',
   [string]$BundlePath = ''
 )
 

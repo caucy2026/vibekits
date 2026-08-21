@@ -3,12 +3,88 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
+import 'package:vibekits/features/cleaner/domain/installed_application_service.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analysis_runner.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analysis_report.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_insights.dart';
 
 void main() {
+  test('最近一次磁盘分析可完整保存并恢复路径和软件信息', () async {
+    final Directory cache = Directory.systemTemp.createTempSync(
+      'vk_drive_snapshot_',
+    );
+    addTearDown(() => cache.deleteSync(recursive: true));
+    final DateTime generatedAt = DateTime(2026, 8, 20, 18, 30);
+    const SystemDriveAnalysis analysis = SystemDriveAnalysis(
+      rootPath: r'C:\',
+      entries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Program Files',
+          name: 'Program Files',
+          sizeBytes: 4096,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: '应用安装目录',
+          isDirectory: true,
+          complete: true,
+        ),
+      ],
+      breakdownEntries: <SystemDriveUsageEntry>[
+        SystemDriveUsageEntry(
+          path: r'C:\Program Files\Acme',
+          name: 'Acme',
+          sizeBytes: 3072,
+          kind: SystemDriveEntryKind.installedPrograms,
+          reason: 'Acme 安装文件',
+          isDirectory: true,
+          complete: true,
+          ownerLabel: 'Acme',
+          parentPath: r'C:\Program Files',
+        ),
+      ],
+      cancelled: false,
+      unreadablePaths: 2,
+      visitedEntries: 20,
+      measuredBytes: 4096,
+      totalBytes: 10000,
+      freeBytes: 2000,
+      availableBytes: 1800,
+    );
+
+    await SystemDriveAnalysisSnapshotStore.save(
+      const <SystemDriveAnalysis>[analysis],
+      const <InstalledApplication>[
+        InstalledApplication(
+          id: 'acme-registry',
+          name: 'Acme IDE',
+          publisher: 'Acme Inc.',
+          version: '3.2',
+          installLocation: r'C:\Program Files\Acme',
+          estimatedSizeBytes: 3072,
+          uninstallCommand: r'"C:\Program Files\Acme\uninstall.exe"',
+        ),
+      ],
+      generatedAt: generatedAt,
+      directory: cache,
+    );
+
+    final SystemDriveAnalysisSnapshot? restored =
+        await SystemDriveAnalysisSnapshotStore.load(directory: cache);
+    expect(restored, isNotNull);
+    expect(restored!.generatedAt, generatedAt);
+    expect(restored.analyses.single.rootPath, r'C:\');
+    expect(
+      restored.analyses.single.breakdownEntries.single.path,
+      r'C:\Program Files\Acme',
+    );
+    expect(restored.analyses.single.unreadablePaths, 2);
+    expect(restored.installedApplications.single.name, 'Acme IDE');
+    expect(
+      restored.installedApplications.single.installLocation,
+      r'C:\Program Files\Acme',
+    );
+  });
+
   test('系统盘根目录按用途分类并统计真实字节', () async {
     final Directory root = Directory.systemTemp.createTempSync(
       'vk_drive_analysis_',

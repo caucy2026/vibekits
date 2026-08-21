@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/domain/disk_volume_discovery.dart';
 import 'package:vibekits/features/cleaner/domain/installed_application_service.dart';
+import 'package:vibekits/features/cleaner/domain/system_drive_analysis_report.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
 
@@ -30,6 +32,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: const <CleanupScanTarget>[
               ...testTargets,
               CleanupScanTarget(
@@ -71,6 +74,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: testTargets,
             scanRunner:
                 ({
@@ -132,6 +136,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: testTargets,
             initialWhitelist: const <String>[root],
             scanRunner:
@@ -177,6 +182,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: testTargets,
             scanRunner:
                 ({
@@ -259,6 +265,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: testTargets,
             scanRunner:
                 ({
@@ -338,6 +345,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: CleanerTab(
+            persistDriveAnalysisReport: false,
             availableTargets: testTargets,
             initialTotalReleasedBytes: 1024,
             initialCompletedRuns: 2,
@@ -485,10 +493,95 @@ void main() {
     expect(find.text('estlog'), findsOneWidget);
     expect(find.textContaining('需复核'), findsOneWidget);
     expect(find.textContaining('剩余 2.0 KB'), findsOneWidget);
+    await tester.tap(find.text('Windows'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining(r'C:\Windows'), findsOneWidget);
+    expect(find.textContaining('Windows 系统文件'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '关闭'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('让 Harness 解释'));
     await tester.pump();
     expect(harnessPrompt, contains('vibekits.cleaner.analyze_drive'));
     expect(harnessPrompt, contains(r'C:\'));
+  });
+
+  testWidgets('重新进入清理页恢复上次分析且不会自动重新扫描', (WidgetTester tester) async {
+    final Directory cache = Directory.systemTemp.createTempSync(
+      'vk_cleaner_restore_',
+    );
+    addTearDown(() => cache.deleteSync(recursive: true));
+    int analysisRuns = 0;
+    Future<SystemDriveAnalysis> analyze({
+      required CleanupCancellationToken cancellationToken,
+      required void Function(SystemDriveAnalysisProgress progress) onProgress,
+    }) async {
+      analysisRuns++;
+      return const SystemDriveAnalysis(
+        rootPath: r'C:\',
+        entries: <SystemDriveUsageEntry>[
+          SystemDriveUsageEntry(
+            path: r'C:\SavedAnalysis',
+            name: 'SavedAnalysis',
+            sizeBytes: 2048,
+            kind: SystemDriveEntryKind.unknown,
+            reason: '持久化测试目录',
+            isDirectory: true,
+            complete: true,
+          ),
+        ],
+        cancelled: false,
+        unreadablePaths: 0,
+        visitedEntries: 4,
+        measuredBytes: 2048,
+        totalBytes: 10000,
+        freeBytes: 3000,
+        availableBytes: 3000,
+      );
+    }
+
+    Widget cleaner() => MaterialApp(
+      home: Scaffold(
+        body: CleanerTab(
+          availableTargets: testTargets,
+          driveAnalysisCacheDirectory: cache,
+          installedApplicationLoader: () async =>
+              const <InstalledApplication>[],
+          driveAnalysisRunner: analyze,
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(cleaner());
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('分析全部磁盘占用（只读）'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(seconds: 1)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(analysisRuns, 1);
+    expect(find.text('SavedAnalysis'), findsOneWidget);
+    final SystemDriveAnalysisSnapshot? saved = await tester
+        .runAsync<SystemDriveAnalysisSnapshot?>(
+          () => SystemDriveAnalysisSnapshotStore.load(directory: cache),
+        );
+    expect(saved, isNotNull);
+    expect(saved!.analyses.single.entries.single.name, 'SavedAnalysis');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(cleaner());
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(seconds: 1)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(analysisRuns, 1);
+    expect(find.text('SavedAnalysis'), findsOneWidget);
+    expect(find.textContaining('已恢复'), findsOneWidget);
+    expect(find.textContaining('才会重新计算'), findsOneWidget);
   });
 
   testWidgets('空间分析未完成时逐项显示已完成的软件占用', (WidgetTester tester) async {
@@ -701,6 +794,9 @@ void main() {
                   InstalledApplication(
                     id: 'acme',
                     name: 'Acme IDE',
+                    publisher: 'Acme Inc.',
+                    version: '3.2',
+                    installLocation: r'C:\Program Files\Acme',
                     uninstallCommand: r'"C:\Program Files\Acme\uninstall.exe"',
                   ),
                 ],
@@ -729,6 +825,17 @@ void main() {
     expect(find.textContaining('安装 2.9 KB'), findsOneWidget);
     expect(find.textContaining('可清缓存 1000 B'), findsOneWidget);
     expect(find.textContaining(r'安装路径：C:\Program Files\Acme'), findsOneWidget);
+
+    await tester.tap(find.text('Acme IDE'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Acme Inc.'), findsOneWidget);
+    expect(
+      find.textContaining(r'C:\Users\me\AppData\Local\Acme\Cache'),
+      findsOneWidget,
+    );
+    expect(find.text('复制全部路径'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '关闭'));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.widgetWithText(OutlinedButton, '清理缓存'));
     await tester.pumpAndSettle();
