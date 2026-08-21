@@ -1,148 +1,200 @@
-# Windows 测试节点与 GitHub 备份剩余工作
+# dev.61 Windows 测试节点与 GitHub 备份剩余工作
 
-状态：代码安全底座已补齐，真实外部证据未完全满足
+状态：未完成，不能宣称可一键配置多设备节点
 盘点日期：2026-08-21
-基线版本：`1.9.0-dev.61+71`
+当前基线：`v1.9.0-dev.61+71`
 对应规格：`25_WINDOWS_TEST_NODE_AND_GITHUB_BACKUP.md`
+安全设计：`27_SECURE_WINDOWS_NODE_INTEGRATION_GUIDE.md`
 
-## 1. 当前结论
+## 1. 当前可用边界
 
-现有实现已经完成只读体检、幂等计划、GitHub 回环代理发现与 GitHub host-scoped 配置、受控 Git 备份领域逻辑、Harness/UI 接入、自动测试和 Windows Release 构建。随包 MinGit 已能通过当前 Clash/Mihomo 和系统凭据只读访问私有仓库 `caucy2026/priv`。
+dev.61 已完成安全协议和领域底座，但没有交付可执行的 Windows 节点 helper。因此当前状态必须按以下边界理解：
 
-但当前版本仍不能宣称需求全文完成。最关键的缺口是 Windows 系统变更入口仍因缺少签名 UAC helper 而禁用，多设备登记/撤销尚未形成可执行闭环，也没有两台 Mac 到同一 Windows 节点的真实证据。
+| 场景 | 当前状态 | 说明 |
+|---|---:|---|
+| Windows 节点只读体检 | 可用 | 普通权限检查真实系统状态 |
+| 生成幂等变更计划 | 可用 | 只生成计划，不修改系统 |
+| 列出设备登记 | 可用 | 读取设备登记数据，不修改 `authorized_keys` |
+| 导出 Mac onboarding | 可用 | 只包含连接事实和 host key，不包含秘密 |
+| 已手工配置节点的 SSH/SFTP | 可用 | 复用现有远程工作台 |
+| apply / rollback | 不可用 | Release 没有签名 helper 实体 |
+| enroll / revoke device | 不可用 | 不能安全写入系统 `authorized_keys` 和 ACL |
+| 跨设备 verify | 不可用 | 没有真实 Mac 执行器和证据闭环 |
+| 多台 Mac 一次配置后长期使用 | 不可用 | 缺少登记、撤销、验证和实机证据 |
+| 私有 GitHub 只读访问 | 可用 | 随包 MinGit `ls-remote` 已验证 |
+| 私有 GitHub 真实受控 push | 待验收 | 尚未执行两次独立审批和远端 SHA 核验 |
 
-## 2. 必须完成的产品能力
+结论：如果 Windows 已经由人工配置好 SSH、账户、防火墙和公钥，Mac 可以连接；如果依赖 VibeKits 从零配置并管理多台 Mac，目前不能工作。
 
-### 2.1 NODE-003：签名 UAC helper 与精确回滚
+## 2. dev.61 已完成，不应重复开发
 
-交付一个独立、版本化、可验证签名的 Windows helper：
+- helper 请求/回执协议：action 白名单、规范摘要、15 分钟时效、nonce 防重放、命令参数拒绝；
+- App 侧 helper 客户端：签名、发布者、SHA-256、协议版本、UAC 拒绝、取消、超时和回执绑定检查；
+- 设备领域服务：独立 Ed25519、重复拒绝、禁用/恢复/撤销、active-only keys、原子清单和 onboarding；
+- 跨设备报告模型：11 项必需检查、`WorkflowArtifact`、localhost/缺项/秘密/伪通过拒绝；
+- Harness 可执行入口：`windows_node.list_devices`、`windows_node.export_onboarding`；
+- GitHub 代理摘要/状态漂移/安全回滚；
+- Git 备份隔离、内容竞态阻断、commit/push 分离设计；
+- dev.61 Release `vibekits.exe` 已生成；专项回归 31 项通过。
 
-- 主 App 保持普通权限，只在执行已审批计划时触发 UAC；
-- helper 只接受版本化 JSON、短期 plan ID、摘要、随机 nonce 和预定义 action ID；
-- 禁止接收任意 PowerShell、CMD 或 shell 文本；
-- 白名单覆盖 OpenSSH、sshd、LAN 防火墙、Private 网络、标准账户、公钥、`D:\KEMI-Test` ACL、PowerShell、电源和 rollback；
-- 每个动作保存修改前值、修改后值、结果和一次性回执；
-- App 验证 helper 的发布者签名、文件哈希、协议版本、计划摘要和回执；
-- UAC 拒绝、部分成功、超时、取消、重启要求和回滚失败必须分别报告；
-- 删除账户、删除用户数据和卸载系统组件不得进入自动回滚。
+以上是可复用底座，不等于 Windows 管理员动作已经实现。
 
-验收标准：`windows_node.apply` 与 `windows_node.rollback` 进入 executable catalog；篡改、重放、过期、未知 action、错误签名和状态漂移全部被拒绝；真实 Windows 管理员配置和回滚各成功一次。
+## 3. 仍需开发的代码和产物
 
-### 2.2 NODE-007/008：多设备身份生命周期
+### 3.1 真实 Windows 节点 helper
 
-- 创建并维护非管理员账户 `kemi-test`，不得加入 Administrators；
-- 每台 Mac/Windows 客户端使用独立 Ed25519 公钥，禁止共享私钥；
-- 提供设备列表、添加、重复指纹拒绝、禁用、撤销和最近连接状态；
-- `authorized_keys` 原子写入并校验 ACL；
-- 至少一把密钥真实登录成功前，不得关闭密码认证；
-- 导出不含秘密的 onboarding 包：主机、端口、用户名、host key 指纹、SSH config 示例和操作说明；
-- 撤销一台设备后，其他设备必须保持可连接。
+必须交付独立 helper 工程和 Release 二进制。只有协议类或 mock launcher 不算完成。
 
-验收标准：`list_devices/enroll_device/revoke_device/export_onboarding` 全部可执行；两台不同 Mac 使用不同密钥连接同一 Windows 节点，撤销其中一台后仅该设备失效。
+helper 必须：
 
-### 2.3 NODE-010：跨设备真实节点验证
+- 只接受版本化 JSON 请求，不接受任意 shell、脚本、命令行或可执行路径；
+- 重新验证协议版本、plan ID、plan/inspection/request 摘要、nonce、时效、action 白名单、依赖和现场状态；
+- 实现下列原子 action：
+  - `windows.openssh.install_or_repair`
+  - `windows.sshd.configure`
+  - `windows.sshd.start_and_enable`
+  - `windows.firewall.apply_lan_rule`
+  - `windows.network.mark_private`
+  - `windows.local_user.create_standard`
+  - `windows.local_user.set_authorized_keys`
+  - `windows.acl.apply_test_root`
+  - `windows.runtime.install_powershell`
+  - `windows.power.disable_ac_sleep`
+  - `windows.change.rollback`
+- 每个 action 记录脱敏的 before/after 摘要、状态、耗时和错误分类；
+- 以绑定 request digest 和 nonce 的 JSON 回执结束；
+- 支持精确回滚，但不得自动删除账户、用户数据或卸载系统组件；
+- 操作 `authorized_keys` 时使用原子替换并验证仅目标用户、SYSTEM 和 Administrators 具有允许的写权限；
+- 防火墙仅允许用户确认的 RFC1918/ULA，IPv4 `/24` 或更窄，Profile 仅 Private。
 
-必须从 Mac 而不是 Windows 本机 localhost 执行并保存证据：
+### 3.2 App 到 helper 的真实 Windows 适配器
 
-1. 固定并核对 Windows host key；
-2. 使用设备独立公钥登录；
-3. 执行 `pwsh -NoProfile` 并取得版本；
-4. 验证工作目录为 `D:\KEMI-Test\work`；
-5. 验证远端进程的 TEMP/TMP 指向 `D:\KEMI-Test\tmp`；
-6. SFTP 上传、远端 SHA-256、下载、本地 SHA-256 一致；
-7. 验证 Windows 防火墙只允许用户确认的 Private `/24` 或更窄网段；
-8. 断网恢复后重新核对同一 host key。
+当前 `WindowsNodeHelperClient` 依赖注入的是身份检查器和 launcher，仍需生产实现：
 
-结果必须形成 `NodeVerificationReport` 和 `WorkflowArtifact`，包含来源设备标签、检查状态、耗时和证据引用，不包含密码、私钥或文件正文。
+- 使用 Windows Authenticode API 验证签名链和预期发布者；
+- 计算 helper 文件 SHA-256，并与 Release manifest 固定值比较；
+- 使用 Windows `runas`/UAC 启动固定 helper，禁止调用方替换路径；
+- 建立有界请求/回执通道，限制大小、编码、超时和输出内容；
+- 区分 UAC 拒绝、用户取消、超时、进程失败、无效回执和部分成功；
+- 取消或超时后重新执行只读体检，不假定系统没有变化；
+- helper 运行期间不得阻塞 Flutter UI 线程。
 
-## 3. 必须补齐的真实压力与故障验收
+### 3.3 接通被关闭的 ToolSpec/Harness 工具
 
-### 3.1 SSH/SFTP
+以下工具当前只有定义，没有生产 handler，必须在 helper 和真实验证器闭环后才能进入 executable catalog：
 
-- 1 GiB 上传过程中主动取消，服务端没有本轮临时残留；
-- 传输约 50% 时断网，操作明确失败且恢复网络后可重试；
-- 上传和下载均记录本地/远端 SHA-256 并一致；
-- 多台设备同时使用时，会话、进度、取消和证据互不串扰；
-- 主机密钥变化必须阻断，不得自动接受。
+- `vibekits.windows_node.apply`
+- `vibekits.windows_node.enroll_device`
+- `vibekits.windows_node.revoke_device`
+- `vibekits.windows_node.rollback`
+- `vibekits.windows_node.verify`
 
-### 3.2 GitHub 代理
+接通要求：
 
-- 从真实 `verge-mihomo`/Clash 监听发现非固定端口；
-- 通过 VibeKits UI/Harness 预览并应用 GitHub host-scoped proxy；
-- 停止代理后显示配置失效；
-- 端口变化后旧计划被拒绝，重新探测可恢复；
-- 应用验证失败时恢复旧值，用户后来修改的值不得被旧 rollback 覆盖。
+- apply/rollback 只接受短期 plan ID 和摘要；
+- enroll 只接受合法 Ed25519 公钥、设备标签和可选到期时间，不接受私钥；
+- revoke 只接受已登记 device ID；
+- 写入工具必须经过一次性审批并进入模块审计；
+- verify 只接受另一台真实设备产生的完整报告，localhost 永远拒绝；
+- handler 未接通、helper 缺失或签名资源无效时继续保持不可执行。
 
-当前只读 `ls-remote` 已通过，不需要重复证明账号登录；仍需补的是产品内 apply/rollback 的真实操作证据。
+### 3.4 Release 供应链门禁
 
-### 3.3 私有 GitHub 受控备份
+Release 目前没有 helper 资产和身份清单，必须补齐：
 
-在专门的可回收测试分支完成一次真实闭环：
+- 将固定路径的 helper 加入 Windows Release 构建；
+- manifest 记录 helper 相对路径、协议版本、文件版本、SHA-256 和预期发布者；
+- `verify_windows_bundle.ps1` 检查 helper 存在、版本、哈希和 Authenticode；
+- 缺失、未签名、证书不可信或任何值不一致时构建/发布失败；
+- `tool/release_acceptance_manifest.json` 登记 Windows 节点完整工作流、自动测试和真实证据；
+- 生成第三方组件/许可证记录；若 helper 为自研，应记录源码版本和构建来源。
 
-1. `backup_preview` 显示准确文件集合且秘密扫描通过；
-2. 用户第一次审批后创建 commit，但当前工作分支、HEAD、index 和工作区不变；
-3. 用户第二次独立审批后 push 到计划生成的 `backup/<device-or-project>/<date>`；
-4. `ls-remote` 返回的远端 SHA 与计划 commit SHA 一致；
-5. 重试不得重复 commit；禁止 force、删 ref、改 tag 和绕过 hooks；
-6. 测试结束后是否删除远端测试分支由用户另行明确审批。
+## 4. 需要用户或组织提供的外部资源
 
-当前只完成私有仓库只读访问和本地 bare remote push 测试，未执行真实私有仓库 push。
+这些不是 mock 能解决的项目：
 
-## 4. 发布证据与门禁
+1. Windows 可信代码签名证书或组织 CI/HSM 签名服务；
+2. 证书的预期发布者名称和可验证证书链；
+3. 一台允许 UAC 管理员操作的目标 Windows 真机；
+4. 至少两台不同 Mac，每台本机生成独立 Ed25519 密钥；
+5. 可控制断网的局域网环境；
+6. 一个允许创建可回收 backup 分支的私有 GitHub 测试仓库。
 
-完成以上能力后必须归档：
+签名私钥、Mac 私钥、GitHub Token、Windows 密码和 SSH CA 私钥不得进入仓库、VibeKits、Harness 参数或验收文档。
 
-- helper 签名验证、文件哈希、协议版本和白名单清单；
-- Windows 配置前后节点报告及精确回滚报告；
-- 两台 Mac 的不同设备指纹、连接结果和单设备撤销结果；
-- 1 GiB 取消、50% 断网、双向 SHA-256 和无残留证据；
+## 5. 必须完成的真实验收
+
+### 5.1 Windows apply 与 rollback
+
+1. 普通权限 App 完成 inspect 和 plan；
+2. 用户确认计划并接受 UAC；
+3. helper 完成 OpenSSH、sshd、防火墙、Private 网络、`kemi-test`、公钥、`D:\KEMI-Test` ACL、PowerShell 和电源动作；
+4. 再次只读体检确认目标状态；
+5. 执行精确 rollback；
+6. 核对计划外系统状态没有变化；
+7. 保存 UAC、helper 回执、前后报告和 rollback 证据。
+
+### 5.2 两台 Mac 独立接入和单设备撤销
+
+- 两台 Mac 使用不同 Ed25519 公钥和不同设备标签；
+- 分别固定同一个 Windows host key 并完成公钥登录；
+- 均验证 `pwsh -NoProfile`、`D:\KEMI-Test\work` 和远端 TEMP/TMP；
+- 撤销 Mac A 后，Mac A 必须失败，Mac B 必须继续成功；
+- 禁止复制同一私钥到两台 Mac。
+
+### 5.3 SSH/SFTP 故障与完整性
+
+- 双向上传/下载并核对本地与远端 SHA-256；
+- 1 GiB 上传中途取消，服务端无本轮临时残留；
+- 约 50% 时断网，明确失败，恢复后可重试；
+- 恢复连接时重新核对相同 host key；
+- 两台设备并发时会话、进度、取消和证据不得串扰。
+
+### 5.4 GitHub 真实写入
+
+- 通过产品内流程完成 proxy plan/apply/失效检测/rollback；
+- 对私有仓库执行 `backup_preview`，秘密扫描无 blocker；
+- 第一次独立审批创建 commit；
+- 第二次独立审批 push 到专用 backup 分支；
+- `ls-remote` SHA 与计划 commit SHA 一致；
+- 当前分支、HEAD、index 和工作区保持不变；
+- 是否删除远端测试分支必须另行取得用户审批。
+
+## 6. 验收证据要求
+
+最终 `docs/acceptance/` 记录至少包含：
+
+- helper 文件版本、SHA-256、签名状态、发布者和协议版本；
+- Release 校验输出；
+- Windows 配置前、配置后和回滚后的节点报告；
+- 两台 Mac 的设备标签、公钥指纹、host key 指纹和连接结果；
+- 单设备撤销结果；
+- 1 GiB 取消、断网重试、双向 SHA-256 和无残留证据；
 - GitHub proxy 应用/失效/恢复记录；
-- 私有仓库 preview、两次审批、commit SHA、远端 SHA；
-- Windows Release 资产校验、自动测试、静态分析和启动证据；
-- 对应 UI 截图或录屏及脱敏后的模块审计记录。
+- Git commit SHA、远端 ref SHA 和两次审批记录；
+- UI 截图或录屏以及脱敏模块审计记录。
 
-只有上述证据进入 `docs/acceptance/` 后，才能把 NODE-001～010、NET-001～003 和 GIT-001～003 标记为完整通过。
+证据不得包含密码、Token、私钥、公钥完整正文、代理订阅、测试文件正文或完整敏感命令输出。
 
-## 5. 不阻塞首个多设备版本的后续能力
+## 7. 建议实施顺序
 
-以下能力有价值，但不应阻塞使用独立公钥的首个多设备版本：
+1. 实现 helper 二进制和原子 action；
+2. 实现 Authenticode、哈希、UAC launcher 和回执通道；
+3. 接通 apply/rollback，并在 Windows 真机完成配置与回滚；
+4. 接通 enroll/revoke 和 `authorized_keys` 投影；
+5. 接通跨设备 verify；
+6. 将已签名 helper 和 manifest 纳入 Release 强制资产；
+7. 用两台 Mac 完成连接、撤销、1 GiB、断网和 SHA-256；
+8. 完成私有 GitHub 两次审批 push 和远端 SHA；
+9. 归档证据，更新需求总账和发布清单。
 
-- NODE-009 SSH CA、短期证书、KRL 和外部签发服务；
-- NET-004 系统级 WinINet/WinHTTP/PAC/TUN 切换；
-- P4 业务项目提供的签名 `KemiWindowsTestAgent` 编排。
+## 8. 完成定义
 
-这些能力未完成时必须保持不可执行或明确标记为扩展项，不得退化为共享私钥、任意管理员脚本或全局代理。
+只有同时满足以下条件才能回复“已经满足”：
 
-## 6. 建议实施顺序
-
-1. 签名 UAC helper、协议、白名单和回滚测试；
-2. 单设备公钥登记与 Windows 真机 apply/verify/rollback；
-3. 多设备登记、onboarding 和单设备撤销；
-4. 两台 Mac 的 SSH/SFTP、断网和大文件实证；
-5. 产品内 GitHub proxy apply/rollback 实证；
-6. 私有仓库受控 push 与远端 SHA 实证；
-7. 汇总发布证据并更新需求总账和验收记录。
-
-## 7. 完成判定
-
-完成不是“代码入口存在”，而是以下条件同时成立：签名 helper 已随包、Windows 系统配置可安全执行和精确回滚、至少两台 Mac 独立接入且可单独撤销、SFTP 故障场景通过、真实私有 GitHub 备份通过、证据归档完成。
-
-## 8. 2026-08-21 dev.61 续研结果
-
-### 已完成并自动验收
-
-- 新增版本化 helper 协议：固定 action ID 白名单、计划/体检 SHA-256、短期 nonce、15 分钟上限、防重放、禁止 `command/cmd/script/shell/executable/arguments/powershell` 参数和请求绑定回执。
-- 新增 helper 客户端安全门禁：执行前必须同时验证 Authenticode 状态、发布者、Release 固定 SHA-256 和协议版本；UAC 拒绝、取消、超时、进程失败、回执无效保持不同错误状态。
-- 新增 Ed25519 设备生命周期：严格解析 OpenSSH Ed25519 blob，重复指纹拒绝，禁用、恢复、撤销和最近连接记录；设备清单原子保存，`authorized_keys` 只输出 active 设备，撤销一台不会影响其他设备。
-- 新增无秘密 onboarding：固定 host key、`StrictHostKeyChecking yes`、Private IPv4 `/24` 或更窄网段；拒绝 localhost、宽网段、私钥、RSA 和损坏公钥。
-- `windows_node.list_devices` 与 `windows_node.export_onboarding` 已进入 Harness executable catalog，并完成真实桥接调用；登记、撤销仍保持不可执行，直到签名 helper 能原子同步系统 `authorized_keys` 和 ACL。
-- 新增 `NodeVerificationReport` 与 `WorkflowArtifact`：强制记录来源设备、平台、固定 host key、11 个跨设备检查、耗时和脱敏证据引用；localhost、缺项、秘密证据和“有失败却标记通过”均拒绝。
-- GitHub 代理代码补齐计划摘要校验、端口/状态漂移拒绝和“用户后来修改的配置不被旧 rollback 覆盖”；受控 Git 备份补齐不推进当前分支/HEAD、不清空工作区和内容变化使旧 preview 失效。相关 Windows/代理/Git 测试通过。
-
-### 仍需外部输入，不能用模拟测试替代
-
-1. 可信代码签名证书及预期发布者名称，用于签署真正执行系统动作的 helper；仓库不得保存签名私钥。
-2. 两台真实 Mac 各自生成独立 Ed25519 密钥，并从局域网完成 1 GiB 取消、50% 断网、双向 SHA-256、host key 固定和单设备撤销。
-3. 用户对真实私有仓库测试分支的两次独立外部写入批准：先 commit、再 push；当前消息不视为这两次批准。
-
-在以上三个外部前提到位前，`apply/enroll/revoke/rollback/verify` 保持不可执行是安全门禁，不属于 UI 漏做。可复用设计和接入步骤见 `27_SECURE_WINDOWS_NODE_INTEGRATION_GUIDE.md`。
+- 签名 helper 实体随 Windows Release 交付并通过强制校验；
+- apply/enroll/revoke/rollback/verify 均进入 executable catalog；
+- Windows 管理员 apply 和精确 rollback 实测通过；
+- 两台 Mac 独立密钥接入、单设备撤销和 SFTP 故障测试通过；
+- 私有 GitHub commit/push 两次审批及远端 SHA 通过；
+- 所有脱敏证据进入正式验收文档。

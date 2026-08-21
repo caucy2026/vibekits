@@ -70,6 +70,7 @@ void main() {
       VibekitsHarnessToolBridge.githubProxyApplyId,
       VibekitsHarnessToolBridge.githubProxyRollbackId,
       VibekitsHarnessToolBridge.windowsNodeInspectId,
+      VibekitsHarnessToolBridge.windowsNodeHelperStatusId,
       VibekitsHarnessToolBridge.windowsNodePlanId,
       VibekitsHarnessToolBridge.windowsNodeListDevicesId,
       VibekitsHarnessToolBridge.windowsNodeExportOnboardingId,
@@ -97,6 +98,7 @@ void main() {
       VibekitsHarnessToolBridge.windowsNodeEnrollDeviceId,
       VibekitsHarnessToolBridge.windowsNodeRevokeDeviceId,
       VibekitsHarnessToolBridge.windowsNodeRollbackId,
+      VibekitsHarnessToolBridge.windowsNodeEnsureClientIdentityId,
     ]) {
       expect(fullIds, contains(id));
       expect(tools.any((dynamic tool) => tool['id'] == id), isFalse);

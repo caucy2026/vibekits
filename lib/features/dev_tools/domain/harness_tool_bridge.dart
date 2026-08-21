@@ -35,6 +35,7 @@ import 'tool_registry.dart';
 import 'tool_result.dart';
 import 'windows_test_node_service.dart';
 import 'windows_node_device_service.dart';
+import 'windows_node_helper_protocol.dart';
 
 enum HarnessToolRisk { readOnly, writesData, controlsDevice, destructive }
 
@@ -230,6 +231,8 @@ class VibekitsHarnessToolBridge {
   static const String githubProxyApplyId = 'vibekits.github.proxy_apply';
   static const String githubProxyRollbackId = 'vibekits.github.proxy_rollback';
   static const String windowsNodeInspectId = 'vibekits.windows_node.inspect';
+  static const String windowsNodeHelperStatusId =
+      'vibekits.windows_node.helper_status';
   static const String windowsNodePlanId = 'vibekits.windows_node.plan';
   static const String windowsNodeApplyId = 'vibekits.windows_node.apply';
   static const String windowsNodeVerifyId = 'vibekits.windows_node.verify';
@@ -242,6 +245,8 @@ class VibekitsHarnessToolBridge {
   static const String windowsNodeExportOnboardingId =
       'vibekits.windows_node.export_onboarding';
   static const String windowsNodeRollbackId = 'vibekits.windows_node.rollback';
+  static const String windowsNodeEnsureClientIdentityId =
+      'vibekits.windows_node.ensure_client_identity';
   static const String programmerCalculatorId = 'vibekits.calculator.programmer';
   static const String remoteListProfilesId = 'vibekits.remote.list_profiles';
   static const String remoteSshExecId = 'vibekits.remote.ssh_exec';
@@ -560,6 +565,12 @@ class VibekitsHarnessToolBridge {
       description: '普通权限只读检查 Windows、硬件、D 盘、网络、OpenSSH、防火墙、运行时、电源、目录、账户和公钥。',
       properties: <String, Object?>{'rootPath': _string(r'固定为 D:\KEMI-Test')},
     ),
+    windowsNodeHelperStatusId: _definition(
+      id: windowsNodeHelperStatusId,
+      name: '检查 Windows 节点 Helper',
+      description: '读取当前 Release 中 helper 实体和 manifest 状态；缺失或不匹配时明确关闭系统写入工具。',
+      properties: const <String, Object?>{},
+    ),
     windowsNodePlanId: _definition(
       id: windowsNodePlanId,
       name: '生成 Windows 节点变更计划',
@@ -619,6 +630,12 @@ class VibekitsHarnessToolBridge {
       name: '回滚 Windows 节点变更',
       description: '等待签名 helper 和修改前状态审计闭环；禁止用删除账户或卸载组件冒充回滚。',
       risk: HarnessToolRisk.controlsDevice,
+    ),
+    windowsNodeEnsureClientIdentityId: _unavailableDefinition(
+      id: windowsNodeEnsureClientIdentityId,
+      name: '确保客户端独立身份',
+      description: '等待 macOS Keychain/受保护文件实现；只返回公钥和不透明凭据引用，永不返回私钥。',
+      risk: HarnessToolRisk.writesData,
     ),
     remoteListProfilesId: _definition(
       id: remoteListProfilesId,
@@ -1056,6 +1073,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == githubProxyApplyId) return _githubProxyApply;
     if (toolId == githubProxyRollbackId) return _githubProxyRollback;
     if (toolId == windowsNodeInspectId) return _inspectWindowsNode;
+    if (toolId == windowsNodeHelperStatusId) return _windowsNodeHelperStatus;
     if (toolId == windowsNodePlanId) return _planWindowsNode;
     if (toolId == windowsNodeListDevicesId) return _listWindowsNodeDevices;
     if (toolId == windowsNodeExportOnboardingId) {
@@ -1553,6 +1571,33 @@ class VibekitsHarnessToolBridge {
     rootPath: (arguments['rootPath'] ?? WindowsTestNodeService.requiredRoot)
         .toString(),
   )).toJson();
+
+  Future<Map<String, Object?>> _windowsNodeHelperStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final String executableDirectory = File(Platform.resolvedExecutable)
+        .parent
+        .path;
+    final File helper = File(
+      '$executableDirectory${Platform.pathSeparator}tools'
+      '${Platform.pathSeparator}windows-node${Platform.pathSeparator}vibekits-node-helper.exe',
+    );
+    final bool exists = await helper.exists();
+    return <String, Object?>{
+      'available': false,
+      'absolutePath': helper.path,
+      'signatureValid': false,
+      'publisher': null,
+      'sha256': null,
+      'fileVersion': null,
+      'protocolVersion': WindowsNodeHelperRequest.currentProtocolVersion,
+      'manifestMatch': false,
+      'executableActions': const <String>[],
+      'unavailableReason': exists
+          ? 'helper 存在，但生产 Authenticode/manifest 适配器尚未完成，拒绝执行'
+          : '当前 Release 未包含签名 Windows 节点 helper',
+    };
+  }
 
   Future<Map<String, Object?>> _planWindowsNode(
     Map<String, Object?> arguments,

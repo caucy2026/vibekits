@@ -2,6 +2,12 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-21 · v1.9.0-dev.62 智能体节点工具合同补齐
+
+- 新增 `vibekits.windows_node.helper_status` 真实只读处理器，返回当前 Release helper 固定路径、签名/manifest 可用性、协议版本、可执行动作和明确阻断原因；缺失 helper 时不伪装可用。
+- 完整能力目录新增 `vibekits.windows_node.ensure_client_identity`，在 macOS Keychain 适配器完成前保持不可执行；既有 apply/enroll/revoke/rollback/verify 继续遵守签名 helper 和外部执行器门禁。
+- 新增智能体接口文档，统一 11 个节点工具的调用顺序、风险、输入、输出、审批和失败处理；Harness 目录与实际调用回归 20/20 通过。
+
 ## 2026-08-21 · dev.58～dev.61 近期改动归档与 GitHub 备份
 
 - `dev.58`：Windows 测试节点只读体检、GitHub 分层诊断/回环代理、受控 Git 备份领域逻辑和 Harness/UI 接入。
