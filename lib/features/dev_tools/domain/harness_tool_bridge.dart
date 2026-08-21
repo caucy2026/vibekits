@@ -210,6 +210,12 @@ class VibekitsHarnessToolBridge {
   static const String adbListDevicesId = 'vibekits.adb.list_devices';
   static const String adbConnectId = 'vibekits.adb.connect';
   static const String adbCommandId = 'vibekits.adb.command';
+  static const String adbShellId = 'vibekits.adb.shell';
+  static const String adbLogcatId = 'vibekits.adb.logcat';
+  static const String adbInstallApkId = 'vibekits.adb.install_apk';
+  static const String adbPushFileId = 'vibekits.adb.push_file';
+  static const String adbPullFileId = 'vibekits.adb.pull_file';
+  static const String adbScreenshotId = 'vibekits.adb.screenshot';
   static const String serialListPortsId = 'vibekits.serial.list_ports';
   static const String serialTransactId = 'vibekits.serial.transact';
   static const String sqliteInspectId = 'vibekits.sqlite.inspect';
@@ -337,6 +343,87 @@ class VibekitsHarnessToolBridge {
         },
       },
       required: <String>['serial', 'arguments'],
+    ),
+    adbShellId: _definition(
+      id: adbShellId,
+      name: '执行 Android Shell',
+      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'arguments': <String, Object?>{
+          'type': 'array',
+          'items': <String, Object?>{'type': 'string'},
+          'minItems': 1,
+          'maxItems': 32,
+        },
+      },
+      required: <String>['serial', 'arguments'],
+    ),
+    adbLogcatId: _definition(
+      id: adbLogcatId,
+      name: '读取 Android Logcat',
+      description: '读取选定设备最近的有界 Logcat；可按 tag 过滤，不启动无限流。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'lines': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 2000,
+        },
+        'tag': _string('可选 Android 日志 tag'),
+      },
+      required: <String>['serial'],
+    ),
+    adbInstallApkId: _definition(
+      id: adbInstallApkId,
+      name: '安装 APK',
+      description: '把明确的本地 APK 安装到选定设备；覆盖安装必须显式指定。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'apkPath': _string('本地 APK 绝对路径'),
+        'replace': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['serial', 'apkPath'],
+    ),
+    adbPushFileId: _definition(
+      id: adbPushFileId,
+      name: '推送文件到 Android',
+      description: '把一个真实本地文件推送到选定设备的绝对路径。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'localPath': _string('本地文件绝对路径'),
+        'remotePath': _string('设备端绝对路径'),
+      },
+      required: <String>['serial', 'localPath', 'remotePath'],
+    ),
+    adbPullFileId: _definition(
+      id: adbPullFileId,
+      name: '从 Android 拉取文件',
+      description: '从选定设备拉取一个文件；覆盖本地文件必须显式指定。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'remotePath': _string('设备端绝对路径'),
+        'localPath': _string('本地目标绝对路径'),
+        'overwrite': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['serial', 'remotePath', 'localPath'],
+    ),
+    adbScreenshotId: _definition(
+      id: adbScreenshotId,
+      name: '保存 Android 截图',
+      description: '从选定设备实时截图并保存为本地 PNG，不读取剪贴板。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'localPath': _string('本地 PNG 绝对路径'),
+        'overwrite': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['serial', 'localPath'],
     ),
     serialListPortsId: _definition(
       id: serialListPortsId,
@@ -1054,6 +1141,12 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbListDevicesId) return _listAdbDevices;
     if (toolId == adbConnectId) return _connectAdb;
     if (toolId == adbCommandId) return _runAdbCommand;
+    if (toolId == adbShellId) return _runAdbShell;
+    if (toolId == adbLogcatId) return _readAdbLogcat;
+    if (toolId == adbInstallApkId) return _installAdbApk;
+    if (toolId == adbPushFileId) return _pushAdbFile;
+    if (toolId == adbPullFileId) return _pullAdbFile;
+    if (toolId == adbScreenshotId) return _captureAdbScreenshot;
     if (toolId == serialListPortsId) return _listSerialPorts;
     if (toolId == serialTransactId) return _serialTransact;
     if (toolId == sqliteInspectId) return _inspectSqlite;
@@ -1277,6 +1370,205 @@ class VibekitsHarnessToolBridge {
       'stdout': result.stdout,
       'stderr': result.stderr,
     };
+  }
+
+  Future<Map<String, Object?>> _runAdbShell(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<String> values = _stringList(arguments['arguments']);
+    if (values.isEmpty) throw const FormatException('缺少 Android shell 参数');
+    return _executeSemanticAdb(arguments, <String>['shell', ...values]);
+  }
+
+  Future<Map<String, Object?>> _readAdbLogcat(
+    Map<String, Object?> arguments,
+  ) async {
+    final int lines = _integer(arguments['lines'], 500).clamp(1, 2000);
+    final String tag = (arguments['tag'] ?? '').toString().trim();
+    if (tag.contains(RegExp(r'[\r\n\s:*]'))) {
+      throw const FormatException('Logcat tag 不能包含空白、冒号或星号');
+    }
+    return _executeSemanticAdb(arguments, <String>[
+      'logcat',
+      '-d',
+      '-t',
+      '$lines',
+      if (tag.isNotEmpty) ...<String>['$tag:D', '*:S'],
+    ]);
+  }
+
+  Future<Map<String, Object?>> _installAdbApk(
+    Map<String, Object?> arguments,
+  ) async {
+    final String apkPath = _absoluteLocalFile(
+      arguments['apkPath'],
+      extension: '.apk',
+    );
+    return _executeSemanticAdb(arguments, <String>[
+      'install',
+      if (arguments['replace'] == true) '-r',
+      apkPath,
+    ]);
+  }
+
+  Future<Map<String, Object?>> _pushAdbFile(
+    Map<String, Object?> arguments,
+  ) async {
+    final String localPath = _absoluteLocalFile(arguments['localPath']);
+    final String remotePath = _androidAbsolutePath(arguments['remotePath']);
+    return _executeSemanticAdb(arguments, <String>[
+      'push',
+      localPath,
+      remotePath,
+    ]);
+  }
+
+  Future<Map<String, Object?>> _pullAdbFile(
+    Map<String, Object?> arguments,
+  ) async {
+    final String remotePath = _androidAbsolutePath(arguments['remotePath']);
+    final String localPath = _absoluteOutputPath(
+      arguments['localPath'],
+      overwrite: arguments['overwrite'] == true,
+    );
+    final Map<String, Object?> result = await _executeSemanticAdb(
+      arguments,
+      <String>['pull', remotePath, localPath],
+    );
+    if (_adbRunner == null) {
+      final File output = File(localPath);
+      if (!await output.exists()) throw StateError('ADB 未生成本地文件');
+      result['bytes'] = await output.length();
+    }
+    result['localPath'] = localPath;
+    result['remotePath'] = remotePath;
+    return result;
+  }
+
+  Future<Map<String, Object?>> _captureAdbScreenshot(
+    Map<String, Object?> arguments,
+  ) async {
+    final String localPath = _absoluteOutputPath(
+      arguments['localPath'],
+      overwrite: arguments['overwrite'] == true,
+      extension: '.png',
+    );
+    final String remotePath =
+        '/data/local/tmp/vibekits-${DateTime.now().microsecondsSinceEpoch}.png';
+    await _executeSemanticAdb(arguments, <String>[
+      'shell',
+      'screencap',
+      '-p',
+      remotePath,
+    ]);
+    try {
+      await _executeSemanticAdb(arguments, <String>[
+        'pull',
+        remotePath,
+        localPath,
+      ]);
+    } finally {
+      try {
+        await _executeSemanticAdb(arguments, <String>[
+          'shell',
+          'rm',
+          '-f',
+          remotePath,
+        ]);
+      } on Object {
+        // The local screenshot result is still useful if remote cleanup fails.
+      }
+    }
+    int? bytes;
+    if (_adbRunner == null) {
+      final File output = File(localPath);
+      if (!await output.exists()) throw StateError('ADB 截图未保存到本地');
+      bytes = await output.length();
+      if (bytes == 0) throw StateError('ADB 截图为空文件');
+    }
+    return <String, Object?>{
+      'localPath': localPath,
+      'bytes': bytes,
+      'source': 'adb-screencap',
+    };
+  }
+
+  Future<Map<String, Object?>> _executeSemanticAdb(
+    Map<String, Object?> arguments,
+    List<String> command,
+  ) async {
+    final String serial = (arguments['serial'] ?? '').toString().trim();
+    if (serial.isEmpty || serial.contains(RegExp(r'[\r\n\s]'))) {
+      throw const FormatException('缺少或无效的 ADB 设备序列号');
+    }
+    final String executable =
+        _adbExecutable ?? AdbService.bundledExecutablePath();
+    final List<String> adbArguments = <String>['-s', serial, ...command];
+    final AdbCommandResult result = _adbRunner == null
+        ? await AdbService.runCommand(
+            executable,
+            adbArguments,
+            timeout: switch (command.first) {
+              'install' => const Duration(minutes: 5),
+              'push' || 'pull' => const Duration(minutes: 2),
+              _ => const Duration(seconds: 30),
+            },
+          )
+        : await _adbRunner(executable, adbArguments);
+    if (result.exitCode != 0) {
+      throw StateError(
+        result.stderr.trim().isEmpty
+            ? 'ADB 操作失败（exit ${result.exitCode}）'
+            : result.stderr.trim(),
+      );
+    }
+    return <String, Object?>{
+      'exitCode': result.exitCode,
+      'stdout': result.stdout,
+      'stderr': result.stderr,
+      'arguments': command,
+    };
+  }
+
+  static String _absoluteLocalFile(Object? value, {String? extension}) {
+    final String raw = (value ?? '').toString().trim();
+    final File file = File(raw);
+    if (raw.isEmpty || !file.isAbsolute || !file.existsSync()) {
+      throw const FormatException('本地输入文件不存在');
+    }
+    if (extension != null && !file.path.toLowerCase().endsWith(extension)) {
+      throw FormatException('文件必须是 $extension');
+    }
+    return file.path;
+  }
+
+  static String _absoluteOutputPath(
+    Object? value, {
+    required bool overwrite,
+    String? extension,
+  }) {
+    final String raw = (value ?? '').toString().trim();
+    final File file = File(raw);
+    if (raw.isEmpty || !file.isAbsolute) {
+      throw const FormatException('本地输出必须是绝对路径');
+    }
+    if (extension != null && !file.path.toLowerCase().endsWith(extension)) {
+      throw FormatException('输出文件必须是 $extension');
+    }
+    if (file.existsSync() && !overwrite) {
+      throw StateError('本地目标已存在；如需覆盖请明确设置 overwrite=true');
+    }
+    final Directory parent = file.parent;
+    if (!parent.existsSync()) parent.createSync(recursive: true);
+    return file.path;
+  }
+
+  static String _androidAbsolutePath(Object? value) {
+    final String path = (value ?? '').toString().trim();
+    if (!path.startsWith('/') || path.contains(RegExp(r'[\r\n\x00]'))) {
+      throw const FormatException('设备端路径必须是 Android 绝对路径');
+    }
+    return path;
   }
 
   Future<Map<String, Object?>> _listSerialPorts(
@@ -2272,7 +2564,17 @@ class VibekitsHarnessToolBridge {
         (arguments['address'] ?? '').toString(),
       );
     }
-    if (toolId == adbCommandId) return (arguments['serial'] ?? '').toString();
+    if (<String>{
+      adbCommandId,
+      adbShellId,
+      adbLogcatId,
+      adbInstallApkId,
+      adbPushFileId,
+      adbPullFileId,
+      adbScreenshotId,
+    }.contains(toolId)) {
+      return (arguments['serial'] ?? '').toString();
+    }
     if (toolId == serialTransactId) return (arguments['port'] ?? '').toString();
     if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
     if (toolId == remoteOpenInteractiveId) {

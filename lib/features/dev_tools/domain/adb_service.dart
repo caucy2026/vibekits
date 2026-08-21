@@ -290,6 +290,7 @@ abstract final class AdbService {
     String executable,
     List<String> arguments, {
     AdbCommandAudit? audit,
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     final DateTime startedAt = DateTime.now();
     final Process process = await Process.start(
@@ -306,10 +307,10 @@ abstract final class AdbService {
         .join();
     int exitCode;
     try {
-      exitCode = await process.exitCode.timeout(const Duration(seconds: 10));
+      exitCode = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill();
-      throw StateError('ADB 命令 10 秒未完成，已终止');
+      throw StateError('ADB 命令 ${timeout.inSeconds} 秒未完成，已终止');
     }
     final AdbCommandResult result = AdbCommandResult(
       exitCode: exitCode,

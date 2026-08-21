@@ -367,6 +367,116 @@ void main() {
     ]);
   });
 
+  test('Harness 通过六个语义 ADB 工具完成常用工作流', () async {
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vibekits_harness_adb_semantic_',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final File apk = File('${sandbox.path}${Platform.pathSeparator}demo.apk');
+    final File upload = File(
+      '${sandbox.path}${Platform.pathSeparator}upload.txt',
+    );
+    await apk.writeAsBytes(<int>[1, 2, 3]);
+    await upload.writeAsString('VIBE');
+    final String download =
+        '${sandbox.path}${Platform.pathSeparator}download.txt';
+    final String screenshot =
+        '${sandbox.path}${Platform.pathSeparator}screen.png';
+    final List<List<String>> calls = <List<String>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: r'C:\tools\adb.exe',
+      adbRunner: (String executable, List<String> arguments) async {
+        calls.add(List<String>.of(arguments));
+        return const AdbCommandResult(
+          exitCode: 0,
+          stdout: 'Success',
+          stderr: '',
+        );
+      },
+    );
+    const String serial = '192.168.3.63:5555';
+    Future<HarnessToolCallResult> invoke(
+      String toolId,
+      Map<String, Object?> arguments,
+    ) => bridge.invoke(
+      toolId: toolId,
+      arguments: <String, Object?>{'serial': serial, ...arguments},
+      approve: (HarnessToolApprovalRequest request) async {
+        expect(request.target, serial);
+        return true;
+      },
+    );
+
+    final List<HarnessToolCallResult> results = <HarnessToolCallResult>[
+      await invoke(VibekitsHarnessToolBridge.adbShellId, <String, Object?>{
+        'arguments': <String>['getprop', 'ro.product.model'],
+      }),
+      await invoke(VibekitsHarnessToolBridge.adbLogcatId, <String, Object?>{
+        'lines': 120,
+        'tag': 'VIBE_TAG',
+      }),
+      await invoke(VibekitsHarnessToolBridge.adbInstallApkId, <String, Object?>{
+        'apkPath': apk.path,
+        'replace': true,
+      }),
+      await invoke(VibekitsHarnessToolBridge.adbPushFileId, <String, Object?>{
+        'localPath': upload.path,
+        'remotePath': '/sdcard/Download/upload.txt',
+      }),
+      await invoke(VibekitsHarnessToolBridge.adbPullFileId, <String, Object?>{
+        'remotePath': '/sdcard/Download/result.txt',
+        'localPath': download,
+      }),
+      await invoke(VibekitsHarnessToolBridge.adbScreenshotId, <String, Object?>{
+        'localPath': screenshot,
+      }),
+    ];
+
+    expect(results.every((HarnessToolCallResult result) => result.ok), isTrue);
+    expect(calls, hasLength(8));
+    expect(calls[0], <String>[
+      '-s',
+      serial,
+      'shell',
+      'getprop',
+      'ro.product.model',
+    ]);
+    expect(calls[1], <String>[
+      '-s',
+      serial,
+      'logcat',
+      '-d',
+      '-t',
+      '120',
+      'VIBE_TAG:D',
+      '*:S',
+    ]);
+    expect(calls[2], <String>['-s', serial, 'install', '-r', apk.path]);
+    expect(calls[3], <String>[
+      '-s',
+      serial,
+      'push',
+      upload.path,
+      '/sdcard/Download/upload.txt',
+    ]);
+    expect(calls[4], <String>[
+      '-s',
+      serial,
+      'pull',
+      '/sdcard/Download/result.txt',
+      download,
+    ]);
+    expect(calls[5].sublist(0, 5), <String>[
+      '-s',
+      serial,
+      'shell',
+      'screencap',
+      '-p',
+    ]);
+    expect(calls[6][2], 'pull');
+    expect(calls[7].sublist(2, 5), <String>['shell', 'rm', '-f']);
+  });
+
   test('SQLite 检查和查询通过桥接完成闭环', () async {
     final Directory sandbox = await Directory.systemTemp.createTemp(
       'vibekits_harness_sqlite_',

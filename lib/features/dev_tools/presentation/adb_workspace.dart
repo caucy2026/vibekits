@@ -41,6 +41,12 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     'vibekits.adb.list_devices',
     'vibekits.adb.connect',
     'vibekits.adb.command',
+    'vibekits.adb.shell',
+    'vibekits.adb.logcat',
+    'vibekits.adb.install_apk',
+    'vibekits.adb.push_file',
+    'vibekits.adb.pull_file',
+    'vibekits.adb.screenshot',
   };
   final TextEditingController _wirelessAddress = TextEditingController();
   final TextEditingController _command = TextEditingController();

@@ -41,6 +41,7 @@
 35. [dev.64 清理经验决策引擎验收](acceptance/V1_9_0_DEV64_CLEANUP_DECISION_2026-08-22.md)——同机只读复扫、四级决策、安全边界与性能数据
 36. [dev.65 30 项高频微工具验收](acceptance/V1_9_0_DEV65_UTILITY_PLUS_30_2026-08-22.md)——GitHub 能力去重、界面/Harness/日志闭环与性能数据
 37. [dev.66 工具集 UI 与智能体接口验收](acceptance/V1_9_0_DEV66_UTILITY_UI_AGENT_2026-08-22.md)——自动可见工具条、小窗口、自带接口 ID 与快捷执行
+38. [dev.67 ADB 语义工具与真机验收](acceptance/V1_9_0_DEV67_ADB_SEMANTIC_TOOLS_2026-08-22.md)——Shell、Logcat、文件往返、截图与 APK 安装门禁
 
 ## 完成定义
 
