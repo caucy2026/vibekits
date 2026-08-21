@@ -31,6 +31,8 @@
 25. [创新能力交付路线](23_INNOVATION_DELIVERY_ROADMAP.md)
 26. [智能清理产品与架构准则](24_CLEANER_COMPETITIVE_ARCHITECTURE.md)——清理竞品结论、五任务入口、规则数据库和超越路线
 27. [Windows 测试节点与 GitHub 受控备份](25_WINDOWS_TEST_NODE_AND_GITHUB_BACKUP.md)——节点生命周期、GitHub 代理回滚和分离审批备份合同
+28. [Windows 测试节点与 GitHub 备份剩余工作](26_WINDOWS_NODE_GITHUB_BACKUP_REMAINING.md)——当前缺口、真实设备门禁和建议实施顺序
+29. [安全 Windows 测试节点复用指南](27_SECURE_WINDOWS_NODE_INTEGRATION_GUIDE.md)——helper 协议、设备身份、跨设备证据与智能体接入通用设计
 
 ## 完成定义
 

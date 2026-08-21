@@ -138,6 +138,7 @@ class GithubProxyService {
     Random? random,
     this.candidateProbe,
   }) : _processRunner = processRunner ?? _runProcess,
+       _usesBundledRunner = processRunner == null,
        _gitExecutable = gitExecutable ?? GitRepositoryService.bundledExecutable,
        _clock = clock ?? DateTime.now,
        _random = random ?? Random.secure();
@@ -146,6 +147,7 @@ class GithubProxyService {
   static const Duration _planLifetime = Duration(minutes: 10);
 
   final GithubProxyProcessRunner _processRunner;
+  final bool _usesBundledRunner;
   final String _gitExecutable;
   final DateTime Function() _clock;
   final Random _random;
@@ -160,12 +162,25 @@ class GithubProxyService {
     }
     const String script = r'''
 $ErrorActionPreference='SilentlyContinue'
-$supported=@('mihomo','clash-verge','clash-verge-service','clash','clash-meta')
+$supported=@('mihomo','verge-mihomo','clash-verge','clash-verge-service','clash','clash-meta')
 $rows=@()
-Get-NetTCPConnection -State Listen | Where-Object { $_.LocalAddress -in @('127.0.0.1','::1') } | ForEach-Object {
-  $p=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+$seen=@{}
+netstat.exe -ano -p tcp | ForEach-Object {
+  $hostAddress=$null
+  $port=0
+  $ownerId=0
+  if($_ -match '^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$'){
+    $hostAddress='127.0.0.1';$port=[int]$Matches[1];$ownerId=[int]$Matches[2]
+  }elseif($_ -match '^\s*TCP\s+\[::1\]:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$'){
+    $hostAddress='::1';$port=[int]$Matches[1];$ownerId=[int]$Matches[2]
+  }
+  if($null -eq $hostAddress -or $port -lt 1 -or $ownerId -lt 1){return}
+  $key="$hostAddress`:$port`:$ownerId"
+  if($seen.ContainsKey($key)){return}
+  $seen[$key]=$true
+  $p=Get-Process -Id $ownerId -ErrorAction SilentlyContinue
   if($null -ne $p -and $supported -contains $p.ProcessName.ToLowerInvariant()) {
-    $rows += [pscustomobject]@{host=if($_.LocalAddress -eq '::1'){'::1'}else{'127.0.0.1'};port=$_.LocalPort;processName=$p.ProcessName;processId=$p.Id}
+    $rows += [pscustomobject]@{host=$hostAddress;port=$port;processName=$p.ProcessName;processId=$p.Id}
   }
 }
 $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
@@ -247,11 +262,18 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
 
   Future<GithubProxyApplyResult> apply(
     String planId, {
+    required String digest,
     String verificationRemote = 'https://github.com/git/git.git',
   }) async {
-    final GithubProxyPlan plan = _requirePlan(planId);
+    final GithubProxyPlan plan = _requirePlan(planId, digest: digest);
     final GithubProxyCandidate? candidate = _candidates[plan.candidateId];
     if (candidate == null) throw const FormatException('代理候选已失效，请重新检测');
+    final GithubProxyProbeResult currentProbe =
+        await (candidateProbe?.call(candidate.host, candidate.port) ??
+            _probeCandidate(candidate.host, candidate.port));
+    if (!currentProbe.listening || !currentProbe.gitReachable) {
+      throw FormatException('代理候选已失效：${currentProbe.detail}');
+    }
     final String? current = await _readCurrentValue();
     if (current != plan.previousValue) {
       throw const FormatException('Git 代理状态已变化，旧计划拒绝执行');
@@ -271,7 +293,14 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
         detail: 'GitHub ls-remote 验证通过',
       );
     } on Object catch (error) {
-      await _restoreValue(plan.previousValue);
+      try {
+        await _restoreValue(plan.previousValue);
+      } on Object catch (rollbackError) {
+        throw StateError(
+          'GitHub 验证失败，且旧代理恢复失败：${_safeOutput(rollbackError)}；'
+          '原验证错误：${_safeOutput(error)}',
+        );
+      }
       return GithubProxyApplyResult(
         planId: plan.id,
         proxyUri: plan.proxyUri,
@@ -282,8 +311,19 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
     }
   }
 
-  Future<GithubProxyApplyResult> rollback(String planId) async {
-    final GithubProxyPlan plan = _requirePlan(planId, allowExpired: true);
+  Future<GithubProxyApplyResult> rollback(
+    String planId, {
+    required String digest,
+  }) async {
+    final GithubProxyPlan plan = _requirePlan(
+      planId,
+      digest: digest,
+      allowExpired: true,
+    );
+    final String? current = await _readCurrentValue();
+    if (current != plan.proxyUri) {
+      throw const FormatException('当前 GitHub 代理已被其他操作修改，拒绝用旧计划覆盖');
+    }
     await _restoreValue(plan.previousValue);
     return GithubProxyApplyResult(
       planId: plan.id,
@@ -294,10 +334,17 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
     );
   }
 
-  GithubProxyPlan _requirePlan(String id, {bool allowExpired = false}) {
+  GithubProxyPlan _requirePlan(
+    String id, {
+    required String digest,
+    bool allowExpired = false,
+  }) {
     if (!allowExpired) _prune();
     final GithubProxyPlan? plan = _plans[id.trim()];
     if (plan == null) throw const FormatException('代理计划不存在或已过期，请重新预览');
+    if (plan.digest != digest.trim()) {
+      throw const FormatException('代理计划摘要不匹配，拒绝执行');
+    }
     return plan;
   }
 
@@ -352,6 +399,7 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
         final ProcessResult result = await _processRunner(
           _gitExecutable,
           <String>[
+            ..._networkGitOptions(),
             '-c',
             '$githubProxyKey=http://$host:$port',
             'ls-remote',
@@ -391,10 +439,11 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
     Duration timeout = const Duration(seconds: 10),
     bool allowMissing = false,
   }) async {
-    final ProcessResult result = await _processRunner(
-      _gitExecutable,
-      arguments,
-    ).timeout(timeout);
+    final bool networkCommand = arguments.contains('ls-remote');
+    final ProcessResult result = await _processRunner(_gitExecutable, <String>[
+      if (networkCommand) ..._networkGitOptions(),
+      ...arguments,
+    ]).timeout(timeout);
     if (result.exitCode != 0 && !allowMissing) {
       throw FormatException(_safeOutput(result.stderr));
     }
@@ -406,6 +455,17 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
     _plans.removeWhere(
       (String _, GithubProxyPlan plan) => !plan.expiresAt.isAfter(now),
     );
+  }
+
+  List<String> _networkGitOptions() {
+    if (!_usesBundledRunner || !Platform.isWindows) return const <String>[];
+    final String runtimeRoot = File(_gitExecutable).parent.parent.path;
+    return <String>[
+      '--exec-path=$runtimeRoot${Platform.pathSeparator}mingw64'
+          '${Platform.pathSeparator}bin',
+      '-c',
+      'http.sslBackend=openssl',
+    ];
   }
 
   String _randomId() =>

@@ -32,6 +32,12 @@ try {
   if ($LASTEXITCODE -ne 0 -or $reportedVersion -notmatch '^git version 2\.55\.0') {
     throw "Unexpected bundled Git version: $reportedVersion"
   }
+  foreach ($helperName in @('git-remote-http.exe', 'git-remote-https.exe')) {
+    $helperSource = Join-Path $staging "mingw64\bin\$helperName"
+    if (-not (Test-Path -LiteralPath $helperSource -PathType Leaf)) {
+      throw "MinGit archive does not contain required HTTPS helper: $helperName"
+    }
+  }
 
   if (Test-Path -LiteralPath $target) {
     Remove-Item -LiteralPath $target -Recurse -Force

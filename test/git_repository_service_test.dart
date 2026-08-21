@@ -181,6 +181,14 @@ void main() {
     run(sandbox.path, <String>['commit', '-m', 'initial']);
     run(sandbox.path, <String>['remote', 'add', 'backup', remote.path]);
     source.writeAsStringSync('two\n');
+    final String originalBranch = run(sandbox.path, <String>[
+      'branch',
+      '--show-current',
+    ]);
+    final String originalHead = run(sandbox.path, <String>[
+      'rev-parse',
+      'HEAD',
+    ]);
 
     final GitBackupPreview preview = await GitRepositoryService.previewBackup(
       sandbox.path,
@@ -201,6 +209,17 @@ void main() {
         );
     expect(committed.commitSha, hasLength(40));
     expect(
+      run(sandbox.path, <String>['branch', '--show-current']),
+      originalBranch,
+    );
+    expect(run(sandbox.path, <String>['rev-parse', 'HEAD']), originalHead);
+    expect(source.readAsStringSync(), 'two\n');
+    expect(
+      run(sandbox.path, <String>['status', '--porcelain']),
+      contains('main.txt'),
+      reason: '备份提交不能推进当前分支或清空用户工作区',
+    );
+    expect(
       run(sandbox.path, <String>['ls-remote', '--heads', 'backup']),
       isEmpty,
       reason: 'commit 审批不能隐式执行 push',
@@ -213,5 +232,56 @@ void main() {
     );
     expect(pushed.verified, isTrue);
     expect(pushed.remoteCommitSha, committed.commitSha);
+  });
+
+  test('文件内容变化但 Git 状态路径不变时旧 preview 失效', () async {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_git_backup_race_',
+    );
+    final Directory remote = Directory.systemTemp.createTempSync(
+      'vk_git_backup_race_remote_',
+    );
+    addTearDown(() {
+      sandbox.deleteSync(recursive: true);
+      remote.deleteSync(recursive: true);
+    });
+
+    void run(String directory, List<String> arguments) {
+      final ProcessResult result = Process.runSync(
+        GitRepositoryService.bundledExecutable,
+        <String>['-C', directory, ...arguments],
+      );
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+    }
+
+    run(remote.path, <String>['init', '--bare']);
+    run(sandbox.path, <String>['init']);
+    run(sandbox.path, <String>['config', 'user.name', 'Vibekits Test']);
+    run(sandbox.path, <String>['config', 'user.email', 'test@vibekits.local']);
+    final File source = File(
+      '${sandbox.path}${Platform.pathSeparator}settings.txt',
+    )..writeAsStringSync('initial\n');
+    run(sandbox.path, <String>['add', 'settings.txt']);
+    run(sandbox.path, <String>['commit', '-m', 'initial']);
+    run(sandbox.path, <String>['remote', 'add', 'backup', remote.path]);
+    source.writeAsStringSync('safe change\n');
+
+    final GitBackupPreview preview = await GitRepositoryService.previewBackup(
+      sandbox.path,
+      remoteId: 'backup',
+      now: DateTime(2026, 8, 21),
+    );
+    expect(preview.blockers, isEmpty);
+    source.writeAsStringSync('password=secret-value-injected-after-preview\n');
+
+    await expectLater(
+      GitRepositoryService.commitBackup(
+        previewId: preview.id,
+        includedPaths: preview.includedPaths,
+        message: 'must be rejected',
+        now: DateTime(2026, 8, 21, 0, 1),
+      ),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

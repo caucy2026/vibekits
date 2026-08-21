@@ -646,28 +646,65 @@ $sshd="$env:WINDIR\System32\OpenSSH\sshd.exe"
 $config="$env:ProgramData\ssh\sshd_config"
 $hostKeys=@(Get-ChildItem "$env:ProgramData\ssh\ssh_host_*_key" -File)
 $listen=@(Get-NetTCPConnection -State Listen -LocalPort 22)
-$fw=@(Get-NetFirewallRule -Direction Inbound -Enabled True | Where-Object {$_.DisplayName -like '*VIBEKITS*SSH*LAN*'})
 $pwsh=Get-Command pwsh.exe
 $wv=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E843-F6AD-4A62-9A44-4D9C2181E2E0}' -ErrorAction SilentlyContinue).'pv'
 $vc=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction SilentlyContinue).Installed
 $root='D:\KEMI-Test'
 $user=Get-LocalUser -Name 'kemi-test' -ErrorAction SilentlyContinue
 $auth='C:\Users\kemi-test\.ssh\authorized_keys'
-$sleep=(powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Out-String)
 $cidr=if($ip){$parts=$ip.IPAddress.Split('.'); "$($parts[0]).$($parts[1]).$($parts[2]).0/24"}else{''}
+$cidrMask=if($ip){$parts=$ip.IPAddress.Split('.'); "$($parts[0]).$($parts[1]).$($parts[2]).0/255.255.255.0"}else{''}
+$sshdConfigValid=$false
+if((Test-Path $sshd) -and (Test-Path $config) -and $hostKeys.Count -gt 0){
+  & $sshd -t -f $config 2>$null
+  $sshdConfigValid=($LASTEXITCODE -eq 0)
+}
+$sshFirewallRows=@()
+Get-NetFirewallPortFilter -Protocol TCP -LocalPort 22 | ForEach-Object {
+  $rule=$_ | Get-NetFirewallRule
+  if($rule.Direction -eq 'Inbound' -and $rule.Enabled -eq 'True' -and $rule.Action -eq 'Allow'){
+    $remote=@(($rule | Get-NetFirewallAddressFilter).RemoteAddress)
+    $sshFirewallRows += [pscustomobject]@{name=$rule.Name;profile=[string]$rule.Profile;remote=$remote;restricted=(([string]$rule.Profile -eq 'Private') -and ($remote -contains $cidr -or $remote -contains $cidrMask))}
+  }
+}
+$firewallRestricted=@($sshFirewallRows | Where-Object {$_.restricted}).Count -gt 0
+$firewallBroad=@($sshFirewallRows | Where-Object {!$_.restricted}).Count -gt 0
+$firewallValid=$firewallRestricted -and !$firewallBroad
+$sleep=(powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Out-String)
+$hibernate=(powercfg /query SCHEME_CURRENT SUB_SLEEP HIBERNATEIDLE 2>$null | Out-String)
+function Get-AcPowerIndex([string]$text){
+  $line=($text -split "`r?`n" | Where-Object {$_ -match 'Current AC Power Setting Index|当前交流电源设置索引'} | Select-Object -First 1)
+  if($line -match '0x([0-9a-fA-F]+)'){return [Convert]::ToInt64($Matches[1],16)}
+  return $null
+}
+$sleepAc=Get-AcPowerIndex $sleep
+$hibernateAc=Get-AcPowerIndex $hibernate
+$adminGroup=Get-LocalGroup -SID 'S-1-5-32-544' -ErrorAction SilentlyContinue
+$userIsAdmin=if($user -and $adminGroup){@((Get-LocalGroupMember -Group $adminGroup -ErrorAction SilentlyContinue) | Where-Object {$_.SID.Value -eq $user.SID.Value}).Count -gt 0}else{$false}
+$authAclValid=$false
+if($user -and (Test-Path $auth)){
+  $allowedSids=@($user.SID.Value,'S-1-5-18','S-1-5-32-544')
+  $writeMask=[int]([System.Security.AccessControl.FileSystemRights]::WriteData -bor [System.Security.AccessControl.FileSystemRights]::AppendData -bor [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [System.Security.AccessControl.FileSystemRights]::Delete -bor [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor [System.Security.AccessControl.FileSystemRights]::TakeOwnership)
+  $badAce=$false
+  foreach($ace in (Get-Acl $auth).Access){
+    try{$sid=$ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}catch{$badAce=$true;continue}
+    if($ace.AccessControlType -eq 'Allow' -and (([int]$ace.FileSystemRights -band $writeMask) -ne 0) -and $sid -notin $allowedSids){$badAce=$true}
+  }
+  $authAclValid=!$badAce
+}
 [pscustomobject]@{
  osEdition=$os.Caption;osVersion=$os.Version;osBuild=[int]$os.BuildNumber;cpu=$cpu.Name;ramBytes=[int64]$os.TotalVisibleMemorySize*1024;gpu=$gpu.Name;display="$($display.ScreenWidth)x$($display.ScreenHeight)";
  dExists=($null -ne $d);dTotalBytes=if($d){[int64]$d.Size}else{0};dFreeBytes=if($d){[int64]$d.FreeSpace}else{0};
  ipv4=if($ip){$ip.IPAddress}else{''};prefix=if($ip){$ip.PrefixLength}else{0};gateway=if($route){$route.NextHop}else{''};candidateCidr=$cidr;networkCategory=if($profile){[string]$profile.NetworkCategory}else{'Unknown'};
  opensshCapability=if($cap){$cap.State}else{'Unknown'};sshdBinary=(Test-Path $sshd);sshdVersion=if(Test-Path $sshd){(Get-Item $sshd).VersionInfo.FileVersion}else{''};sshdServiceExists=($null -ne $svc);
- sshdConfigValid=((Test-Path $config) -and $hostKeys.Count -gt 0);sshdConfigValidDetail="config=$(Test-Path $config), hostKeys=$($hostKeys.Count)";
+ sshdConfigValid=$sshdConfigValid;sshdConfigValidDetail="config=$(Test-Path $config), hostKeys=$($hostKeys.Count), syntax=$sshdConfigValid";
  sshdRunningAndListening=(($svc.State -eq 'Running') -and $listen.Count -gt 0);sshdRunningAndListeningDetail="service=$($svc.State), listeners=$($listen.Count)";
- firewallValid=($fw.Count -gt 0 -and $profile.NetworkCategory -eq 'Private');firewallValidDetail="rules=$($fw.Count), profile=$($profile.NetworkCategory)";
+ firewallValid=$firewallValid;firewallValidDetail="sshRules=$($sshFirewallRows.Count), restricted=$firewallRestricted, broad=$firewallBroad, candidate=$cidr";
  powershell7=($null -ne $pwsh);powershell7Detail=if($pwsh){& $pwsh.Source -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'}else{'系统 PATH 未找到 pwsh'};
  webview2=![string]::IsNullOrWhiteSpace($wv);webview2Detail=$wv;vcredist=($vc -eq 1);vcredistDetail="$vc";
- acPowerSafe=($sleep -match '0x00000000');acPowerSafeDetail='读取当前 AC 睡眠策略';
- testRootValid=(Test-Path $root);testRootValidDetail=$root;testUserValid=($null -ne $user -and $user.Enabled);testUserValidDetail=if($user){"enabled=$($user.Enabled)"}else{'账户不存在'};
- authorizedKeysValid=((Test-Path $auth) -and (Get-Content $auth -ErrorAction SilentlyContinue | Where-Object {$_ -match '^ssh-(ed25519|rsa) '}).Count -gt 0);authorizedKeysValidDetail=$auth
+ acPowerSafe=($sleepAc -eq 0 -and $hibernateAc -eq 0);acPowerSafeDetail="AC sleep=$sleepAc, hibernate=$hibernateAc";
+ testRootValid=(Test-Path $root);testRootValidDetail=$root;testUserValid=($null -ne $user -and $user.Enabled -and !$userIsAdmin);testUserValidDetail=if($user){"enabled=$($user.Enabled), administrator=$userIsAdmin"}else{'账户不存在'};
+ authorizedKeysValid=((Test-Path $auth) -and $authAclValid -and (Get-Content $auth -ErrorAction SilentlyContinue | Where-Object {$_ -match '^ssh-(ed25519|rsa) '}).Count -gt 0);authorizedKeysValidDetail="$auth, acl=$authAclValid"
 } | ConvertTo-Json -Compress -Depth 5
 ''';
     final List<int> bytes = <int>[];
@@ -681,7 +718,7 @@ $cidr=if($ip){$parts=$ip.IPAddress.Split('.'); "$($parts[0]).$($parts[1]).$($par
       '-NonInteractive',
       '-EncodedCommand',
       base64.encode(bytes),
-    ], runInShell: false).timeout(const Duration(seconds: 20));
+    ], runInShell: false).timeout(const Duration(seconds: 40));
     if (result.exitCode != 0) {
       throw FormatException('Windows 节点体检失败：${result.stderr}');
     }

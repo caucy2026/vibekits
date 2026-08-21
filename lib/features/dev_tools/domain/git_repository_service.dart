@@ -155,6 +155,8 @@ class _GitBackupPlanState {
   _GitBackupPlanState(this.preview);
 
   GitBackupPreview preview;
+  List<String>? committedPaths;
+  String? commitMessage;
 }
 
 abstract final class GitRepositoryService {
@@ -366,7 +368,9 @@ abstract final class GitRepositoryService {
     } on Object catch (error) {
       warnings.add('远端当前不可达：${_safeGitError(error)}；本地提交后可重试 push');
     }
-    final String digest = sha256.convert(utf8.encode(porcelain)).toString();
+    final String digest = await Isolate.run(
+      () => _computeBackupStateDigest(root, porcelain, paths),
+    );
     final String id = _randomPlanId();
     final GitBackupPreview preview = GitBackupPreview(
       id: id,
@@ -404,17 +408,6 @@ abstract final class GitRepositoryService {
       now: now,
       requireUnchangedState: true,
     );
-    if (plan.preview.blockers.isNotEmpty) {
-      throw FormatException('备份被安全检查阻断：${plan.preview.blockers.join('；')}');
-    }
-    if (plan.preview.commitSha != null) {
-      return GitBackupCommitResult(
-        previewId: previewId,
-        commitSha: plan.preview.commitSha!,
-        targetBranch: plan.preview.targetBranch,
-        pathCount: plan.preview.includedPaths.length,
-      );
-    }
     final String commitMessage = message.trim();
     if (commitMessage.isEmpty || commitMessage.length > 200) {
       throw const FormatException('提交说明必须为 1～200 个字符');
@@ -425,18 +418,37 @@ abstract final class GitRepositoryService {
         selected.any((String path) => !allowed.contains(path))) {
       throw const FormatException('提交文件必须是 preview 返回的非空文件子集');
     }
-    await _git(plan.preview.repositoryRoot, <String>['add', '--', ...selected]);
-    await _git(plan.preview.repositoryRoot, <String>[
-      'commit',
-      '-m',
-      commitMessage,
-      '--',
-      ...selected,
-    ], timeout: const Duration(minutes: 2));
-    final String sha = (await _git(plan.preview.repositoryRoot, <String>[
-      'rev-parse',
-      'HEAD^{commit}',
-    ])).trim();
+    if (plan.preview.blockers.isNotEmpty) {
+      throw FormatException('备份被安全检查阻断：${plan.preview.blockers.join('；')}');
+    }
+    final Map<String, List<String>> currentSafety = await Isolate.run(
+      () => _inspectBackupPaths(plan.preview.repositoryRoot, selected),
+    );
+    final List<String> currentBlockers =
+        currentSafety['blockers'] ?? const <String>[];
+    if (currentBlockers.isNotEmpty) {
+      throw FormatException('提交前安全复查阻断：${currentBlockers.join('；')}');
+    }
+    if (plan.preview.commitSha != null) {
+      if (!_sameStrings(plan.committedPaths ?? const <String>[], selected) ||
+          plan.commitMessage != commitMessage) {
+        throw const FormatException('该 preview 已生成不同的提交；请重新预览');
+      }
+      return GitBackupCommitResult(
+        previewId: previewId,
+        commitSha: plan.preview.commitSha!,
+        targetBranch: plan.preview.targetBranch,
+        pathCount: selected.length,
+      );
+    }
+    final String sha = await _createDetachedBackupCommit(
+      repositoryRoot: plan.preview.repositoryRoot,
+      selectedPaths: selected,
+      message: commitMessage,
+    );
+    plan
+      ..committedPaths = List<String>.unmodifiable(selected)
+      ..commitMessage = commitMessage;
     plan.preview = GitBackupPreview(
       id: plan.preview.id,
       repositoryRoot: plan.preview.repositoryRoot,
@@ -537,7 +549,13 @@ abstract final class GitRepositoryService {
         '-z',
         '--untracked-files=all',
       ]);
-      final String digest = sha256.convert(utf8.encode(porcelain)).toString();
+      final String digest = await Isolate.run(
+        () => _computeBackupStateDigest(
+          plan.preview.repositoryRoot,
+          porcelain,
+          plan.preview.includedPaths,
+        ),
+      );
       if (digest != plan.preview.repositoryStateDigest) {
         throw const FormatException('仓库状态已变化，旧 preview 已失效，请重新预览');
       }
@@ -611,6 +629,179 @@ abstract final class GitRepositoryService {
       _inspectBackupPath(root, relativePath, blockers, warnings);
     }
     return <String, List<String>>{'blockers': blockers, 'warnings': warnings};
+  }
+
+  static Future<String> _computeBackupStateDigest(
+    String root,
+    String porcelain,
+    List<String> paths,
+  ) async {
+    final List<Map<String, Object?>> entries = <Map<String, Object?>>[];
+    for (final String relativePath in paths) {
+      final String safePath = _safeRelativeBackupPath(relativePath);
+      final String absolutePath =
+          '$root${Platform.pathSeparator}${safePath.replaceAll('/', Platform.pathSeparator)}';
+      final FileSystemEntityType type = FileSystemEntity.typeSync(
+        absolutePath,
+        followLinks: false,
+      );
+      if (type == FileSystemEntityType.notFound) {
+        entries.add(<String, Object?>{'path': safePath, 'type': 'missing'});
+        continue;
+      }
+      if (type == FileSystemEntityType.link) {
+        entries.add(<String, Object?>{'path': safePath, 'type': 'link'});
+        continue;
+      }
+      if (type != FileSystemEntityType.file) {
+        entries.add(<String, Object?>{
+          'path': safePath,
+          'type': type.toString(),
+        });
+        continue;
+      }
+      final File file = File(absolutePath);
+      final Digest digest = await sha256.bind(file.openRead()).first;
+      entries.add(<String, Object?>{
+        'path': safePath,
+        'type': 'file',
+        'length': await file.length(),
+        'sha256': digest.toString(),
+      });
+    }
+    return sha256
+        .convert(
+          utf8.encode(
+            jsonEncode(<String, Object?>{
+              'porcelain': porcelain,
+              'entries': entries,
+            }),
+          ),
+        )
+        .toString();
+  }
+
+  static Future<String> _createDetachedBackupCommit({
+    required String repositoryRoot,
+    required List<String> selectedPaths,
+    required String message,
+  }) async {
+    final String parent = (await _git(repositoryRoot, <String>[
+      'rev-parse',
+      '--verify',
+      'HEAD^{commit}',
+    ])).trim();
+    final Directory temporary = Directory.systemTemp.createTempSync(
+      'vibekits_git_backup_',
+    );
+    temporary.deleteSync();
+    bool worktreeRegistered = false;
+    try {
+      await _git(repositoryRoot, <String>[
+        'worktree',
+        'add',
+        '--detach',
+        temporary.path,
+        parent,
+      ], timeout: const Duration(minutes: 2));
+      worktreeRegistered = true;
+      for (final String relativePath in selectedPaths) {
+        final String safePath = _safeRelativeBackupPath(relativePath);
+        final String platformPath = safePath.replaceAll(
+          '/',
+          Platform.pathSeparator,
+        );
+        final String sourcePath =
+            '$repositoryRoot${Platform.pathSeparator}$platformPath';
+        final String targetPath =
+            '${temporary.path}${Platform.pathSeparator}$platformPath';
+        final FileSystemEntityType sourceType = FileSystemEntity.typeSync(
+          sourcePath,
+          followLinks: false,
+        );
+        if (sourceType == FileSystemEntityType.link) {
+          throw FormatException('$safePath：备份不接受符号链接或重解析点');
+        }
+        if (sourceType == FileSystemEntityType.directory) {
+          throw FormatException('$safePath：备份文件集合不能包含目录');
+        }
+        if (sourceType == FileSystemEntityType.notFound) {
+          final FileSystemEntityType targetType = FileSystemEntity.typeSync(
+            targetPath,
+            followLinks: false,
+          );
+          if (targetType == FileSystemEntityType.file) {
+            File(targetPath).deleteSync();
+          } else if (targetType != FileSystemEntityType.notFound) {
+            throw FormatException('$safePath：删除目标不是普通文件');
+          }
+          continue;
+        }
+        if (sourceType != FileSystemEntityType.file) {
+          throw FormatException('$safePath：只允许备份普通文件');
+        }
+        final File target = File(targetPath);
+        target.parent.createSync(recursive: true);
+        await File(sourcePath).copy(target.path);
+      }
+      await _git(temporary.path, <String>[
+        'add',
+        '--all',
+        '--',
+        ...selectedPaths,
+      ]);
+      await _git(temporary.path, <String>[
+        'commit',
+        '-m',
+        message,
+        '--',
+        ...selectedPaths,
+      ], timeout: const Duration(minutes: 2));
+      return (await _git(temporary.path, <String>[
+        'rev-parse',
+        'HEAD^{commit}',
+      ])).trim();
+    } finally {
+      if (worktreeRegistered) {
+        try {
+          await _git(repositoryRoot, <String>[
+            'worktree',
+            'remove',
+            '--force',
+            temporary.path,
+          ], timeout: const Duration(minutes: 1));
+        } on Object {
+          // The original failure is more actionable; stale metadata is pruned below.
+          try {
+            await _git(repositoryRoot, <String>['worktree', 'prune']);
+          } on Object {
+            // Best-effort cleanup only.
+          }
+        }
+      }
+      if (temporary.existsSync()) {
+        temporary.deleteSync(recursive: true);
+      }
+    }
+  }
+
+  static String _safeRelativeBackupPath(String value) {
+    final String path = value.trim().replaceAll('\\', '/');
+    if (path.isEmpty ||
+        path.startsWith('/') ||
+        RegExp(r'^[A-Za-z]:').hasMatch(path) ||
+        path.split('/').contains('..')) {
+      throw const FormatException('备份文件路径必须位于仓库内');
+    }
+    return path;
+  }
+
+  static bool _sameStrings(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (int index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
   }
 
   static bool _isSecretFileName(String name, String path) {
@@ -747,9 +938,20 @@ abstract final class GitRepositoryService {
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final Process process;
+    final String executable = _resolveGitExecutable();
+    final bool networkCommand = arguments.any(
+      const <String>{'ls-remote', 'push'}.contains,
+    );
+    final String runtimeRoot = File(executable).parent.parent.path;
     try {
-      process = await Process.start(_resolveGitExecutable(), <String>[
+      process = await Process.start(executable, <String>[
         '--no-pager',
+        if (Platform.isWindows && networkCommand) ...<String>[
+          '--exec-path=$runtimeRoot${Platform.pathSeparator}mingw64'
+              '${Platform.pathSeparator}bin',
+          '-c',
+          'http.sslBackend=openssl',
+        ],
         '-C',
         directory,
         ...arguments,

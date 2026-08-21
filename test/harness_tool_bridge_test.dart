@@ -11,6 +11,7 @@ import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/domain/sftp_service.dart';
 import 'package:vibekits/features/dev_tools/domain/sqlite_database_service.dart';
 import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
+import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
   test('导出版本化可执行工具目录且不暴露未接工具', () {
@@ -70,6 +71,8 @@ void main() {
       VibekitsHarnessToolBridge.githubProxyRollbackId,
       VibekitsHarnessToolBridge.windowsNodeInspectId,
       VibekitsHarnessToolBridge.windowsNodePlanId,
+      VibekitsHarnessToolBridge.windowsNodeListDevicesId,
+      VibekitsHarnessToolBridge.windowsNodeExportOnboardingId,
       VibekitsHarnessToolBridge.programmerCalculatorId,
       VibekitsHarnessToolBridge.remoteListProfilesId,
       VibekitsHarnessToolBridge.remoteSshExecId,
@@ -91,10 +94,8 @@ void main() {
     for (final String id in <String>[
       VibekitsHarnessToolBridge.windowsNodeApplyId,
       VibekitsHarnessToolBridge.windowsNodeVerifyId,
-      VibekitsHarnessToolBridge.windowsNodeListDevicesId,
       VibekitsHarnessToolBridge.windowsNodeEnrollDeviceId,
       VibekitsHarnessToolBridge.windowsNodeRevokeDeviceId,
-      VibekitsHarnessToolBridge.windowsNodeExportOnboardingId,
       VibekitsHarnessToolBridge.windowsNodeRollbackId,
     ]) {
       expect(fullIds, contains(id));
@@ -123,6 +124,50 @@ void main() {
         reason: '${workspace.id} 没有当前环境可执行的 Harness 适配器',
       );
     }
+  });
+
+  test('Harness 可列出节点设备并导出不含秘密的 onboarding', () async {
+    final Directory directory = Directory.systemTemp.createTempSync(
+      'vk_harness_node_devices_',
+    );
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      windowsNodeDeviceService: WindowsNodeDeviceService(directory: directory),
+    );
+    int approvals = 0;
+    Future<bool> approve(HarnessToolApprovalRequest _) async {
+      approvals++;
+      return true;
+    }
+
+    final HarnessToolCallResult listed = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.windowsNodeListDevicesId,
+      arguments: const <String, Object?>{},
+      approve: approve,
+    );
+    expect(listed.ok, isTrue);
+    expect(listed.data!['devices'], isEmpty);
+
+    final HarnessToolCallResult onboarding = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.windowsNodeExportOnboardingId,
+      arguments: const <String, Object?>{
+        'host': '192.168.3.10',
+        'port': 22,
+        'hostKeyFingerprint': 'SHA256:verified-host-key',
+        'allowedCidr': '192.168.3.0/24',
+      },
+      approve: approve,
+    );
+    expect(onboarding.ok, isTrue);
+    expect(
+      onboarding.data!['sshConfig'],
+      contains('StrictHostKeyChecking yes'),
+    );
+    expect(
+      onboarding.data.toString().toLowerCase(),
+      isNot(contains('privatekey')),
+    );
+    expect(approvals, 0, reason: '两个工具都只读且不导出秘密');
   });
 
   test('只读文本工具无需审批并返回结构化结果', () async {

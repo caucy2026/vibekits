@@ -121,7 +121,10 @@ class _GithubDiagnosticsWorkspaceState
       _error = null;
     });
     try {
-      final GithubProxyApplyResult result = await _proxyService.apply(plan.id);
+      final GithubProxyApplyResult result = await _proxyService.apply(
+        plan.id,
+        digest: plan.digest,
+      );
       if (!mounted) return;
       setState(() {
         _proxyResult = result;
@@ -131,7 +134,7 @@ class _GithubDiagnosticsWorkspaceState
       if (!mounted) return;
       setState(() {
         _running = false;
-        _error = '应用失败，旧值已自动恢复：$error';
+        _error = '应用失败：$error';
       });
     }
   }
@@ -143,6 +146,7 @@ class _GithubDiagnosticsWorkspaceState
     try {
       final GithubProxyApplyResult result = await _proxyService.rollback(
         plan.id,
+        digest: plan.digest,
       );
       if (!mounted) return;
       setState(() {

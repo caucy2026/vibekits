@@ -1,12 +1,20 @@
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
-  [string]$ExpectedVersion = '1.9.0-dev.58+68',
+  [string]$ExpectedVersion = '',
   [string]$BundlePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) {
+  $manifest = Join-Path $projectRoot 'pubspec.yaml'
+  $versionMatch = Select-String -LiteralPath $manifest -Pattern '^version:\s*(\S+)\s*$' | Select-Object -First 1
+  if ($null -eq $versionMatch) {
+    throw "Unable to read the application version from $manifest"
+  }
+  $ExpectedVersion = $versionMatch.Matches[0].Groups[1].Value
+}
 $bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
   Join-Path $projectRoot "build\windows\x64\runner\$Configuration"
 } else {
@@ -15,6 +23,8 @@ $bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
 $app = Join-Path $bundle 'vibekits.exe'
 $required = @(
   'tools\git\cmd\git.exe',
+  'tools\git\mingw64\bin\git-remote-http.exe',
+  'tools\git\mingw64\bin\git-remote-https.exe',
   'tools\git\vibekits-git-runtime.json',
   'tools\adb\adb.exe',
   'tools\adb\AdbWinApi.dll',
@@ -56,6 +66,12 @@ $git = Join-Path $bundle 'tools\git\cmd\git.exe'
 $gitVersion = (& $git --version).Trim()
 if ($LASTEXITCODE -ne 0 -or $gitVersion -notmatch '^git version 2\.55\.0\.windows\.3$') {
   throw "Bundled Git failed: $gitVersion"
+}
+foreach ($helperName in @('git-remote-http.exe', 'git-remote-https.exe')) {
+  $helper = Join-Path $bundle "tools\git\mingw64\bin\$helperName"
+  if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+    throw "Bundled Git is missing HTTPS helper: $helperName"
+  }
 }
 $node = Join-Path $bundle 'tools\harness\node.exe'
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-approval.mjs')

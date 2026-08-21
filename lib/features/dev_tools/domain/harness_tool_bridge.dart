@@ -34,6 +34,7 @@ import 'sqlite_database_service.dart';
 import 'tool_registry.dart';
 import 'tool_result.dart';
 import 'windows_test_node_service.dart';
+import 'windows_node_device_service.dart';
 
 enum HarnessToolRisk { readOnly, writesData, controlsDevice, destructive }
 
@@ -165,6 +166,7 @@ class VibekitsHarnessToolBridge {
     HarnessScreenshotOcrRunner? screenshotOcrRunner,
     GithubProxyService? githubProxyService,
     WindowsTestNodeService? windowsTestNodeService,
+    WindowsNodeDeviceService? windowsNodeDeviceService,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -181,6 +183,7 @@ class VibekitsHarnessToolBridge {
     screenshotOcrRunner,
     githubProxyService ?? GithubProxyService(),
     windowsTestNodeService ?? WindowsTestNodeService(),
+    windowsNodeDeviceService ?? WindowsNodeDeviceService(),
   );
 
   VibekitsHarnessToolBridge._(
@@ -199,6 +202,7 @@ class VibekitsHarnessToolBridge {
     this._screenshotOcrRunner,
     this._githubProxyService,
     this._windowsTestNodeService,
+    this._windowsNodeDeviceService,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -277,6 +281,7 @@ class VibekitsHarnessToolBridge {
   final HarnessScreenshotOcrRunner? _screenshotOcrRunner;
   final GithubProxyService _githubProxyService;
   final WindowsTestNodeService _windowsTestNodeService;
+  final WindowsNodeDeviceService _windowsNodeDeviceService;
 
   late final Map<String, HarnessToolDefinition>
   _definitions = <String, HarnessToolDefinition>{
@@ -532,16 +537,22 @@ class VibekitsHarnessToolBridge {
       name: '应用 GitHub 专用代理',
       description: '只修改 http.https://github.com.proxy；随后真实 ls-remote，失败自动恢复旧值。',
       risk: HarnessToolRisk.writesData,
-      properties: <String, Object?>{'planId': _string('代理计划 ID')},
-      required: <String>['planId'],
+      properties: <String, Object?>{
+        'planId': _string('代理计划 ID'),
+        'digest': _string('代理计划摘要'),
+      },
+      required: <String>['planId', 'digest'],
     ),
     githubProxyRollbackId: _definition(
       id: githubProxyRollbackId,
       name: '恢复 GitHub 代理旧值',
       description: '按计划保存的原值精确恢复 GitHub host-scoped Git 代理。',
       risk: HarnessToolRisk.writesData,
-      properties: <String, Object?>{'planId': _string('曾应用的代理计划 ID')},
-      required: <String>['planId'],
+      properties: <String, Object?>{
+        'planId': _string('曾应用的代理计划 ID'),
+        'digest': _string('代理计划摘要'),
+      },
+      required: <String>['planId', 'digest'],
     ),
     windowsNodeInspectId: _definition(
       id: windowsNodeInspectId,
@@ -569,10 +580,11 @@ class VibekitsHarnessToolBridge {
       name: '跨设备验证 Windows 节点',
       description: '必须从另一台真实设备执行 SSH/SFTP、SHA-256、取消和断网验收，本机 localhost 不替代。',
     ),
-    windowsNodeListDevicesId: _unavailableDefinition(
+    windowsNodeListDevicesId: _definition(
       id: windowsNodeListDevicesId,
       name: '列出节点设备',
-      description: '等待公钥设备注册表与真实登录时间接入。',
+      description: '读取独立 Ed25519 设备登记、状态、指纹和最近连接时间；不返回私钥。',
+      properties: const <String, Object?>{},
     ),
     windowsNodeEnrollDeviceId: _unavailableDefinition(
       id: windowsNodeEnrollDeviceId,
@@ -586,11 +598,21 @@ class VibekitsHarnessToolBridge {
       description: '等待单设备撤销和其他设备不受影响的真实验收。',
       risk: HarnessToolRisk.writesData,
     ),
-    windowsNodeExportOnboardingId: _unavailableDefinition(
+    windowsNodeExportOnboardingId: _definition(
       id: windowsNodeExportOnboardingId,
       name: '导出节点 onboarding',
-      description: '仅允许导出主机、端口、用户名、host key 指纹和说明；等待设备注册闭环。',
-      risk: HarnessToolRisk.writesData,
+      description: '生成不含秘密的主机、端口、用户、固定 host key、私网范围和 SSH config。',
+      properties: <String, Object?>{
+        'host': _string('节点局域网 IP 或主机名'),
+        'port': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 65535,
+        },
+        'hostKeyFingerprint': _string('SHA256 host key 指纹'),
+        'allowedCidr': _string('Private IPv4 /24 或更窄范围'),
+      },
+      required: <String>['host', 'hostKeyFingerprint', 'allowedCidr'],
     ),
     windowsNodeRollbackId: _unavailableDefinition(
       id: windowsNodeRollbackId,
@@ -1035,6 +1057,10 @@ class VibekitsHarnessToolBridge {
     if (toolId == githubProxyRollbackId) return _githubProxyRollback;
     if (toolId == windowsNodeInspectId) return _inspectWindowsNode;
     if (toolId == windowsNodePlanId) return _planWindowsNode;
+    if (toolId == windowsNodeListDevicesId) return _listWindowsNodeDevices;
+    if (toolId == windowsNodeExportOnboardingId) {
+      return _exportWindowsNodeOnboarding;
+    }
     if (toolId == remoteListProfilesId) return _listRemoteProfiles;
     if (toolId == remoteOpenInteractiveId) return _openInteractiveRemote;
     if (toolId == remoteSshExecId) return _runRemoteSshCommand;
@@ -1509,14 +1535,16 @@ class VibekitsHarnessToolBridge {
 
   Future<Map<String, Object?>> _githubProxyApply(
     Map<String, Object?> arguments,
-  ) async =>
-      (await _githubProxyService.apply((arguments['planId'] ?? '').toString()))
-          .toJson();
+  ) async => (await _githubProxyService.apply(
+    (arguments['planId'] ?? '').toString(),
+    digest: (arguments['digest'] ?? '').toString(),
+  )).toJson();
 
   Future<Map<String, Object?>> _githubProxyRollback(
     Map<String, Object?> arguments,
   ) async => (await _githubProxyService.rollback(
     (arguments['planId'] ?? '').toString(),
+    digest: (arguments['digest'] ?? '').toString(),
   )).toJson();
 
   Future<Map<String, Object?>> _inspectWindowsNode(
@@ -1530,6 +1558,35 @@ class VibekitsHarnessToolBridge {
     Map<String, Object?> arguments,
   ) async => _windowsTestNodeService
       .plan((arguments['inspectionId'] ?? '').toString())
+      .toJson();
+
+  Future<Map<String, Object?>> _listWindowsNodeDevices(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<WindowsNodeDevice> devices = await _windowsNodeDeviceService
+        .list();
+    return <String, Object?>{
+      'devices': devices
+          .map((WindowsNodeDevice item) => item.toJson(includePublicKey: false))
+          .toList(growable: false),
+      'active': devices
+          .where(
+            (WindowsNodeDevice item) =>
+                item.status == WindowsNodeDeviceStatus.active,
+          )
+          .length,
+    };
+  }
+
+  Future<Map<String, Object?>> _exportWindowsNodeOnboarding(
+    Map<String, Object?> arguments,
+  ) async => _windowsNodeDeviceService
+      .onboarding(
+        host: (arguments['host'] ?? '').toString(),
+        port: _integer(arguments['port'], 22),
+        hostKeyFingerprint: (arguments['hostKeyFingerprint'] ?? '').toString(),
+        allowedCidr: (arguments['allowedCidr'] ?? '').toString(),
+      )
       .toJson();
 
   Future<List<RemoteConnectionRecord>> _loadRemoteProfiles() async {
