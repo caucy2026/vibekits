@@ -202,8 +202,11 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
       'vibekits.runtime.inspect',
       'vibekits.proxy.start',
       'vibekits.proxy.stop',
+      'vibekits.proxy.system_apply',
+      'vibekits.proxy.system_restore',
       'vibekits.vm.start',
       'vibekits.vm.stop',
+      'vibekits.vm.create_disk',
       'vibekits.runtime.status',
     ],
   ),
@@ -760,8 +763,17 @@ Set<String> harnessToolIdsFor(ToolSpec tool) {
 
 /// 左侧只保留具有独立任务流的工作区。
 final List<ToolSpec> devToolRegistry = <ToolSpec>[
+  allDevToolRegistry.singleWhere(
+    (ToolSpec tool) => tool.id == 'programmer_calculator',
+  ),
+  allDevToolRegistry.singleWhere(
+    (ToolSpec tool) => tool.id == 'network_virtualization',
+  ),
   for (final ToolSpec tool in allDevToolRegistry)
-    if (_standaloneToolIds.contains(tool.id)) tool,
+    if (_standaloneToolIds.contains(tool.id) &&
+        tool.id != 'programmer_calculator' &&
+        tool.id != 'network_virtualization')
+      tool,
   utilityCollectionTool,
 ];
 

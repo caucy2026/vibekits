@@ -1,0 +1,10 @@
+mixed-port: 17890
+allow-lan: false
+mode: direct
+log-level: warning
+ipv6: false
+external-controller: 127.0.0.1:19090
+proxies: []
+proxy-groups: []
+rules:
+  - MATCH,DIRECT

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../../app/platform_process_lifecycle.dart';
+
 class BundledRuntimeStatus {
   const BundledRuntimeStatus({
     required this.name,
@@ -24,7 +26,12 @@ class BundledRuntimeStatus {
 }
 
 class ManagedToolProcess {
-  ManagedToolProcess(this.process, this.label) {
+  ManagedToolProcess(
+    this.process,
+    this.label, {
+    Future<void> Function(int processId)? releaseProcessTree,
+  }) : _releaseProcessTree =
+           releaseProcessTree ?? PlatformProcessLifecycle.releaseProcessTree {
     stdoutSubscription = process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
@@ -41,6 +48,7 @@ class ManagedToolProcess {
 
   final Process process;
   final String label;
+  final Future<void> Function(int processId) _releaseProcessTree;
   late final StreamSubscription<String> stdoutSubscription;
   late final StreamSubscription<String> stderrSubscription;
   late final Future<int> exitCode;
@@ -63,6 +71,7 @@ class ManagedToolProcess {
     }
     await stdoutSubscription.cancel();
     await stderrSubscription.cancel();
+    await _releaseProcessTree(process.pid);
   }
 }
 
@@ -88,11 +97,13 @@ abstract final class NetworkVirtualizationService {
       '$_toolRoot${Platform.pathSeparator}'
       'qemu${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
 
-  static Future<BundledRuntimeStatus> inspectMihomo() =>
-      _inspect('Clash Verge（Mihomo）', mihomoExecutable, <String>['-v']);
+  static Future<BundledRuntimeStatus> inspectMihomo({String? executable}) =>
+      _inspect('Clash Verge（Mihomo）', executable ?? mihomoExecutable, <String>[
+        '-v',
+      ]);
 
-  static Future<BundledRuntimeStatus> inspectQemu() =>
-      _inspect('QEMU', qemuExecutable, <String>['--version']);
+  static Future<BundledRuntimeStatus> inspectQemu({String? executable}) =>
+      _inspect('QEMU', executable ?? qemuExecutable, <String>['--version']);
 
   static Future<BundledRuntimeStatus> _inspect(
     String name,
@@ -133,29 +144,53 @@ abstract final class NetworkVirtualizationService {
   static Future<ManagedToolProcess> startMihomo({
     required String configPath,
     required String dataDirectory,
+    String? executable,
+    Future<void> Function(int processId)? bindProcessTree,
+    Future<void> Function(int processId)? releaseProcessTree,
   }) async {
     if (_mihomo != null) throw StateError('Mihomo 已在运行');
-    final File config = File(configPath).absolute;
+    final File config = File(configPath.trim());
+    if (configPath.trim().isEmpty || !config.isAbsolute) {
+      throw const FormatException('Clash 配置必须使用绝对路径');
+    }
     if (!await config.exists()) throw StateError('配置文件不存在');
     if (!RegExp(r'\.(ya?ml)$', caseSensitive: false).hasMatch(config.path)) {
       throw const FormatException('Clash 配置必须是 YAML 文件');
     }
-    if (!await File(mihomoExecutable).exists()) {
-      throw StateError('发布包缺少 Mihomo 运行时：$mihomoExecutable');
+    final String mihomo = executable ?? mihomoExecutable;
+    if (!await File(mihomo).exists()) {
+      throw StateError('发布包缺少 Mihomo 运行时：$mihomo');
     }
-    final Directory data = Directory(dataDirectory).absolute;
+    final Directory data = Directory(dataDirectory.trim());
+    if (dataDirectory.trim().isEmpty || !data.isAbsolute) {
+      throw const FormatException('Mihomo 数据目录必须使用绝对路径');
+    }
     await data.create(recursive: true);
     final Process process = await Process.start(
-      mihomoExecutable,
+      mihomo,
       <String>['-d', data.path, '-f', config.path],
       mode: ProcessStartMode.normal,
       runInShell: false,
     );
-    final ManagedToolProcess managed = ManagedToolProcess(process, 'Mihomo');
+    try {
+      await (bindProcessTree ?? PlatformProcessLifecycle.bindProcessTree)(
+        process.pid,
+      );
+    } on Object {
+      process.kill();
+      rethrow;
+    }
+    final ManagedToolProcess managed = ManagedToolProcess(
+      process,
+      'Mihomo',
+      releaseProcessTree: releaseProcessTree,
+    );
     _mihomo = managed;
     unawaited(
-      managed.exitCode.whenComplete(() {
+      managed.exitCode.whenComplete(() async {
         if (identical(_mihomo, managed)) _mihomo = null;
+        await (releaseProcessTree ??
+            PlatformProcessLifecycle.releaseProcessTree)(process.pid);
       }),
     );
     return managed;
@@ -172,13 +207,18 @@ abstract final class NetworkVirtualizationService {
     String? isoPath,
     int memoryMiB = 2048,
     int cpuCount = 2,
+    bool headless = false,
+    String? executable,
+    Future<void> Function(int processId)? bindProcessTree,
+    Future<void> Function(int processId)? releaseProcessTree,
   }) async {
     if (_qemu != null) throw StateError('虚拟机已在运行');
     if (diskPath?.trim().isEmpty != false && isoPath?.trim().isEmpty != false) {
       throw const FormatException('请选择虚拟磁盘或安装镜像');
     }
-    if (!await File(qemuExecutable).exists()) {
-      throw StateError('发布包缺少 QEMU 运行时：$qemuExecutable');
+    final String qemu = executable ?? qemuExecutable;
+    if (!await File(qemu).exists()) {
+      throw StateError('发布包缺少 QEMU 运行时：$qemu');
     }
     final List<String> arguments = <String>[
       '-name',
@@ -194,6 +234,7 @@ abstract final class NetworkVirtualizationService {
       '-usb',
       '-device',
       'usb-tablet',
+      if (headless) ...<String>['-display', 'none'],
     ];
     if (diskPath?.trim().isNotEmpty == true) {
       final File disk = File(diskPath!).absolute;
@@ -206,17 +247,31 @@ abstract final class NetworkVirtualizationService {
       arguments.addAll(<String>['-cdrom', iso.path]);
     }
     final Process process = await Process.start(
-      qemuExecutable,
+      qemu,
       arguments,
-      workingDirectory: File(qemuExecutable).parent.path,
+      workingDirectory: File(qemu).parent.path,
       mode: ProcessStartMode.normal,
       runInShell: false,
     );
-    final ManagedToolProcess managed = ManagedToolProcess(process, 'QEMU');
+    try {
+      await (bindProcessTree ?? PlatformProcessLifecycle.bindProcessTree)(
+        process.pid,
+      );
+    } on Object {
+      process.kill();
+      rethrow;
+    }
+    final ManagedToolProcess managed = ManagedToolProcess(
+      process,
+      'QEMU',
+      releaseProcessTree: releaseProcessTree,
+    );
     _qemu = managed;
     unawaited(
-      managed.exitCode.whenComplete(() {
+      managed.exitCode.whenComplete(() async {
         if (identical(_qemu, managed)) _qemu = null;
+        await (releaseProcessTree ??
+            PlatformProcessLifecycle.releaseProcessTree)(process.pid);
       }),
     );
     return managed;
@@ -226,6 +281,46 @@ abstract final class NetworkVirtualizationService {
     final ManagedToolProcess? current = _qemu;
     _qemu = null;
     if (current != null) await current.stop();
+  }
+
+  static Future<Map<String, Object?>> createQemuDisk({
+    required String path,
+    required int sizeGiB,
+    String? executable,
+  }) async {
+    final File output = File(path.trim());
+    if (path.trim().isEmpty || !output.isAbsolute) {
+      throw const FormatException('新虚拟磁盘必须使用绝对路径');
+    }
+    if (!output.path.toLowerCase().endsWith('.qcow2')) {
+      throw const FormatException('新虚拟磁盘必须使用 .qcow2 扩展名');
+    }
+    if (await output.exists()) throw StateError('目标虚拟磁盘已经存在');
+    final String qemuImg = executable ?? qemuImgExecutable;
+    if (!await File(qemuImg).exists()) {
+      throw StateError('发布包缺少 qemu-img：$qemuImg');
+    }
+    await output.parent.create(recursive: true);
+    final ProcessResult result = await Process.run(qemuImg, <String>[
+      'create',
+      '-f',
+      'qcow2',
+      output.path,
+      '${sizeGiB.clamp(1, 2048)}G',
+    ], runInShell: false).timeout(const Duration(seconds: 30));
+    if (result.exitCode != 0 || !await output.exists()) {
+      throw StateError('创建虚拟磁盘失败：${result.stderr}');
+    }
+    return <String, Object?>{
+      'path': output.path,
+      'virtualSizeGiB': sizeGiB.clamp(1, 2048),
+      'fileBytes': await output.length(),
+      'format': 'qcow2',
+    };
+  }
+
+  static Future<void> stopAll() async {
+    await Future.wait(<Future<void>>[stopMihomo(), stopQemu()]);
   }
 
   static Map<String, Object?> status() => <String, Object?>{

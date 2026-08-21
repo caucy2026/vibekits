@@ -2,6 +2,14 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-22 · v1.9.0-dev.68 代理与轻量虚拟机可见、可用、可恢复
+
+- 聊天记录和 dev41 文档确认代理/虚拟机早已进入范围，但旧实现只启动 Mihomo 和已有 QEMU 磁盘；入口又位于网络分类深处。现在“Clash Verge / 虚拟机”固定为左侧第二个独立工具，程序员计算器仍保持默认第一页。
+- Clash 页主操作改为“启动并启用系统代理”：明确确认后先保存 Windows 当前用户代理，再启动内置 Mihomo 并切换到配置的 `mixed-port`；“停止并恢复原网络”恢复 ProxyEnable/ProxyServer/ProxyOverride。写入失败自动回滚，异常退出后的备份保留供下次恢复，不静默开启 TUN。
+- QEMU 页新增 8～256 GiB qcow2 稀疏磁盘创建，并明确支持 Windows 7～11、x86_64 Linux/BSD 等 PC 系统；不虚假宣称 macOS 来宾或 ARM 支持。
+- Harness 新增系统代理应用/恢复和虚拟磁盘创建工具；`proxy.start` 可在启动成功后原子启用系统代理，`proxy.stop` 可恢复旧值。Mihomo/QEMU 进程绑定 Windows Job Object，APP 进程关闭时由系统兜底终止子进程树。
+- 真实 dev.68 Release 验收通过：Harness 启动 Mihomo、切换并恢复真实 Windows 代理、创建 1 GiB qcow2、无窗口启动 QEMU、读取运行状态并停止，全流程 4 秒。详见 `docs/acceptance/V1_9_0_DEV68_NETWORK_VM_CLOSED_LOOP_2026-08-22.md`。
+
 ## 2026-08-22 · v1.9.0-dev.67 ADB 语义工具与真机闭环
 
 - Harness 新增 `vibekits.adb.shell`、`logcat`、`install_apk`、`push_file`、`pull_file`、`screenshot` 六个明确语义接口；模型无需再拼装通用 ADB 参数，且所有接口继续使用随包发布的 `adb.exe`、统一权限和可删除活动日志。

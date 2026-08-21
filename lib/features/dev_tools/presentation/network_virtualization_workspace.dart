@@ -4,6 +4,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../domain/network_virtualization_service.dart';
+import '../domain/system_proxy_service.dart';
 
 class NetworkVirtualizationWorkspace extends StatefulWidget {
   const NetworkVirtualizationWorkspace({super.key});
@@ -17,6 +18,8 @@ class _NetworkVirtualizationWorkspaceState
     extends State<NetworkVirtualizationWorkspace> {
   BundledRuntimeStatus? _mihomo;
   BundledRuntimeStatus? _qemu;
+  SystemProxySnapshot? _systemProxy;
+  final SystemProxyService _systemProxyService = SystemProxyService();
   String _configPath = '';
   String _diskPath = '';
   String _isoPath = '';
@@ -24,6 +27,8 @@ class _NetworkVirtualizationWorkspaceState
   bool _busy = false;
   int _memory = 2048;
   int _cpus = 2;
+  int _diskSizeGiB = 32;
+  final TextEditingController _proxyPort = TextEditingController(text: '7890');
 
   String get _proxyDataDirectory =>
       '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
@@ -35,6 +40,12 @@ class _NetworkVirtualizationWorkspaceState
     _refresh();
   }
 
+  @override
+  void dispose() {
+    _proxyPort.dispose();
+    super.dispose();
+  }
+
   Future<void> _refresh() async {
     final List<BundledRuntimeStatus> status = await Future.wait(
       <Future<BundledRuntimeStatus>>[
@@ -42,10 +53,19 @@ class _NetworkVirtualizationWorkspaceState
         NetworkVirtualizationService.inspectQemu(),
       ],
     );
+    SystemProxySnapshot? systemProxy;
+    if (Platform.isWindows) {
+      try {
+        systemProxy = await _systemProxyService.inspect();
+      } on Object {
+        systemProxy = null;
+      }
+    }
     if (!mounted) return;
     setState(() {
       _mihomo = status[0];
       _qemu = status[1];
+      _systemProxy = systemProxy;
     });
   }
 
@@ -77,6 +97,71 @@ class _NetworkVirtualizationWorkspaceState
       ],
     );
     if (file != null && mounted) setState(() => _isoPath = file.path);
+  }
+
+  Future<void> _startProxyAndEnableSystem() async {
+    final int? port = int.tryParse(_proxyPort.text.trim());
+    if (port == null) throw const FormatException('请输入配置中的 mixed-port');
+    await NetworkVirtualizationService.startMihomo(
+      configPath: _configPath,
+      dataDirectory: _proxyDataDirectory,
+    );
+    try {
+      _systemProxy = await _systemProxyService.applyLocal(
+        port: port,
+        dataDirectory: _proxyDataDirectory,
+      );
+    } on Object {
+      await NetworkVirtualizationService.stopMihomo();
+      rethrow;
+    }
+  }
+
+  Future<void> _confirmProxyStart() async {
+    final bool? approved = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('启动代理并切换 Windows 网络？'),
+        content: Text(
+          '将启动内置 Mihomo，并把当前用户系统代理切换到 '
+          '127.0.0.1:${_proxyPort.text.trim()}。原设置会先保存，停止时自动恢复。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('mihomo-confirm-system-proxy'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('启动并切换'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) await _run(_startProxyAndEnableSystem);
+  }
+
+  Future<void> _stopProxyAndRestoreSystem() async {
+    _systemProxy = await _systemProxyService.restore(
+      dataDirectory: _proxyDataDirectory,
+    );
+    await NetworkVirtualizationService.stopMihomo();
+  }
+
+  Future<void> _createDisk() async {
+    final FileSaveLocation? location = await getSaveLocation(
+      suggestedName: 'vibekits-vm.qcow2',
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(label: 'QEMU 磁盘', extensions: <String>['qcow2']),
+      ],
+    );
+    if (location == null) return;
+    await NetworkVirtualizationService.createQemuDisk(
+      path: location.path,
+      sizeGiB: _diskSizeGiB,
+    );
+    if (mounted) setState(() => _diskPath = location.path);
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -162,6 +247,24 @@ class _NetworkVirtualizationWorkspaceState
       ),
       const SizedBox(height: 8),
       Text('运行数据：$_proxyDataDirectory'),
+      const SizedBox(height: 8),
+      TextField(
+        key: const Key('mihomo-proxy-port'),
+        controller: _proxyPort,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          labelText: '系统代理端口',
+          helperText: '填写配置文件中的 mixed-port，默认 7890',
+        ),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        _systemProxy == null
+            ? '系统代理：正在读取'
+            : '系统代理：${_systemProxy!.enabled ? '已启用' : '未启用'}'
+                  '${_systemProxy!.server == null ? '' : ' · ${_systemProxy!.server}'}',
+        key: const Key('system-proxy-status'),
+      ),
       const SizedBox(height: 12),
       Wrap(
         spacing: 8,
@@ -170,22 +273,15 @@ class _NetworkVirtualizationWorkspaceState
             key: const Key('mihomo-start'),
             onPressed: _busy || _mihomo?.available != true
                 ? null
-                : () => _run(() async {
-                    await NetworkVirtualizationService.startMihomo(
-                      configPath: _configPath,
-                      dataDirectory: _proxyDataDirectory,
-                    );
-                  }),
+                : _confirmProxyStart,
             icon: const Icon(Icons.play_arrow),
-            label: const Text('启动'),
+            label: const Text('启动并启用系统代理'),
           ),
           OutlinedButton.icon(
             key: const Key('mihomo-stop'),
-            onPressed: _busy
-                ? null
-                : () => _run(NetworkVirtualizationService.stopMihomo),
+            onPressed: _busy ? null : () => _run(_stopProxyAndRestoreSystem),
             icon: const Icon(Icons.stop),
-            label: const Text('停止'),
+            label: const Text('停止并恢复原网络'),
           ),
         ],
       ),
@@ -194,7 +290,9 @@ class _NetworkVirtualizationWorkspaceState
         SelectableText(_message),
       ],
       const SizedBox(height: 16),
-      const Text('说明：当前版本先提供兼容配置的本地内核与运行控制；修改系统代理和 TUN 需要单独明确授权，未静默修改系统网络。'),
+      const Text(
+        '启用前会保存当前 Windows 用户代理；停止时恢复原值。异常退出后备份仍保留，可再次点击“停止并恢复原网络”。TUN 不会静默开启。',
+      ),
     ],
   );
 
@@ -208,6 +306,33 @@ class _NetworkVirtualizationWorkspaceState
       _runtimeCard(_qemu),
       const SizedBox(height: 12),
       _pathField('虚拟磁盘（可选）', _diskPath, _pickDisk),
+      const SizedBox(height: 8),
+      Row(
+        children: <Widget>[
+          Expanded(
+            child: DropdownButtonFormField<int>(
+              initialValue: _diskSizeGiB,
+              decoration: const InputDecoration(labelText: '新磁盘容量'),
+              items: const <int>[8, 16, 32, 64, 128, 256]
+                  .map(
+                    (int value) => DropdownMenuItem<int>(
+                      value: value,
+                      child: Text('$value GiB'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (int? value) => _diskSizeGiB = value ?? _diskSizeGiB,
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            key: const Key('qemu-create-disk'),
+            onPressed: _busy ? null : () => _run(_createDisk),
+            icon: const Icon(Icons.add_to_drive_outlined),
+            label: const Text('创建磁盘'),
+          ),
+        ],
+      ),
       const SizedBox(height: 8),
       _pathField('安装 ISO（可选）', _isoPath, _pickIso),
       const SizedBox(height: 12),
@@ -279,6 +404,10 @@ class _NetworkVirtualizationWorkspaceState
         const SizedBox(height: 12),
         SelectableText(_message),
       ],
+      const SizedBox(height: 12),
+      const Text(
+        '支持的来宾系统：Windows 7～11、主流 x86_64 Linux、BSD 和其他 PC x86/x64 系统。当前不宣称支持 macOS 来宾或 ARM 系统。',
+      ),
     ],
   );
 

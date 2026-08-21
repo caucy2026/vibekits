@@ -15,6 +15,15 @@ void main() {
           .toSet();
       expect(spec.harnessToolIds, isNotEmpty);
       expect(catalog, containsAll(spec.harnessToolIds));
+      expect(
+        spec.harnessToolIds,
+        containsAll(<String>[
+          'vibekits.proxy.system_apply',
+          'vibekits.proxy.system_restore',
+          'vibekits.vm.create_disk',
+        ]),
+      );
+      expect(devToolRegistry[1].id, 'network_virtualization');
     },
   );
 

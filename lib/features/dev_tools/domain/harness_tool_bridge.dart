@@ -23,6 +23,7 @@ import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_work_status.dart';
 import 'network_virtualization_service.dart';
+import 'system_proxy_service.dart';
 import 'programmer_calculator.dart';
 import 'platform_credential_store.dart';
 import 'remote_connection_record.dart';
@@ -168,6 +169,9 @@ class VibekitsHarnessToolBridge {
     GithubProxyService? githubProxyService,
     WindowsTestNodeService? windowsTestNodeService,
     WindowsNodeDeviceService? windowsNodeDeviceService,
+    String? runtimeToolRoot,
+    Future<void> Function(int processId)? runtimeBindProcessTree,
+    Future<void> Function(int processId)? runtimeReleaseProcessTree,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -185,6 +189,9 @@ class VibekitsHarnessToolBridge {
     githubProxyService ?? GithubProxyService(),
     windowsTestNodeService ?? WindowsTestNodeService(),
     windowsNodeDeviceService ?? WindowsNodeDeviceService(),
+    runtimeToolRoot,
+    runtimeBindProcessTree,
+    runtimeReleaseProcessTree,
   );
 
   VibekitsHarnessToolBridge._(
@@ -204,6 +211,9 @@ class VibekitsHarnessToolBridge {
     this._githubProxyService,
     this._windowsTestNodeService,
     this._windowsNodeDeviceService,
+    this._runtimeToolRoot,
+    this._runtimeBindProcessTree,
+    this._runtimeReleaseProcessTree,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -274,8 +284,11 @@ class VibekitsHarnessToolBridge {
   static const String runtimeStatusId = 'vibekits.runtime.status';
   static const String proxyStartId = 'vibekits.proxy.start';
   static const String proxyStopId = 'vibekits.proxy.stop';
+  static const String proxySystemApplyId = 'vibekits.proxy.system_apply';
+  static const String proxySystemRestoreId = 'vibekits.proxy.system_restore';
   static const String vmStartId = 'vibekits.vm.start';
   static const String vmStopId = 'vibekits.vm.stop';
+  static const String vmCreateDiskId = 'vibekits.vm.create_disk';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
@@ -293,6 +306,22 @@ class VibekitsHarnessToolBridge {
   final GithubProxyService _githubProxyService;
   final WindowsTestNodeService _windowsTestNodeService;
   final WindowsNodeDeviceService _windowsNodeDeviceService;
+  final String? _runtimeToolRoot;
+  final Future<void> Function(int processId)? _runtimeBindProcessTree;
+  final Future<void> Function(int processId)? _runtimeReleaseProcessTree;
+
+  String? get _mihomoRuntimeExecutable => _runtimeToolRoot == null
+      ? null
+      : '${Directory(_runtimeToolRoot).absolute.path}${Platform.pathSeparator}'
+            'mihomo${Platform.pathSeparator}${Platform.isWindows ? 'mihomo.exe' : 'mihomo'}';
+  String? get _qemuRuntimeExecutable => _runtimeToolRoot == null
+      ? null
+      : '${Directory(_runtimeToolRoot).absolute.path}${Platform.pathSeparator}'
+            'qemu${Platform.pathSeparator}${Platform.isWindows ? 'qemu-system-x86_64.exe' : 'qemu-system-x86_64'}';
+  String? get _qemuImgRuntimeExecutable => _runtimeToolRoot == null
+      ? null
+      : '${Directory(_runtimeToolRoot).absolute.path}${Platform.pathSeparator}'
+            'qemu${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
 
   late final Map<String, HarnessToolDefinition>
   _definitions = <String, HarnessToolDefinition>{
@@ -896,6 +925,12 @@ class VibekitsHarnessToolBridge {
       properties: <String, Object?>{
         'configPath': _string('Clash YAML 配置绝对路径'),
         'dataDirectory': _string('Mihomo 数据目录'),
+        'systemProxyPort': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 65535,
+          'description': '可选；提供时启动成功后同步启用 Windows 系统代理',
+        },
       },
       required: <String>['configPath', 'dataDirectory'],
     ),
@@ -904,7 +939,32 @@ class VibekitsHarnessToolBridge {
       name: '停止 Clash Verge 内核',
       description: '停止由 Vibekits 启动的 Mihomo 子进程。',
       risk: HarnessToolRisk.controlsDevice,
-      properties: const <String, Object?>{},
+      properties: <String, Object?>{
+        'dataDirectory': _string('可选；提供时先恢复保存在该目录的原系统代理'),
+      },
+    ),
+    proxySystemApplyId: _definition(
+      id: proxySystemApplyId,
+      name: '启用 Windows 系统代理',
+      description: '保存当前用户代理后，把 Windows 系统代理切换到本机 Mihomo 端口；可由恢复工具还原。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'port': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 65535,
+        },
+        'dataDirectory': _string('保存原代理设置的绝对数据目录'),
+      },
+      required: <String>['port', 'dataDirectory'],
+    ),
+    proxySystemRestoreId: _definition(
+      id: proxySystemRestoreId,
+      name: '恢复 Windows 原系统代理',
+      description: '从 Vibekits 备份恢复启用代理前的 Windows 用户代理设置。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'dataDirectory': _string('保存原代理设置的绝对数据目录')},
+      required: <String>['dataDirectory'],
     ),
     vmStartId: _definition(
       id: vmStartId,
@@ -924,6 +984,10 @@ class VibekitsHarnessToolBridge {
           'minimum': 1,
           'maximum': 16,
         },
+        'headless': <String, Object?>{
+          'type': 'boolean',
+          'description': '无窗口后台验收或服务器任务使用；默认 false',
+        },
       },
     ),
     vmStopId: _definition(
@@ -932,6 +996,21 @@ class VibekitsHarnessToolBridge {
       description: '停止由 Vibekits 启动的 QEMU 子进程。',
       risk: HarnessToolRisk.controlsDevice,
       properties: const <String, Object?>{},
+    ),
+    vmCreateDiskId: _definition(
+      id: vmCreateDiskId,
+      name: '创建 QEMU 虚拟磁盘',
+      description: '使用内置 qemu-img 创建新的 qcow2 稀疏磁盘，不覆盖已有文件。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'path': _string('新 qcow2 磁盘绝对路径'),
+        'sizeGiB': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 2048,
+        },
+      },
+      required: <String>['path', 'sizeGiB'],
     ),
     programmerCalculatorId: _definition(
       id: programmerCalculatorId,
@@ -1191,8 +1270,11 @@ class VibekitsHarnessToolBridge {
     if (toolId == runtimeStatusId) return _runtimeStatus;
     if (toolId == proxyStartId) return _startProxy;
     if (toolId == proxyStopId) return _stopProxy;
+    if (toolId == proxySystemApplyId) return _applySystemProxy;
+    if (toolId == proxySystemRestoreId) return _restoreSystemProxy;
     if (toolId == vmStartId) return _startVm;
     if (toolId == vmStopId) return _stopVm;
+    if (toolId == vmCreateDiskId) return _createVmDisk;
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
@@ -1225,8 +1307,12 @@ class VibekitsHarnessToolBridge {
   ) async {
     final List<BundledRuntimeStatus> runtimes = await Future.wait(
       <Future<BundledRuntimeStatus>>[
-        NetworkVirtualizationService.inspectMihomo(),
-        NetworkVirtualizationService.inspectQemu(),
+        NetworkVirtualizationService.inspectMihomo(
+          executable: _mihomoRuntimeExecutable,
+        ),
+        NetworkVirtualizationService.inspectQemu(
+          executable: _qemuRuntimeExecutable,
+        ),
       ],
     );
     return <String, Object?>{
@@ -1243,19 +1329,71 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _startProxy(
     Map<String, Object?> arguments,
   ) async {
+    final String dataDirectory = (arguments['dataDirectory'] ?? '').toString();
     final ManagedToolProcess process =
         await NetworkVirtualizationService.startMihomo(
           configPath: (arguments['configPath'] ?? '').toString(),
-          dataDirectory: (arguments['dataDirectory'] ?? '').toString(),
+          dataDirectory: dataDirectory,
+          executable: _mihomoRuntimeExecutable,
+          bindProcessTree: _runtimeBindProcessTree,
+          releaseProcessTree: _runtimeReleaseProcessTree,
         );
-    return <String, Object?>{'started': true, 'pid': process.process.pid};
+    SystemProxySnapshot? systemProxy;
+    final int? port = arguments['systemProxyPort'] == null
+        ? null
+        : _integer(arguments['systemProxyPort'], 7890);
+    try {
+      if (port != null) {
+        systemProxy = await SystemProxyService().applyLocal(
+          port: port,
+          dataDirectory: dataDirectory,
+        );
+      }
+    } on Object {
+      await NetworkVirtualizationService.stopMihomo();
+      rethrow;
+    }
+    return <String, Object?>{
+      'started': true,
+      'pid': process.process.pid,
+      if (systemProxy != null) 'systemProxy': systemProxy.toJson(),
+    };
   }
 
   Future<Map<String, Object?>> _stopProxy(
     Map<String, Object?> arguments,
   ) async {
+    SystemProxySnapshot? systemProxy;
+    final String dataDirectory = (arguments['dataDirectory'] ?? '').toString();
+    if (dataDirectory.trim().isNotEmpty) {
+      systemProxy = await SystemProxyService().restore(
+        dataDirectory: dataDirectory,
+      );
+    }
     await NetworkVirtualizationService.stopMihomo();
-    return const <String, Object?>{'stopped': true};
+    return <String, Object?>{
+      'stopped': true,
+      if (systemProxy != null) 'systemProxy': systemProxy.toJson(),
+    };
+  }
+
+  Future<Map<String, Object?>> _applySystemProxy(
+    Map<String, Object?> arguments,
+  ) async {
+    final SystemProxySnapshot snapshot = await SystemProxyService().applyLocal(
+      port: _integer(arguments['port'], 7890),
+      dataDirectory: (arguments['dataDirectory'] ?? '').toString(),
+    );
+    return snapshot.toJson();
+  }
+
+  Future<Map<String, Object?>> _restoreSystemProxy(
+    Map<String, Object?> arguments,
+  ) async {
+    final SystemProxySnapshot snapshot = await SystemProxyService().restore(
+      dataDirectory: (arguments['dataDirectory'] ?? '').toString(),
+    );
+    return snapshot.toJson();
   }
 
   Future<Map<String, Object?>> _startVm(Map<String, Object?> arguments) async {
@@ -1265,6 +1403,10 @@ class VibekitsHarnessToolBridge {
           isoPath: (arguments['isoPath'] ?? '').toString(),
           memoryMiB: _integer(arguments['memoryMiB'], 2048),
           cpuCount: _integer(arguments['cpuCount'], 2),
+          headless: arguments['headless'] == true,
+          executable: _qemuRuntimeExecutable,
+          bindProcessTree: _runtimeBindProcessTree,
+          releaseProcessTree: _runtimeReleaseProcessTree,
         );
     return <String, Object?>{'started': true, 'pid': process.process.pid};
   }
@@ -1273,6 +1415,13 @@ class VibekitsHarnessToolBridge {
     await NetworkVirtualizationService.stopQemu();
     return const <String, Object?>{'stopped': true};
   }
+
+  Future<Map<String, Object?>> _createVmDisk(Map<String, Object?> arguments) =>
+      NetworkVirtualizationService.createQemuDisk(
+        path: (arguments['path'] ?? '').toString(),
+        sizeGiB: _integer(arguments['sizeGiB'], 32),
+        executable: _qemuImgRuntimeExecutable,
+      );
 
   Future<Map<String, Object?>> _listAdbDevices(
     Map<String, Object?> arguments,
@@ -2610,6 +2759,13 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == githubProxyApplyId || toolId == githubProxyRollbackId) {
       return (arguments['planId'] ?? '').toString();
+    }
+    if (toolId == proxySystemApplyId || toolId == proxySystemRestoreId) {
+      return (arguments['dataDirectory'] ?? '').toString();
+    }
+    if (toolId == vmCreateDiskId) return (arguments['path'] ?? '').toString();
+    if (toolId == vmStartId) {
+      return (arguments['diskPath'] ?? arguments['isoPath'] ?? '').toString();
     }
     if (toolId.startsWith('vibekits.windows_node.')) {
       return (arguments['rootPath'] ?? WindowsTestNodeService.requiredRoot)
