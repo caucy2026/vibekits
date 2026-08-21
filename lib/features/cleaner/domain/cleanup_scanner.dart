@@ -218,8 +218,8 @@ abstract final class CleanupScanner {
           currentPath = entity.path;
           visited++;
           report();
-          if (visited % 8 == 0) {
-            await Future<void>.delayed(const Duration(milliseconds: 2));
+          if (visited % 64 == 0) {
+            await Future<void>.delayed(Duration.zero);
           }
           final FileSystemEntityType type = FileSystemEntity.typeSync(
             entity.path,
@@ -242,7 +242,9 @@ abstract final class CleanupScanner {
                   size: 0,
                   category: category,
                   reason: '空目录',
-                  identity: CleanupFileIdentity.read(entity.path),
+                  // Empty-directory deletion is revalidated immediately before
+                  // execution; opening a native identity handle during the
+                  // inventory phase would make large scans needlessly slow.
                   sourceLabel: sourceLabel,
                   riskLevel: riskLevel,
                   impactNote: impactNote,
@@ -251,9 +253,10 @@ abstract final class CleanupScanner {
             }
           } else if (type == FileSystemEntityType.file) {
             final File file = File(entity.path);
-            final int size = await file.length();
+            final FileStat stat = await file.stat();
+            final int size = stat.size;
             if (size < minimumSizeBytes) continue;
-            final DateTime modified = await file.lastModified();
+            final DateTime modified = stat.modified;
             final String name = _baseName(entity.path).toLowerCase();
             if (includePatterns.isNotEmpty &&
                 !includePatterns.any(
@@ -278,7 +281,10 @@ abstract final class CleanupScanner {
                 category: category,
                 reason: sourceLabel ?? category.label,
                 modified: modified,
-                identity: CleanupFileIdentity.read(entity.path),
+                // Size and modification time are recorded here and checked
+                // again by CleanupDeleter. Native identity handles are kept for
+                // user-data suggestions, not tens of thousands of known cache
+                // files.
                 sourceLabel: sourceLabel,
                 riskLevel: riskLevel,
                 impactNote: impactNote,

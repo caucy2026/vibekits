@@ -10,6 +10,7 @@ import '../../../app/app_theme.dart';
 import '../../archive/domain/disk_space.dart';
 import '../domain/cleanup_background_runner.dart';
 import '../domain/cleanup_deleter.dart';
+import '../domain/cleanup_decision_engine.dart';
 import '../domain/cleanup_report.dart';
 import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
@@ -427,14 +428,13 @@ class _CleanerTabState extends State<CleanerTab> {
         return category != 0 ? category : right.size.compareTo(left.size);
       });
       if (mounted) {
+        final CleanupDecisionPlan decisionPlan = _decisionPlanFor(filtered);
         setState(() {
           _candidates = filtered;
           _visibleItemLimits.clear();
           _selected.addAll(
-            filtered
-                .where(
-                  (CleanupCandidate candidate) => candidate.defaultSelected,
-                )
+            decisionPlan
+                .candidatesFor(CleanupDecisionTier.automatic)
                 .map((CleanupCandidate candidate) => candidate.path),
           );
           _scanning = false;
@@ -518,32 +518,43 @@ class _CleanerTabState extends State<CleanerTab> {
           .where(predicate)
           .fold<int>(0, (int sum, CleanupCandidate item) => sum + item.size);
 
+  CleanupDecisionPlan _decisionPlanFor(Iterable<CleanupCandidate> candidates) {
+    DiskVolumeInfo? volume;
+    if (_selectedVolumeRoots.isNotEmpty) {
+      final String selected = _selectedVolumeRoots.first.toLowerCase();
+      for (final DiskVolumeInfo item in _volumes) {
+        if (item.rootPath.toLowerCase() == selected) {
+          volume = item;
+          break;
+        }
+      }
+    }
+    final double freeRatio = volume == null || volume.totalBytes <= 0
+        ? 1
+        : volume.freeBytes / volume.totalBytes;
+    return CleanupDecisionEngine.buildPlan(
+      candidates,
+      freeSpaceRatio: freeRatio,
+    );
+  }
+
   Future<void> _smartSelect() async {
-    final List<CleanupCandidate> recommended = _candidates
-        .where((candidate) {
-          const Set<CleanupCategory> automaticCategories = <CleanupCategory>{
-            CleanupCategory.userTemp,
-            CleanupCategory.browserCache,
-            CleanupCategory.applicationCache,
-            CleanupCategory.systemCache,
-            CleanupCategory.pluginCache,
-            CleanupCategory.debugArtifacts,
-            CleanupCategory.logs,
-          };
-          return !candidate.highRisk &&
-              candidate.defaultSelected &&
-              automaticCategories.contains(candidate.category);
+    final CleanupDecisionPlan decisionPlan = _decisionPlanFor(_candidates);
+    final List<CleanupCandidate> automatic = decisionPlan.candidatesFor(
+      CleanupDecisionTier.automatic,
+    );
+    final List<CleanupCandidate> recommended = decisionPlan.candidatesFor(
+      CleanupDecisionTier.recommended,
+    );
+    final List<CleanupCandidate> review = decisionPlan
+        .candidatesFor(CleanupDecisionTier.review)
+        .where((CleanupCandidate candidate) {
+          return candidate.category != CleanupCategory.recycleBin;
         })
         .toList(growable: false);
-    final List<CleanupCandidate> review = _candidates
-        .where(
-          (CleanupCandidate candidate) =>
-              !recommended.contains(candidate) &&
-              candidate.riskLevel != CleanupRiskLevel.systemManaged &&
-              candidate.category != CleanupCategory.downloads &&
-              candidate.category != CleanupCategory.duplicateFiles,
-        )
-        .toList(growable: false);
+    final List<CleanupCandidate> protected = decisionPlan.candidatesFor(
+      CleanupDecisionTier.protected,
+    );
     final List<CleanupCandidate> recycleBin = _candidates
         .where(
           (CleanupCandidate candidate) =>
@@ -555,19 +566,21 @@ class _CleanerTabState extends State<CleanerTab> {
       0,
       (int total, CleanupCandidate candidate) => total + candidate.size,
     );
+    final int automaticBytes = bytesOf(automatic);
     final int recommendedBytes = bytesOf(recommended);
     final int reviewBytes = bytesOf(review);
+    final int protectedBytes = bytesOf(protected);
     final int recycleBytes = bytesOf(recycleBin);
-    bool includeReview = review.isNotEmpty;
-    bool includeRecycleBin = recycleBin.isNotEmpty;
+    bool includeReview = recommended.isNotEmpty;
+    bool includeRecycleBin = false;
     final _SmartCleanupSelection?
     selection = await showDialog<_SmartCleanupSelection>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setDialogState) {
           final int selectedBytes =
-              recommendedBytes +
-              (includeReview ? reviewBytes : 0) +
+              automaticBytes +
+              (includeReview ? recommendedBytes : 0) +
               (includeRecycleBin ? recycleBytes : 0);
           return AlertDialog(
             title: const Text('智能选择清理计划'),
@@ -583,16 +596,21 @@ class _CleanerTabState extends State<CleanerTab> {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 10),
-                  Text('推荐安全项：${_formatSize(recommendedBytes)}'),
+                  Text('自动安全项：${_formatSize(automaticBytes)}'),
+                  Text(
+                    '保护不清理：${_formatSize(protectedBytes)} · '
+                    '${protected.length} 项',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
                     value: includeReview,
-                    title: Text('加入需确认项 ${_formatSize(reviewBytes)}'),
-                    subtitle: const Text(
-                      '包括可重建开发缓存、明确旧版本和旧智能体调试会话；不包含下载文件和重复文件。',
+                    title: Text('加入建议清理 ${_formatSize(recommendedBytes)}'),
+                    subtitle: Text(
+                      '归属明确但仍需你确认；另有 ${_formatSize(reviewBytes)} 证据不足项目不会加入计划。',
                     ),
-                    onChanged: review.isEmpty
+                    onChanged: recommended.isEmpty
                         ? null
                         : (bool? value) => setDialogState(
                             () => includeReview = value ?? false,
@@ -605,7 +623,7 @@ class _CleanerTabState extends State<CleanerTab> {
                     value: includeRecycleBin,
                     title: Text('永久清空系统回收站 ${_formatSize(recycleBytes)}'),
                     subtitle: const Text(
-                      '这是达到当前 10 GiB 目标的必要步骤；回收站中的原有文件和本次移入项目都将无法恢复。',
+                      '回收站中的文件清空后无法恢复，因此永不默认勾选。',
                       style: TextStyle(color: VibekitsColors.warning),
                     ),
                     onChanged: recycleBin.isEmpty
@@ -642,8 +660,8 @@ class _CleanerTabState extends State<CleanerTab> {
     );
     if (selection == null || !mounted) return;
     final List<CleanupCandidate> plan = <CleanupCandidate>[
-      ...recommended,
-      if (selection.includeReview) ...review,
+      ...automatic,
+      if (selection.includeReview) ...recommended,
       if (selection.includeRecycleBin) ...recycleBin,
     ];
     setState(() {

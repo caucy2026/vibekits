@@ -175,7 +175,7 @@ void main() {
     expect(find.byTooltip('白名单（1）'), findsOneWidget);
   });
 
-  testWidgets('智能选择一次组成十 GiB 分级计划且排除下载文件', (WidgetTester tester) async {
+  testWidgets('智能选择不为凑十 GiB 自动加入回收站和证据不足项目', (WidgetTester tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -196,6 +196,7 @@ void main() {
                       size: 8 * 1024 * 1024 * 1024,
                       category: CleanupCategory.systemCache,
                       reason: '已验证的系统缓存',
+                      sourceLabel: '系统缓存规则',
                     ),
                     CleanupCandidate(
                       path: r'C:\',
@@ -229,6 +230,7 @@ void main() {
                       size: 512 * 1024 * 1024,
                       category: CleanupCategory.applicationCache,
                       reason: '已验证的可重建应用缓存',
+                      sourceLabel: 'KnownApp 缓存规则',
                     ),
                   ],
                   cancelled: false,
@@ -244,11 +246,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('智能选择清理计划'), findsOneWidget);
-    expect(find.textContaining('达到 10 GiB 目标'), findsOneWidget);
+    expect(find.textContaining('还差'), findsOneWidget);
     expect(find.textContaining('永久清空系统回收站 2.00 GB'), findsOneWidget);
+    expect(
+      tester
+          .widget<CheckboxListTile>(
+            find.byKey(const Key('smart-select-recycle-bin')),
+          )
+          .value,
+      isFalse,
+    );
     await tester.tap(find.text('使用此计划'));
     await tester.pumpAndSettle();
-    expect(find.text('清理 5 项'), findsOneWidget);
+    expect(find.text('清理 2 项'), findsOneWidget);
   });
 
   testWidgets('半年未使用软件显示证据、路径和直接卸载入口', (WidgetTester tester) async {
@@ -398,11 +408,13 @@ void main() {
   });
 
   testWidgets('清理完成展示本次累计与系统盘容量总结', (WidgetTester tester) async {
-    const CleanupCandidate candidate = CleanupCandidate(
+    final CleanupCandidate candidate = CleanupCandidate(
       path: r'C:\Cache\package.tmp',
       size: 2048,
       category: CleanupCategory.pluginCache,
       reason: '插件下载缓存',
+      sourceLabel: '插件下载缓存规则',
+      modified: DateTime(2020),
     );
     int diskReads = 0;
     int? persistedTotal;
@@ -420,7 +432,7 @@ void main() {
                   required CleanupCancellationToken cancellationToken,
                   required void Function(CleanupScanProgress progress)
                   onProgress,
-                }) async => const CleanupScanResult(
+                }) async => CleanupScanResult(
                   candidates: <CleanupCandidate>[candidate],
                   cancelled: false,
                   unreadablePaths: 0,
@@ -436,7 +448,7 @@ void main() {
                   onProgress(
                     const CleanupDeleteProgress(completed: 1, total: 1),
                   );
-                  return const CleanupDeleteResult(
+                  return CleanupDeleteResult(
                     items: <CleanupItemResult>[
                       CleanupItemResult(
                         candidate: candidate,
