@@ -18,6 +18,20 @@ rules:
   - MATCH,DIRECT
 ''';
 
+const String _subscriptionYaml = '''
+proxies:
+  - name: Node-A
+    type: socks5
+    server: 127.0.0.1
+    port: 1080
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [Node-A]
+rules:
+  - MATCH,PROXY
+''';
+
 void main() {
   late Directory sandbox;
   late Map<String, String> credentials;
@@ -73,10 +87,14 @@ void main() {
     final Future<void> serving = () async {
       await for (final HttpRequest request in server) {
         downloads++;
+        expect(
+          request.headers.value(HttpHeaders.userAgentHeader),
+          'clash-verge/v2.4.3',
+        );
         request.response
           ..statusCode = HttpStatus.ok
           ..headers.contentType = ContentType.text
-          ..write(_yaml);
+          ..write(_subscriptionYaml);
         await request.response.close();
       }
     }();
@@ -85,7 +103,8 @@ void main() {
       await serving;
     });
 
-    final String url = 'http://127.0.0.1:${server.port}/sub?token=secret-token';
+    final String token = List<String>.filled(320, 'x').join();
+    final String url = 'http://127.0.0.1:${server.port}/sub?token=$token';
     final MihomoProfile profile = await service.addSubscription(
       name: '测试订阅',
       url: url,
@@ -94,12 +113,25 @@ void main() {
     final String manifest = File(
       '${sandbox.path}${Platform.pathSeparator}profiles.json',
     ).readAsStringSync();
-    expect(manifest, isNot(contains('secret-token')));
+    expect(manifest, isNot(contains(token)));
     expect(manifest, contains('127.0.0.1'));
 
     final MihomoProfile updated = await service.update(profile);
     expect(updated.summary.proxyCount, 1);
     expect(downloads, 2);
+    final MihomoManagedConfig managed = await service.prepareManagedConfig(
+      updated,
+    );
+    expect(managed.summary.mixedPort, 7890);
+    expect(
+      await File(managed.path).readAsString(),
+      contains('mixed-port: 7890'),
+    );
+    expect((await service.readActivityLog()).join('\n'), contains('订阅成功'));
+    expect(
+      (await service.readActivityLog()).join('\n'),
+      isNot(contains(token)),
+    );
 
     await service.delete(updated);
     expect(credentials, isEmpty);

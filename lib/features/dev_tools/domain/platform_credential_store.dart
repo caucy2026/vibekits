@@ -141,8 +141,11 @@ abstract final class _WindowsCredentials {
       return;
     }
     final List<int> units = value.codeUnits;
-    if (units.length * 2 > 512) {
-      throw const FormatException('数据库密码超过系统凭据长度上限');
+    // Windows 7 and later allow credential blobs up to 5 * 512 bytes.
+    // Subscription URLs are commonly longer than passwords, so the former
+    // 512-byte guard rejected otherwise valid Clash subscriptions.
+    if (units.length * 2 > 2560) {
+      throw const FormatException('安全凭据超过 Windows 凭据长度上限');
     }
     final ffi.Pointer<Utf16> target = '$_prefix$key'.toNativeUtf16();
     final ffi.Pointer<Utf16> username = key.toNativeUtf16();

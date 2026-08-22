@@ -25,6 +25,7 @@ class _NetworkVirtualizationWorkspaceState
   final SystemProxyService _systemProxyService = SystemProxyService();
   late final MihomoProfileService _profileService;
   List<MihomoProfile> _profiles = const <MihomoProfile>[];
+  List<String> _subscriptionLog = const <String>[];
   MihomoProfile? _activeProfile;
   MihomoManagedConfig? _runningConfig;
   MihomoControllerSnapshot? _controllerSnapshot;
@@ -70,9 +71,11 @@ class _NetworkVirtualizationWorkspaceState
 
   Future<void> _loadProfiles() async {
     final MihomoProfileState state = await _profileService.load();
+    final List<String> activity = await _profileService.readActivityLog();
     if (!mounted) return;
     setState(() {
       _profiles = state.profiles;
+      _subscriptionLog = activity;
       _activeProfile = state.profiles
           .where((MihomoProfile item) => item.id == state.activeId)
           .firstOrNull;
@@ -421,6 +424,12 @@ class _NetworkVirtualizationWorkspaceState
     } on Object catch (error) {
       if (mounted) setState(() => _message = '$error');
     } finally {
+      try {
+        final List<String> activity = await _profileService.readActivityLog();
+        if (mounted) setState(() => _subscriptionLog = activity);
+      } on Object {
+        // Logging must never keep an operation in the busy state.
+      }
       if (mounted) setState(() => _busy = false);
     }
   }
@@ -655,11 +664,12 @@ class _NetworkVirtualizationWorkspaceState
 
   Widget _dashboard() {
     final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
-    final List<String> logs =
-        (NetworkVirtualizationService.status()['mihomoLog'] as List? ??
-                const <Object>[])
-            .map((Object? line) => '$line')
-            .toList(growable: false);
+    final List<String> logs = <String>[
+      ..._subscriptionLog,
+      ...(NetworkVirtualizationService.status()['mihomoLog'] as List? ??
+              const <Object>[])
+          .map((Object? line) => '$line'),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -799,7 +809,7 @@ class _NetworkVirtualizationWorkspaceState
         Card(
           child: ExpansionTile(
             initiallyExpanded: logs.isNotEmpty,
-            title: Text('运行日志（${logs.length}）'),
+            title: Text('订阅与运行日志（${logs.length}）'),
             children: <Widget>[
               SizedBox(
                 height: 180,

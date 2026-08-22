@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'platform_credential_store.dart';
+import 'system_proxy_service.dart';
 
 typedef MihomoCredentialReader = Future<String?> Function(String key);
 typedef MihomoCredentialWriter = Future<void> Function(
@@ -10,6 +11,7 @@ typedef MihomoCredentialWriter = Future<void> Function(
   String value,
 );
 typedef MihomoCredentialDeleter = Future<void> Function(String key);
+typedef MihomoProxyResolver = Future<String?> Function();
 
 class MihomoConfigSummary {
   const MihomoConfigSummary({
@@ -36,7 +38,10 @@ class MihomoConfigSummary {
       return match?.group(1)?.replaceAll(RegExp(r'''^["']|["']$'''), '').trim();
     }
 
-    final int port = int.tryParse(value('mixed-port') ?? '') ?? 7890;
+    final int port =
+        int.tryParse(value('mixed-port') ?? '') ??
+        int.tryParse(value('port') ?? '') ??
+        7890;
     final String controllerValue = value('external-controller') ?? '';
     final Uri? controller = controllerValue.isEmpty
         ? null
@@ -45,11 +50,21 @@ class MihomoConfigSummary {
                 ? controllerValue
                 : 'http://$controllerValue',
           );
-    final int proxyCount = RegExp(
-      r'^\s{2}-\s+name\s*:',
-      multiLine: true,
-      caseSensitive: false,
-    ).allMatches(yaml).length;
+    int proxyCount = 0;
+    bool inProxies = false;
+    for (final String line in const LineSplitter().convert(yaml)) {
+      if (RegExp(r'^proxies\s*:', caseSensitive: false).hasMatch(line)) {
+        inProxies = true;
+        continue;
+      }
+      if (inProxies && line.isNotEmpty && !RegExp(r'^\s').hasMatch(line)) {
+        inProxies = false;
+      }
+      if (inProxies &&
+          RegExp(r'^\s+-\s+name\s*:', caseSensitive: false).hasMatch(line)) {
+        proxyCount++;
+      }
+    }
     return MihomoConfigSummary(
       mixedPort: port.clamp(1, 65535),
       controller: controller,
@@ -111,6 +126,7 @@ class MihomoProfileService {
     this.credentialReader = PlatformCredentialStore.read,
     this.credentialWriter = PlatformCredentialStore.write,
     this.credentialDeleter = PlatformCredentialStore.delete,
+    this.proxyResolver = _defaultProxyResolver,
   });
 
   static const int _maxConfigBytes = 32 * 1024 * 1024;
@@ -118,11 +134,20 @@ class MihomoProfileService {
   final MihomoCredentialReader credentialReader;
   final MihomoCredentialWriter credentialWriter;
   final MihomoCredentialDeleter credentialDeleter;
+  final MihomoProxyResolver proxyResolver;
 
   Directory get _profilesDirectory =>
       Directory('$dataDirectory${Platform.pathSeparator}profiles');
   File get _manifest =>
       File('$dataDirectory${Platform.pathSeparator}profiles.json');
+  File get _activityLog =>
+      File('$dataDirectory${Platform.pathSeparator}subscription.log');
+
+  Future<List<String>> readActivityLog({int limit = 100}) async {
+    if (!await _activityLog.exists()) return const <String>[];
+    final List<String> lines = await _activityLog.readAsLines();
+    return lines.skip((lines.length - limit).clamp(0, lines.length)).toList();
+  }
 
   Future<MihomoProfileState> load() async {
     if (!await _manifest.exists()) {
@@ -197,6 +222,7 @@ class MihomoProfileService {
       subscription: false,
     );
     await _upsert(profile, makeActive: true);
+    await _log('导入成功 name=${profile.name} source=local');
     return profile;
   }
 
@@ -224,8 +250,16 @@ class MihomoProfileService {
     try {
       await credentialWriter(profile.credentialKey, uri.toString());
       await _upsert(profile, makeActive: true);
+      await _log(
+        '订阅成功 host=${uri.host} bytes=${utf8.encode(yaml).length} '
+        'nodes=${profile.summary.proxyCount}',
+      );
       return profile;
-    } on Object {
+    } on Object catch (error) {
+      await _log(
+        '订阅失败 host=${uri.host} stage=credential '
+        'error=${_safeError(error, uri)}',
+      );
       if (await target.exists()) await target.delete();
       rethrow;
     }
@@ -251,6 +285,10 @@ class MihomoProfileService {
       subscription: true,
     );
     await _upsert(updated, makeActive: true);
+    await _log(
+      '更新成功 host=${uri.host} bytes=${utf8.encode(yaml).length} '
+      'nodes=${updated.summary.proxyCount}',
+    );
     return updated;
   }
 
@@ -279,6 +317,17 @@ class MihomoProfileService {
   ) async {
     String yaml = await _readConfig(File(profile.path));
     MihomoConfigSummary summary = MihomoConfigSummary.parse(yaml);
+    if (!RegExp(
+      r'^(mixed-port|port)\s*:',
+      multiLine: true,
+      caseSensitive: false,
+    ).hasMatch(yaml)) {
+      yaml =
+          '$yaml${yaml.endsWith('\n') ? '' : '\n'}'
+          'mixed-port: ${summary.mixedPort}\n'
+          'allow-lan: false\n';
+      summary = MihomoConfigSummary.parse(yaml);
+    }
     Uri? controller = summary.controller;
     if (controller != null &&
         controller.host != InternetAddress.loopbackIPv4.address &&
@@ -327,8 +376,43 @@ class MihomoProfileService {
   }
 
   Future<String> _download(Uri uri) async {
+    String? proxy;
+    if (uri.host != '127.0.0.1' && uri.host != 'localhost') {
+      try {
+        proxy = await proxyResolver();
+      } on Object {
+        proxy = null;
+      }
+    }
+    await _log(
+      '开始订阅 host=${uri.host} route=${proxy == null ? 'direct' : 'system-proxy'}',
+    );
+    try {
+      return await _downloadOnce(uri, proxy: proxy);
+    } on Object catch (firstError) {
+      if (proxy != null) {
+        await _log(
+          '代理下载失败，回退直连 host=${uri.host} '
+          'error=${_safeError(firstError, uri)}',
+        );
+        try {
+          return await _downloadOnce(uri);
+        } on Object catch (directError) {
+          final String safe = _safeError(directError, uri);
+          await _log('订阅失败 host=${uri.host} stage=direct error=$safe');
+          throw StateError('订阅下载失败：$safe');
+        }
+      }
+      final String safe = _safeError(firstError, uri);
+      await _log('订阅失败 host=${uri.host} stage=download error=$safe');
+      throw StateError('订阅下载失败：$safe');
+    }
+  }
+
+  Future<String> _downloadOnce(Uri uri, {String? proxy}) async {
     final HttpClient client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
+    if (proxy != null) client.findProxy = (_) => 'PROXY $proxy';
     try {
       final HttpClientRequest request = await client
           .getUrl(uri)
@@ -337,6 +421,7 @@ class MihomoProfileService {
         HttpHeaders.acceptHeader,
         'text/yaml, text/plain, */*',
       );
+      request.headers.set(HttpHeaders.userAgentHeader, 'clash-verge/v2.4.3');
       final HttpClientResponse response = await request.close().timeout(
         const Duration(seconds: 20),
       );
@@ -361,7 +446,9 @@ class MihomoProfileService {
   }
 
   static Uri _validatedSubscriptionUri(String value) {
-    if (value.trim().length > 240) throw const FormatException('订阅地址过长');
+    if (value.trim().length > 1200) {
+      throw const FormatException('订阅地址过长（最多 1200 字符）');
+    }
     final Uri uri = Uri.parse(value.trim());
     final bool loopback = uri.host == '127.0.0.1' || uri.host == 'localhost';
     if (!uri.isAbsolute ||
@@ -383,12 +470,56 @@ class MihomoProfileService {
   }
 
   static void _validateConfig(String yaml) {
-    if (!RegExp(
-      r'^\s*(mixed-port|port|socks-port)\s*:',
-      multiLine: true,
-    ).hasMatch(yaml)) {
-      throw const FormatException('不是可识别的 Mihomo 配置：缺少代理端口');
+    if (RegExp(r'^\s*<(!doctype|html)', caseSensitive: false).hasMatch(yaml)) {
+      throw const FormatException('订阅服务器返回了网页，不是 Clash 配置');
     }
+    if (!RegExp(
+      r'^\s*(mixed-port|port|socks-port|proxies|proxy-providers|rules)\s*:',
+      multiLine: true,
+      caseSensitive: false,
+    ).hasMatch(yaml)) {
+      throw const FormatException('订阅内容不是可识别的 Clash YAML');
+    }
+  }
+
+  Future<void> _log(String message) async {
+    await Directory(dataDirectory).create(recursive: true);
+    if (await _activityLog.exists() &&
+        await _activityLog.length() > 512 * 1024) {
+      await _activityLog.delete();
+    }
+    await _activityLog.writeAsString(
+      '[${DateTime.now().toIso8601String()}] $message\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  }
+
+  static String _safeError(Object error, Uri uri) => '$error'
+      .replaceAll(uri.toString(), '${uri.scheme}://${uri.host}/…')
+      .replaceAll(
+        RegExp(r'([?&](token|key|auth)=)[^&\s]+', caseSensitive: false),
+        r'$1***',
+      );
+
+  static Future<String?> _defaultProxyResolver() async {
+    if (!Platform.isWindows) return null;
+    final SystemProxySnapshot snapshot = await SystemProxyService().inspect();
+    if (!snapshot.enabled || snapshot.server?.trim().isEmpty != false) {
+      return null;
+    }
+    final String raw = snapshot.server!.trim();
+    final Map<String, String> byScheme = <String, String>{};
+    for (final String part in raw.split(';')) {
+      final int separator = part.indexOf('=');
+      if (separator > 0) {
+        byScheme[part.substring(0, separator).trim().toLowerCase()] = part
+            .substring(separator + 1)
+            .trim();
+      }
+    }
+    final String candidate = byScheme['https'] ?? byScheme['http'] ?? raw;
+    return RegExp(r'^[^\s:;]+:\d{1,5}$').hasMatch(candidate) ? candidate : null;
   }
 
   static Future<void> _atomicWrite(File target, String value) async {
