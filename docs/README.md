@@ -35,7 +35,7 @@
 29. [安全 Windows 测试节点复用指南](27_SECURE_WINDOWS_NODE_INTEGRATION_GUIDE.md)——helper 协议、设备身份、跨设备证据与智能体接入通用设计
 30. [dev.58～dev.61 GitHub 备份记录](acceptance/GITHUB_BACKUP_DEV58_DEV61_2026-08-21.md)——备份范围、安全边界和远端核验方法
 31. [智能体使用 Windows 测试节点所需工具](28_AGENT_WINDOWS_NODE_TOOL_REQUIREMENTS.md)——已完成工具、缺失 ToolSpec、输入输出、安全边界和验收门禁
-32. [Mac 端调用 Windows 测试节点指南](30_MAC_WINDOWS_NODE_CALL_GUIDE.md)——Windows 一次准备、Mac 独立身份、登记、onboarding、验证和撤销调用顺序
+32. [Mac 调用 Windows 测试节点完整搭建手册](30_MAC_WINDOWS_NODE_CALL_GUIDE.md)——v2.0 标准账户、独立密钥、局域网防火墙、本机预验收、SFTP 哈希闭环与 MCP 注册
 33. [Windows 节点智能体工具接口](29_AGENT_WINDOWS_NODE_TOOL_API.md)——Harness/Codex 调用顺序、参数、返回、STDIO 注册和可用性发现
 34. [dev.63 外部 Codex MCP 验收](acceptance/V1_9_0_DEV63_CODEX_MCP_2026-08-21.md)——全局注册、77 工具发现、节点调用与 Release 证据
 35. [dev.64 清理经验决策引擎验收](acceptance/V1_9_0_DEV64_CLEANUP_DECISION_2026-08-22.md)——同机只读复扫、四级决策、安全边界与性能数据
