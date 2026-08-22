@@ -11,6 +11,7 @@ enum DroppedFileRouteKind {
   database,
   image,
   model,
+  audio,
   rejected,
 }
 
@@ -72,6 +73,13 @@ abstract final class DroppedFileRouter {
           path: path,
           kind: DroppedFileRouteKind.model,
           detail: '已识别为本地模型，交给模型仓库校验并导入',
+        );
+      }
+      if (extensionKind == VibekitsFileKind.audio) {
+        return DroppedFileRoute(
+          path: path,
+          kind: DroppedFileRouteKind.audio,
+          detail: '已识别为 PCM/WAV，交给音频调试工具分析波形与信号质量',
         );
       }
       final int size = await file.length();

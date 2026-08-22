@@ -15,6 +15,7 @@ enum DevelopmentObjectKind {
   apiService,
   screenshot,
   cleanupReport,
+  audio,
   unknown,
 }
 
@@ -80,6 +81,9 @@ class DevelopmentObjectRouter {
     }
     if (RegExp(r'\.(png|jpe?g|webp|bmp)$').hasMatch(lower)) {
       return DevelopmentObjectKind.screenshot;
+    }
+    if (RegExp(r'\.(pcm|raw|wav|wave)$').hasMatch(lower)) {
+      return DevelopmentObjectKind.audio;
     }
     if (RegExp(r'\.(zip|7z|rar|tar|gz|bz2|xz|zst)$').hasMatch(lower)) {
       return DevelopmentObjectKind.archive;
@@ -209,6 +213,13 @@ class DevelopmentObjectRouter {
             toolId: 'vibekits.disk.analyze',
             label: '重新分析空间',
             reason: '验证清理后的真实可用容量',
+          ),
+        ],
+        DevelopmentObjectKind.audio => const <DevelopmentNextAction>[
+          DevelopmentNextAction(
+            toolId: 'vibekits.audio_analyzer',
+            label: '分析波形与信号',
+            reason: '识别 PCM/WAV 参数并检查峰值、RMS、削波、静音和频谱',
           ),
         ],
         _ => const <DevelopmentNextAction>[

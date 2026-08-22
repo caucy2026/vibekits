@@ -1,7 +1,21 @@
-enum VibekitsFileKind { archive, document, database, image, model, unsupported }
+enum VibekitsFileKind {
+  archive,
+  document,
+  database,
+  image,
+  model,
+  audio,
+  unsupported,
+}
 
 /// File types that Vibekits can actually open today.
 abstract final class SupportedFileTypes {
+  static const List<String> audioExtensions = <String>[
+    'pcm',
+    'raw',
+    'wav',
+    'wave',
+  ];
   static const List<String> archiveExtensions = <String>[
     'zip',
     'tar',
@@ -250,6 +264,7 @@ abstract final class SupportedFileTypes {
     ...databaseExtensions,
     ...imageExtensions,
     ...modelExtensions,
+    ...audioExtensions,
   ];
 
   static VibekitsFileKind kindForPath(String path) {
@@ -276,6 +291,9 @@ abstract final class SupportedFileTypes {
     }
     if (extension != null && modelExtensions.contains(extension)) {
       return VibekitsFileKind.model;
+    }
+    if (extension != null && audioExtensions.contains(extension)) {
+      return VibekitsFileKind.audio;
     }
     return VibekitsFileKind.unsupported;
   }

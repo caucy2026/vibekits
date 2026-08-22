@@ -2,7 +2,7 @@
 
 更新日期：2026-08-22
 
-适用版本：`1.9.0-dev.65+75`
+适用版本：`1.9.0-dev.76+86`
 
 ## 发布时直接使用的关键组件
 
@@ -18,9 +18,12 @@
 | `libserialport_plus` | 1.0.1 | Windows/macOS 串口枚举、帧参数、读写和关闭 | Dart 封装 MIT；原生 `libserialport` LGPL-3.0-or-later | pub.dev 锁文件 SHA-256 `b6e55f52...31902`；原生动态库由 native-assets 构建并随 Release 分发 |
 | `dartssh2` | 2.22.5 | SSH 密码/私钥认证、主机指纹、远程 PTY、SFTP 与三类端口转发 | MIT | pub.dev 锁文件；固定在 `pubspec.lock`，Vibekits 强制提供主机密钥验证回调且不关闭验证 |
 | `xterm` | 4.0.0 | Windows/macOS 交互终端渲染、键盘、选择与缩放 | MIT | pub.dev 锁文件；纯 Flutter 终端视图，不携带 SSH 密码学 |
+| `audioplayers` | 6.8.1 | 音频调试工作区本地 PCM/WAV 播放 | MIT | 上游 `bluefireteam/audioplayers`；Windows/macOS/Android 平台实现随 Flutter Release 打包，不要求外部播放器，不用于联网流媒体 |
 | Git for Windows MinGit x64 | 2.55.0.windows.3 | Git 状态、Diff、日志、版本对比、本地安全分支与代理诊断 | GPL-2.0-only；归档内各组件按各自许可证 | 官方发布资产 `MinGit-2.55.0.3-64-bit.zip`；SHA-256 `f48e2d2dc74a24454adc6d8fd0ac25bf9c2386f19cfb06202b9465aaad4f9f05`；`tool/prepare_git_runtime.ps1` 校验后事务解压 |
 
 数据库密码不依赖额外原生插件：Windows 直接调用系统 Credential Manager，macOS 调用系统 Keychain；Windows 已完成临时凭据写入、读取、删除真实闭环。这样避免 `flutter_secure_storage_windows` 对 Visual Studio ATL 的额外构建依赖。串口封装使用 MIT 许可证，但发布 NOTICE 必须同时保留底层 `libserialport` 的 LGPL-3.0-or-later 声明和对应源代码获取方式。
+
+音频波形交互参考 `SimformSolutionsPvtLtd/audio_waveforms`（MIT）和 `ryanheise/just_waveform`（MIT）；频谱与信号健康工作流参考 Spek（GPL-3.0）与 mscope。Vibekits 未复制这些项目源码或品牌界面，PCM/WAV 解析、降采样波形、DFT、RMS/峰值/削波/静音/DC 分析为独立纯 Dart 实现。
 
 远程桌面不打包第三方协议实现：Windows 调用系统 `mstsc.exe`，macOS 调用 `/usr/bin/open` 打开系统 VNC/屏幕共享 URL。Vibekits 只传脱敏的主机和端口参数，不读取或传递桌面密码。
 

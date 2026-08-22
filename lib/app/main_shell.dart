@@ -85,11 +85,13 @@ class _MainShellState extends State<MainShell> {
   String? _modelDropPath;
   String? _imageDropPath;
   String? _databaseDropPath;
+  String? _audioDropPath;
   int _archiveDropSerial = 0;
   int _documentDropSerial = 0;
   int _modelDropSerial = 0;
   int _imageDropSerial = 0;
   int _databaseDropSerial = 0;
+  int _audioDropSerial = 0;
   RemoteWorkspaceIntent? _remoteWorkspaceIntent;
   int _remoteWorkspaceIntentSerial = 0;
   String _harnessExternalPrompt = '';
@@ -111,6 +113,7 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.database => 4,
       VibekitsFileKind.image => 0,
       VibekitsFileKind.model => 0,
+      VibekitsFileKind.audio => 4,
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
@@ -297,12 +300,13 @@ class _MainShellState extends State<MainShell> {
     final bool model = route.kind == DroppedFileRouteKind.model;
     final bool image = route.kind == DroppedFileRouteKind.image;
     final bool database = route.kind == DroppedFileRouteKind.database;
+    final bool audio = route.kind == DroppedFileRouteKind.audio;
     _selectTab(
       archive
           ? 1
           : model || image
           ? 0
-          : database
+          : database || audio
           ? 4
           : 3,
     );
@@ -319,6 +323,9 @@ class _MainShellState extends State<MainShell> {
       } else if (database) {
         _databaseDropPath = route.path;
         _databaseDropSerial++;
+      } else if (audio) {
+        _audioDropPath = route.path;
+        _audioDropSerial++;
       } else {
         _documentDropPath = route.path;
         _documentDropMode = route.documentMode;
@@ -527,7 +534,15 @@ class _MainShellState extends State<MainShell> {
             ),
       ),
       DevToolsTab(
-        key: ValueKey<String>('database-drop-$_databaseDropSerial'),
+        key: ValueKey<String>(
+          'dev-drop-$_databaseDropSerial-$_audioDropSerial',
+        ),
+        initialAudioPath:
+            _audioDropPath ??
+            (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==
+                    VibekitsFileKind.audio
+                ? widget.initialFilePath
+                : null),
         initialDatabasePath:
             _databaseDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==

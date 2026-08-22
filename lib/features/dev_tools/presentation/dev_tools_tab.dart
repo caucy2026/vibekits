@@ -7,6 +7,7 @@ import '../domain/file_diff_service.dart';
 import 'batch_rename_workspace.dart';
 import 'adb_workspace.dart';
 import 'api_workspace.dart';
+import 'audio_debug_workspace.dart';
 import 'database_workspace.dart';
 import 'duplicate_files_workspace.dart';
 import 'file_hash_workspace.dart';
@@ -37,6 +38,7 @@ class DevToolsTab extends StatefulWidget {
     this.fileSearchRunner,
     this.fileSearchReveal,
     this.initialDatabasePath,
+    this.initialAudioPath,
     this.databasePickFile,
     this.databaseInspect,
     this.databaseLoadPage,
@@ -74,6 +76,7 @@ class DevToolsTab extends StatefulWidget {
   final FileSearchRunner? fileSearchRunner;
   final FileSearchReveal? fileSearchReveal;
   final String? initialDatabasePath;
+  final String? initialAudioPath;
   final SqliteFilePicker? databasePickFile;
   final SqliteInspector? databaseInspect;
   final SqlitePageLoader? databaseLoadPage;
@@ -119,7 +122,11 @@ class _DevToolsTabState extends State<DevToolsTab> {
   @override
   void initState() {
     super.initState();
-    if (widget.initialDatabasePath != null) {
+    if (widget.initialAudioPath != null) {
+      _selected = devToolRegistry.firstWhere(
+        (ToolSpec tool) => tool.id == 'audio_analyzer',
+      );
+    } else if (widget.initialDatabasePath != null) {
       _selected = devToolRegistry.firstWhere(
         (ToolSpec tool) => tool.id == 'database_manager',
       );
@@ -439,6 +446,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
     }
     if (tool.id == 'network_virtualization') {
       return const NetworkVirtualizationWorkspace();
+    }
+    if (tool.id == 'audio_analyzer') {
+      return AudioDebugWorkspace(initialPath: widget.initialAudioPath);
     }
     if (tool.id == 'batch_rename') {
       return const BatchRenameWorkspace();

@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'audio_analysis_service.dart';
 import 'crypto_tools.dart';
 import 'development_object_router.dart';
 import 'code_statistics_service.dart';
@@ -24,6 +27,7 @@ abstract final class ToolGroups {
   static const String format = '格式处理';
   static const String network = '网络开发';
   static const String file = '文件工具';
+  static const String audio = '音频调试';
 }
 
 /// 一个开发工具的静态描述。
@@ -209,6 +213,36 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
       'vibekits.vm.create_disk',
       'vibekits.runtime.status',
     ],
+  ),
+  ToolSpec(
+    id: 'audio_analyzer',
+    name: '音频调试',
+    group: ToolGroups.audio,
+    description: '打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、削波、静音、直流偏置和频谱。',
+    aiUseWhen: '需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。',
+    aiAvoidWhen: '需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。',
+    aiExamples: const <String>['分析这份 PCM 的波形和信号质量', '检查 WAV 是否削波、静音或存在直流偏置'],
+    runAsync: (String input, String params) async {
+      try {
+        final Object? decoded = params.trim().isEmpty
+            ? const <String, Object?>{}
+            : jsonDecode(params);
+        final Map<String, Object?> options = decoded is Map
+            ? decoded.map(
+                (Object? key, Object? value) => MapEntry('$key', value),
+              )
+            : const <String, Object?>{};
+        final AudioAnalysisResult result = await AudioAnalysisService.inspect(
+          input,
+          rawFormat: PcmAudioFormat.fromJson(options),
+        );
+        return ToolSuccess(
+          const JsonEncoder.withIndent('  ').convert(result.toJson()),
+        );
+      } on Object catch (error) {
+        return ToolFailure('$error');
+      }
+    },
   ),
   _plusTool(
     id: 'json_minify',
@@ -735,6 +769,7 @@ const Set<String> _standaloneToolIds = <String>{
   'file_diff',
   'github_diagnostics',
   'network_virtualization',
+  'audio_analyzer',
   'file_hash',
   'file_search',
   'batch_rename',

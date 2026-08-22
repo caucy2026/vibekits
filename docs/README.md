@@ -50,6 +50,7 @@
 44. [dev.73 Clash 标准 Profile 验收](acceptance/V1_9_0_DEV73_CLASH_STANDARD_PROFILE_2026-08-22.md)——行内节点、内置 GeoData、启动前预校验与真实 Profile 证据
 45. [dev.74 Clash 测速与关闭验收](acceptance/V1_9_0_DEV74_CLASH_DELAY_CLOSE_2026-08-22.md)——真实延迟、分组测速、进度与恢复网络
 46. [dev.75 Clash 标准界面验收](acceptance/V1_9_0_DEV75_CLASH_STANDARD_LAYOUT_2026-08-22.md)——八项侧栏、真实流量、双列节点、单节点与分组测速
+47. [dev.76 音频调试验收](acceptance/V1_9_0_DEV76_AUDIO_DEBUG_2026-08-22.md)——PCM/WAV 波形、播放、频谱、信号健康、拖入与 Harness
 
 ## 完成定义
 
