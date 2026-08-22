@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": 6,
+  "catalogVersion": 7,
   "rules": [
     {
       "id": "nuget-http-download-cache",
@@ -347,6 +347,51 @@
       "cleanupAction": "recycle",
       "impact": "不会删除会话、设置、技能、插件或运行时",
       "source": "Vibekits Windows 软件规则 v6"
+    },
+    {
+      "id": "espressif-component-cache",
+      "label": "Espressif 组件下载缓存",
+      "platform": "windows",
+      "pathTemplate": "%LOCALAPPDATA%\\Espressif\\ComponentManager\\Cache",
+      "category": "developerCache",
+      "risk": "safe",
+      "defaultEnabled": true,
+      "minimumAgeHours": 24,
+      "maxDepth": 10,
+      "maxEntries": 100000,
+      "cleanupAction": "permanent",
+      "impact": "ESP-IDF 组件管理器可重新下载；不会删除工程、工具链或配置",
+      "source": "Vibekits Windows 软件规则 v7"
+    },
+    {
+      "id": "dart-analysis-server-cache",
+      "label": "Dart 分析服务缓存",
+      "platform": "windows",
+      "pathTemplate": "%LOCALAPPDATA%\\.dartServer",
+      "category": "developerCache",
+      "risk": "cautious",
+      "defaultEnabled": true,
+      "minimumAgeHours": 24,
+      "maxDepth": 10,
+      "maxEntries": 100000,
+      "cleanupAction": "recycle",
+      "impact": "关闭 Dart/Flutter IDE 后可重建；不会删除源码，但下次索引会变慢",
+      "source": "Vibekits Windows 软件规则 v7"
+    },
+    {
+      "id": "bilibili-media-cache",
+      "label": "哔哩哔哩媒体缓存",
+      "platform": "windows",
+      "pathTemplate": "%APPDATA%\\bilibili\\Cache",
+      "category": "applicationCache",
+      "risk": "safe",
+      "defaultEnabled": true,
+      "minimumAgeHours": 24,
+      "maxDepth": 10,
+      "maxEntries": 100000,
+      "cleanupAction": "permanent",
+      "impact": "关闭哔哩哔哩后可重新生成；不会删除账号、收藏或本地用户文件",
+      "source": "Vibekits Windows 软件规则 v7"
     }
   ]
 }

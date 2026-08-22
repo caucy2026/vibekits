@@ -13,8 +13,9 @@ import 'cleanup_targets.dart';
 /// Cancellation is forwarded through a dedicated send port, so pressing stop
 /// remains responsive even while the worker is enumerating many files.
 abstract final class CleanupBackgroundRunner {
-  /// Two workers keep directory enumeration responsive without saturating the
-  /// system disk or competing aggressively with foreground applications.
+  /// Two workers avoid random-I/O contention on nearly-full system disks.
+  /// Per-file metadata work is synchronous inside each isolate, while batched
+  /// yields preserve cancellation and foreground responsiveness.
   static const int maxScanWorkers = 2;
 
   static Future<List<CleanupScanTarget>> discoverTargets({
@@ -118,7 +119,10 @@ abstract final class CleanupBackgroundRunner {
         final String key = Platform.isWindows
             ? candidate.path.toLowerCase()
             : candidate.path;
-        candidates[key] = candidate;
+        candidates[key] = CleanupScanner.preferredCandidate(
+          candidates[key],
+          candidate,
+        );
       }
     }
     return CleanupScanResult(

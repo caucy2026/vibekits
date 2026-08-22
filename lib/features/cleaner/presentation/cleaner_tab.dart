@@ -15,6 +15,7 @@ import '../domain/cleanup_report.dart';
 import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
 import '../domain/cleanup_targets.dart';
+import '../domain/cleanup_recovery_planner.dart';
 import '../domain/cleanup_whitelist.dart';
 import '../domain/disk_volume_discovery.dart';
 import '../domain/installed_application_service.dart';
@@ -540,17 +541,18 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _smartSelect() async {
     final CleanupDecisionPlan decisionPlan = _decisionPlanFor(_candidates);
-    final List<CleanupCandidate> automatic = decisionPlan.candidatesFor(
-      CleanupDecisionTier.automatic,
+    final CleanupRecoveryPlan recoveryPlan = CleanupRecoveryPlanner.build(
+      decisionPlan,
+      releaseGoalBytes: _acceptanceTargetBytes,
     );
-    final List<CleanupCandidate> recommended = decisionPlan.candidatesFor(
-      CleanupDecisionTier.recommended,
-    );
-    final List<CleanupCandidate> review = decisionPlan
-        .candidatesFor(CleanupDecisionTier.review)
-        .where((CleanupCandidate candidate) {
-          return candidate.category != CleanupCategory.recycleBin;
-        })
+    final List<CleanupCandidate> automatic = recoveryPlan.automatic
+        .map((CleanupDecision item) => item.candidate)
+        .toList(growable: false);
+    final List<CleanupCandidate> recommended = recoveryPlan.recommendedToGoal
+        .map((CleanupDecision item) => item.candidate)
+        .toList(growable: false);
+    final List<CleanupCandidate> review = recoveryPlan.reviewOpportunities
+        .map((CleanupDecision item) => item.candidate)
         .toList(growable: false);
     final List<CleanupCandidate> protected = decisionPlan.candidatesFor(
       CleanupDecisionTier.protected,
@@ -595,6 +597,26 @@ class _CleanerTabState extends State<CleanerTab> {
                     '${selectedBytes >= _acceptanceTargetBytes ? '达到 10 GiB 目标' : '还差 ${_formatSize(_acceptanceTargetBytes - selectedBytes)}'}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  if (!recoveryPlan.reachesGoal) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: VibekitsColors.warning.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: VibekitsColors.warning.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Text(
+                        '当前规则有把握释放 ${_formatSize(recoveryPlan.selectedBytes)}，'
+                        '距离目标还差 ${_formatSize(recoveryPlan.goalGapBytes)}。'
+                        '算法不会拿未知目录凑数；请在“分析全部占用”中复核不用的软件、旧版本和用户数据。',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Text('自动安全项：${_formatSize(automaticBytes)}'),
                   Text(
@@ -608,7 +630,7 @@ class _CleanerTabState extends State<CleanerTab> {
                     value: includeReview,
                     title: Text('加入建议清理 ${_formatSize(recommendedBytes)}'),
                     subtitle: Text(
-                      '归属明确但仍需你确认；另有 ${_formatSize(reviewBytes)} 证据不足项目不会加入计划。',
+                      '按大容量优先，仅加入达到目标所需项目；另有 ${_formatSize(reviewBytes)} 证据不足项目只展示、不自动加入。',
                     ),
                     onChanged: recommended.isEmpty
                         ? null

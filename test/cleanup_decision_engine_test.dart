@@ -122,4 +122,44 @@ void main() {
     expect(plan.decisions, hasLength(1));
     expect(plan.decisions.single.candidate.size, 1000);
   });
+
+  test('known one-day-old developer cache is recommended, never automatic', () {
+    final CleanupDecisionPlan plan = CleanupDecisionEngine.buildPlan(
+      <CleanupCandidate>[
+        candidate(
+          path: r'C:\Users\me\.gradle\caches\payload.bin',
+          category: CleanupCategory.devCache,
+          modified: now.subtract(const Duration(hours: 30)),
+          size: 2 * 1024 * 1024 * 1024,
+          source: 'Gradle 构建缓存',
+        ),
+      ],
+      now: now,
+      freeSpaceRatio: 0.08,
+    );
+
+    expect(plan.candidatesFor(CleanupDecisionTier.recommended), hasLength(1));
+    expect(plan.candidatesFor(CleanupDecisionTier.automatic), isEmpty);
+  });
+
+  test('large candidate inventory deduplicates without quadratic stall', () {
+    final List<CleanupCandidate> candidates = List<CleanupCandidate>.generate(
+      50000,
+      (int index) => candidate(
+        path: 'C:\\Cache\\package_${index ~/ 10}\\file_$index.bin',
+        category: CleanupCategory.applicationCache,
+        modified: now.subtract(const Duration(days: 10)),
+        size: 1024,
+      ),
+    );
+    final Stopwatch clock = Stopwatch()..start();
+    final CleanupDecisionPlan plan = CleanupDecisionEngine.buildPlan(
+      candidates,
+      now: now,
+    );
+    clock.stop();
+
+    expect(plan.decisions, hasLength(50000));
+    expect(clock.elapsed, lessThan(const Duration(seconds: 3)));
+  });
 }

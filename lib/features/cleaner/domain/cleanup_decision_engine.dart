@@ -153,13 +153,23 @@ abstract final class CleanupDecisionEngine {
 
     if (candidate.riskLevel == CleanupRiskLevel.cautious ||
         candidate.category.highRisk) {
+      final bool verifiedRegenerableDeveloperCache =
+          candidate.riskLevel == CleanupRiskLevel.safe &&
+          candidate.category == CleanupCategory.devCache &&
+          knownOwner &&
+          ageHours >= 24 &&
+          score >= 65;
       return CleanupDecision(
         candidate: candidate,
-        tier: ageHours >= minimumAutomaticAge && score >= 70
+        tier:
+            verifiedRegenerableDeveloperCache ||
+                (ageHours >= minimumAutomaticAge && score >= 70)
             ? CleanupDecisionTier.recommended
             : CleanupDecisionTier.review,
         score: score,
-        explanation: ageHours < 0
+        explanation: verifiedRegenerableDeveloperCache
+            ? '归属明确、可重新下载或重建，且已超过一天未修改；保持人工确认，不自动删除'
+            : ageHours < 0
             ? '可重建性或最近使用时间证据不足，需要确认'
             : '属于开发缓存或谨慎规则，已保留人工确认',
       );
@@ -198,18 +208,40 @@ abstract final class CleanupDecisionEngine {
         return left.path.length.compareTo(right.path.length);
       });
     final List<CleanupCandidate> result = <CleanupCandidate>[];
+    final Map<String, Set<String>> acceptedByGroup = <String, Set<String>>{};
     for (final CleanupCandidate candidate in ordered) {
-      final bool covered = result.any(
-        (CleanupCandidate parent) =>
-            parent.category != CleanupCategory.recycleBin &&
-            parent.category == candidate.category &&
-            parent.sourceLabel == candidate.sourceLabel &&
-            parent.size > 0 &&
-            _containsPath(parent.path, candidate.path),
+      final String group =
+          '${candidate.category.index}\u0000'
+          '${candidate.sourceLabel ?? ''}';
+      final Set<String> accepted = acceptedByGroup.putIfAbsent(
+        group,
+        () => <String>{},
       );
-      if (!covered) result.add(candidate);
+      final String normalized = _normalize(candidate.path);
+      if (_hasAcceptedAncestor(accepted, normalized)) continue;
+      result.add(candidate);
+      if (candidate.category != CleanupCategory.recycleBin &&
+          candidate.size > 0) {
+        accepted.add(normalized);
+      }
     }
     return result;
+  }
+
+  static bool _hasAcceptedAncestor(Set<String> accepted, String path) {
+    String cursor = path;
+    while (cursor.isNotEmpty) {
+      if (accepted.contains(cursor)) return true;
+      final int separator = cursor.lastIndexOf(Platform.pathSeparator);
+      if (separator < 0) return false;
+      // Preserve a Windows drive root (C:\) as the last possible ancestor.
+      final int nextLength = separator == 2 && cursor.length >= 3
+          ? 3
+          : separator;
+      if (nextLength >= cursor.length || nextLength <= 0) return false;
+      cursor = cursor.substring(0, nextLength);
+    }
+    return false;
   }
 
   static bool _containsPath(String root, String candidate) {

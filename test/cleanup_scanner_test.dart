@@ -69,4 +69,38 @@ void main() {
       sandbox.deleteSync(recursive: true);
     }
   });
+
+  test('精确缓存规则优先于泛化发现，系统保护始终优先', () {
+    const CleanupCandidate discovered = CleanupCandidate(
+      path: r'C:\App\Cache\a.bin',
+      size: 10,
+      category: CleanupCategory.discoveredTransient,
+      reason: '名称发现',
+      riskLevel: CleanupRiskLevel.cautious,
+    );
+    const CleanupCandidate exact = CleanupCandidate(
+      path: r'C:\App\Cache\a.bin',
+      size: 10,
+      category: CleanupCategory.applicationCache,
+      reason: '官方缓存规则',
+      sourceLabel: '应用缓存',
+      riskLevel: CleanupRiskLevel.safe,
+    );
+    const CleanupCandidate protected = CleanupCandidate(
+      path: r'C:\App\Cache\a.bin',
+      size: 10,
+      category: CleanupCategory.systemCache,
+      reason: '系统管理',
+      riskLevel: CleanupRiskLevel.systemManaged,
+    );
+
+    expect(
+      CleanupScanner.preferredCandidate(discovered, exact).reason,
+      '官方缓存规则',
+    );
+    expect(
+      CleanupScanner.preferredCandidate(exact, protected).riskLevel,
+      CleanupRiskLevel.systemManaged,
+    );
+  });
 }

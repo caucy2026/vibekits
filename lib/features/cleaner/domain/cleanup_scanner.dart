@@ -211,6 +211,9 @@ abstract final class CleanupScanner {
       }
       final Directory current = Directory(path);
       try {
+        // This code already runs in a dedicated isolate. Streaming directory
+        // enumeration avoids materializing huge cache folders, while sync
+        // metadata reads remove one Future allocation per file.
         await for (final FileSystemEntity entity in current.list(
           followLinks: false,
         )) {
@@ -218,7 +221,7 @@ abstract final class CleanupScanner {
           currentPath = entity.path;
           visited++;
           report();
-          if (visited % 64 == 0) {
+          if (visited % 256 == 0) {
             await Future<void>.delayed(Duration.zero);
           }
           final FileSystemEntityType type = FileSystemEntity.typeSync(
@@ -253,7 +256,7 @@ abstract final class CleanupScanner {
             }
           } else if (type == FileSystemEntityType.file) {
             final File file = File(entity.path);
-            final FileStat stat = await file.stat();
+            final FileStat stat = file.statSync();
             final int size = stat.size;
             if (size < minimumSizeBytes) continue;
             final DateTime modified = stat.modified;
@@ -402,7 +405,8 @@ abstract final class CleanupScanner {
         CleanupTargetStrategy.recycleBin => _scanRecycleBin(target),
       };
       for (final CleanupCandidate candidate in result.candidates) {
-        candidates[_pathKey(candidate.path)] = candidate;
+        final String key = _pathKey(candidate.path);
+        candidates[key] = preferredCandidate(candidates[key], candidate);
       }
       unreadable += result.unreadablePaths;
       visitedOffset += result.visitedEntries;
@@ -418,6 +422,37 @@ abstract final class CleanupScanner {
       visitedEntries: visitedOffset,
       candidateBytes: bytesOffset,
     );
+  }
+
+  /// Merges overlapping rules without letting broad semantic discovery erase
+  /// an exact catalog rule, while system-managed protection always wins.
+  static CleanupCandidate preferredCandidate(
+    CleanupCandidate? existing,
+    CleanupCandidate incoming,
+  ) {
+    if (existing == null) return incoming;
+    if (existing.riskLevel == CleanupRiskLevel.systemManaged) return existing;
+    if (incoming.riskLevel == CleanupRiskLevel.systemManaged) return incoming;
+    final bool existingDiscovered =
+        existing.category == CleanupCategory.discoveredTransient;
+    final bool incomingDiscovered =
+        incoming.category == CleanupCategory.discoveredTransient;
+    if (existingDiscovered != incomingDiscovered) {
+      return existingDiscovered ? incoming : existing;
+    }
+    if (existing.riskLevel != incoming.riskLevel) {
+      return existing.riskLevel == CleanupRiskLevel.cautious
+          ? existing
+          : incoming;
+    }
+    // Prefer the richer exact rule explanation, then retain the larger
+    // measured value if a file changed between overlapping scans.
+    if (incoming.impactNote.length != existing.impactNote.length) {
+      return incoming.impactNote.length > existing.impactNote.length
+          ? incoming
+          : existing;
+    }
+    return incoming.size > existing.size ? incoming : existing;
   }
 
   /// 把已过期的直属子目录聚合成单个候选。
