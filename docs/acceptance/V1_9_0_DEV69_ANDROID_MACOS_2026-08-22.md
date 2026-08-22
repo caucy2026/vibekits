@@ -38,4 +38,14 @@ Windows 主机执行 `flutter build macos` 时，Flutter 不提供 macOS 构建�
 4. 生成 SHA-256
 5. 上传 14 天保留的构建产物
 
+真实运行结果：
+
+- GitHub Actions Run：`32542306872`
+- 提交：`927a99893f0fc2a6271475d5c80d9dcd10348e72`
+- `flutter build macos --release --no-pub`：成功
+- 压缩与 SHA-256：成功
+- Artifact 上传：成功
+- Artifact：`Vibekits-1.9.0-dev.69-macOS`，53,000,834 字节
+- 保留至：2026-09-05
+
 这属于未签名 Release 构建验证；正式分发仍需 Apple Developer ID、签名和 notarization。

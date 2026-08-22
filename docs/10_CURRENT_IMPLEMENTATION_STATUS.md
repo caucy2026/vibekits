@@ -9,7 +9,7 @@
 ## 2026-08-22 当前增量状态
 
 - Android 12 arm64 Release 已在 `192.168.3.63:5555` 构建、安装和启动；三次冷启动平均 716 ms，稳定 PSS 约 102 MB，强制退出后无残留。移动端不再启动桌面 MCP/拖放/文件关联，并只挂载当前重型工作区。
-- macOS 源码基线和 Runner 已就绪；Windows 无 Xcode，真实 Release 构建交由新增的 macOS 14 GitHub Actions 执行。未签名构建通过不等于 Developer ID 签名及公证完成。
+- macOS 14 Runner 已完成真实 Release 构建、压缩、SHA-256 和 Artifact 上传（Run `32542306872`，53,000,834 字节）。未签名构建通过不等于 Developer ID 签名及公证完成。
 - Clash Verge / 虚拟机固定显示在开发工具左侧第二项。Windows Release 内置 Mihomo/QEMU；系统代理具备保存、确认应用、失败回滚和恢复原值，QEMU 可创建 qcow2 并启动已有磁盘/ISO。Harness 真实调用闭环已通过。
 - ADB 已从三个通用入口扩展为可被 Harness 自动选择的 Shell、Logcat、APK 安装、推送、拉取和截图语义接口；界面、工具清单、审批与真实活动日志使用同一注册源。
 - `192.168.3.63:5555` 已通过 APP 的 Harness bridge 实测连接、枚举、APK 安装、Shell、Logcat、文件往返校验和截图，不是直接终端绕过。大 APK 安装使用 5 分钟有界超时，完成或失败都会释放进程。

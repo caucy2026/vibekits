@@ -8,7 +8,7 @@
 - Android 可用入口：模型页默认进入本地 PP-OCRv6 tiny，不再先探测桌面 Harness Runtime。
 - 真机闭环：Android 12 arm64 Release APK 构建、安装成功；三次冷启动平均 716 ms，稳定 PSS 约 102 MB，退出无残留进程。
 - 构建体验：Gradle 限制为 3 GB/2 worker；使用 D 盘隔离缓存并规避 C/D 跨盘 Kotlin 增量缓存错误，避免构建拖慢整机。
-- macOS：Windows 本机确认无法调用 Xcode 构建；新增 macOS 14 GitHub Runner 的真实 Release 构建、压缩、校验和产物上传流程。
+- macOS：Windows 本机确认无法调用 Xcode 构建；macOS 14 GitHub Runner Run `32542306872` 已真实完成 Release 构建、压缩、校验和及 53,000,834 字节产物上传。
 
 ## 2026-08-22 · v1.9.0-dev.68 代理与轻量虚拟机可见、可用、可恢复
 
