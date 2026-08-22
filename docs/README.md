@@ -45,6 +45,7 @@
 39. [dev.68 代理与轻量虚拟机闭环验收](acceptance/V1_9_0_DEV68_NETWORK_VM_CLOSED_LOOP_2026-08-22.md)——真实系统代理恢复、qcow2 创建、QEMU 启停和 Harness 调用
 40. [dev.69 Android 真机与 macOS 构建验收](acceptance/V1_9_0_DEV69_ANDROID_MACOS_2026-08-22.md)——arm64 真机性能、进程退出与 macOS 14 Release CI
 41. [dev.70 Harness 本地启动性能验收](acceptance/V1_9_0_DEV70_HARNESS_STARTUP_2026-08-22.md)——旧入口纠正、真实分段计时、已完成优化与 3 秒门槛结论
+42. [dev.71 Clash Verge 工作区验收](acceptance/V1_9_0_DEV71_CLASH_WORKSPACE_2026-08-22.md)——订阅、节点、代理模式、系统代理、统计和日志真实闭环
 
 ## 完成定义
 

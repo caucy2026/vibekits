@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../domain/mihomo_controller_service.dart';
+import '../domain/mihomo_profile_service.dart';
 import '../domain/network_virtualization_service.dart';
 import '../domain/system_proxy_service.dart';
 
@@ -20,7 +23,12 @@ class _NetworkVirtualizationWorkspaceState
   BundledRuntimeStatus? _qemu;
   SystemProxySnapshot? _systemProxy;
   final SystemProxyService _systemProxyService = SystemProxyService();
-  String _configPath = '';
+  late final MihomoProfileService _profileService;
+  List<MihomoProfile> _profiles = const <MihomoProfile>[];
+  MihomoProfile? _activeProfile;
+  MihomoManagedConfig? _runningConfig;
+  MihomoControllerSnapshot? _controllerSnapshot;
+  Timer? _dashboardTimer;
   String _diskPath = '';
   String _isoPath = '';
   String _message = '';
@@ -28,22 +36,47 @@ class _NetworkVirtualizationWorkspaceState
   int _memory = 2048;
   int _cpus = 2;
   int _diskSizeGiB = 32;
-  final TextEditingController _proxyPort = TextEditingController(text: '7890');
 
   String get _proxyDataDirectory =>
       '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
       '${Platform.pathSeparator}mihomo';
 
+  bool get _proxyRunning =>
+      NetworkVirtualizationService.status()['mihomoRunning'] == true;
+
+  MihomoControllerService? get _controller {
+    final MihomoConfigSummary? summary = _runningConfig?.summary;
+    return summary?.controller == null
+        ? null
+        : MihomoControllerService(summary!.controller!, secret: summary.secret);
+  }
+
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _profileService = MihomoProfileService(dataDirectory: _proxyDataDirectory);
+    unawaited(_initialize());
   }
 
   @override
   void dispose() {
-    _proxyPort.dispose();
+    _dashboardTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _initialize() async {
+    await Future.wait<void>(<Future<void>>[_loadProfiles(), _refresh()]);
+  }
+
+  Future<void> _loadProfiles() async {
+    final MihomoProfileState state = await _profileService.load();
+    if (!mounted) return;
+    setState(() {
+      _profiles = state.profiles;
+      _activeProfile = state.profiles
+          .where((MihomoProfile item) => item.id == state.activeId)
+          .firstOrNull;
+    });
   }
 
   Future<void> _refresh() async {
@@ -67,6 +100,7 @@ class _NetworkVirtualizationWorkspaceState
       _qemu = status[1];
       _systemProxy = systemProxy;
     });
+    if (_proxyRunning) await _refreshController();
   }
 
   Future<void> _pickConfig() async {
@@ -75,7 +109,265 @@ class _NetworkVirtualizationWorkspaceState
         XTypeGroup(label: 'Clash YAML', extensions: <String>['yaml', 'yml']),
       ],
     );
-    if (file != null && mounted) setState(() => _configPath = file.path);
+    if (file == null) return;
+    await _run(() async {
+      final MihomoProfile profile = await _profileService.importConfig(
+        sourcePath: file.path,
+      );
+      await _loadProfiles();
+      if (mounted) setState(() => _activeProfile = profile);
+    }, success: '配置已导入，可直接启动');
+  }
+
+  Future<void> _addSubscription() async {
+    final TextEditingController name = TextEditingController();
+    final TextEditingController url = TextEditingController();
+    final bool confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            title: const Text('添加订阅'),
+            content: SizedBox(
+              width: 520,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  TextField(
+                    controller: name,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: '名称',
+                      hintText: '例如：工作代理',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    key: const Key('mihomo-subscription-url'),
+                    controller: url,
+                    decoration: const InputDecoration(
+                      labelText: '订阅地址',
+                      hintText: 'https://…',
+                      helperText: '完整地址保存在系统凭据库，不写入普通设置和日志',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('mihomo-add-subscription-confirm'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('下载并添加'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (confirmed) {
+      await _run(() async {
+        final MihomoProfile profile = await _profileService.addSubscription(
+          name: name.text,
+          url: url.text,
+        );
+        await _loadProfiles();
+        if (mounted) setState(() => _activeProfile = profile);
+      }, success: '订阅已添加并设为当前配置');
+    }
+    name.dispose();
+    url.dispose();
+  }
+
+  Future<void> _selectProfile(MihomoProfile profile) async {
+    if (_proxyRunning) {
+      setState(() => _message = '请先停止当前代理，再切换配置');
+      return;
+    }
+    await _profileService.select(profile.id);
+    if (mounted) setState(() => _activeProfile = profile);
+  }
+
+  Future<void> _updateProfile(MihomoProfile profile) async {
+    await _run(() async {
+      final MihomoProfile updated = await _profileService.update(profile);
+      await _loadProfiles();
+      if (mounted) setState(() => _activeProfile = updated);
+    }, success: '订阅已更新');
+  }
+
+  Future<void> _deleteProfile(MihomoProfile profile) async {
+    final bool confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            title: const Text('删除配置？'),
+            content: Text('将删除“${profile.name}”的本地副本和订阅凭据，不影响服务商账户。'),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed) return;
+    await _run(() async {
+      await _profileService.delete(profile);
+      await _loadProfiles();
+    }, success: '配置已删除');
+  }
+
+  Future<void> _startProxyAndEnableSystem() async {
+    final MihomoProfile? profile = _activeProfile;
+    if (profile == null) throw StateError('请先添加订阅或导入 Clash YAML');
+    final MihomoManagedConfig config = await _profileService
+        .prepareManagedConfig(profile);
+    await NetworkVirtualizationService.startMihomo(
+      configPath: config.path,
+      dataDirectory: _proxyDataDirectory,
+    );
+    try {
+      _systemProxy = await _systemProxyService.applyLocal(
+        port: config.summary.mixedPort,
+        dataDirectory: _proxyDataDirectory,
+      );
+      _runningConfig = config;
+      await _waitForController();
+      _startDashboardTimer();
+    } on Object {
+      try {
+        _systemProxy = await _systemProxyService.restore(
+          dataDirectory: _proxyDataDirectory,
+        );
+      } on Object {
+        // Preserve the original startup failure. A later refresh will surface
+        // the actual Windows proxy state without hiding the root cause.
+      }
+      await NetworkVirtualizationService.stopMihomo();
+      _runningConfig = null;
+      rethrow;
+    }
+  }
+
+  Future<void> _confirmProxyStart() async {
+    final MihomoProfile? profile = _activeProfile;
+    if (profile == null) {
+      setState(() => _message = '请先添加订阅或导入 Clash YAML');
+      return;
+    }
+    final bool approved =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            title: const Text('启动代理并切换 Windows 网络？'),
+            content: Text(
+              '将启动“${profile.name}”，并把当前用户系统代理切换到 '
+              '127.0.0.1:${profile.summary.mixedPort}。原设置会先保存，停止时自动恢复。',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('mihomo-confirm-system-proxy'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('启动并切换'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (approved) {
+      await _run(_startProxyAndEnableSystem, success: '代理已启动，系统代理已启用');
+    }
+  }
+
+  Future<void> _waitForController() async {
+    Object? lastError;
+    for (int attempt = 0; attempt < 30; attempt++) {
+      try {
+        await _refreshController();
+        return;
+      } on Object catch (error) {
+        lastError = error;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+    throw StateError('Mihomo 已启动，但控制面板未就绪：$lastError');
+  }
+
+  void _startDashboardTimer() {
+    _dashboardTimer?.cancel();
+    _dashboardTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_refreshController(silent: true)),
+    );
+  }
+
+  Future<void> _refreshController({bool silent = false}) async {
+    final MihomoControllerService? controller = _controller;
+    if (controller == null) return;
+    try {
+      final MihomoControllerSnapshot snapshot = await controller.snapshot();
+      if (mounted) setState(() => _controllerSnapshot = snapshot);
+    } on Object {
+      if (!silent) rethrow;
+    }
+  }
+
+  Future<void> _setMode(String mode) async {
+    final MihomoControllerService? controller = _controller;
+    if (controller == null) return;
+    await _run(() async {
+      await controller.setMode(mode);
+      await _refreshController();
+    }, success: '代理模式已切换');
+  }
+
+  Future<void> _selectNode(MihomoProxyGroup group, String node) async {
+    final MihomoControllerService? controller = _controller;
+    if (controller == null) return;
+    await _run(() async {
+      await controller.selectNode(group.name, node);
+      await _refreshController();
+    }, success: '节点已切换为 $node');
+  }
+
+  Future<void> _toggleSystemProxy(bool enabled) async {
+    final MihomoManagedConfig? config = _runningConfig;
+    if (enabled && config == null) {
+      await _confirmProxyStart();
+      return;
+    }
+    await _run(() async {
+      _systemProxy = enabled
+          ? await _systemProxyService.applyLocal(
+              port: config!.summary.mixedPort,
+              dataDirectory: _proxyDataDirectory,
+            )
+          : await _systemProxyService.restore(
+              dataDirectory: _proxyDataDirectory,
+            );
+    }, success: enabled ? '系统代理已启用' : '系统代理已关闭，Mihomo 继续运行');
+  }
+
+  Future<void> _stopProxyAndRestoreSystem() async {
+    _dashboardTimer?.cancel();
+    _systemProxy = await _systemProxyService.restore(
+      dataDirectory: _proxyDataDirectory,
+    );
+    await NetworkVirtualizationService.stopMihomo();
+    _runningConfig = null;
+    _controllerSnapshot = null;
   }
 
   Future<void> _pickDisk() async {
@@ -99,56 +391,6 @@ class _NetworkVirtualizationWorkspaceState
     if (file != null && mounted) setState(() => _isoPath = file.path);
   }
 
-  Future<void> _startProxyAndEnableSystem() async {
-    final int? port = int.tryParse(_proxyPort.text.trim());
-    if (port == null) throw const FormatException('请输入配置中的 mixed-port');
-    await NetworkVirtualizationService.startMihomo(
-      configPath: _configPath,
-      dataDirectory: _proxyDataDirectory,
-    );
-    try {
-      _systemProxy = await _systemProxyService.applyLocal(
-        port: port,
-        dataDirectory: _proxyDataDirectory,
-      );
-    } on Object {
-      await NetworkVirtualizationService.stopMihomo();
-      rethrow;
-    }
-  }
-
-  Future<void> _confirmProxyStart() async {
-    final bool? approved = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('启动代理并切换 Windows 网络？'),
-        content: Text(
-          '将启动内置 Mihomo，并把当前用户系统代理切换到 '
-          '127.0.0.1:${_proxyPort.text.trim()}。原设置会先保存，停止时自动恢复。',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('mihomo-confirm-system-proxy'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('启动并切换'),
-          ),
-        ],
-      ),
-    );
-    if (approved == true) await _run(_startProxyAndEnableSystem);
-  }
-
-  Future<void> _stopProxyAndRestoreSystem() async {
-    _systemProxy = await _systemProxyService.restore(
-      dataDirectory: _proxyDataDirectory,
-    );
-    await NetworkVirtualizationService.stopMihomo();
-  }
-
   Future<void> _createDisk() async {
     final FileSaveLocation? location = await getSaveLocation(
       suggestedName: 'vibekits-vm.qcow2',
@@ -164,7 +406,10 @@ class _NetworkVirtualizationWorkspaceState
     if (mounted) setState(() => _diskPath = location.path);
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    String success = '操作完成',
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -172,9 +417,9 @@ class _NetworkVirtualizationWorkspaceState
     });
     try {
       await action();
-      _message = '操作完成';
+      if (mounted) setState(() => _message = success);
     } on Object catch (error) {
-      _message = '$error';
+      if (mounted) setState(() => _message = '$error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -200,6 +445,418 @@ class _NetworkVirtualizationWorkspaceState
     );
   }
 
+  Widget _proxyTab() => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      final bool compact = constraints.maxWidth < 900;
+      final Widget profiles = _profilePane(compact: compact);
+      final Widget dashboard = _dashboard();
+      return Column(
+        children: <Widget>[
+          _proxyToolbar(),
+          if (_message.isNotEmpty)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              child: Text(
+                _message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          Expanded(
+            child: compact
+                ? ListView(
+                    padding: const EdgeInsets.all(12),
+                    children: <Widget>[
+                      profiles,
+                      const SizedBox(height: 12),
+                      dashboard,
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      SizedBox(width: 310, child: profiles),
+                      const VerticalDivider(width: 1),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(14),
+                          child: dashboard,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      );
+    },
+  );
+
+  Widget _proxyToolbar() => Container(
+    height: 58,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
+    ),
+    child: Row(
+      children: <Widget>[
+        Icon(
+          _proxyRunning ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _proxyRunning
+                ? '${_activeProfile?.name ?? 'Mihomo'} · 127.0.0.1:${_runningConfig?.summary.mixedPort ?? '-'}'
+                : '代理未启动',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        IconButton(
+          tooltip: '刷新状态',
+          onPressed: _busy ? null : _refresh,
+          icon: const Icon(Icons.refresh),
+        ),
+        const SizedBox(width: 4),
+        if (_proxyRunning)
+          OutlinedButton.icon(
+            key: const Key('mihomo-stop'),
+            onPressed: _busy
+                ? null
+                : () =>
+                      _run(_stopProxyAndRestoreSystem, success: '代理已停止，原网络已恢复'),
+            icon: const Icon(Icons.stop_circle_outlined),
+            label: const Text('停止'),
+          )
+        else
+          FilledButton.icon(
+            key: const Key('mihomo-start'),
+            onPressed: _busy || _mihomo?.available != true
+                ? null
+                : _confirmProxyStart,
+            icon: const Icon(Icons.play_arrow),
+            label: const Text('启动代理'),
+          ),
+      ],
+    ),
+  );
+
+  Widget _profilePane({required bool compact}) => Container(
+    padding: const EdgeInsets.all(12),
+    child: Column(
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            const Expanded(
+              child: Text(
+                '订阅与配置',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              tooltip: '添加订阅',
+              onPressed: _busy ? null : _addSubscription,
+              icon: const Icon(Icons.add_link),
+            ),
+            IconButton(
+              tooltip: '导入 YAML',
+              onPressed: _busy ? null : _pickConfig,
+              icon: const Icon(Icons.file_open_outlined),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        if (_profiles.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: <Widget>[
+                  const Icon(Icons.cloud_download_outlined, size: 32),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '添加订阅或导入 Clash YAML 后即可使用',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _addSubscription,
+                    icon: const Icon(Icons.add),
+                    label: const Text('添加订阅'),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else if (compact)
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _profiles.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 6),
+            itemBuilder: _profileItem,
+          )
+        else
+          Expanded(
+            child: ListView.separated(
+              itemCount: _profiles.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 6),
+              itemBuilder: _profileItem,
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          '数据目录：$_proxyDataDirectory',
+          style: Theme.of(context).textTheme.bodySmall,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    ),
+  );
+
+  Widget _profileItem(BuildContext context, int index) {
+    final MihomoProfile profile = _profiles[index];
+    final bool selected = profile.id == _activeProfile?.id;
+    return Card(
+      color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
+      child: ListTile(
+        dense: true,
+        selected: selected,
+        onTap: () => _selectProfile(profile),
+        leading: Icon(
+          profile.subscription
+              ? Icons.cloud_outlined
+              : Icons.description_outlined,
+        ),
+        title: Text(profile.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          '${profile.sourceHost} · ${profile.summary.proxyCount} 节点\n'
+          '${profile.updatedAt.toString().substring(0, 16)}',
+          maxLines: 2,
+        ),
+        trailing: PopupMenuButton<String>(
+          onSelected: (String action) {
+            if (action == 'update') unawaited(_updateProfile(profile));
+            if (action == 'delete') unawaited(_deleteProfile(profile));
+          },
+          itemBuilder: (_) => <PopupMenuEntry<String>>[
+            if (profile.subscription)
+              const PopupMenuItem(value: 'update', child: Text('立即更新')),
+            const PopupMenuItem(value: 'delete', child: Text('删除')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dashboard() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    final List<String> logs =
+        (NetworkVirtualizationService.status()['mihomoLog'] as List? ??
+                const <Object>[])
+            .map((Object? line) => '$line')
+            .toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _runtimeCard(_mihomo),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: <Widget>[
+            _metricCard(
+              '活动连接',
+              '${snapshot?.connectionCount ?? 0}',
+              Icons.link,
+            ),
+            _metricCard(
+              '下载流量',
+              _bytes(snapshot?.downloadTotal ?? 0),
+              Icons.download,
+            ),
+            _metricCard(
+              '上传流量',
+              _bytes(snapshot?.uploadTotal ?? 0),
+              Icons.upload,
+            ),
+            _metricCard(
+              '当前节点',
+              snapshot?.groups.firstOrNull?.selected ?? '未启动',
+              Icons.public,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  '网络设置',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: <Widget>[
+                    const Expanded(child: Text('系统代理')),
+                    Switch(
+                      key: const Key('mihomo-system-proxy-switch'),
+                      value: _systemProxy?.enabled == true,
+                      onChanged: _busy || !Platform.isWindows
+                          ? null
+                          : _toggleSystemProxy,
+                    ),
+                  ],
+                ),
+                Text(
+                  _systemProxy?.enabled == true
+                      ? '已启用 · ${_systemProxy?.server ?? ''}'
+                      : '未启用；关闭时会恢复启动前的 Windows 设置',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                const Text('代理模式'),
+                const SizedBox(height: 6),
+                SegmentedButton<String>(
+                  key: const Key('mihomo-mode-selector'),
+                  segments: const <ButtonSegment<String>>[
+                    ButtonSegment(value: 'rule', label: Text('规则')),
+                    ButtonSegment(value: 'global', label: Text('全局')),
+                    ButtonSegment(value: 'direct', label: Text('直连')),
+                  ],
+                  selected: <String>{
+                    snapshot?.mode ?? _activeProfile?.summary.mode ?? 'rule',
+                  },
+                  onSelectionChanged: !_proxyRunning || _busy
+                      ? null
+                      : (Set<String> value) => _setMode(value.first),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  '代理组与节点',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                if (!_proxyRunning)
+                  const Text('启动代理后可直接选择代理组和节点。')
+                else if (snapshot == null)
+                  const LinearProgressIndicator()
+                else if (snapshot.groups.isEmpty)
+                  const Text('当前配置没有可切换的代理组。')
+                else
+                  ...snapshot.groups.map(
+                    (MihomoProxyGroup group) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey<String>('mihomo-group-${group.name}'),
+                        initialValue: group.nodes.contains(group.selected)
+                            ? group.selected
+                            : group.nodes.first,
+                        decoration: InputDecoration(
+                          labelText: '${group.name} · ${group.type}',
+                        ),
+                        items: group.nodes
+                            .map(
+                              (String node) => DropdownMenuItem<String>(
+                                value: node,
+                                child: Text(
+                                  node,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: _busy
+                            ? null
+                            : (String? node) {
+                                if (node != null) _selectNode(group, node);
+                              },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: ExpansionTile(
+            initiallyExpanded: logs.isNotEmpty,
+            title: Text('运行日志（${logs.length}）'),
+            children: <Widget>[
+              SizedBox(
+                height: 180,
+                width: double.infinity,
+                child: logs.isEmpty
+                    ? const Center(child: Text('暂无日志'))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: logs.length,
+                        itemBuilder: (_, int index) => SelectableText(
+                          logs[index],
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _metricCard(String label, String value, IconData icon) => SizedBox(
+    width: 190,
+    child: Card(
+      child: Padding(
+        padding: const EdgeInsets.all(13),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(label, style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Widget _runtimeCard(BundledRuntimeStatus? status) {
     final bool available = status?.available == true;
     return Card(
@@ -222,86 +879,12 @@ class _NetworkVirtualizationWorkspaceState
     );
   }
 
-  Widget _proxyTab() => ListView(
-    padding: const EdgeInsets.all(16),
-    children: <Widget>[
-      Text('网络代理', style: Theme.of(context).textTheme.headlineSmall),
-      const SizedBox(height: 4),
-      const Text('内置 Mihomo 内核，兼容 Clash Verge 配置。启动和停止均在独立进程，不阻塞界面。'),
-      const SizedBox(height: 12),
-      _runtimeCard(_mihomo),
-      const SizedBox(height: 12),
-      TextField(
-        key: const Key('mihomo-config-path'),
-        controller: TextEditingController(text: _configPath),
-        readOnly: true,
-        decoration: InputDecoration(
-          labelText: '配置文件',
-          hintText: '选择 .yaml / .yml',
-          suffixIcon: IconButton(
-            tooltip: '选择配置',
-            onPressed: _pickConfig,
-            icon: const Icon(Icons.folder_open_outlined),
-          ),
-        ),
-      ),
-      const SizedBox(height: 8),
-      Text('运行数据：$_proxyDataDirectory'),
-      const SizedBox(height: 8),
-      TextField(
-        key: const Key('mihomo-proxy-port'),
-        controller: _proxyPort,
-        keyboardType: TextInputType.number,
-        decoration: const InputDecoration(
-          labelText: '系统代理端口',
-          helperText: '填写配置文件中的 mixed-port，默认 7890',
-        ),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        _systemProxy == null
-            ? '系统代理：正在读取'
-            : '系统代理：${_systemProxy!.enabled ? '已启用' : '未启用'}'
-                  '${_systemProxy!.server == null ? '' : ' · ${_systemProxy!.server}'}',
-        key: const Key('system-proxy-status'),
-      ),
-      const SizedBox(height: 12),
-      Wrap(
-        spacing: 8,
-        children: <Widget>[
-          FilledButton.icon(
-            key: const Key('mihomo-start'),
-            onPressed: _busy || _mihomo?.available != true
-                ? null
-                : _confirmProxyStart,
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('启动并启用系统代理'),
-          ),
-          OutlinedButton.icon(
-            key: const Key('mihomo-stop'),
-            onPressed: _busy ? null : () => _run(_stopProxyAndRestoreSystem),
-            icon: const Icon(Icons.stop),
-            label: const Text('停止并恢复原网络'),
-          ),
-        ],
-      ),
-      if (_message.isNotEmpty) ...<Widget>[
-        const SizedBox(height: 12),
-        SelectableText(_message),
-      ],
-      const SizedBox(height: 16),
-      const Text(
-        '启用前会保存当前 Windows 用户代理；停止时恢复原值。异常退出后备份仍保留，可再次点击“停止并恢复原网络”。TUN 不会静默开启。',
-      ),
-    ],
-  );
-
   Widget _vmTab() => ListView(
     padding: const EdgeInsets.all(16),
     children: <Widget>[
       Text('轻量虚拟机', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 4),
-      const Text('内置 QEMU x86_64 运行时。选择已有磁盘或 ISO 后启动，关闭不会影响 Vibekits 主界面。'),
+      const Text('内置 QEMU x86_64 运行时。选择已有磁盘或 ISO 后启动。'),
       const SizedBox(height: 12),
       _runtimeCard(_qemu),
       const SizedBox(height: 12),
@@ -411,16 +994,35 @@ class _NetworkVirtualizationWorkspaceState
     ],
   );
 
-  Widget _pathField(String label, String value, VoidCallback pick) => TextField(
-    controller: TextEditingController(text: value),
-    readOnly: true,
-    decoration: InputDecoration(
-      labelText: label,
-      suffixIcon: IconButton(
-        tooltip: '选择文件',
-        onPressed: pick,
-        icon: const Icon(Icons.folder_open_outlined),
-      ),
-    ),
-  );
+  Widget _pathField(String label, String value, VoidCallback pick) =>
+      InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                value.isEmpty ? '未选择' : value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              tooltip: '选择文件',
+              onPressed: pick,
+              icon: const Icon(Icons.folder_open_outlined),
+            ),
+          ],
+        ),
+      );
+
+  static String _bytes(int value) {
+    if (value >= 1024 * 1024 * 1024) {
+      return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(2)} GiB';
+    }
+    if (value >= 1024 * 1024) {
+      return '${(value / (1024 * 1024)).toStringAsFixed(1)} MiB';
+    }
+    if (value >= 1024) return '${(value / 1024).toStringAsFixed(1)} KiB';
+    return '$value B';
+  }
 }

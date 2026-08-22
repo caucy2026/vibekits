@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
+import 'package:vibekits/features/dev_tools/domain/mihomo_controller_service.dart';
 import 'package:vibekits/features/dev_tools/domain/network_virtualization_service.dart';
 import 'package:vibekits/features/dev_tools/domain/system_proxy_service.dart';
 
@@ -55,6 +56,12 @@ void main() {
         timeout: const Duration(seconds: 3),
       );
       await socket.close();
+      final MihomoControllerService controller = MihomoControllerService(
+        Uri.parse('http://127.0.0.1:19090'),
+      );
+      expect((await controller.snapshot()).mode, 'direct');
+      await controller.setMode('rule');
+      expect((await controller.snapshot()).mode, 'rule');
       final SystemProxySnapshot applied = await proxy.inspect();
       expect(applied.enabled, isTrue);
       expect(applied.server, '127.0.0.1:17890');

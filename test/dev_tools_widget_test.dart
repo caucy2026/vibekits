@@ -80,6 +80,8 @@ void main() {
   });
 
   testWidgets('工具列表明确显示 Clash Verge 和轻量虚拟机', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: DevToolsTab())),
     );
@@ -104,6 +106,9 @@ void main() {
     );
     expect(find.text('Clash Verge'), findsWidgets);
     expect(find.text('轻量虚拟机'), findsOneWidget);
+    expect(find.text('订阅与配置'), findsOneWidget);
+    expect(find.text('代理模式'), findsOneWidget);
+    expect(find.byKey(const Key('mihomo-system-proxy-switch')), findsOneWidget);
     expect(find.byKey(const Key('mihomo-start')), findsOneWidget);
     await tester.tap(find.text('轻量虚拟机'));
     await tester.pumpAndSettle();
