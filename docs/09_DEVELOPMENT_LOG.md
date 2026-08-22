@@ -2,6 +2,14 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-22 · v1.9.0-dev.69 Android 真机性能与 macOS 构建链
+
+- Android 真机性能：裁掉移动端无效的桌面 MCP 服务、文件关联和拖放监听；切换模块时释放隐藏的重型工作区。
+- Android 可用入口：模型页默认进入本地 PP-OCRv6 tiny，不再先探测桌面 Harness Runtime。
+- 真机闭环：Android 12 arm64 Release APK 构建、安装成功；三次冷启动平均 716 ms，稳定 PSS 约 102 MB，退出无残留进程。
+- 构建体验：Gradle 限制为 3 GB/2 worker；使用 D 盘隔离缓存并规避 C/D 跨盘 Kotlin 增量缓存错误，避免构建拖慢整机。
+- macOS：Windows 本机确认无法调用 Xcode 构建；新增 macOS 14 GitHub Runner 的真实 Release 构建、压缩、校验和产物上传流程。
+
 ## 2026-08-22 · v1.9.0-dev.68 代理与轻量虚拟机可见、可用、可恢复
 
 - 聊天记录和 dev41 文档确认代理/虚拟机早已进入范围，但旧实现只启动 Mihomo 和已有 QEMU 磁盘；入口又位于网络分类深处。现在“Clash Verge / 虚拟机”固定为左侧第二个独立工具，程序员计算器仍保持默认第一页。

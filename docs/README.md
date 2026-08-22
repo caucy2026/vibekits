@@ -43,6 +43,7 @@
 37. [dev.66 工具集 UI 与智能体接口验收](acceptance/V1_9_0_DEV66_UTILITY_UI_AGENT_2026-08-22.md)——自动可见工具条、小窗口、自带接口 ID 与快捷执行
 38. [dev.67 ADB 语义工具与真机验收](acceptance/V1_9_0_DEV67_ADB_SEMANTIC_TOOLS_2026-08-22.md)——Shell、Logcat、文件往返、截图与 APK 安装门禁
 39. [dev.68 代理与轻量虚拟机闭环验收](acceptance/V1_9_0_DEV68_NETWORK_VM_CLOSED_LOOP_2026-08-22.md)——真实系统代理恢复、qcow2 创建、QEMU 启停和 Harness 调用
+40. [dev.69 Android 真机与 macOS 构建验收](acceptance/V1_9_0_DEV69_ANDROID_MACOS_2026-08-22.md)——arm64 真机性能、进程退出与 macOS 14 Release CI
 
 ## 完成定义
 

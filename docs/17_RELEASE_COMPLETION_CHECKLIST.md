@@ -1,7 +1,7 @@
 # Vibekits 发布完成清单
 
 版本：1.8
-当前基线：`v1.9.0-dev.68+78`
+当前基线：`v1.9.0-dev.69+79`
 更新日期：2026-08-22
 
 ## 0.1 dev67 当前真实状态（优先级最高）
@@ -12,6 +12,8 @@
 | APK 安装 | ✅ 真机通过 | 161.7 MiB Android Release APK 由 `vibekits.adb.install_apk` 安装成功；修复固定 10 秒超时后完整验收 15 秒通过 |
 | Windows Release 主程序 | ✅ 本轮通过 | `flutter build windows --release --no-pub` 成功；发布目录版本 `1.9.0-dev.68+78`，25 项必需运行时及内置 Git 通过校验 |
 | 代理与轻量虚拟机 | ✅ Windows 主链路 | Harness 使用 Release 内置 Mihomo/QEMU 完成系统代理保存/切换/恢复、1 GiB qcow2 创建、VM 无窗口启停和 PID 状态闭环；TUN/快照另列增强项 |
+| Android arm64 Release | ✅ 真机通过 | `192.168.3.63:5555` 安装 dev.69；三次冷启动 734/692/721 ms，PSS 104123 KB，退出无残留 |
+| macOS Release | 🟡 Runner 待回传 | Windows 无 Xcode，已增加 macOS 14 Actions 构建、压缩、SHA-256 与 Artifact；签名、公证仍需 Apple 凭据 |
 | ADB 扩展矩阵 | 🟡 待补 | 无线配对码 UI、流式 Logcat 停止、APK 降级/签名冲突、未授权/离线设备矩阵尚未全部实证 |
 | Windows 可分发安装 | 🔴 未完成 | 仍缺安装器、卸载/升级覆盖和可信代码签名；便携 Release 不能替代 |
 | 清理安全释放 10 GiB | 🔴 未达标 | 不通过删除运行中应用、用户文档或无把握数据凑数；必须由 APP 报告真实前后容量差完成 |

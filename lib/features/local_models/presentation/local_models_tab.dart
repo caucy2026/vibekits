@@ -167,7 +167,9 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         ? _ModelWorkspace.ocr
         : _ModelWorkspace.agent;
     _agentOpened = _workspace == _ModelWorkspace.agent;
-    unawaited(_initializeHarnessDebugDirectory());
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      unawaited(_initializeHarnessDebugDirectory());
+    }
     if (_workspace == _ModelWorkspace.ocr) unawaited(_refresh());
     final String? path = widget.initialImportPath;
     if (path != null) {

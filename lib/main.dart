@@ -10,6 +10,10 @@ void main(List<String> arguments) {
   final List<String> initialFilePaths = arguments
       .where((String argument) => File(argument).existsSync())
       .toList(growable: false);
-  unawaited(WindowsFileAssociations.registerCurrentExecutable());
+  // File associations only exist on Windows. Avoid touching the executable
+  // path and FFI-backed registration service during Android cold start.
+  if (Platform.isWindows) {
+    unawaited(WindowsFileAssociations.registerCurrentExecutable());
+  }
   runApp(VibekitsApp(initialFilePaths: initialFilePaths));
 }

@@ -47,7 +47,12 @@ class _VibekitsAppState extends State<VibekitsApp> {
     super.initState();
     _settings.addListener(_refresh);
     if (widget.settingsController == null) _settings.load();
-    if (!_isFlutterTest) unawaited(_startExternalToolServer());
+    // The external Harness/MCP endpoint is a desktop integration. Starting a
+    // local socket server on Android adds cold-start work and keeps resources
+    // alive without providing a usable mobile workflow.
+    if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
+      unawaited(_startExternalToolServer());
+    }
   }
 
   Future<void> _startExternalToolServer() async {

@@ -131,9 +131,15 @@ class _MainShellState extends State<MainShell> {
       setState(() => _loadedTabs.add(_selectedIndex));
     });
     widget.settingsController.addListener(_applySettings);
-    if (widget.droppedFiles == null) WindowsFileDrop.instance.start();
-    _dropSubscription = (widget.droppedFiles ?? WindowsFileDrop.instance.files)
-        .listen(_handleDroppedFiles);
+    final bool supportsNativeDrop = Platform.isWindows || Platform.isMacOS;
+    if (widget.droppedFiles != null) {
+      _dropSubscription = widget.droppedFiles!.listen(_handleDroppedFiles);
+    } else if (supportsNativeDrop) {
+      WindowsFileDrop.instance.start();
+      _dropSubscription = WindowsFileDrop.instance.files.listen(
+        _handleDroppedFiles,
+      );
+    }
     if (widget.initialFilePath != null &&
         startupKind == VibekitsFileKind.unsupported) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -159,7 +165,13 @@ class _MainShellState extends State<MainShell> {
     if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
       setState(() {
         _selectedIndex = restoredIndex;
-        _loadedTabs.add(restoredIndex);
+        if (Platform.isAndroid || Platform.isIOS) {
+          _loadedTabs
+            ..clear()
+            ..add(restoredIndex);
+        } else {
+          _loadedTabs.add(restoredIndex);
+        }
       });
     }
   }
@@ -186,12 +198,26 @@ class _MainShellState extends State<MainShell> {
       return;
     }
     _hasUserSelectedTab = true;
+    final bool mobile = Platform.isAndroid || Platform.isIOS;
     final bool needsLoad = !_loadedTabs.contains(index);
-    setState(() => _selectedIndex = index);
+    setState(() {
+      _selectedIndex = index;
+      // Desktop keeps workspaces alive for instant switching. Mobile keeps
+      // only the visible workspace mounted so OCR, archive and database state
+      // cannot accumulate into an ever-growing background memory footprint.
+      if (mobile && !needsLoad) {
+        _loadedTabs
+          ..clear()
+          ..add(index);
+      }
+    });
     if (needsLoad) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || _selectedIndex != index) return;
-        setState(() => _loadedTabs.add(index));
+        setState(() {
+          if (mobile) _loadedTabs.clear();
+          _loadedTabs.add(index);
+        });
       });
     }
     if (widget.settingsController.value.restoreLastTab) {
@@ -409,7 +435,12 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.image
                 ? widget.initialFilePath
                 : null),
-        initialLargeModelView: settings.lastLargeModelView,
+        // The bundled Harness runtime is desktop-only. Android opens the
+        // useful local OCR workspace immediately instead of spending the
+        // first interaction probing a runtime that cannot execute there.
+        initialLargeModelView: Platform.isAndroid
+            ? 'ocr'
+            : settings.lastLargeModelView,
         onLargeModelViewChanged: (String view) =>
             widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
@@ -687,63 +718,75 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildCompactNavigation(BuildContext context) {
-    return Container(
-      key: const Key('primary-navigation-compact'),
-      height: 58,
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.all(5),
-      decoration: BoxDecoration(
-        color: context.vibe.panel,
-        borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: context.vibe.border),
-      ),
-      child: Row(
-        children: List<Widget>.generate(_tabTitles.length, (int index) {
-          final bool selected = index == _selectedIndex;
-          final Color color = selected
-              ? Theme.of(context).colorScheme.primary
-              : context.vibe.muted;
-          return Expanded(
-            child: Semantics(
-              selected: selected,
-              button: true,
-              child: Material(
-                color: selected
-                    ? Theme.of(context).colorScheme.primary
-                          .withValues(alpha: 0.10)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                child: InkWell(
-                  key: ValueKey<String>('compact-nav-${_tabTitles[index]}'),
-                  onTap: () => _selectTab(index),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: <Widget>[
-                      Icon(_tabIcons[index], size: 18, color: color),
-                      const SizedBox(width: 7),
-                      Flexible(
-                        child: Text(
-                          _tabTitles[index],
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 13,
-                            fontWeight: selected
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                          ),
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool iconsOnly = constraints.maxWidth < 760;
+        return Container(
+          key: const Key('primary-navigation-compact'),
+          height: 58,
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          padding: const EdgeInsets.all(5),
+          decoration: BoxDecoration(
+            color: context.vibe.panel,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: context.vibe.border),
+          ),
+          child: Row(
+            children: List<Widget>.generate(_tabTitles.length, (int index) {
+              final bool selected = index == _selectedIndex;
+              final Color color = selected
+                  ? Theme.of(context).colorScheme.primary
+                  : context.vibe.muted;
+              return Expanded(
+                child: Tooltip(
+                  message: _tabTitles[index],
+                  child: Semantics(
+                    selected: selected,
+                    button: true,
+                    child: Material(
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                                .withValues(alpha: 0.10)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        key: ValueKey<String>(
+                          'compact-nav-${_tabTitles[index]}',
+                        ),
+                        onTap: () => _selectTab(index),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: <Widget>[
+                            Icon(_tabIcons[index], size: 18, color: color),
+                            if (!iconsOnly) ...<Widget>[
+                              const SizedBox(width: 7),
+                              Flexible(
+                                child: Text(
+                                  _tabTitles[index],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: color,
+                                    fontSize: 13,
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
-          );
-        }),
-      ),
+              );
+            }),
+          ),
+        );
+      },
     );
   }
 
