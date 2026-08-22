@@ -44,6 +44,7 @@
 38. [dev.67 ADB 语义工具与真机验收](acceptance/V1_9_0_DEV67_ADB_SEMANTIC_TOOLS_2026-08-22.md)——Shell、Logcat、文件往返、截图与 APK 安装门禁
 39. [dev.68 代理与轻量虚拟机闭环验收](acceptance/V1_9_0_DEV68_NETWORK_VM_CLOSED_LOOP_2026-08-22.md)——真实系统代理恢复、qcow2 创建、QEMU 启停和 Harness 调用
 40. [dev.69 Android 真机与 macOS 构建验收](acceptance/V1_9_0_DEV69_ANDROID_MACOS_2026-08-22.md)——arm64 真机性能、进程退出与 macOS 14 Release CI
+41. [dev.70 Harness 本地启动性能验收](acceptance/V1_9_0_DEV70_HARNESS_STARTUP_2026-08-22.md)——旧入口纠正、真实分段计时、已完成优化与 3 秒门槛结论
 
 ## 完成定义
 

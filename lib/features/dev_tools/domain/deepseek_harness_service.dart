@@ -189,6 +189,7 @@ abstract final class DeepSeekHarnessService {
   static const String defaultBaseUrl = 'https://api.deepseek.com';
   static const String defaultModel = 'deepseek-v4-flash';
   static const String _deepSeekCredentialRef = 'DEEPSEEK_API_KEY';
+  static Future<_HarnessRuntime>? _runtimeFuture;
 
   static String defaultDebugDirectory() {
     final File executable = File(Platform.resolvedExecutable);
@@ -317,7 +318,7 @@ abstract final class DeepSeekHarnessService {
       );
     }
     try {
-      final _HarnessRuntime runtime = await _resolveBundledRuntime();
+      final _HarnessRuntime runtime = await _cachedBundledRuntime();
       final ProcessResult node = await Process.run(
         runtime.nodeExecutable,
         const <String>['--version'],
@@ -365,7 +366,7 @@ abstract final class DeepSeekHarnessService {
 
   static Future<HarnessSessionHandle> start(HarnessLaunchSpec spec) async {
     spec.validate();
-    final _HarnessRuntime runtime = await _resolveBundledRuntime();
+    final _HarnessRuntime runtime = await _cachedBundledRuntime();
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
@@ -389,7 +390,7 @@ abstract final class DeepSeekHarnessService {
       throw StateError('请先填写 DeepSeek API Key');
     }
     _validateEndpoint(request.baseUrl);
-    final _HarnessRuntime runtime = await _resolveBundledRuntime();
+    final _HarnessRuntime runtime = await _cachedBundledRuntime();
     final HarnessDebugPaths debug = await prepareDebugDirectory(
       request.debugDirectory,
     );
@@ -461,10 +462,15 @@ abstract final class DeepSeekHarnessService {
   ) async {
     request.validate();
     _validateEndpoint(request.baseUrl);
-    final _HarnessRuntime runtime = await _resolveBundledRuntime();
-    final HarnessDebugPaths debug = await prepareDebugDirectory(
+    // Runtime discovery, writable-directory preparation and the native tool
+    // bridge are independent. Running them together removes avoidable serial
+    // disk waits from every Web workspace launch.
+    final Future<_HarnessRuntime> runtimeFuture = _cachedBundledRuntime();
+    final Future<HarnessDebugPaths> debugFuture = prepareDebugDirectory(
       request.debugDirectory,
     );
+    final _HarnessRuntime runtime = await runtimeFuture;
+    final HarnessDebugPaths debug = await debugFuture;
     final HarnessToolServer toolServer = await HarnessToolServer.start(
       approve: request.approveTool,
       bridge: request.toolBridge,
@@ -614,25 +620,41 @@ abstract final class DeepSeekHarnessService {
               '    - id: vibekits-native-approval\n'
               '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n'
         : '';
-    await patch.writeAsString(
-      '- insert:\n'
-      '    - id: vibekits-mcp\n'
-      "      name: '@deepseek-ai/dsh-mcp-client'\n"
-      '      config:\n'
-      '        serverName: vibekits\n'
-      '        transport: stdio\n'
-      '        command: !!js process.env.VIBEKITS_NODE_EXECUTABLE\n'
-      '        args:\n'
-      '          - !!js process.env.VIBEKITS_MCP_SERVER\n'
-      '        env:\n'
-      '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
-      '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
-      '        failOnStartupError: true\n'
-      '        toolCallTimeoutMs: 60000\n'
-      '$approvalPatch',
-      flush: true,
-    );
+    final String patchContents =
+        '- insert:\n'
+        '    - id: vibekits-mcp\n'
+        "      name: '@deepseek-ai/dsh-mcp-client'\n"
+        '      config:\n'
+        '        serverName: vibekits\n'
+        '        transport: stdio\n'
+        '        command: !!js process.env.VIBEKITS_NODE_EXECUTABLE\n'
+        '        args:\n'
+        '          - !!js process.env.VIBEKITS_MCP_SERVER\n'
+        '        env:\n'
+        '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
+        '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
+        '        failOnStartupError: true\n'
+        '        toolCallTimeoutMs: 60000\n'
+        '$approvalPatch';
+    // This file is read on every DSH boot. Rewriting and force-flushing an
+    // identical patch invalidates filesystem caches and makes Defender scan it
+    // again, so only touch it when the configuration actually changes.
+    final String current = await patch.exists()
+        ? await patch.readAsString()
+        : '';
+    if (current != patchContents) {
+      await patch.writeAsString(patchContents, flush: true);
+    }
     return home;
+  }
+
+  static Future<_HarnessRuntime> _cachedBundledRuntime() {
+    return _runtimeFuture ??= _resolveBundledRuntime().catchError((
+      Object error,
+    ) {
+      _runtimeFuture = null;
+      throw error;
+    });
   }
 
   static Future<Directory> _prepareNodeCompileCache(
@@ -868,6 +890,11 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     this._apiKey,
   ) {
     _log = logFile.openWrite(mode: FileMode.append);
+    _logFlushTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!_logDirty) return;
+      _logDirty = false;
+      unawaited(_log.flush());
+    });
     _stdout = _process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .listen((String chunk) => _forward('stdout', chunk));
@@ -888,6 +915,7 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
       _log.writeln(
         '[${DateTime.now().toUtc().toIso8601String()}] exitCode=$code',
       );
+      _logFlushTimer.cancel();
       await _log.flush();
       await _log.close();
       await _output.close();
@@ -907,7 +935,9 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
   late final Future<void> _stdoutDone;
   late final Future<void> _stderrDone;
   late final Future<int> _exitCode;
+  late final Timer _logFlushTimer;
   bool _running = true;
+  bool _logDirty = false;
 
   void _forward(String channel, String chunk) {
     final String safe = DeepSeekHarnessService.redactSensitiveOutput(
@@ -915,7 +945,10 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
       <String>[_apiKey],
     );
     _log.write('[${DateTime.now().toUtc().toIso8601String()}][$channel] $safe');
-    unawaited(_log.flush());
+    // IOSink is already buffered. A forced disk flush for every Node output
+    // chunk can add seconds to DSH startup on Windows and is unnecessary for a
+    // diagnostic log. Periodic flushing above keeps the log durable enough.
+    _logDirty = true;
     _output.add(safe);
   }
 

@@ -73,6 +73,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _restartOverlay = false;
   String _status = '正在准备官方 Harness…';
   String _diagnostics = '';
+  final StringBuffer _pendingDiagnostics = StringBuffer();
+  Timer? _diagnosticsTimer;
   final Set<String> _sessionApprovedToolIds = <String>{};
 
   @override
@@ -131,6 +133,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       message: '正在启动本地 Harness',
       target: workspace,
     );
+    final Stopwatch startup = Stopwatch()..start();
     try {
       final String key =
           await (widget.credentialReader ?? PlatformCredentialStore.read)(
@@ -152,6 +155,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         }
       }
       final int port = await widget.findPort();
+      if (mounted) {
+        setState(() => _status = '正在启动本地 DSH…');
+      }
       final HarnessSessionHandle session = await widget.startWeb(
         HarnessWebRequest(
           workspace: workspace,
@@ -174,12 +180,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       await _outputSubscription?.cancel();
       _outputSubscription = session.output.listen((String chunk) {
         if (!mounted) return;
-        setState(() {
-          _diagnostics = '$_diagnostics$chunk';
-          if (_diagnostics.length > 12000) {
-            _diagnostics = _diagnostics.substring(_diagnostics.length - 12000);
-          }
-        });
+        // DSH cold start can emit hundreds of small chunks. Rebuilding the
+        // complete Web workspace for every chunk competes with WebView2 and
+        // Node startup. Coalesce diagnostics into at most ten UI updates/sec.
+        _pendingDiagnostics.write(chunk);
+        _diagnosticsTimer ??= Timer(
+          const Duration(milliseconds: 100),
+          _flushPendingDiagnostics,
+        );
       });
       unawaited(
         session.exitCode.then((int code) {
@@ -214,7 +222,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         _starting = false;
         _loading = false;
         _restartOverlay = false;
-        _status = '官方 Harness 已就绪';
+        _status = '官方 Harness 已就绪（${startup.elapsedMilliseconds} ms）';
       });
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.ready,
@@ -252,6 +260,19 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         message: 'Harness 启动失败',
       );
     }
+  }
+
+  void _flushPendingDiagnostics() {
+    _diagnosticsTimer = null;
+    if (!mounted || _pendingDiagnostics.isEmpty) return;
+    final String pending = _pendingDiagnostics.toString();
+    _pendingDiagnostics.clear();
+    setState(() {
+      _diagnostics = '$_diagnostics$pending';
+      if (_diagnostics.length > 12000) {
+        _diagnostics = _diagnostics.substring(_diagnostics.length - 12000);
+      }
+    });
   }
 
   Future<bool> _approveVibekitsTool(HarnessToolApprovalRequest request) async {
@@ -529,6 +550,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   @override
   void dispose() {
+    _diagnosticsTimer?.cancel();
     _outputSubscription?.cancel();
     _webMessageSubscription?.cancel();
     final HarnessSessionHandle? session = _session;
