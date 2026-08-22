@@ -218,10 +218,19 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     id: 'audio_analyzer',
     name: '音频调试',
     group: ToolGroups.audio,
-    description: '打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、削波、静音、直流偏置和频谱。',
+    description:
+        '打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。',
     aiUseWhen: '需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。',
     aiAvoidWhen: '需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。',
     aiExamples: const <String>['分析这份 PCM 的波形和信号质量', '检查 WAV 是否削波、静音或存在直流偏置'],
+    harnessToolIds: const <String>[
+      'vibekits.audio.inspect',
+      'vibekits.audio.pcm_to_wav',
+      'vibekits.audio.play',
+      'vibekits.audio.pause',
+      'vibekits.audio.stop',
+      'vibekits.audio.generate_tone',
+    ],
     runAsync: (String input, String params) async {
       try {
         final Object? decoded = params.trim().isEmpty

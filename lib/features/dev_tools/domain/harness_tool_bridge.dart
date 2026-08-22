@@ -10,6 +10,7 @@ import '../../cleaner/domain/system_drive_analysis_runner.dart';
 import '../../cleaner/domain/system_drive_analyzer.dart';
 import '../../cleaner/domain/system_drive_insights.dart';
 import 'adb_service.dart';
+import 'audio_harness_service.dart';
 import 'api_request_service.dart';
 import 'duplicate_file_background_runner.dart';
 import 'duplicate_file_scanner.dart';
@@ -289,6 +290,12 @@ class VibekitsHarnessToolBridge {
   static const String vmStartId = 'vibekits.vm.start';
   static const String vmStopId = 'vibekits.vm.stop';
   static const String vmCreateDiskId = 'vibekits.vm.create_disk';
+  static const String audioInspectId = 'vibekits.audio.inspect';
+  static const String audioPcmToWavId = 'vibekits.audio.pcm_to_wav';
+  static const String audioPlayId = 'vibekits.audio.play';
+  static const String audioPauseId = 'vibekits.audio.pause';
+  static const String audioStopId = 'vibekits.audio.stop';
+  static const String audioGenerateToneId = 'vibekits.audio.generate_tone';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
@@ -309,6 +316,7 @@ class VibekitsHarnessToolBridge {
   final String? _runtimeToolRoot;
   final Future<void> Function(int processId)? _runtimeBindProcessTree;
   final Future<void> Function(int processId)? _runtimeReleaseProcessTree;
+  final AudioHarnessService _audioHarnessService = AudioHarnessService();
 
   String? get _mihomoRuntimeExecutable => _runtimeToolRoot == null
       ? null
@@ -327,6 +335,75 @@ class VibekitsHarnessToolBridge {
   _definitions = <String, HarnessToolDefinition>{
     for (final ToolSpec spec in allDevToolRegistry)
       'vibekits.${spec.id}': _fromToolSpec(spec),
+    audioInspectId: _definition(
+      id: audioInspectId,
+      name: '分析 PCM / WAV 质量',
+      description: '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性。复杂音乐的单音指标仅作诊断参考。',
+      properties: _audioProperties(includePath: true),
+      required: const <String>['path'],
+    ),
+    audioPcmToWavId: _definition(
+      id: audioPcmToWavId,
+      name: 'PCM 转 WAV',
+      description: '按照明确的 RAW PCM 参数封装为 WAV，不重新采样、不改变样本。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'inputPath': _string('输入 PCM 绝对路径'),
+        'outputPath': _string('输出 WAV 绝对路径'),
+        ..._audioProperties(),
+      },
+      required: const <String>['inputPath', 'outputPath'],
+    ),
+    audioPlayId: _definition(
+      id: audioPlayId,
+      name: '播放 PCM / WAV',
+      description: '播放 WAV；RAW PCM 会先按给定格式生成临时 WAV 再播放。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: _audioProperties(includePath: true),
+      required: const <String>['path'],
+    ),
+    audioPauseId: _definition(
+      id: audioPauseId,
+      name: '暂停音频',
+      description: '暂停由 Harness 音频工具启动的本地播放。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
+    ),
+    audioStopId: _definition(
+      id: audioStopId,
+      name: '停止音频',
+      description: '停止由 Harness 音频工具启动的本地播放。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
+    ),
+    audioGenerateToneId: _definition(
+      id: audioGenerateToneId,
+      name: '生成音频测试音',
+      description: '生成 16-bit PCM WAV 正弦测试音并立即返回质量分析，便于闭环校验音频链路。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'outputPath': _string('输出 WAV 绝对路径'),
+        'frequencyHz': const <String, Object?>{
+          'type': 'number',
+          'minimum': 1,
+          'description': '正弦频率，默认 1000 Hz',
+        },
+        'durationSeconds': const <String, Object?>{
+          'type': 'number',
+          'minimum': 0.01,
+          'maximum': 60,
+          'description': '时长，默认 1 秒',
+        },
+        'amplitude': const <String, Object?>{
+          'type': 'number',
+          'exclusiveMinimum': 0,
+          'maximum': 1,
+          'description': '峰值幅度，默认 0.5',
+        },
+        ..._audioProperties(),
+      },
+      required: const <String>['outputPath'],
+    ),
     adbListDevicesId: const HarnessToolDefinition(
       id: adbListDevicesId,
       name: '列出 ADB 设备',
@@ -1275,6 +1352,14 @@ class VibekitsHarnessToolBridge {
     if (toolId == vmStartId) return _startVm;
     if (toolId == vmStopId) return _stopVm;
     if (toolId == vmCreateDiskId) return _createVmDisk;
+    if (toolId == audioInspectId) return _audioHarnessService.inspect;
+    if (toolId == audioPcmToWavId) return _audioHarnessService.pcmToWav;
+    if (toolId == audioPlayId) return _audioHarnessService.play;
+    if (toolId == audioPauseId) return _audioHarnessService.pause;
+    if (toolId == audioStopId) return _audioHarnessService.stop;
+    if (toolId == audioGenerateToneId) {
+      return _audioHarnessService.generateTone;
+    }
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
@@ -2660,6 +2745,34 @@ class VibekitsHarnessToolBridge {
     'type': 'string',
     'description': description,
   };
+  static Map<String, Object?> _audioProperties({bool includePath = false}) =>
+      <String, Object?>{
+        if (includePath) 'path': _string('PCM/WAV 文件绝对路径'),
+        'sampleRate': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'description': 'RAW PCM 采样率，默认 48000',
+        },
+        'channels': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 8,
+          'description': 'RAW PCM 声道数，默认 2',
+        },
+        'bitsPerSample': const <String, Object?>{
+          'type': 'integer',
+          'enum': <int>[8, 16, 24, 32],
+          'description': 'RAW PCM 位深，默认 16',
+        },
+        'signed': const <String, Object?>{
+          'type': 'boolean',
+          'description': 'RAW PCM 是否有符号，默认 true',
+        },
+        'littleEndian': const <String, Object?>{
+          'type': 'boolean',
+          'description': 'RAW PCM 是否小端，默认 true',
+        },
+      };
   static HarnessToolDefinition _definition({
     required String id,
     required String name,
@@ -2766,6 +2879,15 @@ class VibekitsHarnessToolBridge {
     if (toolId == vmCreateDiskId) return (arguments['path'] ?? '').toString();
     if (toolId == vmStartId) {
       return (arguments['diskPath'] ?? arguments['isoPath'] ?? '').toString();
+    }
+    if (toolId == audioInspectId || toolId == audioPlayId) {
+      return (arguments['path'] ?? '').toString();
+    }
+    if (toolId == audioPcmToWavId) {
+      return '${arguments['inputPath'] ?? ''} → ${arguments['outputPath'] ?? ''}';
+    }
+    if (toolId == audioGenerateToneId) {
+      return (arguments['outputPath'] ?? '').toString();
     }
     if (toolId.startsWith('vibekits.windows_node.')) {
       return (arguments['rootPath'] ?? WindowsTestNodeService.requiredRoot)

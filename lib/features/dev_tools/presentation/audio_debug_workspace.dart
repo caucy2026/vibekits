@@ -145,6 +145,11 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
     await _player.play(DeviceFileSource(playable));
   }
 
+  Future<void> _stopPlayback() async {
+    await _player.stop();
+    if (mounted) setState(() => _position = Duration.zero);
+  }
+
   @override
   Widget build(BuildContext context) {
     final AudioAnalysisResult? result = _result;
@@ -167,6 +172,8 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
                     _formatAndMetrics(result),
                     const SizedBox(height: 12),
                     _waveformCard(result),
+                    const SizedBox(height: 12),
+                    _qualityCard(result),
                     const SizedBox(height: 12),
                     _spectrumCard(result),
                     const SizedBox(height: 12),
@@ -212,6 +219,11 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
           onPressed: result == null || _busy ? null : _togglePlayback,
           icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
           label: Text(_playing ? '暂停' : '播放'),
+        ),
+        IconButton(
+          tooltip: '停止并回到开头',
+          onPressed: result == null || _busy ? null : _stopPlayback,
+          icon: const Icon(Icons.stop),
         ),
       ],
     ),
@@ -372,6 +384,80 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
       ),
     ),
   );
+
+  Widget _qualityCard(AudioAnalysisResult result) {
+    final AudioSignalQuality quality = result.quality;
+    final Color scoreColor = quality.score >= 80
+        ? Colors.green
+        : quality.score >= 60
+        ? Colors.orange
+        : Colors.red;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                const Expanded(
+                  child: Text(
+                    'PCM 质量、谐波与杂讯',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Text(
+                  '${quality.score} 分',
+                  style: TextStyle(
+                    color: scoreColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 24,
+              runSpacing: 10,
+              children: <Widget>[
+                Text('主频 ${quality.dominantFrequencyHz.toStringAsFixed(1)} Hz'),
+                Text('THD ${quality.thdPercent.toStringAsFixed(3)}%'),
+                Text('THD+N ${quality.thdnPercent.toStringAsFixed(3)}%'),
+                Text('估算 SNR ${quality.estimatedSnrDb.toStringAsFixed(1)} dB'),
+                Text('噪声底 ${quality.noiseFloorDbfs.toStringAsFixed(1)} dBFS'),
+                Text(
+                  '有效位数 ${quality.estimatedEffectiveBits.toStringAsFixed(1)} bit',
+                ),
+                Text(
+                  '音调可信度 ${(quality.tonalConfidence * 100).toStringAsFixed(0)}%',
+                ),
+                if (quality.channelCorrelation != null)
+                  Text(
+                    '声道相关 ${quality.channelCorrelation!.toStringAsFixed(3)}',
+                  ),
+              ],
+            ),
+            const Divider(height: 22),
+            Text(
+              quality.harmonicsDb.isEmpty
+                  ? '未检测到可报告的谐波'
+                  : List<String>.generate(
+                      quality.harmonicsDb.length,
+                      (int index) =>
+                          '${index + 2}次 ${quality.harmonicsDb[index].toStringAsFixed(1)} dBc',
+                    ).join('  ·  '),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'THD、THD+N 和 SNR 使用文件开头稳态窗口估算；语音、音乐及扫频信号应结合频谱与波形判断。',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _spectrumCard(AudioAnalysisResult result) => Card(
     child: Padding(

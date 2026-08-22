@@ -86,6 +86,12 @@ void main() {
       VibekitsHarnessToolBridge.duplicateScanId,
       VibekitsHarnessToolBridge.fileDiffId,
       VibekitsHarnessToolBridge.systemDriveAnalyzeId,
+      VibekitsHarnessToolBridge.audioInspectId,
+      VibekitsHarnessToolBridge.audioPcmToWavId,
+      VibekitsHarnessToolBridge.audioPlayId,
+      VibekitsHarnessToolBridge.audioPauseId,
+      VibekitsHarnessToolBridge.audioStopId,
+      VibekitsHarnessToolBridge.audioGenerateToneId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
     }

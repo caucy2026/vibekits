@@ -51,6 +51,8 @@
 45. [dev.74 Clash 测速与关闭验收](acceptance/V1_9_0_DEV74_CLASH_DELAY_CLOSE_2026-08-22.md)——真实延迟、分组测速、进度与恢复网络
 46. [dev.75 Clash 标准界面验收](acceptance/V1_9_0_DEV75_CLASH_STANDARD_LAYOUT_2026-08-22.md)——八项侧栏、真实流量、双列节点、单节点与分组测速
 47. [dev.76 音频调试验收](acceptance/V1_9_0_DEV76_AUDIO_DEBUG_2026-08-22.md)——PCM/WAV 波形、播放、频谱、信号健康、拖入与 Harness
+48. [音频 Harness 工具接口](31_AUDIO_HARNESS_TOOL_API.md)——PCM/WAV 质量、谐波、杂讯、转换、播放与测试音接口
+49. [dev.77 音频质量闭环验收](acceptance/V1_9_0_DEV77_AUDIO_QUALITY_HARNESS_2026-08-22.md)——FFT 性能、质量指标、Harness 真调用与 Release
 
 ## 完成定义
 

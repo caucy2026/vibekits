@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/audio_analysis_service.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 
 void main() {
   test('analyzes raw PCM and generated WAV without clipping', () async {
@@ -36,6 +37,9 @@ void main() {
     expect(raw.clippedRatio, 0);
     expect(raw.waveformMin.single, isNotEmpty);
     expect(raw.spectrum, isNotEmpty);
+    expect(raw.quality.dominantFrequencyHz, closeTo(440, 5));
+    expect(raw.quality.thdPercent, lessThan(1));
+    expect(raw.quality.score, greaterThanOrEqualTo(70));
 
     final String wavPath = '${temp.path}${Platform.pathSeparator}tone.wav';
     await AudioAnalysisService.pcmToWav(rawPath, wavPath, format);
@@ -44,5 +48,26 @@ void main() {
     expect(wav.format.sampleRate, 16000);
     expect(wav.format.channels, 1);
     expect(wav.durationSeconds, closeTo(1, 0.001));
+
+    final String generated = await AudioAnalysisService.generateToneWav(
+      '${temp.path}${Platform.pathSeparator}generated.wav',
+      frequencyHz: 1000,
+      durationSeconds: 0.25,
+      format: format,
+    );
+    final AudioAnalysisResult generatedResult =
+        AudioAnalysisService.inspectSync(generated);
+    expect(generatedResult.quality.dominantFrequencyHz, closeTo(1000, 5));
+
+    final HarnessToolCallResult harnessResult =
+        await VibekitsHarnessToolBridge().invoke(
+          toolId: VibekitsHarnessToolBridge.audioInspectId,
+          arguments: <String, Object?>{'path': generated},
+          approve: (_) async => true,
+        );
+    expect(harnessResult.ok, isTrue);
+    final Map<String, Object?> quality =
+        harnessResult.data!['quality']! as Map<String, Object?>;
+    expect(quality['dominantFrequencyHz']! as double, closeTo(1000, 5));
   });
 }

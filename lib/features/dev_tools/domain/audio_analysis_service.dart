@@ -68,6 +68,7 @@ class AudioAnalysisResult {
     required this.waveformMin,
     required this.waveformMax,
     required this.spectrum,
+    required this.quality,
     required this.findings,
   });
 
@@ -85,6 +86,7 @@ class AudioAnalysisResult {
   final List<List<double>> waveformMin;
   final List<List<double>> waveformMax;
   final List<double> spectrum;
+  final AudioSignalQuality quality;
   final List<String> findings;
 
   Map<String, Object?> toJson({bool includeVisualData = false}) =>
@@ -102,6 +104,7 @@ class AudioAnalysisResult {
         'dcOffset': dcOffset,
         'clippedRatio': clippedRatio,
         'silenceRatio': silenceRatio,
+        'quality': quality.toJson(),
         'findings': findings,
         if (includeVisualData) 'waveformMin': waveformMin,
         if (includeVisualData) 'waveformMax': waveformMax,
@@ -112,9 +115,55 @@ class AudioAnalysisResult {
       value <= 0 ? -120 : 20 * math.log(value) / math.ln10;
 }
 
+class AudioSignalQuality {
+  const AudioSignalQuality({
+    required this.dominantFrequencyHz,
+    required this.fundamentalDbfs,
+    required this.harmonicsDb,
+    required this.thdPercent,
+    required this.thdnPercent,
+    required this.estimatedSnrDb,
+    required this.noiseFloorDbfs,
+    required this.crestFactorDb,
+    required this.channelCorrelation,
+    required this.tonalConfidence,
+    required this.estimatedEffectiveBits,
+    required this.score,
+  });
+
+  final double dominantFrequencyHz;
+  final double fundamentalDbfs;
+  final List<double> harmonicsDb;
+  final double thdPercent;
+  final double thdnPercent;
+  final double estimatedSnrDb;
+  final double noiseFloorDbfs;
+  final List<double> crestFactorDb;
+  final double? channelCorrelation;
+  final double tonalConfidence;
+  final double estimatedEffectiveBits;
+  final int score;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'dominantFrequencyHz': dominantFrequencyHz,
+    'fundamentalDbfs': fundamentalDbfs,
+    'harmonicsDbRelativeToFundamental': harmonicsDb,
+    'thdPercent': thdPercent,
+    'thdnPercent': thdnPercent,
+    'estimatedSnrDb': estimatedSnrDb,
+    'noiseFloorDbfs': noiseFloorDbfs,
+    'crestFactorDb': crestFactorDb,
+    'channelCorrelation': channelCorrelation,
+    'tonalConfidence': tonalConfidence,
+    'estimatedEffectiveBits': estimatedEffectiveBits,
+    'qualityScore': score,
+    'measurementNote': 'THD/THD+N/SNR 为稳态单音估算；复杂语音或音乐只作诊断参考。',
+  };
+}
+
 abstract final class AudioAnalysisService {
   static const int waveformBins = 1200;
-  static const int fftSize = 1024;
+  static const int fftSize = 4096;
 
   static Future<AudioAnalysisResult> inspect(
     String path, {
@@ -155,6 +204,7 @@ abstract final class AudioAnalysisService {
     int clipped = 0;
     int silent = 0;
     final Float64List fftInput = Float64List(math.min(fftSize, frames));
+    double channelCrossSum = 0;
 
     for (int frame = 0; frame < frames; frame++) {
       double mixed = 0;
@@ -178,6 +228,17 @@ abstract final class AudioAnalysisService {
         maximum[channel][bin] = math.max(maximum[channel][bin], sample);
         mixed += sample;
       }
+      if (format.channels >= 2) {
+        final int base = frame * format.bytesPerFrame;
+        channelCrossSum +=
+            _sample(decoded.audioBytes, audioData, base, format) *
+            _sample(
+              decoded.audioBytes,
+              audioData,
+              base + format.bytesPerSample,
+              format,
+            );
+      }
       if (frame < fftInput.length) fftInput[frame] = mixed / format.channels;
     }
     final int samples = frames * format.channels;
@@ -189,6 +250,24 @@ abstract final class AudioAnalysisService {
         .toList(growable: false);
     final double clippedRatio = clipped / samples;
     final double silenceRatio = silent / samples;
+    final double? correlation = format.channels < 2
+        ? null
+        : _correlation(
+            frames,
+            channelCrossSum,
+            sum[0],
+            sum[1],
+            squareSum[0],
+            squareSum[1],
+          );
+    final AudioSignalQuality quality = _signalQuality(
+      fftInput,
+      format.sampleRate,
+      peak,
+      rms,
+      correlation,
+      clippedRatio,
+    );
     final List<String> findings = <String>[];
     if (clippedRatio > 0.0001) {
       findings.add('检测到削波 ${(clippedRatio * 100).toStringAsFixed(3)}%');
@@ -200,6 +279,19 @@ abstract final class AudioAnalysisService {
     }
     if (decoded.trailingBytes > 0) {
       findings.add('末尾有 ${decoded.trailingBytes} 字节不完整 PCM 帧');
+    }
+    if (quality.tonalConfidence >= 0.1) {
+      if (quality.thdPercent > 5) {
+        findings.add('谐波失真偏高：THD ${quality.thdPercent.toStringAsFixed(2)}%');
+      }
+      if (quality.estimatedSnrDb < 40) {
+        findings.add('估算信噪比较低：${quality.estimatedSnrDb.toStringAsFixed(1)} dB');
+      }
+    } else {
+      findings.add('输入不是明显稳态单音，THD/SNR 仅作参考；语音和音乐应结合频谱与电平判断');
+    }
+    if (correlation != null && correlation < -0.8) {
+      findings.add('左右声道高度反相，单声道合并时可能抵消');
     }
     if (findings.isEmpty) findings.add('未发现明显削波、静音或直流偏置异常');
 
@@ -218,6 +310,7 @@ abstract final class AudioAnalysisService {
       waveformMin: minimum,
       waveformMax: maximum,
       spectrum: _spectrum(fftInput),
+      quality: quality,
       findings: findings,
     );
   }
@@ -232,6 +325,51 @@ abstract final class AudioAnalysisService {
     File(outputPath).parent.createSync(recursive: true);
     File(outputPath).writeAsBytesSync(wav, flush: true);
     return File(outputPath).absolute.path;
+  });
+
+  static Future<String> generateToneWav(
+    String outputPath, {
+    double frequencyHz = 1000,
+    double durationSeconds = 1,
+    double amplitude = 0.5,
+    PcmAudioFormat format = const PcmAudioFormat(
+      sampleRate: 48000,
+      channels: 2,
+      bitsPerSample: 16,
+    ),
+  }) => Isolate.run(() {
+    if (frequencyHz <= 0 || frequencyHz >= format.sampleRate / 2) {
+      throw ArgumentError('测试音频率必须大于 0 且低于奈奎斯特频率');
+    }
+    if (durationSeconds <= 0 || durationSeconds > 60) {
+      throw ArgumentError('测试音时长必须在 0～60 秒之间');
+    }
+    if (amplitude <= 0 || amplitude > 1) {
+      throw ArgumentError('测试音幅度必须在 0～1 之间');
+    }
+    if (format.bitsPerSample != 16 || !format.signed) {
+      throw ArgumentError('测试音生成当前支持 16-bit 有符号 PCM');
+    }
+    final int frames = (format.sampleRate * durationSeconds).round();
+    final ByteData pcm = ByteData(frames * format.bytesPerFrame);
+    for (int frame = 0; frame < frames; frame++) {
+      final int sample =
+          (math.sin(2 * math.pi * frequencyHz * frame / format.sampleRate) *
+                  amplitude *
+                  32767)
+              .round();
+      for (int channel = 0; channel < format.channels; channel++) {
+        pcm.setInt16(
+          (frame * format.channels + channel) * 2,
+          sample,
+          format.littleEndian ? Endian.little : Endian.big,
+        );
+      }
+    }
+    final File output = File(outputPath);
+    output.parent.createSync(recursive: true);
+    output.writeAsBytesSync(_wavBytes(pcm.buffer.asUint8List(), format));
+    return output.absolute.path;
   });
 
   static _DecodedAudio _decode(Uint8List bytes, PcmAudioFormat rawFormat) {
@@ -318,20 +456,226 @@ abstract final class AudioAnalysisService {
 
   static List<double> _spectrum(Float64List input) {
     if (input.isEmpty) return const <double>[];
-    final int bins = math.min(128, input.length ~/ 2);
-    return List<double>.generate(bins, (int bin) {
-      double real = 0;
-      double imaginary = 0;
-      for (int index = 0; index < input.length; index++) {
-        final double window =
-            0.5 -
-            0.5 * math.cos(2 * math.pi * index / math.max(1, input.length - 1));
-        final double angle = 2 * math.pi * bin * index / input.length;
-        real += input[index] * window * math.cos(angle);
-        imaginary -= input[index] * window * math.sin(angle);
+    final _FftSnapshot fft = _fft(input);
+    final int bins = math.min(128, fft.power.length);
+    return List<double>.generate(
+      bins,
+      (int bin) => math.sqrt(fft.power[bin]),
+      growable: false,
+    );
+  }
+
+  static AudioSignalQuality _signalQuality(
+    Float64List input,
+    int sampleRate,
+    List<double> peak,
+    List<double> rms,
+    double? correlation,
+    double clippedRatio,
+  ) {
+    if (input.length < 32) {
+      return AudioSignalQuality(
+        dominantFrequencyHz: 0,
+        fundamentalDbfs: -120,
+        harmonicsDb: const <double>[],
+        thdPercent: 0,
+        thdnPercent: 0,
+        estimatedSnrDb: 0,
+        noiseFloorDbfs: -120,
+        crestFactorDb: List<double>.filled(peak.length, 0),
+        channelCorrelation: correlation,
+        tonalConfidence: 0,
+        estimatedEffectiveBits: 0,
+        score: 0,
+      );
+    }
+    final _FftSnapshot fft = _fft(input);
+    final List<double> power = fft.power;
+    final int bins = power.length;
+    final int startBin = math.max(1, (20 * fft.size / sampleRate).ceil());
+    int fundamentalBin = startBin;
+    for (int bin = startBin + 1; bin < bins; bin++) {
+      if (power[bin] > power[fundamentalBin]) fundamentalBin = bin;
+    }
+    double bandPower(int center) {
+      double value = 0;
+      for (
+        int bin = math.max(1, center - 1);
+        bin <= math.min(bins - 1, center + 1);
+        bin++
+      ) {
+        value += power[bin];
       }
-      return math.sqrt(real * real + imaginary * imaginary) / input.length;
+      return value;
+    }
+
+    final double fundamentalPower = bandPower(fundamentalBin)
+        .clamp(1e-20, double.infinity);
+    double harmonicPower = 0;
+    final List<double> harmonicDb = <double>[];
+    final Set<int> excluded = <int>{0};
+    for (int bin = fundamentalBin - 1; bin <= fundamentalBin + 1; bin++) {
+      if (bin >= 0 && bin < bins) excluded.add(bin);
+    }
+    for (int order = 2; order <= 5; order++) {
+      final int center = fundamentalBin * order;
+      if (center >= bins) break;
+      final double value = bandPower(center);
+      harmonicPower += value;
+      harmonicDb.add(
+        10 *
+            math.log(value.clamp(1e-20, double.infinity) / fundamentalPower) /
+            math.ln10,
+      );
+      for (int bin = center - 1; bin <= center + 1; bin++) {
+        if (bin >= 0 && bin < bins) excluded.add(bin);
+      }
+    }
+    double totalPower = 0;
+    double noisePower = 0;
+    final List<double> noiseAmplitudes = <double>[];
+    for (int bin = 1; bin < bins; bin++) {
+      totalPower += power[bin];
+      if (!excluded.contains(bin)) {
+        noisePower += power[bin];
+        noiseAmplitudes.add(math.sqrt(power[bin]));
+      }
+    }
+    noiseAmplitudes.sort();
+    final double medianNoise = noiseAmplitudes.isEmpty
+        ? 0
+        : noiseAmplitudes[noiseAmplitudes.length ~/ 2];
+    final double thd = math.sqrt(harmonicPower / fundamentalPower) * 100;
+    final double thdn =
+        math.sqrt((harmonicPower + noisePower) / fundamentalPower) * 100;
+    final double snr =
+        10 *
+        math.log(fundamentalPower / noisePower.clamp(1e-20, double.infinity)) /
+        math.ln10;
+    final double confidence =
+        fundamentalPower / totalPower.clamp(1e-20, double.infinity);
+    final double fundamentalAmplitude = math.sqrt(fundamentalPower);
+    final List<double> crest = List<double>.generate(
+      peak.length,
+      (int index) =>
+          20 *
+          math.log(
+            peak[index].clamp(1e-20, double.infinity) /
+                rms[index].clamp(1e-20, double.infinity),
+          ) /
+          math.ln10,
+      growable: false,
+    );
+    final double effectiveBits = ((snr - 1.76) / 6.02).clamp(0, 32);
+    int score = 100;
+    score -= (clippedRatio * 10000).round().clamp(0, 40);
+    if (confidence >= 0.1) {
+      score -= (thd * 2).round().clamp(0, 30);
+      if (snr < 60) score -= ((60 - snr) / 2).round().clamp(0, 30);
+    }
+    return AudioSignalQuality(
+      dominantFrequencyHz: fundamentalBin * sampleRate / fft.size,
+      fundamentalDbfs:
+          20 *
+          math.log(fundamentalAmplitude.clamp(1e-20, double.infinity)) /
+          math.ln10,
+      harmonicsDb: harmonicDb,
+      thdPercent: thd,
+      thdnPercent: thdn,
+      estimatedSnrDb: snr,
+      noiseFloorDbfs:
+          20 * math.log(medianNoise.clamp(1e-20, double.infinity)) / math.ln10,
+      crestFactorDb: crest,
+      channelCorrelation: correlation,
+      tonalConfidence: confidence,
+      estimatedEffectiveBits: effectiveBits,
+      score: score.clamp(0, 100),
+    );
+  }
+
+  /// Radix-2 FFT keeps interactive analysis bounded. The former direct DFT
+  /// repeated trigonometric work for every bin and could take over a minute.
+  static _FftSnapshot _fft(Float64List input) {
+    int size = 1;
+    while (size * 2 <= input.length) {
+      size *= 2;
+    }
+    final Float64List real = Float64List(size);
+    final Float64List imaginary = Float64List(size);
+    double windowSum = 0;
+    for (int index = 0; index < size; index++) {
+      final double window = size <= 1
+          ? 1
+          : 0.5 - 0.5 * math.cos(2 * math.pi * index / (size - 1));
+      real[index] = input[index] * window;
+      windowSum += window;
+    }
+    for (int index = 1, reversed = 0; index < size; index++) {
+      int bit = size >> 1;
+      while ((reversed & bit) != 0) {
+        reversed ^= bit;
+        bit >>= 1;
+      }
+      reversed ^= bit;
+      if (index < reversed) {
+        final double temporary = real[index];
+        real[index] = real[reversed];
+        real[reversed] = temporary;
+      }
+    }
+    for (int length = 2; length <= size; length <<= 1) {
+      final double angle = -2 * math.pi / length;
+      final double stepReal = math.cos(angle);
+      final double stepImaginary = math.sin(angle);
+      for (int start = 0; start < size; start += length) {
+        double twiddleReal = 1;
+        double twiddleImaginary = 0;
+        for (int offset = 0; offset < length ~/ 2; offset++) {
+          final int even = start + offset;
+          final int odd = even + length ~/ 2;
+          final double oddReal =
+              real[odd] * twiddleReal - imaginary[odd] * twiddleImaginary;
+          final double oddImaginary =
+              real[odd] * twiddleImaginary + imaginary[odd] * twiddleReal;
+          final double evenReal = real[even];
+          final double evenImaginary = imaginary[even];
+          real[even] = evenReal + oddReal;
+          imaginary[even] = evenImaginary + oddImaginary;
+          real[odd] = evenReal - oddReal;
+          imaginary[odd] = evenImaginary - oddImaginary;
+          final double nextReal =
+              twiddleReal * stepReal - twiddleImaginary * stepImaginary;
+          twiddleImaginary =
+              twiddleReal * stepImaginary + twiddleImaginary * stepReal;
+          twiddleReal = nextReal;
+        }
+      }
+    }
+    final double scale = windowSum <= 0 ? 1 : 2 / windowSum;
+    final List<double> power = List<double>.generate(size ~/ 2, (int bin) {
+      final double amplitude =
+          math.sqrt(real[bin] * real[bin] + imaginary[bin] * imaginary[bin]) *
+          scale;
+      return amplitude * amplitude;
     }, growable: false);
+    return _FftSnapshot(size, power);
+  }
+
+  static double _correlation(
+    int frames,
+    double crossSum,
+    double sumA,
+    double sumB,
+    double squareA,
+    double squareB,
+  ) {
+    final double meanA = sumA / frames;
+    final double meanB = sumB / frames;
+    final double covariance = crossSum / frames - meanA * meanB;
+    final double varianceA = squareA / frames - meanA * meanA;
+    final double varianceB = squareB / frames - meanB * meanB;
+    final double denominator = math.sqrt(math.max(0, varianceA * varianceB));
+    return denominator <= 1e-20 ? 0 : (covariance / denominator).clamp(-1, 1);
   }
 
   static Uint8List _wavBytes(Uint8List pcm, PcmAudioFormat format) {
@@ -372,4 +716,11 @@ class _DecodedAudio {
   final PcmAudioFormat format;
   final Uint8List audioBytes;
   final int trailingBytes;
+}
+
+class _FftSnapshot {
+  const _FftSnapshot(this.size, this.power);
+
+  final int size;
+  final List<double> power;
 }
