@@ -30,10 +30,18 @@ class _NetworkVirtualizationWorkspaceState
   MihomoManagedConfig? _runningConfig;
   MihomoControllerSnapshot? _controllerSnapshot;
   final Map<String, int?> _nodeDelays = <String, int?>{};
+  final Set<String> _testingNodes = <String>{};
+  final Set<String> _expandedGroups = <String>{};
   Timer? _dashboardTimer;
   bool _testingDelay = false;
   int _testedNodes = 0;
   int _delayTestGeneration = 0;
+  int _clashPage = 1;
+  final List<double> _uploadRates = <double>[];
+  final List<double> _downloadRates = <double>[];
+  int _lastUploadTotal = 0;
+  int _lastDownloadTotal = 0;
+  DateTime? _lastTrafficAt;
   String _diskPath = '';
   String _isoPath = '';
   String _message = '';
@@ -71,6 +79,15 @@ class _NetworkVirtualizationWorkspaceState
 
   Future<void> _initialize() async {
     await Future.wait<void>(<Future<void>>[_loadProfiles(), _refresh()]);
+    if (_activeProfile != null &&
+        _mihomo?.available == true &&
+        !_proxyRunning) {
+      try {
+        await _ensureCoreRunning();
+      } on Object catch (error) {
+        if (mounted) setState(() => _message = '本地核心未就绪：$error');
+      }
+    }
   }
 
   Future<void> _loadProfiles() async {
@@ -190,11 +207,13 @@ class _NetworkVirtualizationWorkspaceState
 
   Future<void> _selectProfile(MihomoProfile profile) async {
     if (_proxyRunning) {
-      setState(() => _message = '请先停止当前代理，再切换配置');
-      return;
+      await NetworkVirtualizationService.stopMihomo();
+      _runningConfig = null;
+      _controllerSnapshot = null;
     }
     await _profileService.select(profile.id);
     if (mounted) setState(() => _activeProfile = profile);
+    await _run(_ensureCoreRunning, success: '配置已切换');
   }
 
   Future<void> _updateProfile(MihomoProfile profile) async {
@@ -232,7 +251,8 @@ class _NetworkVirtualizationWorkspaceState
     }, success: '配置已删除');
   }
 
-  Future<void> _startProxyAndEnableSystem() async {
+  Future<void> _ensureCoreRunning() async {
+    if (_proxyRunning && _runningConfig != null) return;
     final MihomoProfile? profile = _activeProfile;
     if (profile == null) throw StateError('请先添加订阅或导入 Clash YAML');
     final MihomoManagedConfig config = await _profileService
@@ -241,27 +261,24 @@ class _NetworkVirtualizationWorkspaceState
       configPath: config.path,
       dataDirectory: _proxyDataDirectory,
     );
+    _runningConfig = config;
     try {
-      _systemProxy = await _systemProxyService.applyLocal(
-        port: config.summary.mixedPort,
-        dataDirectory: _proxyDataDirectory,
-      );
-      _runningConfig = config;
       await _waitForController();
       _startDashboardTimer();
     } on Object {
-      try {
-        _systemProxy = await _systemProxyService.restore(
-          dataDirectory: _proxyDataDirectory,
-        );
-      } on Object {
-        // Preserve the original startup failure. A later refresh will surface
-        // the actual Windows proxy state without hiding the root cause.
-      }
       await NetworkVirtualizationService.stopMihomo();
       _runningConfig = null;
       rethrow;
     }
+  }
+
+  Future<void> _startProxyAndEnableSystem() async {
+    await _ensureCoreRunning();
+    final MihomoManagedConfig config = _runningConfig!;
+    _systemProxy = await _systemProxyService.applyLocal(
+      port: config.summary.mixedPort,
+      dataDirectory: _proxyDataDirectory,
+    );
   }
 
   Future<void> _confirmProxyStart() async {
@@ -274,10 +291,10 @@ class _NetworkVirtualizationWorkspaceState
         await showDialog<bool>(
           context: context,
           builder: (BuildContext dialogContext) => AlertDialog(
-            title: const Text('启动代理并切换 Windows 网络？'),
+            title: const Text('启用 Windows 系统代理？'),
             content: Text(
-              '将启动“${profile.name}”，并把当前用户系统代理切换到 '
-              '127.0.0.1:${profile.summary.mixedPort}。原设置会先保存，停止时自动恢复。',
+              '将把当前用户系统代理切换到“${profile.name}”。'
+              '本地核心和节点管理不依赖此开关，原系统设置会先保存并可随时恢复。',
             ),
             actions: <Widget>[
               TextButton(
@@ -287,14 +304,14 @@ class _NetworkVirtualizationWorkspaceState
               FilledButton(
                 key: const Key('mihomo-confirm-system-proxy'),
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('启动并切换'),
+                child: const Text('启用系统代理'),
               ),
             ],
           ),
         ) ??
         false;
     if (approved) {
-      await _run(_startProxyAndEnableSystem, success: '代理已启动，系统代理已启用');
+      await _run(_startProxyAndEnableSystem, success: '系统代理已启用');
     }
   }
 
@@ -325,7 +342,35 @@ class _NetworkVirtualizationWorkspaceState
     if (controller == null) return;
     try {
       final MihomoControllerSnapshot snapshot = await controller.snapshot();
-      if (mounted) setState(() => _controllerSnapshot = snapshot);
+      if (mounted) {
+        final DateTime now = DateTime.now();
+        final double seconds = _lastTrafficAt == null
+            ? 0
+            : now.difference(_lastTrafficAt!).inMilliseconds / 1000;
+        final double uploadRate = seconds <= 0
+            ? 0
+            : (snapshot.uploadTotal - _lastUploadTotal).clamp(0, 1 << 50) /
+                  seconds;
+        final double downloadRate = seconds <= 0
+            ? 0
+            : (snapshot.downloadTotal - _lastDownloadTotal).clamp(0, 1 << 50) /
+                  seconds;
+        setState(() {
+          _controllerSnapshot = snapshot;
+          if (seconds > 0) {
+            _uploadRates.add(uploadRate);
+            _downloadRates.add(downloadRate);
+            if (_uploadRates.length > 30) _uploadRates.removeAt(0);
+            if (_downloadRates.length > 30) _downloadRates.removeAt(0);
+          }
+          _lastUploadTotal = snapshot.uploadTotal;
+          _lastDownloadTotal = snapshot.downloadTotal;
+          _lastTrafficAt = now;
+          if (_expandedGroups.isEmpty && snapshot.groups.isNotEmpty) {
+            _expandedGroups.add(snapshot.groups.first.name);
+          }
+        });
+      }
     } on Object {
       if (!silent) rethrow;
     }
@@ -374,6 +419,7 @@ class _NetworkVirtualizationWorkspaceState
     setState(() {
       _testingDelay = true;
       _testedNodes = 0;
+      _testingNodes.addAll(nodes);
       for (final String node in nodes) {
         _nodeDelays.remove(node);
       }
@@ -392,6 +438,7 @@ class _NetworkVirtualizationWorkspaceState
         if (!mounted || generation != _delayTestGeneration) return;
         setState(() {
           _nodeDelays[node] = delay;
+          _testingNodes.remove(node);
           _testedNodes++;
           _message = '正在测速 $_testedNodes/${nodes.length}；可随时关闭代理';
         });
@@ -408,6 +455,24 @@ class _NetworkVirtualizationWorkspaceState
     setState(() {
       _testingDelay = false;
       _message = '测速完成：$available/${nodes.length} 个节点可用';
+    });
+  }
+
+  Future<void> _testSingleNode(String node) async {
+    if (_testingNodes.contains(node) || !_proxyRunning) return;
+    final MihomoControllerService? controller = _controller;
+    if (controller == null) return;
+    setState(() => _testingNodes.add(node));
+    int? delay;
+    try {
+      delay = await controller.testDelay(node);
+    } on Object {
+      delay = null;
+    }
+    if (!mounted) return;
+    setState(() {
+      _testingNodes.remove(node);
+      _nodeDelays[node] = delay;
     });
   }
 
@@ -440,6 +505,7 @@ class _NetworkVirtualizationWorkspaceState
     _runningConfig = null;
     _controllerSnapshot = null;
     _nodeDelays.clear();
+    _testingNodes.clear();
   }
 
   Future<void> _pickDisk() async {
@@ -505,71 +571,183 @@ class _NetworkVirtualizationWorkspaceState
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
+    return _proxyTab();
+  }
+
+  Widget _proxyTab() => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      if (constraints.maxWidth < 720) {
+        return Column(
+          children: <Widget>[
+            _compactNav(),
+            Expanded(child: _clashPageBody()),
+          ],
+        );
+      }
+      return Row(
+        children: <Widget>[
+          SizedBox(width: 178, child: _clashSidebar()),
+          const VerticalDivider(width: 1),
+          Expanded(child: _clashPageBody()),
+        ],
+      );
+    },
+  );
+
+  static const List<(String, IconData)> _clashPages = <(String, IconData)>[
+    ('首页', Icons.home_outlined),
+    ('代理', Icons.wifi),
+    ('订阅', Icons.dns_outlined),
+    ('连接', Icons.public),
+    ('规则', Icons.call_split),
+    ('日志', Icons.format_align_left),
+    ('测试', Icons.lock_outline),
+    ('设置', Icons.settings_outlined),
+  ];
+
+  Widget _compactNav() => SizedBox(
+    height: 54,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: _clashPages.length,
+      itemBuilder: (_, int index) => TextButton.icon(
+        onPressed: () => setState(() => _clashPage = index),
+        icon: Icon(_clashPages[index].$2, size: 18),
+        label: Text(_clashPages[index].$1),
+      ),
+    ),
+  );
+
+  Widget _clashSidebar() => Container(
+    color: Theme.of(context).colorScheme.surfaceContainerLowest,
+    padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
+    child: Column(
+      children: <Widget>[
+        for (int index = 0; index < _clashPages.length; index++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: ListTile(
+              key: ValueKey<String>('clash-nav-$index'),
+              minTileHeight: 52,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              selected: _clashPage == index,
+              selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+              leading: Icon(_clashPages[index].$2, size: 24),
+              title: Text(
+                _clashPages[index].$1,
+                style: const TextStyle(fontSize: 16),
+              ),
+              onTap: () => setState(() => _clashPage = index),
+            ),
+          ),
+        const Spacer(),
+        _trafficFooter(),
+      ],
+    ),
+  );
+
+  Widget _trafficFooter() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+      ),
       child: Column(
         children: <Widget>[
-          const TabBar(
-            tabs: <Widget>[
-              Tab(icon: Icon(Icons.shield_outlined), text: 'Clash Verge'),
-              Tab(icon: Icon(Icons.computer_outlined), text: '轻量虚拟机'),
-            ],
+          SizedBox(
+            height: 38,
+            child: CustomPaint(
+              painter: _TrafficSparklinePainter(
+                upload: _uploadRates,
+                download: _downloadRates,
+              ),
+            ),
           ),
-          Expanded(
-            child: TabBarView(children: <Widget>[_proxyTab(), _vmTab()]),
+          _trafficLine(
+            Icons.arrow_upward,
+            '${_rateText(_uploadRates)} /s',
+            Colors.deepOrangeAccent,
+          ),
+          _trafficLine(
+            Icons.arrow_downward,
+            '${_rateText(_downloadRates)} /s',
+            Colors.blue,
+          ),
+          _trafficLine(
+            Icons.link,
+            '${snapshot?.connectionCount ?? 0} 个连接',
+            Theme.of(context).colorScheme.onSurface,
           ),
         ],
       ),
     );
   }
 
-  Widget _proxyTab() => LayoutBuilder(
-    builder: (BuildContext context, BoxConstraints constraints) {
-      final bool compact = constraints.maxWidth < 900;
-      final Widget profiles = _profilePane(compact: compact);
-      final Widget dashboard = _dashboard();
-      return Column(
-        children: <Widget>[
-          _proxyToolbar(),
-          if (_message.isNotEmpty)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              child: Text(
-                _message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          Expanded(
-            child: compact
-                ? ListView(
-                    padding: const EdgeInsets.all(12),
-                    children: <Widget>[
-                      profiles,
-                      const SizedBox(height: 12),
-                      dashboard,
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      SizedBox(width: 310, child: profiles),
-                      const VerticalDivider(width: 1),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(14),
-                          child: dashboard,
-                        ),
-                      ),
-                    ],
-                  ),
+  Widget _trafficLine(IconData icon, String value, Color color) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      children: <Widget>[
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: TextStyle(color: color, fontSize: 13),
           ),
-        ],
-      );
-    },
+        ),
+      ],
+    ),
   );
+
+  String _rateText(List<double> samples) =>
+      _bytes(samples.isEmpty ? 0 : samples.last.round());
+
+  Widget _clashPageBody() => Column(
+    children: <Widget>[
+      _proxyToolbar(),
+      if (_message.isNotEmpty)
+        Container(
+          width: double.infinity,
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Text(_message, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ),
+      Expanded(child: _selectedClashPage()),
+    ],
+  );
+
+  Widget _selectedClashPage() => switch (_clashPage) {
+    0 => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _homePage(),
+    ),
+    1 => _proxyGroupsPage(),
+    2 => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _profilePane(compact: true),
+    ),
+    3 => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _connectionsPage(),
+    ),
+    4 => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _rulesPage(),
+    ),
+    5 => _logsPage(),
+    6 => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _testPage(),
+    ),
+    _ => SingleChildScrollView(
+      padding: const EdgeInsets.all(14),
+      child: _settingsPage(),
+    ),
+  };
 
   Widget _proxyToolbar() => Container(
     height: 58,
@@ -587,7 +765,7 @@ class _NetworkVirtualizationWorkspaceState
           child: Text(
             _proxyRunning
                 ? '${_activeProfile?.name ?? 'Mihomo'} · 127.0.0.1:${_runningConfig?.summary.mixedPort ?? '-'}'
-                : '代理未启动',
+                : (_activeProfile == null ? '尚未添加订阅' : '正在准备本地核心'),
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
@@ -612,19 +790,23 @@ class _NetworkVirtualizationWorkspaceState
           const SizedBox(width: 8),
           FilledButton.icon(
             key: const Key('mihomo-stop'),
-            onPressed: () =>
-                _run(_stopProxyAndRestoreSystem, success: '代理已关闭，原网络已恢复'),
+            onPressed: _busy
+                ? null
+                : () => _systemProxy?.enabled == true
+                      ? _toggleSystemProxy(false)
+                      : _confirmProxyStart(),
             icon: const Icon(Icons.power_settings_new),
-            label: const Text('关闭代理'),
+            label: Text(_systemProxy?.enabled == true ? '关闭系统代理' : '启用系统代理'),
           ),
         ] else
-          FilledButton.icon(
+          OutlinedButton.icon(
             key: const Key('mihomo-start'),
-            onPressed: _busy || _mihomo?.available != true
+            onPressed:
+                _busy || _mihomo?.available != true || _activeProfile == null
                 ? null
-                : _confirmProxyStart,
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('启动代理'),
+                : () => _run(_ensureCoreRunning, success: '本地核心已加载'),
+            icon: const Icon(Icons.refresh),
+            label: const Text('重新加载'),
           ),
       ],
     ),
@@ -741,6 +923,447 @@ class _NetworkVirtualizationWorkspaceState
     );
   }
 
+  Widget _homePage() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: <Widget>[
+            _metricCard(
+              '活动连接',
+              '${snapshot?.connectionCount ?? 0}',
+              Icons.link,
+            ),
+            _metricCard(
+              '下载流量',
+              _bytes(snapshot?.downloadTotal ?? 0),
+              Icons.download,
+            ),
+            _metricCard(
+              '上传流量',
+              _bytes(snapshot?.uploadTotal ?? 0),
+              Icons.upload,
+            ),
+            _metricCard(
+              '当前节点',
+              snapshot?.groups.firstOrNull?.selected ?? '未启动',
+              Icons.public,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _networkSettingsCard(),
+        const SizedBox(height: 12),
+        _runtimeCard(_mihomo),
+      ],
+    );
+  }
+
+  Widget _connectionsPage() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('连接', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: <Widget>[
+            _metricCard(
+              '活动连接',
+              '${snapshot?.connectionCount ?? 0}',
+              Icons.link,
+            ),
+            _metricCard(
+              '下载流量',
+              _bytes(snapshot?.downloadTotal ?? 0),
+              Icons.download,
+            ),
+            _metricCard(
+              '上传流量',
+              _bytes(snapshot?.uploadTotal ?? 0),
+              Icons.upload,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          _proxyRunning ? '连接数据每 2 秒实时刷新。' : '代理启动后显示实时连接数据。',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      ],
+    );
+  }
+
+  Widget _rulesPage() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text('规则', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 12),
+      _networkSettingsCard(),
+      const SizedBox(height: 12),
+      Text(
+        _activeProfile == null
+            ? '请先在“订阅”中添加配置。'
+            : '当前配置：${_activeProfile!.name} · ${_activeProfile!.summary.proxyCount} 个节点',
+      ),
+    ],
+  );
+
+  Widget _networkSettingsCard() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              '网络设置',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('系统代理'),
+              subtitle: Text(
+                _systemProxy?.enabled == true
+                    ? '已启用 · ${_systemProxy?.server ?? ''}'
+                    : '关闭时自动恢复启动前的 Windows 设置',
+              ),
+              value: _systemProxy?.enabled == true,
+              onChanged: _busy || !Platform.isWindows
+                  ? null
+                  : _toggleSystemProxy,
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const <ButtonSegment<String>>[
+                ButtonSegment(value: 'rule', label: Text('规则')),
+                ButtonSegment(value: 'global', label: Text('全局')),
+                ButtonSegment(value: 'direct', label: Text('直连')),
+              ],
+              selected: <String>{
+                snapshot?.mode ?? _activeProfile?.summary.mode ?? 'rule',
+              },
+              onSelectionChanged: !_proxyRunning || _busy
+                  ? null
+                  : (Set<String> value) => _setMode(value.first),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _logsPage() {
+    final List<String> logs = <String>[
+      ..._subscriptionLog,
+      ...(NetworkVirtualizationService.status()['mihomoLog'] as List? ??
+              const <Object>[])
+          .map((Object? line) => '$line'),
+    ];
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+          child: Row(
+            children: <Widget>[
+              const Expanded(
+                child: Text(
+                  '日志',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text('${logs.length} 条'),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: logs.isEmpty
+              ? const Center(child: Text('暂无日志'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(14),
+                  itemCount: logs.length,
+                  itemBuilder: (_, int index) => Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: SelectableText(
+                      logs[index],
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _testPage() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text('延迟测试', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 8),
+      const Text('使用 Mihomo 标准延迟接口测试全部节点；也可在“代理”页面逐个测速。'),
+      const SizedBox(height: 16),
+      FilledButton.icon(
+        onPressed: !_proxyRunning || _testingDelay ? null : _testDelays,
+        icon: _testingDelay
+            ? const SizedBox.square(
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.speed),
+        label: Text(_testingDelay ? '正在测速 $_testedNodes 个' : '全部测速'),
+      ),
+      const SizedBox(height: 16),
+      Text('已获得 ${_nodeDelays.values.whereType<int>().length} 个有效结果'),
+    ],
+  );
+
+  Widget _settingsPage() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text('设置', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 12),
+      _runtimeCard(_mihomo),
+      if (_proxyRunning) ...<Widget>[
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _run(
+                    _stopProxyAndRestoreSystem,
+                    success: '本地核心已停止，系统代理已恢复',
+                  ),
+            icon: const Icon(Icons.stop_circle_outlined),
+            label: const Text('停止本地核心'),
+          ),
+        ),
+      ],
+      const SizedBox(height: 12),
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.folder_outlined),
+        title: const Text('数据目录'),
+        subtitle: SelectableText(_proxyDataDirectory),
+      ),
+      const Divider(),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        leading: const Icon(Icons.computer_outlined),
+        title: const Text('轻量虚拟机'),
+        subtitle: const Text('QEMU 独立运行环境'),
+        children: <Widget>[SizedBox(height: 620, child: _vmTab())],
+      ),
+    ],
+  );
+
+  Widget _proxyGroupsPage() {
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    if (!_proxyRunning) {
+      return const Center(child: Text('本地核心正在加载；订阅和设置仍可直接使用'));
+    }
+    if (snapshot == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (snapshot.groups.isEmpty) {
+      return const Center(child: Text('当前配置没有可切换的代理组'));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: snapshot.groups.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (_, int index) => _proxyGroupSection(snapshot.groups[index]),
+    );
+  }
+
+  Widget _proxyGroupSection(MihomoProxyGroup group) {
+    final bool expanded = _expandedGroups.contains(group.name);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: <Widget>[
+          InkWell(
+            onTap: () => setState(
+              () => expanded
+                  ? _expandedGroups.remove(group.name)
+                  : _expandedGroups.add(group.name),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          group.name,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${group.type}  ·  ${group.selected}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '测试此组所有节点',
+                    onPressed: _testingDelay
+                        ? null
+                        : () => _testDelays(group: group),
+                    icon: const Icon(Icons.speed),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text('${group.nodes.length}'),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded) ...<Widget>[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: LayoutBuilder(
+                builder: (_, BoxConstraints constraints) {
+                  final int columns = constraints.maxWidth >= 720 ? 2 : 1;
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: group.nodes.length,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      mainAxisExtent: 72,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 8,
+                    ),
+                    itemBuilder: (_, int index) =>
+                        _proxyNodeCard(group, group.nodes[index]),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _proxyNodeCard(MihomoProxyGroup group, String node) {
+    final bool selected = node == group.selected;
+    final bool testing = _testingNodes.contains(node);
+    final bool tested = _nodeDelays.containsKey(node);
+    final int? delay = _nodeDelays[node];
+    final Color delayColor = delay == null
+        ? (tested ? Colors.red : Theme.of(context).colorScheme.onSurfaceVariant)
+        : delay <= 300
+        ? Colors.green
+        : delay <= 800
+        ? Colors.orange
+        : Colors.red;
+    return Material(
+      color: selected
+          ? Theme.of(context).colorScheme.primaryContainer
+          : Theme.of(context).colorScheme.surfaceContainerLowest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(9),
+        side: BorderSide(
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).dividerColor,
+        ),
+      ),
+      child: InkWell(
+        key: ValueKey<String>('mihomo-node-${group.name}-$node'),
+        borderRadius: BorderRadius.circular(9),
+        onTap: _busy ? null : () => _selectNode(group, node),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(13, 9, 7, 9),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      node,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      selected ? '当前节点' : '点击切换',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              if (testing)
+                const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Text(
+                  tested ? (delay == null ? '超时' : '$delay') : '—',
+                  style: TextStyle(
+                    color: delayColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              IconButton(
+                tooltip: '单独测速',
+                onPressed: testing ? null : () => _testSingleNode(node),
+                icon: const Icon(Icons.speed, size: 19),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Retained while older widget tests migrate to the page-based Clash layout.
+  // ignore: unused_element
   Widget _dashboard() {
     final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
     final List<String> logs = <String>[
@@ -1139,4 +1762,48 @@ class _NetworkVirtualizationWorkspaceState
     if (value >= 1024) return '${(value / 1024).toStringAsFixed(1)} KiB';
     return '$value B';
   }
+}
+
+class _TrafficSparklinePainter extends CustomPainter {
+  const _TrafficSparklinePainter({
+    required this.upload,
+    required this.download,
+  });
+
+  final List<double> upload;
+  final List<double> download;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double maximum = <double>[...upload, ...download].fold<double>(
+      1,
+      (double value, double item) => item > value ? item : value,
+    );
+    void draw(List<double> values, Color color) {
+      if (values.length < 2) return;
+      final Path path = Path();
+      for (int index = 0; index < values.length; index++) {
+        final double x = size.width * index / (values.length - 1);
+        final double y = size.height - (values[index] / maximum * size.height);
+        if (index == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = color
+          ..strokeWidth = 1.8
+          ..style = PaintingStyle.stroke,
+      );
+    }
+
+    draw(upload, Colors.deepOrangeAccent);
+    draw(download, Colors.blue);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrafficSparklinePainter oldDelegate) => true;
 }
