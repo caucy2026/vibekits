@@ -1,2 +1,4 @@
 # Preserve bundled third-party documentation exactly as distributed.
 native/7za/*.txt -text whitespace=-trailing-space
+native/mihomo/windows/runtime/*.dat binary
+native/mihomo/windows/runtime/*.mmdb binary

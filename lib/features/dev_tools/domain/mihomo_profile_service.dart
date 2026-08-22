@@ -60,8 +60,7 @@ class MihomoConfigSummary {
       if (inProxies && line.isNotEmpty && !RegExp(r'^\s').hasMatch(line)) {
         inProxies = false;
       }
-      if (inProxies &&
-          RegExp(r'^\s+-\s+name\s*:', caseSensitive: false).hasMatch(line)) {
+      if (inProxies && RegExp(r'^\s+-\s+').hasMatch(line)) {
         proxyCount++;
       }
     }
@@ -316,42 +315,43 @@ class MihomoProfileService {
     MihomoProfile profile,
   ) async {
     String yaml = await _readConfig(File(profile.path));
-    MihomoConfigSummary summary = MihomoConfigSummary.parse(yaml);
-    if (!RegExp(
-      r'^(mixed-port|port)\s*:',
-      multiLine: true,
-      caseSensitive: false,
-    ).hasMatch(yaml)) {
-      yaml =
-          '$yaml${yaml.endsWith('\n') ? '' : '\n'}'
-          'mixed-port: ${summary.mixedPort}\n'
-          'allow-lan: false\n';
-      summary = MihomoConfigSummary.parse(yaml);
+    // Clash Verge treats a subscription as a profile and owns all local
+    // inbound/control settings. Never trust or reuse ports supplied by a
+    // remote profile: they may conflict with another Clash instance.
+    yaml = yaml.replaceAll(
+      RegExp(
+        r'^(mixed-port|port|socks-port|allow-lan|external-controller)\s*:.*(?:\r?\n|$)',
+        multiLine: true,
+        caseSensitive: false,
+      ),
+      '',
+    );
+    final int mixedPort = await _freeLoopbackPort();
+    int controllerPort = await _freeLoopbackPort();
+    while (controllerPort == mixedPort) {
+      controllerPort = await _freeLoopbackPort();
     }
-    Uri? controller = summary.controller;
-    if (controller != null &&
-        controller.host != InternetAddress.loopbackIPv4.address &&
-        controller.host != 'localhost') {
-      throw const FormatException('为安全起见，Mihomo 控制端口必须绑定 127.0.0.1');
-    }
-    if (controller == null) {
-      final ServerSocket socket = await ServerSocket.bind(
-        InternetAddress.loopbackIPv4,
-        0,
-      );
-      final int port = socket.port;
-      await socket.close();
-      yaml =
-          '$yaml${yaml.endsWith('\n') ? '' : '\n'}'
-          'external-controller: 127.0.0.1:$port\n';
-      summary = MihomoConfigSummary.parse(yaml);
-      controller = summary.controller;
-    }
+    yaml =
+        '$yaml${yaml.endsWith('\n') ? '' : '\n'}'
+        'mixed-port: $mixedPort\n'
+        'allow-lan: false\n'
+        'external-controller: 127.0.0.1:$controllerPort\n';
+    final MihomoConfigSummary summary = MihomoConfigSummary.parse(yaml);
     final File runtime = File(
       '$dataDirectory${Platform.pathSeparator}active-runtime.yaml',
     );
     await _atomicWrite(runtime, yaml);
     return MihomoManagedConfig(path: runtime.path, summary: summary);
+  }
+
+  static Future<int> _freeLoopbackPort() async {
+    final ServerSocket socket = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final int port = socket.port;
+    await socket.close();
+    return port;
   }
 
   Future<void> _upsert(

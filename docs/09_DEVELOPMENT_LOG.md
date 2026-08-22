@@ -771,3 +771,10 @@
 - 解除错误的 240 字符 URL 限制；Windows Credential Manager 写入上限从误用的 512 B 修正为系统支持的 2560 B，600 字符订阅凭据真实写入、读取、删除通过。
 - 订阅请求增加 Clash Verge User-Agent；在 Windows 系统代理已启用时优先使用该代理，失败后自动回退直连。解决仅能通过现有代理访问订阅服务时 Dart 直连失败的问题。
 - 接受不携带 `mixed-port` 的标准代理列表 YAML，并在生成运行配置时补入本地 `mixed-port`、`allow-lan: false` 和回环控制器；修正代理组条目被错误计入节点数量的问题。
+
+## 2026-08-22 · v1.9.0-dev.73 Clash Verge 标准 Profile 启动链路
+
+- dev.72 实机日志确认订阅已下载 31,057 字节，但节点显示 0。结构检查确认 Profile 含 32 个行内映射节点；节点计数改为按 `proxies` 列表项统计，兼容 `- name:` 与 `- {name: ...}` 两种标准 YAML 写法。
+- 使用 Release 内置 Mihomo 对真实 Profile 执行 `-t` 发现实际阻塞：运行包缺少 `Country.mmdb`、`geoip.dat`、`geosite.dat`，导致 GEOIP 规则启动时尝试在线下载并因 DNS 失败。补齐与当前 Clash Verge 相同且经过 SHA-256 固定的 GeoData，纳入 CMake Release 和自包含校验。
+- Mihomo 启动前把内置 GeoData 原子准备到独立数据目录，并执行 30 秒有界配置预校验；只有校验通过才创建常驻进程和切换 Windows 系统代理，避免错误配置破坏网络。
+- 同一份用户 Profile 在补齐 GeoData 后真实校验 38 ms 完成并返回 successful；最终 Release 进一步真实启动该 Profile，REST 返回代理组及不少于 32 个节点，进程正常退出。自包含资产 28 项通过，运行不再依赖 GitHub 临时下载。

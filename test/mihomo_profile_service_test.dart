@@ -75,7 +75,9 @@ void main() {
     );
     expect(File(managed.path).existsSync(), isTrue);
     expect(managed.summary.controller?.host, '127.0.0.1');
-    expect(managed.summary.controller?.port, 19090);
+    expect(managed.summary.controller?.port, greaterThan(0));
+    expect(managed.summary.controller?.port, isNot(19090));
+    expect(managed.summary.mixedPort, isNot(17890));
   });
 
   test('订阅地址只进凭据库，清单不泄露 token，并支持更新', () async {
@@ -122,10 +124,10 @@ void main() {
     final MihomoManagedConfig managed = await service.prepareManagedConfig(
       updated,
     );
-    expect(managed.summary.mixedPort, 7890);
+    expect(managed.summary.mixedPort, greaterThan(0));
     expect(
       await File(managed.path).readAsString(),
-      contains('mixed-port: 7890'),
+      contains('allow-lan: false'),
     );
     expect((await service.readActivityLog()).join('\n'), contains('订阅成功'));
     expect(

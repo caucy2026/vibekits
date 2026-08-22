@@ -49,6 +49,16 @@ void main() {
         'dataDirectory': evidence.path,
         'systemProxyPort': 17890,
       });
+      for (final String name in const <String>[
+        'Country.mmdb',
+        'geoip.dat',
+        'geosite.dat',
+      ]) {
+        expect(
+          File('${evidence.path}${Platform.pathSeparator}$name').existsSync(),
+          isTrue,
+        );
+      }
       await Future<void>.delayed(const Duration(milliseconds: 500));
       final Socket socket = await Socket.connect(
         '127.0.0.1',

@@ -166,6 +166,8 @@ abstract final class NetworkVirtualizationService {
       throw const FormatException('Mihomo 数据目录必须使用绝对路径');
     }
     await data.create(recursive: true);
+    await _prepareMihomoData(mihomo, data);
+    await _validateMihomoConfig(mihomo, data, config);
     final Process process = await Process.start(
       mihomo,
       <String>['-d', data.path, '-f', config.path],
@@ -194,6 +196,80 @@ abstract final class NetworkVirtualizationService {
       }),
     );
     return managed;
+  }
+
+  static Future<void> _prepareMihomoData(
+    String executable,
+    Directory data,
+  ) async {
+    final Directory bundle = File(executable).parent;
+    for (final String name in const <String>[
+      'Country.mmdb',
+      'geoip.dat',
+      'geosite.dat',
+    ]) {
+      final File source = File('${bundle.path}${Platform.pathSeparator}$name');
+      if (!await source.exists()) {
+        throw StateError('发布包缺少 Mihomo GeoData：$name');
+      }
+      final File target = File('${data.path}${Platform.pathSeparator}$name');
+      if (await target.exists() &&
+          await target.length() == await source.length()) {
+        continue;
+      }
+      final File temporary = File('${target.path}.tmp');
+      if (await temporary.exists()) await temporary.delete();
+      await source.copy(temporary.path);
+      if (await target.exists()) await target.delete();
+      await temporary.rename(target.path);
+    }
+  }
+
+  static Future<void> _validateMihomoConfig(
+    String executable,
+    Directory data,
+    File config,
+  ) async {
+    final Process process = await Process.start(
+      executable,
+      <String>['-t', '-d', data.path, '-f', config.path],
+      mode: ProcessStartMode.normal,
+      runInShell: false,
+    );
+    final List<String> lines = <String>[];
+    void append(String line) {
+      lines.add(line);
+      if (lines.length > 40) lines.removeAt(0);
+    }
+
+    final StreamSubscription<String> stdout = process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(append);
+    final StreamSubscription<String> stderr = process.stderr
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(append);
+    int exitCode;
+    try {
+      exitCode = await process.exitCode.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode;
+      throw TimeoutException('Mihomo 配置校验超过 30 秒');
+    } finally {
+      await stdout.cancel();
+      await stderr.cancel();
+    }
+    if (exitCode != 0) {
+      final String reason = lines.reversed
+          .firstWhere(
+            (String line) => line.trim().isNotEmpty,
+            orElse: () => '未知配置错误',
+          )
+          .replaceAll(RegExp(r'https?://\S+'), '<远程地址>');
+      throw StateError('Mihomo 配置校验失败：$reason');
+    }
   }
 
   static Future<void> stopMihomo() async {

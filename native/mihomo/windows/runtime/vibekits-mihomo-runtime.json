@@ -4,5 +4,11 @@
     "source":  "https://github.com/MetaCubeX/mihomo",
     "upstreamBundle":  "Clash Verge Rev",
     "license":  "MIT",
-    "sha256":  "98986B574E41F92B22ED65AA42A61AD8CADF886CC7B3F76B722CD73A3A52D878"
+    "sha256":  "98986B574E41F92B22ED65AA42A61AD8CADF886CC7B3F76B722CD73A3A52D878",
+    "geoDataSource": "https://github.com/MetaCubeX/meta-rules-dat",
+    "geoData": {
+        "Country.mmdb": {"sha256": "0EDF8A9651A7B21AF9234BB176DACB727FBD32149E19CC5A2A2163317A8F10FE", "size": 8000653},
+        "geoip.dat": {"sha256": "AF332AB88EB4BB15E3CD10F03F5542E90655EE4BD5BF0E23949CFBD1E46BC20F", "size": 17784192},
+        "geosite.dat": {"sha256": "2C185FDFAC8F0AAC556CFCEEE6B66B9353779D3EF6DEFF3B4ACC0132D7515546", "size": 4229320}
+    }
 }
