@@ -48,6 +48,7 @@
 42. [dev.71 Clash Verge 工作区验收](acceptance/V1_9_0_DEV71_CLASH_WORKSPACE_2026-08-22.md)——订阅、节点、代理模式、系统代理、统计和日志真实闭环
 43. [dev.72 Clash 订阅修复验收](acceptance/V1_9_0_DEV72_CLASH_SUBSCRIPTION_2026-08-22.md)——长 URL、系统代理、客户端标识、无端口 YAML 和脱敏日志
 44. [dev.73 Clash 标准 Profile 验收](acceptance/V1_9_0_DEV73_CLASH_STANDARD_PROFILE_2026-08-22.md)——行内节点、内置 GeoData、启动前预校验与真实 Profile 证据
+45. [dev.74 Clash 测速与关闭验收](acceptance/V1_9_0_DEV74_CLASH_DELAY_CLOSE_2026-08-22.md)——真实延迟、分组测速、进度与恢复网络
 
 ## 完成定义
 

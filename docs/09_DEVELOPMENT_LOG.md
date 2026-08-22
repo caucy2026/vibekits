@@ -778,3 +778,9 @@
 - 使用 Release 内置 Mihomo 对真实 Profile 执行 `-t` 发现实际阻塞：运行包缺少 `Country.mmdb`、`geoip.dat`、`geosite.dat`，导致 GEOIP 规则启动时尝试在线下载并因 DNS 失败。补齐与当前 Clash Verge 相同且经过 SHA-256 固定的 GeoData，纳入 CMake Release 和自包含校验。
 - Mihomo 启动前把内置 GeoData 原子准备到独立数据目录，并执行 30 秒有界配置预校验；只有校验通过才创建常驻进程和切换 Windows 系统代理，避免错误配置破坏网络。
 - 同一份用户 Profile 在补齐 GeoData 后真实校验 38 ms 完成并返回 successful；最终 Release 进一步真实启动该 Profile，REST 返回代理组及不少于 32 个节点，进程正常退出。自包含资产 28 项通过，运行不再依赖 GitHub 临时下载。
+
+## 2026-08-22 · v1.9.0-dev.74 节点测速与显式关闭
+
+- 运行态顶部固定显示“全部测速”和“关闭代理”；关闭操作明确停止 Mihomo、取消当前测速并恢复启动前的 Windows 系统代理。
+- 每个代理组增加独立测速按钮，节点下拉直接显示 `ms` 或“超时”；全量测速采用 6 路有界并发并实时显示进度，测速期间仍可立即关闭代理。
+- 测速直接调用内置 Mihomo 标准 `/proxies/{name}/delay` 接口，不在 Flutter 层伪造网络延迟。轻量接口测试通过；使用用户真实 32 节点 Profile 启动并完成真实延迟请求，6 秒内验收通过。

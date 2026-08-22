@@ -99,10 +99,40 @@ class MihomoControllerService {
     );
   }
 
+  Future<int> testDelay(
+    String proxy, {
+    String testUrl = 'https://www.gstatic.com/generate_204',
+    int timeoutMilliseconds = 5000,
+  }) async {
+    if (proxy.isEmpty || proxy.length > 300) {
+      throw const FormatException('测速节点无效');
+    }
+    final Uri target = Uri.parse(testUrl);
+    if (target.scheme != 'https' || target.host.isEmpty) {
+      throw const FormatException('测速地址必须使用 HTTPS');
+    }
+    final Map<String, Object?> result = await _json(
+      'GET',
+      '/proxies/${Uri.encodeComponent(proxy)}/delay',
+      queryParameters: <String, String>{
+        'url': target.toString(),
+        'timeout': timeoutMilliseconds.clamp(1000, 15000).toString(),
+      },
+      responseTimeout: Duration(
+        milliseconds: timeoutMilliseconds.clamp(1000, 15000) + 1500,
+      ),
+    );
+    final int delay = _integer(result['delay']);
+    if (delay <= 0) throw StateError('节点测速失败');
+    return delay;
+  }
+
   Future<Map<String, Object?>> _json(
     String method,
     String path, {
     Map<String, Object?>? body,
+    Map<String, String>? queryParameters,
+    Duration responseTimeout = const Duration(seconds: 2),
   }) async {
     if (!endpoint.isAbsolute ||
         endpoint.host != InternetAddress.loopbackIPv4.address &&
@@ -112,7 +142,10 @@ class MihomoControllerService {
     final HttpClient client = HttpClient()
       ..connectionTimeout = const Duration(milliseconds: 800);
     try {
-      final Uri uri = endpoint.replace(path: path);
+      final Uri uri = endpoint.replace(
+        path: path,
+        queryParameters: queryParameters,
+      );
       final HttpClientRequest request = await client
           .openUrl(method, uri)
           .timeout(const Duration(seconds: 1));
@@ -125,12 +158,12 @@ class MihomoControllerService {
         request.write(jsonEncode(body));
       }
       final HttpClientResponse response = await request.close().timeout(
-        const Duration(seconds: 2),
+        responseTimeout,
       );
       final String text = await utf8.decoder
           .bind(response)
           .join()
-          .timeout(const Duration(seconds: 2));
+          .timeout(responseTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Mihomo 控制接口失败（HTTP ${response.statusCode}）');
       }

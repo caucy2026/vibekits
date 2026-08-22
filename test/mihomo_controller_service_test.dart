@@ -33,6 +33,14 @@ void main() {
             }),
           );
         } else if (request.method == 'GET' &&
+            request.uri.path.endsWith('/delay')) {
+          expect(request.uri.queryParameters['timeout'], '5000');
+          expect(
+            request.uri.queryParameters['url'],
+            'https://www.gstatic.com/generate_204',
+          );
+          request.response.write(jsonEncode(<String, Object>{'delay': 86}));
+        } else if (request.method == 'GET' &&
             request.uri.path == '/connections') {
           request.response.write(
             jsonEncode(<String, Object>{
@@ -68,6 +76,7 @@ void main() {
     expect(snapshot.connectionCount, 1);
     expect(snapshot.downloadTotal, 1024);
     expect(snapshot.groups.single.selected, '节点 A');
+    expect(await controller.testDelay('节点 A'), 86);
 
     await controller.setMode('global');
     await controller.selectNode('自动选择', '节点 B');

@@ -72,6 +72,30 @@ void main() {
             .length,
         greaterThanOrEqualTo(32),
       );
+      final List<String> candidates = snapshot.groups
+          .expand((MihomoProxyGroup group) => group.nodes)
+          .where(
+            (String node) => !const <String>{
+              'DIRECT',
+              'REJECT',
+              'REJECT-DROP',
+              'PASS',
+              'COMPATIBLE',
+            }.contains(node.toUpperCase()),
+          )
+          .toSet()
+          .take(6)
+          .toList();
+      final List<int?> delays = await Future.wait<int?>(
+        candidates.map((String node) async {
+          try {
+            return await controller.testDelay(node);
+          } on Object {
+            return null;
+          }
+        }),
+      );
+      expect(delays.whereType<int>(), isNotEmpty);
     } finally {
       await NetworkVirtualizationService.stopMihomo();
     }

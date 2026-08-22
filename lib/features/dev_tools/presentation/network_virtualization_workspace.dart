@@ -29,7 +29,11 @@ class _NetworkVirtualizationWorkspaceState
   MihomoProfile? _activeProfile;
   MihomoManagedConfig? _runningConfig;
   MihomoControllerSnapshot? _controllerSnapshot;
+  final Map<String, int?> _nodeDelays = <String, int?>{};
   Timer? _dashboardTimer;
+  bool _testingDelay = false;
+  int _testedNodes = 0;
+  int _delayTestGeneration = 0;
   String _diskPath = '';
   String _isoPath = '';
   String _message = '';
@@ -345,6 +349,68 @@ class _NetworkVirtualizationWorkspaceState
     }, success: '节点已切换为 $node');
   }
 
+  Future<void> _testDelays({MihomoProxyGroup? group}) async {
+    if (_testingDelay || !_proxyRunning) return;
+    final MihomoControllerService? controller = _controller;
+    final MihomoControllerSnapshot? snapshot = _controllerSnapshot;
+    if (controller == null || snapshot == null) return;
+    final List<String> nodes =
+        (group == null
+                ? snapshot.groups.expand((MihomoProxyGroup item) => item.nodes)
+                : group.nodes)
+            .where(
+              (String node) => !const <String>{
+                'DIRECT',
+                'REJECT',
+                'REJECT-DROP',
+                'PASS',
+                'COMPATIBLE',
+              }.contains(node.toUpperCase()),
+            )
+            .toSet()
+            .toList(growable: false);
+    if (nodes.isEmpty) return;
+    final int generation = ++_delayTestGeneration;
+    setState(() {
+      _testingDelay = true;
+      _testedNodes = 0;
+      for (final String node in nodes) {
+        _nodeDelays.remove(node);
+      }
+      _message = '正在测速 0/${nodes.length}；可随时关闭代理';
+    });
+    int cursor = 0;
+    Future<void> worker() async {
+      while (generation == _delayTestGeneration && cursor < nodes.length) {
+        final String node = nodes[cursor++];
+        int? delay;
+        try {
+          delay = await controller.testDelay(node);
+        } on Object {
+          delay = null;
+        }
+        if (!mounted || generation != _delayTestGeneration) return;
+        setState(() {
+          _nodeDelays[node] = delay;
+          _testedNodes++;
+          _message = '正在测速 $_testedNodes/${nodes.length}；可随时关闭代理';
+        });
+      }
+    }
+
+    await Future.wait<void>(
+      List<Future<void>>.generate(nodes.length.clamp(1, 6), (_) => worker()),
+    );
+    if (!mounted || generation != _delayTestGeneration) return;
+    final int available = nodes
+        .where((String node) => _nodeDelays[node] != null)
+        .length;
+    setState(() {
+      _testingDelay = false;
+      _message = '测速完成：$available/${nodes.length} 个节点可用';
+    });
+  }
+
   Future<void> _toggleSystemProxy(bool enabled) async {
     final MihomoManagedConfig? config = _runningConfig;
     if (enabled && config == null) {
@@ -364,6 +430,8 @@ class _NetworkVirtualizationWorkspaceState
   }
 
   Future<void> _stopProxyAndRestoreSystem() async {
+    _delayTestGeneration++;
+    _testingDelay = false;
     _dashboardTimer?.cancel();
     _systemProxy = await _systemProxyService.restore(
       dataDirectory: _proxyDataDirectory,
@@ -371,6 +439,7 @@ class _NetworkVirtualizationWorkspaceState
     await NetworkVirtualizationService.stopMihomo();
     _runningConfig = null;
     _controllerSnapshot = null;
+    _nodeDelays.clear();
   }
 
   Future<void> _pickDisk() async {
@@ -528,17 +597,27 @@ class _NetworkVirtualizationWorkspaceState
           icon: const Icon(Icons.refresh),
         ),
         const SizedBox(width: 4),
-        if (_proxyRunning)
+        if (_proxyRunning) ...<Widget>[
           OutlinedButton.icon(
+            key: const Key('mihomo-test-all'),
+            onPressed: _testingDelay ? null : _testDelays,
+            icon: _testingDelay
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.speed),
+            label: Text(_testingDelay ? '$_testedNodes 个' : '全部测速'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
             key: const Key('mihomo-stop'),
-            onPressed: _busy
-                ? null
-                : () =>
-                      _run(_stopProxyAndRestoreSystem, success: '代理已停止，原网络已恢复'),
-            icon: const Icon(Icons.stop_circle_outlined),
-            label: const Text('停止'),
-          )
-        else
+            onPressed: () =>
+                _run(_stopProxyAndRestoreSystem, success: '代理已关闭，原网络已恢复'),
+            icon: const Icon(Icons.power_settings_new),
+            label: const Text('关闭代理'),
+          ),
+        ] else
           FilledButton.icon(
             key: const Key('mihomo-start'),
             onPressed: _busy || _mihomo?.available != true
@@ -774,30 +853,49 @@ class _NetworkVirtualizationWorkspaceState
                   ...snapshot.groups.map(
                     (MihomoProxyGroup group) => Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey<String>('mihomo-group-${group.name}'),
-                        initialValue: group.nodes.contains(group.selected)
-                            ? group.selected
-                            : group.nodes.first,
-                        decoration: InputDecoration(
-                          labelText: '${group.name} · ${group.type}',
-                        ),
-                        items: group.nodes
-                            .map(
-                              (String node) => DropdownMenuItem<String>(
-                                value: node,
-                                child: Text(
-                                  node,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              key: ValueKey<String>(
+                                'mihomo-group-${group.name}',
                               ),
-                            )
-                            .toList(),
-                        onChanged: _busy
-                            ? null
-                            : (String? node) {
-                                if (node != null) _selectNode(group, node);
-                              },
+                              initialValue: group.nodes.contains(group.selected)
+                                  ? group.selected
+                                  : group.nodes.first,
+                              decoration: InputDecoration(
+                                labelText: '${group.name} · ${group.type}',
+                              ),
+                              items: group.nodes
+                                  .map(
+                                    (String node) => DropdownMenuItem<String>(
+                                      value: node,
+                                      child: Text(
+                                        _nodeLabel(node),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: _busy
+                                  ? null
+                                  : (String? node) {
+                                      if (node != null) {
+                                        _selectNode(group, node);
+                                      }
+                                    },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filledTonal(
+                            key: ValueKey<String>('mihomo-test-${group.name}'),
+                            tooltip: '测试此组所有节点延迟',
+                            onPressed: _testingDelay
+                                ? null
+                                : () => _testDelays(group: group),
+                            icon: const Icon(Icons.speed),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -833,6 +931,12 @@ class _NetworkVirtualizationWorkspaceState
         ),
       ],
     );
+  }
+
+  String _nodeLabel(String node) {
+    if (!_nodeDelays.containsKey(node)) return node;
+    final int? delay = _nodeDelays[node];
+    return delay == null ? '$node · 超时' : '$node · $delay ms';
   }
 
   Widget _metricCard(String label, String value, IconData icon) => SizedBox(
