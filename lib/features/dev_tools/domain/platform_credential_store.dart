@@ -2,24 +2,46 @@ import 'dart:ffi' as ffi;
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart';
 
 abstract final class PlatformCredentialStore {
   static Future<String?> read(String key) {
     if (Platform.isWindows) return _WindowsCredentials.read(key);
     if (Platform.isMacOS) return _MacKeychain.read(key);
+    if (Platform.isAndroid) return _AndroidKeystore.read(key);
     throw UnsupportedError('当前平台没有可用的系统安全凭据存储');
   }
 
   static Future<void> write(String key, String value) {
     if (Platform.isWindows) return _WindowsCredentials.write(key, value);
     if (Platform.isMacOS) return _MacKeychain.write(key, value);
+    if (Platform.isAndroid) return _AndroidKeystore.write(key, value);
     throw UnsupportedError('当前平台没有可用的系统安全凭据存储');
   }
 
   static Future<void> delete(String key) {
     if (Platform.isWindows) return _WindowsCredentials.delete(key);
     if (Platform.isMacOS) return _MacKeychain.delete(key);
+    if (Platform.isAndroid) return _AndroidKeystore.delete(key);
     throw UnsupportedError('当前平台没有可用的系统安全凭据存储');
+  }
+}
+
+abstract final class _AndroidKeystore {
+  static const MethodChannel _channel = MethodChannel('vibekits/credentials');
+
+  static Future<String?> read(String key) =>
+      _channel.invokeMethod<String>('read', <String, String>{'key': key});
+
+  static Future<void> write(String key, String value) async {
+    await _channel.invokeMethod<void>('write', <String, String>{
+      'key': key,
+      'value': value,
+    });
+  }
+
+  static Future<void> delete(String key) async {
+    await _channel.invokeMethod<void>('delete', <String, String>{'key': key});
   }
 }
 

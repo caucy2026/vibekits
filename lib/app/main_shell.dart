@@ -74,6 +74,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _selectedIndex = 0;
+  final List<int> _mobileNavigationHistory = <int>[];
   bool _hasUserSelectedTab = false;
   late final Set<int> _loadedTabs;
   final ValueNotifier<int> _openRequest = ValueNotifier<int>(0);
@@ -196,12 +197,17 @@ class _MainShellState extends State<MainShell> {
     super.dispose();
   }
 
-  void _selectTab(int index) {
+  void _selectTab(int index, {bool recordMobileHistory = true}) {
     if (index < 0 || index >= _tabTitles.length) {
       return;
     }
+    if (index == _selectedIndex) return;
     _hasUserSelectedTab = true;
     final bool mobile = Platform.isAndroid || Platform.isIOS;
+    if (mobile && recordMobileHistory) {
+      _mobileNavigationHistory.remove(index);
+      _mobileNavigationHistory.add(_selectedIndex);
+    }
     final bool needsLoad = !_loadedTabs.contains(index);
     setState(() {
       _selectedIndex = index;
@@ -598,32 +604,63 @@ class _MainShellState extends State<MainShell> {
           },
         );
 
-    return CallbackShortcuts(
-      bindings: shortcuts,
-      child: Focus(
-        autofocus: true,
-        child: Scaffold(
-          body: SafeArea(
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                final bool useSidebar = constraints.maxWidth >= 1180;
-                if (!useSidebar) {
-                  return Column(
+    final bool mobile = Platform.isAndroid || Platform.isIOS;
+    return PopScope<Object?>(
+      canPop: !mobile || _mobileNavigationHistory.isEmpty,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop || !mobile || _mobileNavigationHistory.isEmpty) return;
+        final int previous = _mobileNavigationHistory.removeLast();
+        _selectTab(previous, recordMobileHistory: false);
+      },
+      child: CallbackShortcuts(
+        bindings: shortcuts,
+        child: Focus(
+          autofocus: !mobile,
+          child: Scaffold(
+            body: SafeArea(
+              bottom: !mobile,
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final bool useSidebar =
+                      !mobile && constraints.maxWidth >= 1180;
+                  if (!useSidebar) {
+                    return Column(
+                      children: <Widget>[
+                        _buildTopBar(context, compact: true),
+                        if (!mobile) _buildCompactNavigation(context),
+                        Expanded(child: _buildWorkspace(context, tabPages)),
+                      ],
+                    );
+                  }
+                  return Row(
                     children: <Widget>[
-                      _buildTopBar(context, compact: true),
-                      _buildCompactNavigation(context),
+                      _buildNavigation(context),
                       Expanded(child: _buildWorkspace(context, tabPages)),
                     ],
                   );
-                }
-                return Row(
-                  children: <Widget>[
-                    _buildNavigation(context),
-                    Expanded(child: _buildWorkspace(context, tabPages)),
-                  ],
-                );
-              },
+                },
+              ),
             ),
+            bottomNavigationBar: mobile
+                ? NavigationBar(
+                    key: const Key('primary-navigation-mobile'),
+                    selectedIndex: _selectedIndex,
+                    labelBehavior:
+                        NavigationDestinationLabelBehavior.onlyShowSelected,
+                    onDestinationSelected: _selectTab,
+                    destinations: List<NavigationDestination>.generate(
+                      _tabTitles.length,
+                      (int index) => NavigationDestination(
+                        icon: Icon(_tabIcons[index]),
+                        selectedIcon: Icon(_tabIcons[index], fill: 1),
+                        label: _tabTitles[index]
+                            .replaceAll('（智能体）', '')
+                            .replaceAll('系统', ''),
+                        tooltip: _tabTitles[index],
+                      ),
+                    ),
+                  )
+                : null,
           ),
         ),
       ),
@@ -631,26 +668,31 @@ class _MainShellState extends State<MainShell> {
   }
 
   Widget _buildWorkspace(BuildContext context, List<Widget> tabPages) {
+    final bool mobile = Platform.isAndroid || Platform.isIOS;
     return Column(
       children: <Widget>[
         if (MediaQuery.sizeOf(context).width >= 1180) _buildTopBar(context),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            padding: mobile
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: Material(
               color: context.vibe.panelRaised,
-              elevation: 2,
+              elevation: mobile ? 0 : 2,
               shadowColor: context.vibe.glow,
               clipBehavior: Clip.antiAlias,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: context.vibe.border),
-              ),
+              shape: mobile
+                  ? const RoundedRectangleBorder()
+                  : RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: context.vibe.border),
+                    ),
               child: IndexedStack(index: _selectedIndex, children: tabPages),
             ),
           ),
         ),
-        _buildStatusBar(context),
+        if (!mobile) _buildStatusBar(context),
       ],
     );
   }

@@ -10,6 +10,8 @@
 
 - Windows 固定 Release 入口已更新为 `dev.70+80`，不再把源码版本或被旧进程锁住的历史 EXE 当成交付完成。Harness 启动日志取消逐块强制刷盘，诊断 UI 合并刷新，运行时发现缓存且不重复写相同补丁。实机热启动 DSH 本体为 3.886～4.192 秒，端到端约 5.650 秒；稳定 3 秒目标仍未通过，详见 dev.70 验收报告。
 - Android 12 arm64 Release 已在 `192.168.3.63:5555` 构建、安装和启动；三次冷启动平均 716 ms，稳定 PSS 约 102 MB，强制退出后无残留。移动端不再启动桌面 MCP/拖放/文件关联，并只挂载当前重型工作区。
+- Android dev.79 已将桌面顶部工作区条替换为 Material 3 底部导航，系统返回优先返回上一个工作区；Harness Key 新增一次性局域网二维码网页输入并接入 Android Keystore AES-GCM 安全存储。模型、下载和 Harness 调试目录改用应用 files/cache 沙箱。
+- Android 全功能复核仍有未完成项：桌面专属系统清理、ADB host、串口、Git/SSH 原生进程、Mihomo 和 QEMU 需要逐项改为手机本地实现或“连接桌面节点”，不能把当前可编译状态等同于全部移动能力已验收。
 - macOS 14 Runner 已完成真实 Release 构建、压缩、SHA-256 和 Artifact 上传（Run `32542306872`，53,000,834 字节）。未签名构建通过不等于 Developer ID 签名及公证完成。
 - Clash Verge / 虚拟机固定显示在开发工具左侧第二项。Windows Release 内置 Mihomo/QEMU；系统代理具备保存、确认应用、失败回滚和恢复原值，QEMU 可创建 qcow2 并启动已有磁盘/ISO。Harness 真实调用闭环已通过。
 - ADB 已从三个通用入口扩展为可被 Harness 自动选择的 Shell、Logcat、APK 安装、推送、拉取和截图语义接口；界面、工具清单、审批与真实活动日志使用同一注册源。

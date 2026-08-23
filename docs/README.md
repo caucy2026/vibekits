@@ -54,6 +54,7 @@
 48. [音频 Harness 工具接口](31_AUDIO_HARNESS_TOOL_API.md)——PCM/WAV 质量、谐波、杂讯、转换、播放与测试音接口
 49. [dev.77 音频质量闭环验收](acceptance/V1_9_0_DEV77_AUDIO_QUALITY_HARNESS_2026-08-22.md)——FFT 性能、质量指标、Harness 真调用与 Release
 50. [dev.78 清理经验算法与性能闭环验收](acceptance/V1_9_0_DEV78_CLEANUP_EXPERIENCE_ALGORITHM_2026-08-22.md)——本机只读审计、10 GiB 目标规划、安全缺口与大候选集性能
+51. [dev.79 Android UI 与局域网 Key 验收](acceptance/V1_9_0_DEV79_ANDROID_UI_LAN_KEY_2026-08-23.md)——底部导航、返回历史、Keystore、一次性二维码网页输入与 APK 构建
 
 ## 完成定义
 

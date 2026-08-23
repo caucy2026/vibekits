@@ -30,6 +30,10 @@ Future<List<int>> loadBundledModelAsset(String path) async {
 
 /// 模型目录默认位置（docs/02 §7）。
 String defaultModelDirectory() {
+  if (Platform.isAndroid || Platform.isIOS) {
+    return '${Directory.systemTemp.parent.path}${Platform.pathSeparator}'
+        'files${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Models';
+  }
   if (Platform.isMacOS) {
     final String home = Platform.environment['HOME'] ?? '.';
     return <String>[
@@ -48,6 +52,10 @@ String defaultModelDirectory() {
 }
 
 String defaultToolDownloadDirectory() {
+  if (Platform.isAndroid || Platform.isIOS) {
+    return '${Directory.systemTemp.path}${Platform.pathSeparator}'
+        'Vibekits${Platform.pathSeparator}downloads';
+  }
   final String base =
       Platform.environment['LOCALAPPDATA'] ??
       Platform.environment['APPDATA'] ??

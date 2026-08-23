@@ -2,6 +2,17 @@
 
 按时间记录开发过程、关键决策、问题与解决、里程碑状态。里程碑详细验收见 `docs/acceptance/`。
 
+## 2026-08-23 · v1.9.0-dev.79 Android 操作习惯与局域网 Key 输入
+
+- 手机端一级导航改为 Material 3 底部导航，只显示当前项文字；移除桌面式顶部横排 Tab。安卓返回键/返回手势按实际访问历史返回上一个工作区，历史为空时退出。
+- 手机端工作区改为贴边内容、无桌面阴影/圆角外框和底部桌面状态栏；仍只挂载当前重型页面，避免后台累积 OCR、数据库等状态。
+- Harness 设置新增“同局域网扫码输入 Key”：APP 生成一次性二维码，另一设备扫码打开内置临时网页，粘贴并确认后 Key 自动回到安卓 APP；二维码不包含 Key，错误令牌拒绝，接收一次或五分钟后立即停服。
+- Android 新增原生 Keystore 凭据通道，API Key 使用随机 IV 的 AES-GCM 加密后写入私有 SharedPreferences；Key 不进入普通设置、二维码、URL 或日志。
+- Android 模型、下载和 Harness 调试目录改到应用 files/cache 沙箱，不再按桌面可执行文件目录推导。
+- 引入 BSD-3-Clause `qr_flutter 4.1.0` 本地绘制二维码；专项 HTTP 闭环 2/2、定向静态分析 0 问题。
+- 首次 APK 构建识别出用户 Gradle 9.3.1 全局缓存损坏；切换项目隔离缓存后 Android arm64 Release 构建成功，产物 108.1 MB。
+- 详细验收与尚未移动化的桌面能力见 `docs/acceptance/V1_9_0_DEV79_ANDROID_UI_LAN_KEY_2026-08-23.md`。
+
 ## 2026-08-22 · Windows 测试节点跨 Mac 搭建手册 v2.0
 
 - 将原节点调用说明整理为从零搭建手册，明确专用 Windows 标准账户、Private 局域网、受限 SSH 防火墙、每台 Mac 独立 Ed25519 身份和 host key 固定要求。

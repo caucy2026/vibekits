@@ -192,6 +192,10 @@ abstract final class DeepSeekHarnessService {
   static Future<_HarnessRuntime>? _runtimeFuture;
 
   static String defaultDebugDirectory() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return '${Directory.systemTemp.parent.path}${Platform.pathSeparator}'
+          'files${Platform.pathSeparator}Vibekits${Platform.pathSeparator}tmp';
+    }
     final File executable = File(Platform.resolvedExecutable);
     return '${executable.parent.path}${Platform.pathSeparator}tmp';
   }

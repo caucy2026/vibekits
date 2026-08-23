@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
@@ -12,6 +13,7 @@ import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
+import '../../dev_tools/domain/lan_harness_key_receiver.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
@@ -842,6 +844,26 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ?.showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _receiveKeyOverLan() async {
+    final bool? received = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) => _LanHarnessKeyDialog(
+        onKeyReceived: (String key) async {
+          await (widget.credentialWriter ?? PlatformCredentialStore.write)(
+            _credentialKey,
+            key,
+          );
+          _apiKey.text = key;
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+    if (received == true && mounted) {
+      _show('API Key 已从局域网页面安全保存');
+    }
+  }
+
   Future<void> _showSettings() async {
     final bool initialLoggingEnabled =
         await HarnessToolActivityStore.loadLoggingEnabled();
@@ -887,6 +909,18 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                           prefixIcon: Icon(Icons.key_outlined),
                         ),
                       ),
+                      if (Platform.isAndroid) ...<Widget>[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            key: const Key('agent-lan-key-input'),
+                            onPressed: _receiveKeyOverLan,
+                            icon: const Icon(Icons.qr_code_2_outlined),
+                            label: const Text('同局域网扫码输入 Key'),
+                          ),
+                        ),
+                      ],
                       SwitchListTile(
                         key: const Key('agent-tool-logging'),
                         contentPadding: EdgeInsets.zero,
@@ -1724,6 +1758,132 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ),
         );
       },
+    );
+  }
+}
+
+final class _LanHarnessKeyDialog extends StatefulWidget {
+  const _LanHarnessKeyDialog({required this.onKeyReceived});
+
+  final Future<void> Function(String key) onKeyReceived;
+
+  @override
+  State<_LanHarnessKeyDialog> createState() => _LanHarnessKeyDialogState();
+}
+
+final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
+  LanHarnessKeyReceiver? _receiver;
+  String _status = '正在建立局域网页面…';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    try {
+      final LanHarnessKeyReceiver receiver =
+          await LanHarnessKeyReceiver.start();
+      if (!mounted) {
+        await receiver.close();
+        return;
+      }
+      setState(() {
+        _receiver = receiver;
+        _status = '用同一局域网内的电脑或另一台手机扫码';
+      });
+      final String key = await receiver.keyReceived;
+      if (!mounted) return;
+      setState(() {
+        _saving = true;
+        _status = '已收到，正在写入安卓安全存储…';
+      });
+      await widget.onKeyReceived(key);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _status = '$error';
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    final LanHarnessKeyReceiver? receiver = _receiver;
+    if (receiver != null) unawaited(receiver.close());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final LanHarnessKeyReceiver? receiver = _receiver;
+    return AlertDialog(
+      title: const Text('局域网输入 Harness Key'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (receiver == null)
+              const SizedBox.square(
+                dimension: 42,
+                child: CircularProgressIndicator(),
+              )
+            else
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(12),
+                child: QrImageView(
+                  key: const Key('agent-lan-key-qr'),
+                  data: receiver.pageUri.toString(),
+                  version: QrVersions.auto,
+                  size: 240,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Colors.black,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 14),
+            Text(
+              _status,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _saving ? Theme.of(context).colorScheme.primary : null,
+              ),
+            ),
+            if (receiver != null) ...<Widget>[
+              const SizedBox(height: 8),
+              SelectableText(
+                receiver.pageUri.toString(),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '二维码不包含 API Key，确认一次后立即失效。仅在可信 Wi-Fi 下使用。',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+      ],
     );
   }
 }
