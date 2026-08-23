@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import '../../archive/domain/disk_space.dart';
+import 'cleanup_platform_policy.dart';
 
 typedef _GetLogicalDrivesNative = Uint32 Function();
 typedef _GetLogicalDrivesDart = int Function();
@@ -47,14 +48,34 @@ class DiskVolumeInfo {
 }
 
 abstract final class DiskVolumeDiscovery {
-  static Future<List<DiskVolumeInfo>> discover() async {
-    if (Platform.isWindows) {
+  static Future<List<DiskVolumeInfo>> discover({
+    CleanupPlatform? platform,
+  }) async {
+    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
+    if (targetPlatform == CleanupPlatform.windows && Platform.isWindows) {
       return Isolate.run<List<DiskVolumeInfo>>(
         _discoverWindows,
         debugName: 'vibekits-disk-volume-discovery',
       );
     }
-    return _discoverUnix();
+    if (targetPlatform == CleanupPlatform.macos) return _discoverUnix();
+    if (targetPlatform == CleanupPlatform.android) {
+      final String root = Directory.systemTemp.path;
+      final DiskSpaceSnapshot? disk = DiskSpace.snapshot(root);
+      if (disk == null) return const <DiskVolumeInfo>[];
+      return <DiskVolumeInfo>[
+        DiskVolumeInfo(
+          rootPath: root,
+          name: 'Vibekits 应用存储',
+          type: DiskVolumeType.mounted,
+          totalBytes: disk.totalBytes,
+          freeBytes: disk.freeBytes,
+          availableBytes: disk.availableBytes,
+          isSystemVolume: false,
+        ),
+      ];
+    }
+    return const <DiskVolumeInfo>[];
   }
 
   static List<DiskVolumeInfo> _discoverWindows() {

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'cleanup_scanner.dart';
+import 'cleanup_platform_policy.dart';
 import 'cleanup_whitelist.dart';
 import 'macos_cleanup_rule_catalog.dart';
 import 'windows_cleanup_rule_catalog.dart';
@@ -54,21 +55,41 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 13;
+  static const int catalogVersion = 14;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
     int? windowsBuild,
     String harnessDebugDirectory = '',
+    CleanupPlatform? platform,
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
+    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
     final List<CleanupScanTarget> targets = <CleanupScanTarget>[];
+    if (targetPlatform == CleanupPlatform.macos) {
+      final String? home = env['HOME'];
+      if (home != null && home.trim().isNotEmpty) {
+        _addMacTargets(targets, home, _currentMacosMajor(environment != null));
+      }
+      _addHarnessDebugTargets(targets, harnessDebugDirectory);
+      return _deduplicate(targets);
+    }
+    if (targetPlatform == CleanupPlatform.android) {
+      _addAndroidTargets(
+        targets,
+        env,
+        harnessDebugDirectory: harnessDebugDirectory,
+      );
+      return _deduplicate(targets);
+    }
+    if (targetPlatform != CleanupPlatform.windows) {
+      return const <CleanupScanTarget>[];
+    }
     final String? temp = env['TEMP'];
     final String? windows = env['WINDIR'];
     final String? local = env['LOCALAPPDATA'];
     final String? roaming = env['APPDATA'];
     final String? userProfile = env['USERPROFILE'];
-    final String? home = env['HOME'];
 
     if (temp != null && temp.trim().isNotEmpty) {
       targets.add(
@@ -191,11 +212,14 @@ abstract final class CleanupTargetDiscovery {
       _addExisting(
         targets,
         id: 'gradle-cache',
-        label: 'Gradle 构建缓存',
+        label: 'Gradle 旧版本构建缓存',
         path: _join(userProfile, <String>['.gradle', 'caches']),
         category: CleanupCategory.devCache,
-        defaultEnabled: true,
-        safetyNote: '可由 Gradle 重新生成；首次构建会变慢',
+        defaultEnabled: false,
+        strategy: CleanupTargetStrategy.staleChildDirectories,
+        minimumAgeHours: 24 * 30,
+        riskLevel: CleanupRiskLevel.cautious,
+        safetyNote: '只按 30 天未更新的完整版本目录列出；禁止逐文件清理，避免留下损坏的半套 Gradle 缓存',
         maxEntries: 100000,
       );
       for (final (String id, String label, List<String> parts)
@@ -350,9 +374,6 @@ abstract final class CleanupTargetDiscovery {
       );
     }
 
-    if (home != null && home.trim().isNotEmpty) {
-      _addMacTargets(targets, home, _currentMacosMajor(environment != null));
-    }
     _addWindowsCatalogTargets(
       targets,
       env,
@@ -393,6 +414,10 @@ abstract final class CleanupTargetDiscovery {
     }
     _addHarnessDebugTargets(targets, harnessDebugDirectory);
 
+    return _deduplicate(targets);
+  }
+
+  static List<CleanupScanTarget> _deduplicate(List<CleanupScanTarget> targets) {
     final Map<String, CleanupScanTarget> unique = <String, CleanupScanTarget>{};
     for (final CleanupScanTarget target in targets) {
       final String? normalized = CleanupWhitelist.normalize(target.path);
@@ -411,6 +436,40 @@ abstract final class CleanupTargetDiscovery {
       }
     }
     return unique.values.toList(growable: false);
+  }
+
+  static void _addAndroidTargets(
+    List<CleanupScanTarget> targets,
+    Map<String, String> environment, {
+    required String harnessDebugDirectory,
+  }) {
+    final List<String> ownedRoots = CleanupPlatformPolicy.androidOwnedRoots(
+      environment: environment,
+      harnessDebugDirectory: harnessDebugDirectory,
+    );
+    if (ownedRoots.isNotEmpty) {
+      _addExisting(
+        targets,
+        id: 'android-vibekits-app-cache',
+        label: 'Vibekits 应用缓存',
+        path: ownedRoots.first,
+        category: CleanupCategory.applicationCache,
+        defaultEnabled: true,
+        minimumAgeHours: 24,
+        maxDepth: 8,
+        maxEntries: 25000,
+        safetyNote: '仅本应用私有缓存；不访问共享存储、下载目录或其他应用数据',
+        ruleSource: 'Android 应用沙箱规则',
+      );
+    }
+    if (harnessDebugDirectory.trim().isNotEmpty &&
+        CleanupPlatformPolicy.isAndroidOwnedPath(
+          harnessDebugDirectory,
+          environment: environment,
+          harnessDebugDirectory: harnessDebugDirectory,
+        )) {
+      _addHarnessDebugTargets(targets, harnessDebugDirectory);
+    }
   }
 
   static void _addWindowsCatalogTargets(
@@ -1007,6 +1066,12 @@ abstract final class CleanupTargetDiscovery {
         includePatterns: rule.includePatterns,
         excludePatterns: rule.excludePatterns,
         ruleCatalogVersion: MacosCleanupRuleCatalog.version,
+        riskLevel: switch (rule.risk) {
+          MacosCleanupRuleRisk.safe => CleanupRiskLevel.safe,
+          MacosCleanupRuleRisk.cautious => CleanupRiskLevel.cautious,
+          MacosCleanupRuleRisk.systemManaged => CleanupRiskLevel.systemManaged,
+        },
+        ruleSource: 'macOS 规则库 v${MacosCleanupRuleCatalog.version}',
       );
     }
     _addExisting(

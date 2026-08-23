@@ -170,3 +170,4 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 7. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
 8. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
 9. SSH/SFTP/转发仍需真实服务端证据；系统远程桌面仍需 Windows 真实目标与 macOS 实机证据；ADB 通用命令终端与智能体会话授权已接入，文件可视化、Logcat 流式视图、截图、APK 安装向导和无线配对仍需真机逐项验收。
+- dev.80 已将清理器拆为公共决策内核与 Windows/macOS/Android 平台边界：规则互斥加载、Android App 沙箱删除、macOS 独立风险映射及删除前二次校验已完成；macOS 全盘分类与 Android 其他 App 统计等待原生适配，当前安全禁用。

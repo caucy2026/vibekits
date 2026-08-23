@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_platform_policy.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/domain/macos_cleanup_rule_catalog.dart';
 import 'package:vibekits/features/cleaner/domain/windows_cleanup_rule_catalog.dart';
@@ -742,6 +743,7 @@ void main() {
 
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{'HOME': sandbox.path},
+      platform: CleanupPlatform.macos,
     );
 
     expect(

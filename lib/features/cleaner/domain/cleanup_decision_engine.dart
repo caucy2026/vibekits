@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'cleanup_scanner.dart';
+import 'cleanup_platform_policy.dart';
 
 /// The decision made after a cleanup candidate has been discovered.
 ///
@@ -47,7 +48,11 @@ abstract final class CleanupDecisionEngine {
     DateTime? now,
     double freeSpaceRatio = 1,
     Iterable<String> protectedRoots = const <String>[],
+    CleanupPlatform? platform,
+    Map<String, String>? environment,
+    String harnessDebugDirectory = '',
   }) {
+    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
     final DateTime clock = now ?? DateTime.now();
     final List<String> roots = <String>[
       ...protectedRoots,
@@ -68,6 +73,9 @@ abstract final class CleanupDecisionEngine {
               now: clock,
               freeSpaceRatio: freeSpaceRatio,
               protectedRoots: roots,
+              platform: targetPlatform,
+              environment: environment,
+              harnessDebugDirectory: harnessDebugDirectory,
             ),
           )
           .toList(growable: false),
@@ -79,7 +87,24 @@ abstract final class CleanupDecisionEngine {
     required DateTime now,
     required double freeSpaceRatio,
     required List<String> protectedRoots,
+    required CleanupPlatform platform,
+    required Map<String, String>? environment,
+    required String harnessDebugDirectory,
   }) {
+    if (candidate.category != CleanupCategory.recycleBin &&
+        !CleanupPlatformPolicy.allowsDeletion(
+          platform,
+          candidate.path,
+          environment: environment,
+          harnessDebugDirectory: harnessDebugDirectory,
+        )) {
+      return CleanupDecision(
+        candidate: candidate,
+        tier: CleanupDecisionTier.protected,
+        score: 0,
+        explanation: '${platform.label} 平台安全边界之外，只展示信息，不允许清理',
+      );
+    }
     if (protectedRoots.any(
       (String root) => _containsPath(root, candidate.path),
     )) {

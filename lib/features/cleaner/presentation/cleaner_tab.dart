@@ -11,6 +11,7 @@ import '../../archive/domain/disk_space.dart';
 import '../domain/cleanup_background_runner.dart';
 import '../domain/cleanup_deleter.dart';
 import '../domain/cleanup_decision_engine.dart';
+import '../domain/cleanup_platform_policy.dart';
 import '../domain/cleanup_report.dart';
 import '../domain/cleanup_scanner.dart';
 import '../domain/cleanup_task.dart';
@@ -182,19 +183,28 @@ class _CleanerTabState extends State<CleanerTab> {
   final Map<CleanupCategory, int> _visibleItemLimits = <CleanupCategory, int>{};
 
   bool get _acceptancePassed => _totalReleasedBytes >= _acceptanceTargetBytes;
+  bool get _supportsSystemWideAnalysis =>
+      CleanupPlatformPolicy.supportsSystemWideAnalysis(CleanupPlatform.current);
   int get _acceptanceRemainingBytes =>
       _acceptancePassed ? 0 : _acceptanceTargetBytes - _totalReleasedBytes;
 
   @override
   void initState() {
     super.initState();
-    _selectedVolumeRoots = <String>{_systemDiskPath()};
-    _activeVolumeRoot = _systemDiskPath();
-    if (widget.persistDriveAnalysisReport) {
-      _restoringDriveAnalysis = true;
-      unawaited(_restoreLatestDriveAnalysis());
+    final CleanupPlatform platform = CleanupPlatform.current;
+    if (CleanupPlatformPolicy.supportsSystemWideAnalysis(platform)) {
+      _selectedVolumeRoots = <String>{_systemDiskPath()};
+      _activeVolumeRoot = _systemDiskPath();
+      if (widget.persistDriveAnalysisReport) {
+        _restoringDriveAnalysis = true;
+        unawaited(_restoreLatestDriveAnalysis());
+      }
+      unawaited(_discoverVolumes());
+    } else {
+      _selectedVolumeRoots = <String>{};
+      _activeVolumeRoot = null;
+      _discoveringVolumes = false;
     }
-    unawaited(_discoverVolumes());
     final List<CleanupScanTarget>? supplied = widget.availableTargets;
     if (supplied != null) {
       _applyDiscoveredTargets(supplied);
@@ -299,16 +309,21 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _discoverTargets() async {
     try {
-      final String bundledRuleDatabase = await rootBundle.loadString(
-        'assets/cleaner/windows_rules_v6.json',
-      );
-      final List<CleanupScanTarget>
-      targets = await CleanupBackgroundRunner.discoverTargets(
-        harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
-            ? '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
-            : widget.harnessDebugDirectory.trim(),
-        bundledRuleDatabase: bundledRuleDatabase,
-      );
+      final CleanupPlatform platform = CleanupPlatform.current;
+      final String bundledRuleDatabase = platform == CleanupPlatform.windows
+          ? await rootBundle.loadString('assets/cleaner/windows_rules_v6.json')
+          : '';
+      final String defaultDebugDirectory = platform == CleanupPlatform.android
+          ? '${Directory.systemTemp.path}${Platform.pathSeparator}vibekits-harness'
+          : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp';
+      final List<CleanupScanTarget> targets =
+          await CleanupBackgroundRunner.discoverTargets(
+            harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
+                ? defaultDebugDirectory
+                : widget.harnessDebugDirectory.trim(),
+            bundledRuleDatabase: bundledRuleDatabase,
+            platform: platform,
+          );
       if (mounted) _applyDiscoveredTargets(targets);
     } on Object catch (error) {
       if (!mounted) return;
@@ -917,6 +932,15 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Future<void> _analyzeSystemDrive() async {
+    if (!CleanupPlatformPolicy.supportsSystemWideAnalysis(
+      CleanupPlatform.current,
+    )) {
+      setState(() {
+        _message =
+            '${CleanupPlatform.current.label} 使用独立安全清理规则；当前不提供 Windows 式全盘分析';
+      });
+      return;
+    }
     if (_scanning || _cleaning || _analyzingDrive || _restoringDriveAnalysis) {
       return;
     }
@@ -1479,7 +1503,8 @@ class _CleanerTabState extends State<CleanerTab> {
                 IconButton(
                   tooltip: '分析全部磁盘占用（只读）',
                   onPressed:
-                      _scanning ||
+                      !_supportsSystemWideAnalysis ||
+                          _scanning ||
                           _cleaning ||
                           _analyzingDrive ||
                           _restoringDriveAnalysis
@@ -1495,7 +1520,8 @@ class _CleanerTabState extends State<CleanerTab> {
               else
                 OutlinedButton.icon(
                   onPressed:
-                      _scanning ||
+                      !_supportsSystemWideAnalysis ||
+                          _scanning ||
                           _cleaning ||
                           _analyzingDrive ||
                           _restoringDriveAnalysis
@@ -1507,7 +1533,13 @@ class _CleanerTabState extends State<CleanerTab> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.donut_large, size: 18),
-                  label: Text(_analyzingDrive ? '分析中…' : '分析全部占用'),
+                  label: Text(
+                    !_supportsSystemWideAnalysis
+                        ? '本平台安全缓存'
+                        : _analyzingDrive
+                        ? '分析中…'
+                        : '分析全部占用',
+                  ),
                 ),
               const SizedBox(width: 6),
               if (veryCompact)

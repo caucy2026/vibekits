@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'cleanup_deleter.dart';
+import 'cleanup_platform_policy.dart';
 import 'cleanup_rule_database.dart';
 import 'cleanup_scanner.dart';
 import 'cleanup_task.dart';
@@ -21,15 +22,19 @@ abstract final class CleanupBackgroundRunner {
   static Future<List<CleanupScanTarget>> discoverTargets({
     String harnessDebugDirectory = '',
     String bundledRuleDatabase = '',
+    CleanupPlatform? platform,
   }) => Isolate.run(() {
+    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
     final List<CleanupScanTarget> targets = List<CleanupScanTarget>.of(
       CleanupTargetDiscovery.discover(
         harnessDebugDirectory: harnessDebugDirectory,
+        platform: targetPlatform,
       ),
     );
     if (bundledRuleDatabase.trim().isNotEmpty) {
       final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
         bundledRuleDatabase,
+        platform: targetPlatform.wireName,
       );
       final Set<String> ids = targets
           .map((CleanupScanTarget target) => target.id)

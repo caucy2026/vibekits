@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 
 import 'cleanup_scanner.dart';
+import 'cleanup_platform_policy.dart';
 import 'cleanup_task.dart';
 import 'cleanup_file_identity.dart';
 import 'recycle_bin_service.dart';
@@ -259,10 +260,27 @@ abstract final class CleanupDeleter {
     void Function(CleanupDeleteProgress progress)? onProgress,
     bool Function(String path)? recycle,
     bool permanentFallback = false,
+    CleanupPlatform? platform,
+    Map<String, String>? environment,
+    String harnessDebugDirectory = '',
   }) async {
+    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
     final CleanupCancellationToken token =
         cancellationToken ?? CleanupCancellationToken();
-    if (recycle == null && Platform.isWindows && candidates.length > 1) {
+    if (recycle == null &&
+        targetPlatform == CleanupPlatform.windows &&
+        Platform.isWindows &&
+        candidates.length > 1 &&
+        candidates.every(
+          (CleanupCandidate candidate) =>
+              candidate.category == CleanupCategory.recycleBin ||
+              CleanupPlatformPolicy.allowsDeletion(
+                targetPlatform,
+                candidate.path,
+                environment: environment,
+                harnessDebugDirectory: harnessDebugDirectory,
+              ),
+        )) {
       return _deleteWindowsBatched(
         candidates,
         cancellationToken: token,
@@ -289,6 +307,28 @@ abstract final class CleanupDeleter {
       });
     for (final CleanupCandidate candidate in ordered) {
       if (token.isCancelled) break;
+      if (candidate.category != CleanupCategory.recycleBin &&
+          !CleanupPlatformPolicy.allowsDeletion(
+            targetPlatform,
+            candidate.path,
+            environment: environment,
+            harnessDebugDirectory: harnessDebugDirectory,
+          )) {
+        items.add(
+          CleanupItemResult(
+            candidate: candidate,
+            status: CleanupItemStatus.skipped,
+            reason: '${targetPlatform.label} 平台安全边界拒绝了越界路径',
+          ),
+        );
+        onProgress?.call(
+          CleanupDeleteProgress(
+            completed: items.length,
+            total: candidates.length,
+          ),
+        );
+        continue;
+      }
       if (candidate.category == CleanupCategory.recycleBin) {
         final bool emptied = RecycleBinService.empty(candidate.path);
         final int remaining =
@@ -342,6 +382,34 @@ abstract final class CleanupDeleter {
         );
       } else {
         try {
+          if (targetPlatform == CleanupPlatform.android) {
+            final bool removed = await _deletePermanentlyFast(candidate.path);
+            if (removed) {
+              releasedBytes += candidate.size;
+              items.add(
+                CleanupItemResult(
+                  candidate: candidate,
+                  status: CleanupItemStatus.succeeded,
+                  reason: '已删除 Android 应用私有缓存',
+                ),
+              );
+            } else {
+              items.add(
+                CleanupItemResult(
+                  candidate: candidate,
+                  status: CleanupItemStatus.failed,
+                  reason: 'Android 应用私有缓存删除失败，文件可能正在使用',
+                ),
+              );
+            }
+            onProgress?.call(
+              CleanupDeleteProgress(
+                completed: items.length,
+                total: candidates.length,
+              ),
+            );
+            continue;
+          }
           final _RecycleResult? shellResult = recycle == null
               ? _sendToRecycleBin(<String>[candidate.path])
               : null;

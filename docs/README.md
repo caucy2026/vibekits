@@ -55,6 +55,8 @@
 49. [dev.77 音频质量闭环验收](acceptance/V1_9_0_DEV77_AUDIO_QUALITY_HARNESS_2026-08-22.md)——FFT 性能、质量指标、Harness 真调用与 Release
 50. [dev.78 清理经验算法与性能闭环验收](acceptance/V1_9_0_DEV78_CLEANUP_EXPERIENCE_ALGORITHM_2026-08-22.md)——本机只读审计、10 GiB 目标规划、安全缺口与大候选集性能
 51. [dev.79 Android UI 与局域网 Key 验收](acceptance/V1_9_0_DEV79_ANDROID_UI_LAN_KEY_2026-08-23.md)——底部导航、返回历史、Keystore、一次性二维码网页输入与 APK 构建
+52. [清理算法跨平台拆分与迁移基线](32_CLEANER_PLATFORM_MIGRATION.md)——公共内核、Windows/macOS/Android 独立规则与删除边界
+53. [dev.80 清理平台拆分验收](acceptance/V1_9_0_DEV80_CLEANER_PLATFORM_SPLIT_2026-08-23.md)——规则互斥、Android 沙箱、双重越界保护与轻量回归
 
 ## 完成定义
 
