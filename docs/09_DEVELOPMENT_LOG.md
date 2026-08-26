@@ -1,5 +1,10 @@
 # Vibekits 开发日志
 
+## 2026-08-27 · v1.9.0-dev.121+131
+
+- 修复跨宿主平台路径仿真：Windows 可执行文件父目录不再依赖当前宿主的 `File.parent`。
+- macOS GitHub Actions 增加 Analyze、平台策略测试和 unsigned Release 编译门禁，产物版本自动读取 `pubspec.yaml`。
+
 ## 2026-08-27 · v1.9.0-dev.120+130
 
 - 新增统一平台存储布局：Windows 使用 LocalAppData，macOS 使用 Application Support/Caches/Logs，Android 使用应用私有 files/cache；设置页直接显示当前真实位置和安全凭据库。

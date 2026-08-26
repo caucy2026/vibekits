@@ -85,6 +85,7 @@
 79. [dev.119 工具连续使用验收](acceptance/V1_9_0_DEV119_TOOL_CONTINUITY_2026-08-27.md)——SSH 多设备复核、API 脱敏历史、ADB/串口复用和 19 工作区合同门禁
 80. [多平台存储与清理策略](40_PLATFORM_STORAGE_AND_CLEANUP_POLICY.md)——Windows/macOS/Android 的持久目录、缓存、凭据库与不同清理边界
 81. [dev.120 多平台策略验收](acceptance/V1_9_0_DEV120_PLATFORM_POLICY_2026-08-27.md)——平台合同、设置迁移、Windows 真扫与 Android/macOS 环境门禁
+82. [dev.121 macOS 编译门禁](acceptance/V1_9_0_DEV121_MACOS_COMPILE_GATE_2026-08-27.md)——跨宿主路径仿真修复、macOS Analyze/测试及 unsigned Release 云端门禁
 
 ## 完成定义
 

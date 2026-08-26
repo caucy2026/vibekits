@@ -57,7 +57,7 @@ class PlatformStorageLayout {
       final String data = _join(local, 'Vibekits');
       final String executableDirectory = executablePath.trim().isEmpty
           ? data
-          : File(executablePath).parent.path;
+          : _parentPath(executablePath);
       return PlatformStorageLayout(
         platform: 'windows',
         settingsDirectory: data,
