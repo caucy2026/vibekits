@@ -11,3 +11,13 @@
 - Windows 本机仅做 macOS 策略仿真和静态编译检查。
 - GitHub `macos-14` runner 的 `flutter build macos --release` 成功才记录为 macOS 编译通过。
 - 不把 unsigned 编译通过等同于签名、公证或 macOS 真机功能通过。
+
+## 云端结果
+
+- GitHub Actions run：`33022087516`。
+- Resolve dependencies：通过。
+- Analyze macOS platform integration：通过。
+- Test macOS storage and cleanup policy：通过。
+- Build unsigned macOS Release：通过。
+- Package/checksum 与 artifact 上传：通过。
+- 结论：`v1.9.0-dev.121+131` 已确认 macOS 编译通过；签名、公证与真机交互不在本次仿真验收范围。

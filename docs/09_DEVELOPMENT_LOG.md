@@ -4,6 +4,7 @@
 
 - 修复跨宿主平台路径仿真：Windows 可执行文件父目录不再依赖当前宿主的 `File.parent`。
 - macOS GitHub Actions 增加 Analyze、平台策略测试和 unsigned Release 编译门禁，产物版本自动读取 `pubspec.yaml`。
+- GitHub Actions `33022087516` 已通过 Analyze、平台策略测试、macOS Release 编译、校验和打包及产物上传。
 
 ## 2026-08-27 · v1.9.0-dev.120+130
 
