@@ -20,4 +20,5 @@
 - Windows 冷启动：进程正常响应；设置、缓存、本地模型、Harness 调试目录均创建成功；写探针残留 0。
 - Windows 实际设置目录：`%APPDATA%\com.vibekits\vibekits`；缓存：`%LOCALAPPDATA%\com.vibekits\vibekits`；模型继续使用 `%LOCALAPPDATA%\Vibekits\Models`，不会进入漫游配置。
 - Android ARM64 Release APK：通过，`build/app/outputs/flutter-apk/app-release.apk`，110.2 MB。
-- macOS unsigned Release：待 GitHub macOS runner 结果回填。
+- macOS unsigned Release：GitHub Actions `33024241863` 通过；依赖解析、平台集成 Analyze、存储与清理策略测试、Release 编译、压缩校验和及产物上传全部成功。
+- macOS 构建记录：<https://github.com/caucy2026/vibekits/actions/runs/33024241863>。

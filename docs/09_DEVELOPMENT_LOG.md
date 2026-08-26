@@ -6,6 +6,7 @@
 - 接入平台官方应用目录 API；安装目录、应用支持目录不可写时按数据持久性分级自动降级，并把结果同步显示给 UI 与 Harness。
 - 53 项路径、迁移、清理与 Harness 回归通过，目标代码 Analyze 0 问题。
 - Windows Release 与真实冷启动路径探针通过，探针残留 0；Android ARM64 Release APK 编译通过。
+- macOS GitHub Actions `33024241863` 完整通过平台 Analyze、存储与清理策略测试、unsigned Release 编译、校验和打包及产物上传，三端编译门禁闭环。
 
 ## 2026-08-27 · v1.9.0-dev.121+131
 
