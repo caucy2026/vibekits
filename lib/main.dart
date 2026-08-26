@@ -4,9 +4,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
+import 'app/platform_storage_layout.dart';
 import 'app/windows_file_associations.dart';
 
-void main(List<String> arguments) {
+Future<void> main(List<String> arguments) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PlatformStorageLayout.initialize();
   final List<String> initialFilePaths = arguments
       .where((String argument) => File(argument).existsSync())
       .toList(growable: false);

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.9.0-dev.121+131
+version: 1.9.0-dev.122+132
 
 environment:
   sdk: ^3.13.0
@@ -61,6 +61,7 @@ dependencies:
   audioplayers: ^6.8.1
   # BSD-3-Clause: render the one-time LAN Harness Key onboarding QR locally.
   qr_flutter: ^4.1.0
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:

@@ -1218,6 +1218,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   PlatformStorageLayout get _storage => PlatformStorageLayout.current();
 
+  String _storageAccessText() {
+    final PlatformStorageAccessReport? report =
+        PlatformStorageLayout.lastAccessReport;
+    if (report == null) return '可写状态：尚未探测';
+    final String status = report.allRequiredWritable ? '全部已验证可写' : '存在不可写目录';
+    final String temporary = report.persistentDataUsesTemporaryStorage
+        ? ' · 警告：持久数据正在使用临时应急目录'
+        : '';
+    final String fallbacks = report.fallbacks.isEmpty
+        ? ''
+        : '\n自动切换：${report.fallbacks.join('；')}';
+    return '可写状态：$status$temporary$fallbacks';
+  }
+
   String get _defaultDebugDirectory => _storage.harnessDebugDirectory;
 
   String get _defaultToolDownloadDirectory {
@@ -1338,7 +1352,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   '${_storage.platform.toUpperCase()} 存储位置\n'
                   '设置：${_storage.settingsFile}\n'
                   '缓存：${_storage.cacheDirectory}\n'
-                  '凭据：${_storage.credentialStoreLabel}',
+                  '凭据：${_storage.credentialStoreLabel}\n'
+                  '${_storageAccessText()}',
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
                 ),
               ),

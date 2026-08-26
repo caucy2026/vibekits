@@ -372,8 +372,7 @@ class AppSettingsStore {
   }
 
   static List<File> _defaultLegacyFiles() {
-    if (Platform.isWindows) return const <File>[];
-    return <File>[
+    final List<File> candidates = <File>[
       File(
         '${Directory.current.path}${Platform.pathSeparator}Vibekits'
         '${Platform.pathSeparator}settings.json',
@@ -383,6 +382,26 @@ class AppSettingsStore {
         '${Platform.pathSeparator}settings.json',
       ),
     ];
+    if (Platform.isWindows) {
+      for (final String variable in <String>['LOCALAPPDATA', 'APPDATA']) {
+        final String? root = Platform.environment[variable];
+        if (root == null || root.trim().isEmpty) continue;
+        candidates.add(
+          File(
+            '${root.trim()}${Platform.pathSeparator}Vibekits'
+            '${Platform.pathSeparator}settings.json',
+          ),
+        );
+      }
+    }
+    final String current = _defaultFile().path.toLowerCase();
+    final Set<String> seen = <String>{};
+    return candidates
+        .where((File file) {
+          final String normalized = file.path.toLowerCase();
+          return normalized != current && seen.add(normalized);
+        })
+        .toList(growable: false);
   }
 
   Future<AppSettings> load() async {
