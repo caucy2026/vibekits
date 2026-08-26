@@ -20,6 +20,25 @@ typedef AgentDirectoryPicker = Future<String?> Function();
 typedef AgentCredentialReader = Future<String?> Function(String key);
 typedef AgentCredentialWriter = Future<void> Function(String key, String value);
 
+String _initialHarnessWorkspace(String configured) {
+  final String value = configured.trim();
+  if (!Platform.isAndroid && !Platform.isIOS) return value;
+  if (value.isNotEmpty && Directory(value).isAbsolute) {
+    try {
+      Directory(value).createSync(recursive: true);
+      return value;
+    } on Object {
+      // Fall through to the app-owned mobile workspace.
+    }
+  }
+  final Directory directory = Directory(
+    '${Directory.systemTemp.parent.path}${Platform.pathSeparator}files'
+    '${Platform.pathSeparator}Vibekits${Platform.pathSeparator}workspace',
+  );
+  directory.createSync(recursive: true);
+  return directory.path;
+}
+
 class DeepSeekAgentWorkspace extends StatefulWidget {
   const DeepSeekAgentWorkspace({
     super.key,
@@ -79,7 +98,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   );
 
   late final TextEditingController _workspace = TextEditingController(
-    text: widget.initialWorkspace,
+    text: _initialHarnessWorkspace(widget.initialWorkspace),
   );
   final TextEditingController _composer = TextEditingController();
   final TextEditingController _apiKey = TextEditingController();
@@ -1427,15 +1446,23 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             onPressed: _running ? null : _checkEnvironment,
             icon: const Icon(Icons.refresh, size: 18),
           ),
-          IconButton(
-            key: const Key('agent-settings'),
-            tooltip: _apiKey.text.isEmpty ? '设置模型与 API Key' : '模型设置',
-            onPressed: _running ? null : _showSettings,
-            icon: Icon(
-              _apiKey.text.isEmpty ? Icons.key_outlined : Icons.tune_outlined,
-              size: 18,
+          if (Platform.isAndroid && _apiKey.text.isEmpty)
+            OutlinedButton.icon(
+              key: const Key('agent-lan-key-header'),
+              onPressed: _running ? null : _receiveKeyOverLan,
+              icon: const Icon(Icons.qr_code_2_outlined, size: 18),
+              label: const Text('扫码输入 Key'),
+            )
+          else
+            IconButton(
+              key: const Key('agent-settings'),
+              tooltip: _apiKey.text.isEmpty ? '设置模型与 API Key' : '模型设置',
+              onPressed: _running ? null : _showSettings,
+              icon: Icon(
+                _apiKey.text.isEmpty ? Icons.key_outlined : Icons.tune_outlined,
+                size: 18,
+              ),
             ),
-          ),
           IconButton(
             key: const Key('agent-new-task'),
             tooltip: '新任务',
@@ -1792,7 +1819,9 @@ final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
       }
       setState(() {
         _receiver = receiver;
-        _status = '用同一局域网内的电脑或另一台手机扫码';
+        _status =
+            '请先确认手机和 Pad 已连接同一局域网\n'
+            '然后用手机扫码，在网页粘贴 DeepSeek 授权码并确认';
       });
       final String key = await receiver.keyReceived;
       if (!mounted) return;
@@ -1823,12 +1852,21 @@ final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
   Widget build(BuildContext context) {
     final LanHarnessKeyReceiver? receiver = _receiver;
     return AlertDialog(
-      title: const Text('局域网输入 Harness Key'),
+      title: const Text('手机扫码输入 DeepSeek 授权码'),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            Text(
+              _status,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _saving ? Theme.of(context).colorScheme.primary : null,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
             if (receiver == null)
               const SizedBox.square(
                 dimension: 42,
@@ -1842,7 +1880,7 @@ final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
                   key: const Key('agent-lan-key-qr'),
                   data: receiver.pageUri.toString(),
                   version: QrVersions.auto,
-                  size: 240,
+                  size: 210,
                   eyeStyle: const QrEyeStyle(
                     eyeShape: QrEyeShape.square,
                     color: Colors.black,
@@ -1853,14 +1891,6 @@ final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
                   ),
                 ),
               ),
-            const SizedBox(height: 14),
-            Text(
-              _status,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _saving ? Theme.of(context).colorScheme.primary : null,
-              ),
-            ),
             if (receiver != null) ...<Widget>[
               const SizedBox(height: 8),
               SelectableText(
@@ -1870,7 +1900,8 @@ final class _LanHarnessKeyDialogState extends State<_LanHarnessKeyDialog> {
               ),
               const SizedBox(height: 8),
               const Text(
-                '二维码不包含 API Key，确认一次后立即失效。仅在可信 Wi-Fi 下使用。',
+                '步骤：同一局域网 → 手机扫码 → 粘贴授权码 → 确认\n'
+                '二维码不包含授权码，成功一次后立即失效。',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12),
               ),

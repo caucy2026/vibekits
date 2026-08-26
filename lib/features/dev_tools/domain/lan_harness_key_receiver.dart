@@ -234,9 +234,9 @@ final class LanHarnessKeyReceiver {
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vibekits Harness 登录</title><style>
 body{font-family:system-ui,sans-serif;background:#f5f5f3;margin:0;padding:24px;color:#20211f}.card{max-width:460px;margin:8vh auto;background:white;border:1px solid #ddd;border-radius:18px;padding:26px;box-shadow:0 10px 40px #0001}h1{font-size:24px;margin:0 0 8px}p{color:#666;line-height:1.6}label{display:block;font-weight:650;margin:22px 0 8px}input{box-sizing:border-box;width:100%;font-size:17px;padding:14px;border:1px solid #bbb;border-radius:12px}button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;background:#20211f;color:white;font-size:17px;font-weight:650}.tip{font-size:13px;color:#777}</style></head>
-<body><main class="card"><h1>连接 Harness</h1><p>在这里粘贴 DeepSeek API Key，确认后会写入当前安卓设备。</p>
-<form method="post" action="${pageUri.path}?token=$_token"><label for="key">API Key</label><input id="key" name="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required autofocus><button type="submit">确认并发送</button></form>
-<p class="tip">仅限可信局域网使用。二维码不包含 Key，页面 5 分钟后自动失效。</p></main></body></html>''';
+<body><main class="card"><h1>连接 Vibekits Harness</h1><p>请确认这台手机和 Pad 已连接同一局域网。在下方粘贴 DeepSeek 授权码（API Key），确认后会安全写入 Pad 上的 Vibekits。</p>
+<form method="post" action="${pageUri.path}?token=$_token"><label for="key">DeepSeek 授权码（API Key）</label><input id="key" name="apiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴授权码" required autofocus><button type="submit">确认授权并发送到 Pad</button></form>
+<p class="tip">仅限可信局域网使用。二维码不包含授权码，页面 5 分钟后自动失效。</p></main></body></html>''';
 
   static String _resultPage(String message, {required bool success}) =>
       '''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vibekits</title><style>body{font-family:system-ui;background:#f5f5f3;padding:24px;color:#20211f}.card{max-width:460px;margin:14vh auto;background:#fff;border-radius:18px;padding:30px;text-align:center}.icon{font-size:46px;color:${success ? '#198754' : '#c0392b'}}</style></head><body><main class="card"><div class="icon">${success ? '✓' : '!'}</div><h2>${success ? '登录信息已发送' : '发送失败'}</h2><p>$message</p></main></body></html>''';

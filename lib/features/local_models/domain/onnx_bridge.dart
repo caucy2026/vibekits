@@ -97,8 +97,14 @@ class OnnxBridge {
   final _LastErrorDart _lastError;
 
   static OnnxBridge load({String? nativeDirectory}) {
+    if (Platform.isAndroid) {
+      return OnnxBridge._(
+        DynamicLibrary.open('libvibekits_onnx.so'),
+        'libonnxruntime.so',
+      );
+    }
     if (!Platform.isWindows) {
-      throw UnsupportedError('当前 ONNX 桥接只完成 Windows；macOS 运行时由平台适配层提供。');
+      throw UnsupportedError('当前 ONNX 桥接支持 Windows 和 Android。');
     }
     final String directory =
         nativeDirectory ?? File(Platform.resolvedExecutable).parent.path;

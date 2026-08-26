@@ -20,6 +20,10 @@ class AdbWorkspace extends StatefulWidget {
     this.loadSnapshot,
     this.connectDevice,
     this.runCommand,
+    this.initialRecentAddresses = const <String>[],
+    this.initialCommandHistory = const <String>[],
+    this.onRecentAddressesChanged,
+    this.onCommandHistoryChanged,
     this.loadHarnessActivity = HarnessToolActivityStore.load,
     this.deleteHarnessActivity = HarnessToolActivityStore.delete,
     this.clearHarnessActivity = HarnessToolActivityStore.clear,
@@ -28,6 +32,10 @@ class AdbWorkspace extends StatefulWidget {
   final AdbWorkspaceLoader? loadSnapshot;
   final AdbWirelessConnector? connectDevice;
   final AdbCommandRunner? runCommand;
+  final List<String> initialRecentAddresses;
+  final List<String> initialCommandHistory;
+  final Future<void> Function(List<String> history)? onRecentAddressesChanged;
+  final Future<void> Function(List<String> history)? onCommandHistoryChanged;
   final HarnessToolActivityLoader loadHarnessActivity;
   final HarnessToolActivityDeleter deleteHarnessActivity;
   final HarnessToolActivityClearer clearHarnessActivity;
@@ -61,6 +69,42 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
   bool _executing = false;
   String? _connectionMessage;
   int _generation = 0;
+  late final List<String> _recentAddresses = widget.initialRecentAddresses
+      .take(20)
+      .toList();
+  late final List<String> _commandHistory = widget.initialCommandHistory
+      .take(50)
+      .toList();
+
+  Future<void> _rememberAddress(String address) async {
+    final String value = AdbService.normalizeWirelessAddress(address);
+    _recentAddresses.remove(value);
+    _recentAddresses.insert(0, value);
+    if (_recentAddresses.length > 20) _recentAddresses.removeLast();
+    try {
+      await widget.onRecentAddressesChanged?.call(
+        List<String>.unmodifiable(_recentAddresses),
+      );
+    } catch (_) {
+      // History is a convenience layer. A storage failure must never turn a
+      // successful device connection into a failed connection.
+    }
+  }
+
+  Future<void> _rememberCommand(String command) async {
+    final String value = command.trim();
+    if (value.isEmpty) return;
+    _commandHistory.remove(value);
+    _commandHistory.insert(0, value);
+    if (_commandHistory.length > 50) _commandHistory.removeLast();
+    try {
+      await widget.onCommandHistoryChanged?.call(
+        List<String>.unmodifiable(_commandHistory),
+      );
+    } catch (_) {
+      // Executing the command is more important than persisting its history.
+    }
+  }
 
   AdbDevice? get _selected => _snapshot?.devices
       .where((AdbDevice device) => device.serial == _selectedSerial)
@@ -127,6 +171,7 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
         _connecting = false;
         _connectionMessage = message;
       });
+      unawaited(_rememberAddress(_wirelessAddress.text));
       await _refresh();
     } on Object catch (error) {
       if (!mounted) return;
@@ -152,6 +197,7 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     }
     final List<String> arguments = <String>['-s', device.serial, ...command];
     final String display = command.join(' ');
+    unawaited(_rememberCommand(display));
     final Stopwatch elapsed = Stopwatch()..start();
     setState(() {
       _executing = true;
@@ -417,6 +463,25 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
                   helperText: '固定设备 ${device.serial} · 普通命令自动使用 shell',
                   isDense: true,
                   prefixText: 'adb > ',
+                  suffixIcon: _commandHistory.isEmpty
+                      ? null
+                      : PopupMenuButton<String>(
+                          tooltip: '常用命令',
+                          onSelected: (String value) => _command.text = value,
+                          itemBuilder: (BuildContext context) => _commandHistory
+                              .map(
+                                (String value) => PopupMenuItem<String>(
+                                  value: value,
+                                  child: Text(
+                                    value,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                          icon: const Icon(Icons.history_rounded),
+                        ),
                 ),
               ),
             ),
@@ -535,11 +600,28 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
                   controller: _wirelessAddress,
                   enabled: installation != null && !_connecting,
                   onSubmitted: (_) => _connect(),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '无线设备',
                     hintText: '192.168.3.63（默认端口 5555）',
-                    prefixIcon: Icon(Icons.wifi_rounded, size: 19),
+                    prefixIcon: const Icon(Icons.wifi_rounded, size: 19),
                     isDense: true,
+                    suffixIcon: _recentAddresses.isEmpty
+                        ? null
+                        : PopupMenuButton<String>(
+                            tooltip: '最近设备',
+                            onSelected: (String value) =>
+                                _wirelessAddress.text = value,
+                            itemBuilder: (BuildContext context) =>
+                                _recentAddresses
+                                    .map(
+                                      (String value) => PopupMenuItem<String>(
+                                        value: value,
+                                        child: Text(value),
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                            icon: const Icon(Icons.history_rounded),
+                          ),
                   ),
                 ),
               ),

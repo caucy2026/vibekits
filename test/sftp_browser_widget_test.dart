@@ -136,6 +136,56 @@ void main() {
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.textContaining('已取消'), findsOneWidget);
   });
+
+  testWidgets('SFTP 本地和远端可独立后退与返回上级', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final Directory local = Directory.systemTemp.createTempSync('vibe_nav_');
+    addTearDown(() => local.deleteSync(recursive: true));
+    final Directory child = Directory(
+      '${local.path}${Platform.pathSeparator}local-child',
+    )..createSync();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SftpBrowser(
+            client: _NavigationRemoteFileClient(),
+            initialLocalPath: local.path,
+            initialRemotePath: '/',
+            scanLocalDirectory: _testLocalScanner,
+          ),
+        ),
+      ),
+    );
+    await _pumpAsync(tester);
+
+    await tester.tap(find.text('local-child'));
+    await _pumpAsync(tester);
+    expect(find.text(child.absolute.path), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sftp-local-back')));
+    await _pumpAsync(tester);
+    expect(find.text(local.absolute.path), findsOneWidget);
+    await tester.tap(find.text('local-child'));
+    await _pumpAsync(tester);
+    await tester.tap(find.byKey(const Key('sftp-local-up')));
+    await _pumpAsync(tester);
+    expect(find.text(local.absolute.path), findsOneWidget);
+
+    await tester.tap(find.text('remote-child'));
+    await _pumpAsync(tester);
+    expect(find.text('/remote-child'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sftp-remote-back')));
+    await _pumpAsync(tester);
+    expect(find.text('/'), findsOneWidget);
+    await tester.tap(find.text('remote-child'));
+    await _pumpAsync(tester);
+    await tester.tap(find.byKey(const Key('sftp-remote-up')));
+    await _pumpAsync(tester);
+    expect(find.text('/'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpAsync(WidgetTester tester) async {
@@ -224,6 +274,48 @@ class _FakeRemoteFileClient implements RemoteFileClient {
     File(localPath).writeAsBytesSync(<int>[4, 5, 6]);
     onProgress(3, total);
   }
+
+  @override
+  Future<void> close() async {}
+}
+
+class _NavigationRemoteFileClient implements RemoteFileClient {
+  @override
+  Future<String> absolute(String path) async {
+    if (path == '.' || path.isEmpty) return '/';
+    return path;
+  }
+
+  @override
+  Future<List<RemoteFileEntry>> listDirectory(String path) async => path == '/'
+      ? const <RemoteFileEntry>[
+          RemoteFileEntry(
+            name: 'remote-child',
+            path: '/remote-child',
+            isDirectory: true,
+            size: 0,
+          ),
+        ]
+      : const <RemoteFileEntry>[];
+
+  @override
+  Future<void> upload(
+    String localPath,
+    String remotePath, {
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {}
+
+  @override
+  Future<void> download(
+    String remotePath,
+    String localPath, {
+    required int total,
+    required bool overwrite,
+    required SftpCancellationToken cancellation,
+    required void Function(int bytes, int total) onProgress,
+  }) async {}
 
   @override
   Future<void> close() async {}

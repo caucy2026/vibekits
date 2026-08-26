@@ -1,0 +1,84 @@
+name: Harness upstream evolution
+
+on:
+  schedule:
+    - cron: '20 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inspect-candidate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Compare pinned and official versions
+        id: versions
+        shell: pwsh
+        run: |
+          $source = Get-Content -LiteralPath 'lib/features/dev_tools/domain/deepseek_harness_service.dart' -Raw
+          $match = [regex]::Match($source, "@deepseek-ai/dsh@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)")
+          if (-not $match.Success) { throw 'Pinned Harness version was not found' }
+          $pinned = $match.Groups[1].Value
+          $latest = (& npm view '@deepseek-ai/dsh' version).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $latest) { throw 'Official npm version lookup failed' }
+          "pinned=$pinned" >> $env:GITHUB_OUTPUT
+          "latest=$latest" >> $env:GITHUB_OUTPUT
+          "changed=$($pinned -ne $latest)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
+          "## Harness upstream evolution" >> $env:GITHUB_STEP_SUMMARY
+          "- Vibekits pinned: ``$pinned``" >> $env:GITHUB_STEP_SUMMARY
+          "- Official npm: ``$latest``" >> $env:GITHUB_STEP_SUMMARY
+      - name: Build isolated candidate runtime
+        if: steps.versions.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'harness-candidate'
+          .\tool\prepare_harness_runtime.ps1 -NodeDirectory (Split-Path (Get-Command node).Source) -OutputDirectory $candidate -PackageVersion '${{ steps.versions.outputs.latest }}'
+          $manifest = Get-Content -LiteralPath (Join-Path $candidate 'harness-runtime.json') -Raw | ConvertFrom-Json
+          & (Join-Path $candidate 'node.exe') (Join-Path $candidate $manifest.cli) --help
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate CLI smoke failed' }
+      - name: Open or update upgrade review issue
+        if: steps.versions.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `[Harness Upgrade] ${process.env.PINNED} → ${process.env.LATEST}`;
+            const body = [
+              '后台已发现新的 DeepSeek Harness 官方 npm 版本。',
+              '',
+              `- 当前固定版本：\`${process.env.PINNED}\``,
+              `- 官方候选版本：\`${process.env.LATEST}\``,
+              '- 隔离运行时准备、Vibekits 补丁和 CLI 冒烟已通过。',
+              '- 仍需运行 Harness Web、MCP 全能力、权限、会话恢复、停止和 Release 回归；禁止直接向客户端追 latest。',
+            ].join('\n');
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.data.find(issue => issue.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+        env:
+          PINNED: ${{ steps.versions.outputs.pinned }}
+          LATEST: ${{ steps.versions.outputs.latest }}

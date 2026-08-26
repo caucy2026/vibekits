@@ -10,6 +10,26 @@ import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 
 void main() {
+  test('三平台清理能力与真实权限边界不同', () {
+    final CleanupPlatformCapabilities windows =
+        CleanupPlatformPolicy.capabilities(CleanupPlatform.windows);
+    final CleanupPlatformCapabilities macos =
+        CleanupPlatformPolicy.capabilities(CleanupPlatform.macos);
+    final CleanupPlatformCapabilities android =
+        CleanupPlatformPolicy.capabilities(CleanupPlatform.android);
+
+    expect(windows.supportsSystemWideAnalysis, isTrue);
+    expect(windows.supportsMultipleVolumes, isTrue);
+    expect(windows.supportsInstalledAppInventory, isTrue);
+    expect(windows.supportsUninstall, isTrue);
+    expect(macos.supportsSystemWideAnalysis, isFalse);
+    expect(macos.supportsRecycleOrTrash, isTrue);
+    expect(macos.scanScope, contains('Library'));
+    expect(android.supportsRecycleOrTrash, isFalse);
+    expect(android.scanScope, contains('应用私有'));
+    expect(android.deletionMode, contains('共享存储'));
+  });
+
   test('Windows、macOS、Android 目标发现互不串用', () {
     final Directory sandbox = Directory.systemTemp.createTempSync(
       'vk_platform_targets_',

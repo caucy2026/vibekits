@@ -45,6 +45,8 @@ class _SftpBrowserState extends State<SftpBrowser> {
   String? _error;
   bool _loadingLocal = true;
   bool _loadingRemote = true;
+  final List<String> _localHistory = <String>[];
+  final List<String> _remoteHistory = <String>[];
 
   @override
   void initState() {
@@ -61,10 +63,10 @@ class _SftpBrowserState extends State<SftpBrowser> {
   }
 
   Future<void> _refreshAll() async {
-    await Future.wait(<Future<void>>[_refreshLocal(), _refreshRemote()]);
+    await Future.wait(<Future<bool>>[_refreshLocal(), _refreshRemote()]);
   }
 
-  Future<void> _refreshLocal() async {
+  Future<bool> _refreshLocal() async {
     setState(() {
       _loadingLocal = true;
       _error = null;
@@ -73,7 +75,7 @@ class _SftpBrowserState extends State<SftpBrowser> {
       final ({String path, List<(String, String, bool, int)> entries}) result =
           await (widget.scanLocalDirectory?.call(_localPath.text) ??
               _scanLocalDirectory(_localPath.text));
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _localPath.text = result.path;
         _localEntries = result.entries
@@ -89,16 +91,18 @@ class _SftpBrowserState extends State<SftpBrowser> {
         _selectedLocal = null;
         _loadingLocal = false;
       });
+      return true;
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _loadingLocal = false;
         _error = '本地目录：$error';
       });
+      return false;
     }
   }
 
-  Future<void> _refreshRemote() async {
+  Future<bool> _refreshRemote() async {
     setState(() {
       _loadingRemote = true;
       _error = null;
@@ -108,20 +112,86 @@ class _SftpBrowserState extends State<SftpBrowser> {
       final List<RemoteFileEntry> entries = await widget.client.listDirectory(
         canonical,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _remotePath.text = canonical;
         _remoteEntries = entries;
         _selectedRemote = null;
         _loadingRemote = false;
       });
+      return true;
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _loadingRemote = false;
         _error = '远端目录：$error';
       });
+      return false;
     }
+  }
+
+  Future<void> _navigateLocal(String target, {bool remember = true}) async {
+    if (_loadingLocal) return;
+    final String previous = _localPath.text;
+    _localPath.text = target;
+    if (await _refreshLocal()) {
+      if (remember && previous != _localPath.text) {
+        setState(() => _localHistory.add(previous));
+      }
+      return;
+    }
+    _localPath.text = previous;
+  }
+
+  Future<void> _navigateRemote(String target, {bool remember = true}) async {
+    if (_loadingRemote) return;
+    final String previous = _remotePath.text;
+    _remotePath.text = target;
+    if (await _refreshRemote()) {
+      if (remember && previous != _remotePath.text) {
+        setState(() => _remoteHistory.add(previous));
+      }
+      return;
+    }
+    _remotePath.text = previous;
+  }
+
+  Future<void> _backLocal() async {
+    if (_localHistory.isEmpty || _loadingLocal) return;
+    final String target = _localHistory.removeLast();
+    final String current = _localPath.text;
+    setState(() {});
+    await _navigateLocal(target, remember: false);
+    if (_localPath.text == current && mounted) {
+      setState(() => _localHistory.add(target));
+    }
+  }
+
+  Future<void> _backRemote() async {
+    if (_remoteHistory.isEmpty || _loadingRemote) return;
+    final String target = _remoteHistory.removeLast();
+    final String current = _remotePath.text;
+    setState(() {});
+    await _navigateRemote(target, remember: false);
+    if (_remotePath.text == current && mounted) {
+      setState(() => _remoteHistory.add(target));
+    }
+  }
+
+  String? get _localParent {
+    final Directory current = Directory(_localPath.text).absolute;
+    final String parent = current.parent.path;
+    return parent == current.path ? null : parent;
+  }
+
+  String? get _remoteParent {
+    String current = _remotePath.text.replaceAll('\\', '/');
+    if (current.isEmpty || current == '/') return null;
+    while (current.length > 1 && current.endsWith('/')) {
+      current = current.substring(0, current.length - 1);
+    }
+    final int separator = current.lastIndexOf('/');
+    return separator <= 0 ? '/' : current.substring(0, separator);
   }
 
   Future<void> _openLocal(_LocalFileEntry entry) async {
@@ -129,8 +199,7 @@ class _SftpBrowserState extends State<SftpBrowser> {
       setState(() => _selectedLocal = entry);
       return;
     }
-    _localPath.text = entry.path;
-    await _refreshLocal();
+    await _navigateLocal(entry.path);
   }
 
   Future<void> _openRemote(RemoteFileEntry entry) async {
@@ -138,8 +207,7 @@ class _SftpBrowserState extends State<SftpBrowser> {
       setState(() => _selectedRemote = entry);
       return;
     }
-    _remotePath.text = entry.path;
-    await _refreshRemote();
+    await _navigateRemote(entry.path);
   }
 
   Future<_ConflictChoice> _resolveConflict({
@@ -339,7 +407,16 @@ class _SftpBrowserState extends State<SftpBrowser> {
                   entries: _localEntries,
                   loading: _loadingLocal,
                   selected: _selectedLocal,
-                  onRefresh: _refreshLocal,
+                  onRefresh: () async {
+                    await _refreshLocal();
+                  },
+                  onNavigate: _navigateLocal,
+                  onBack: _localHistory.isEmpty || _loadingLocal
+                      ? null
+                      : _backLocal,
+                  onUp: _localParent == null || _loadingLocal
+                      ? null
+                      : () => _navigateLocal(_localParent!),
                   onOpen: _openLocal,
                   onDropRemote: _download,
                 ),
@@ -378,7 +455,16 @@ class _SftpBrowserState extends State<SftpBrowser> {
                   entries: _remoteEntries,
                   loading: _loadingRemote,
                   selected: _selectedRemote,
-                  onRefresh: _refreshRemote,
+                  onRefresh: () async {
+                    await _refreshRemote();
+                  },
+                  onNavigate: _navigateRemote,
+                  onBack: _remoteHistory.isEmpty || _loadingRemote
+                      ? null
+                      : _backRemote,
+                  onUp: _remoteParent == null || _loadingRemote
+                      ? null
+                      : () => _navigateRemote(_remoteParent!),
                   onOpen: _openRemote,
                   onDropLocal: _upload,
                 ),
@@ -400,6 +486,9 @@ class _LocalPane extends StatelessWidget {
     required this.loading,
     required this.selected,
     required this.onRefresh,
+    required this.onNavigate,
+    required this.onBack,
+    required this.onUp,
     required this.onOpen,
     required this.onDropRemote,
   });
@@ -409,6 +498,9 @@ class _LocalPane extends StatelessWidget {
   final bool loading;
   final _LocalFileEntry? selected;
   final Future<void> Function() onRefresh;
+  final Future<void> Function(String) onNavigate;
+  final Future<void> Function()? onBack;
+  final Future<void> Function()? onUp;
   final Future<void> Function(_LocalFileEntry) onOpen;
   final Future<void> Function(RemoteFileEntry) onDropRemote;
 
@@ -417,6 +509,10 @@ class _LocalPane extends StatelessWidget {
     title: '本地',
     path: path,
     onRefresh: onRefresh,
+    onNavigate: onNavigate,
+    onBack: onBack,
+    onUp: onUp,
+    keyPrefix: 'sftp-local',
     child: DragTarget<RemoteFileEntry>(
       onWillAcceptWithDetails: (DragTargetDetails<RemoteFileEntry> details) =>
           !details.data.isDirectory,
@@ -457,6 +553,9 @@ class _RemotePane extends StatelessWidget {
     required this.loading,
     required this.selected,
     required this.onRefresh,
+    required this.onNavigate,
+    required this.onBack,
+    required this.onUp,
     required this.onOpen,
     required this.onDropLocal,
   });
@@ -466,6 +565,9 @@ class _RemotePane extends StatelessWidget {
   final bool loading;
   final RemoteFileEntry? selected;
   final Future<void> Function() onRefresh;
+  final Future<void> Function(String) onNavigate;
+  final Future<void> Function()? onBack;
+  final Future<void> Function()? onUp;
   final Future<void> Function(RemoteFileEntry) onOpen;
   final Future<void> Function(_LocalFileEntry) onDropLocal;
 
@@ -474,6 +576,10 @@ class _RemotePane extends StatelessWidget {
     title: '远端',
     path: path,
     onRefresh: onRefresh,
+    onNavigate: onNavigate,
+    onBack: onBack,
+    onUp: onUp,
+    keyPrefix: 'sftp-remote',
     child: DragTarget<_LocalFileEntry>(
       onWillAcceptWithDetails: (DragTargetDetails<_LocalFileEntry> details) =>
           !details.data.isDirectory,
@@ -512,12 +618,20 @@ class _PaneFrame extends StatelessWidget {
     required this.title,
     required this.path,
     required this.onRefresh,
+    required this.onNavigate,
+    required this.onBack,
+    required this.onUp,
+    required this.keyPrefix,
     required this.child,
   });
 
   final String title;
   final TextEditingController path;
   final Future<void> Function() onRefresh;
+  final Future<void> Function(String) onNavigate;
+  final Future<void> Function()? onBack;
+  final Future<void> Function()? onUp;
+  final String keyPrefix;
   final Widget child;
 
   @override
@@ -533,11 +647,26 @@ class _PaneFrame extends StatelessWidget {
           child: Row(
             children: <Widget>[
               Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(width: 7),
+              const SizedBox(width: 3),
+              IconButton(
+                key: Key('$keyPrefix-back'),
+                tooltip: '后退到上一目录',
+                onPressed: onBack,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              ),
+              IconButton(
+                key: Key('$keyPrefix-up'),
+                tooltip: '返回上级目录',
+                onPressed: onUp,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.arrow_upward_rounded, size: 18),
+              ),
+              const SizedBox(width: 3),
               Expanded(
                 child: TextField(
                   controller: path,
-                  onSubmitted: (_) => onRefresh(),
+                  onSubmitted: onNavigate,
                   style: const TextStyle(fontSize: 12),
                   decoration: const InputDecoration(
                     isDense: true,

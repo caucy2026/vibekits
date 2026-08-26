@@ -51,6 +51,8 @@ migrate_working_dir/
 /_build*.txt
 /_doctor*.txt
 /_test_out.txt
+/.tmp/
+/dev*.png
 
 # Symbolication related
 app.*.symbols

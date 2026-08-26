@@ -18,12 +18,18 @@ import 'package:vibekits/features/local_models/domain/model_store.dart';
 import 'package:vibekits/features/local_models/domain/pp_ocr_v6.dart';
 import 'package:vibekits/features/local_models/presentation/local_models_tab.dart';
 
+Future<void> pumpBounded(WidgetTester tester, {int frames = 20}) async {
+  for (int index = 0; index < frames; index++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 void main() {
   testWidgets('启动后显示五个 Tab 与第一个页面', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
     for (final String title in <String>[
-      'Harness（智能体）',
+      '智能体（Harness）',
       '解压缩',
       '系统清理',
       '文档阅读',
@@ -37,7 +43,7 @@ void main() {
     expect(find.text('界面已就绪，正在加载工作区…'), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsNothing);
     await tester.pump();
-    expect(find.text('Harness 智能体'), findsOneWidget);
+    expect(find.text('智能体（Harness）'), findsWidgets);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     // 其余页面处于离屏状态。
     expect(find.text('扫描可清理项'), findsNothing);
@@ -83,7 +89,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Harness（智能体）'), findsWidgets);
+    expect(find.text('智能体（Harness）'), findsWidgets);
     expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsNothing);
   });
@@ -160,7 +166,7 @@ void main() {
     await tester.pumpWidget(const VibekitsApp());
 
     for (final String title in <String>[
-      'Harness（智能体）',
+      '智能体（Harness）',
       '系统清理',
       '文档阅读',
       '开发工具',
@@ -194,7 +200,7 @@ void main() {
     )..writeAsStringSync('void startupRouteWorks() {}');
 
     await tester.pumpWidget(VibekitsApp(initialFilePath: source.path));
-    await tester.pumpAndSettle();
+    await pumpBounded(tester);
 
     expect(find.text('文档阅读'), findsWidgets);
     expect(
@@ -265,7 +271,7 @@ void main() {
     );
     drops.add(<String>[source.path]);
     await tester.pump();
-    await tester.pumpAndSettle();
+    await pumpBounded(tester);
 
     expect(find.text('文档阅读'), findsWidgets);
     expect(find.textContaining('按扩展名交给文档阅读处理：pubspec.yaml'), findsOneWidget);
@@ -303,7 +309,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pumpAndSettle();
+    await pumpBounded(tester);
 
     expect(find.byKey(const Key('drop-batch-button')), findsOneWidget);
     expect(find.textContaining('已逐项识别 2 个项目'), findsOneWidget);
@@ -330,9 +336,9 @@ void main() {
     );
     drops.add(const <String>[modelPath]);
     await tester.pump();
-    await tester.pumpAndSettle();
+    await pumpBounded(tester);
 
-    expect(find.text('Harness（智能体）'), findsWidgets);
+    expect(find.text('智能体（Harness）'), findsWidgets);
     expect(
       tester
           .widget<LocalModelsTab>(find.byType(LocalModelsTab))
@@ -390,6 +396,7 @@ void main() {
     ) {
       await tester.pump(const Duration(milliseconds: 30));
     }
+    await pumpBounded(tester, frames: 4);
 
     expect(find.byKey(const Key('drop-batch-button')), findsOneWidget);
     expect(find.textContaining('已逐项识别 3 个项目'), findsOneWidget);
@@ -399,7 +406,7 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('drop-batch-button')));
-    await tester.pumpAndSettle();
+    await pumpBounded(tester, frames: 10);
     expect(find.text('本次拖入 · 3 项'), findsOneWidget);
     expect(find.text('notes.unknown'), findsOneWidget);
     expect(find.text('payload.unknown'), findsOneWidget);
@@ -415,6 +422,9 @@ void main() {
       tester.widget<DocumentsTab>(find.byType(DocumentsTab)).initialMode,
       DocViewMode.hex,
     );
+    await pumpBounded(tester, frames: 4);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await pumpBounded(tester, frames: 2);
   });
 
   testWidgets('Harness 页只保留智能体与截图 OCR', (WidgetTester tester) async {
@@ -438,17 +448,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('截图 OCR'), findsOneWidget);
-    expect(find.text('Harness 智能体'), findsOneWidget);
+    expect(find.text('截图识别（OCR）'), findsOneWidget);
+    expect(find.text('智能体（Harness）'), findsWidgets);
     expect(find.text('精选小模型'), findsNothing);
     expect(find.text('语音片段检测'), findsNothing);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
-    await tester.tap(find.text('截图 OCR'));
+    await tester.tap(find.text('截图识别（OCR）'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
     expect(find.byKey(const Key('ocr-pick-image')), findsOneWidget);
     expect(find.byKey(const Key('ocr-run')), findsOneWidget);
-    await tester.tap(find.text('Harness 智能体'));
+    await tester.tap(find.text('智能体（Harness）').last);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     expect(find.byKey(const Key('agent-pick-workspace')), findsOneWidget);
@@ -479,7 +489,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Harness 智能体'));
+    await tester.tap(find.text('智能体（Harness）').last);
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('agent-composer')), '审查项目');
     await tester.tap(find.byKey(const Key('agent-send')));
@@ -489,9 +499,9 @@ void main() {
     await handle.complete();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('截图 OCR'));
+    await tester.tap(find.text('截图识别（OCR）'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Harness 智能体'));
+    await tester.tap(find.text('智能体（Harness）').last);
     await tester.pumpAndSettle();
     expect(find.text('会话结果会保留'), findsOneWidget);
   });
@@ -516,9 +526,9 @@ void main() {
     );
     drops.add(<String>[imagePath]);
     await tester.pump();
-    await tester.pumpAndSettle();
+    await pumpBounded(tester);
 
-    expect(find.text('Harness（智能体）'), findsWidgets);
+    expect(find.text('智能体（Harness）'), findsWidgets);
     expect(find.byKey(const Key('ocr-image-preview')), findsOneWidget);
     expect(
       tester
@@ -662,7 +672,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('截图 OCR'));
+    await tester.tap(find.text('截图识别（OCR）'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('ocr-screenshot')));
     await tester.pumpAndSettle();

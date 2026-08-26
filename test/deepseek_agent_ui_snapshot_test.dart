@@ -11,6 +11,8 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
+  final bool updateSnapshots =
+      Platform.environment['VIBEKITS_UPDATE_SNAPSHOTS'] == 'true';
   testWidgets('Harness 智能体页面截图', (WidgetTester tester) async {
     final GlobalKey repaintBoundaryKey = GlobalKey();
     final Directory outputDir = Directory(
@@ -67,5 +69,5 @@ void main() {
     // ignore: avoid_print
     print('SNAPSHOT: ${output.absolute.path}');
     expect(output.existsSync(), isTrue);
-  });
+  }, skip: !updateSnapshots);
 }

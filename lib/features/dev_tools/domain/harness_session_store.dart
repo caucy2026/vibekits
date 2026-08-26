@@ -30,6 +30,7 @@ class HarnessSessionStore {
         );
         if (await candidate.exists()) {
           await candidate.delete(recursive: true);
+          await _deleteDirectoryWhenEmpty(workspace);
         }
       }
     }
@@ -47,6 +48,39 @@ class HarnessSessionStore {
       final Map<String, dynamic>? tables = _map(root['tables']);
       _map(tables?['sessions'])?.remove(sessionId);
     });
+  }
+
+  /// Removes temporary native-Harness workspaces created by VibeKits' older
+  /// acceptance probes. They are not user workspaces and otherwise appear as
+  /// undeletable `session-not-found` rows in the official DSH sidebar.
+  Future<int> deleteLegacyNativeProbeSessions() async {
+    final Directory sessionsRoot = Directory(
+      '${home.path}${Platform.pathSeparator}sessions',
+    );
+    if (!await sessionsRoot.exists()) return 0;
+    int removed = 0;
+    await for (final FileSystemEntity entity in sessionsRoot.list()) {
+      if (entity is! Directory) continue;
+      final String name = entity.uri.pathSegments
+          .where((String segment) => segment.isNotEmpty)
+          .last;
+      if (!name.startsWith('--') ||
+          !name.endsWith('--') ||
+          !name.contains('vibekits_harness_native_')) {
+        continue;
+      }
+      await entity.delete(recursive: true);
+      removed++;
+    }
+    return removed;
+  }
+
+  Future<void> _deleteDirectoryWhenEmpty(Directory directory) async {
+    if (!await directory.exists()) return;
+    await for (final FileSystemEntity _ in directory.list()) {
+      return;
+    }
+    await directory.delete();
   }
 
   Future<void> _editJsonStore(

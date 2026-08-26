@@ -2,9 +2,25 @@
 
 > 当前研发顺序与逐项关闭状态以 [发布完成清单](17_RELEASE_COMPLETION_CHECKLIST.md) 为唯一执行入口；早期 Windows/UI 矩阵保留为用例库。
 
-更新日期：2026-08-22
+更新日期：2026-08-26
 
-当前版本：`1.9.0-dev.70+80`（Harness 本地启动优化检查点，非正式发布）
+当前版本：`1.9.0-dev.118+128`（Android 63 Harness 全目录与 Pad 触控检查点，非正式发布）
+
+## 2026-08-26 当前增量状态
+
+- Android ARM64 Release 已在 `192.168.3.63:5555` 安装：五个一级入口、1920×2560 连续双屏、局域网扫码 Key、触控工具列表和一键 Harness 任务均有真机证据。
+- 移动 Harness 现可发现全部 130 个公开接口；文件、HTTP、SSH/SFTP 和远程数据库等跨平台能力直接执行，依赖 Windows 进程/驱动的能力返回结构化 `requiresDesktopNode`，不再因移动过滤而让模型误判“没有该工具”。
+- 自动化 118/118 通过，最终 APK SHA-256 为 `3B78EA49EFD31790B6A409D50C33CD0ECAAB14354AB485FAC37074819F6F94B9`。
+- 尚未完成 Android→桌面节点远程执行传输；真实模型联调还需通过 Pad 扫码写入 DeepSeek Key。两项均在 dev.118 验收报告中明确标为门禁。
+
+## 2026-08-24 当前增量状态
+
+- dev.93 已纠正此前“双 Activity 异显”的方向：默认跨屏现在是唯一 `MainActivity`、唯一 Flutter Engine/View 和唯一状态树运行一张 `1920×2560` 连续画布；D2 显示 `Y=0..1279`，D0 显示 `Y=1280..2559`。
+- D2 使用 Presentation 复用源 FlutterView 绘制并转发触摸；在 D2 点击 OCR 后，两屏同步显示同一 OCR 页面上下区段。D2 退出会同时关闭 Activity 与 Presentation，但不强杀独立后台服务。
+- `192.168.3.62:5555` 已完成连续显示、跨屏触摸、单 Activity、双屏退出与重启恢复真机验收；合同测试 5/5、Analyze 0 问题、ARM64 Release 构建通过。
+- 一级工作区、开发工具独立入口和远程功能页统一采用“中文用途（标准英文缩写/产品名）”，例如“安卓调试（ADB）”“远程连接（SSH/SFTP）”“网络代理（Clash Verge）”，避免同一列表中纯中文、纯英文混排。
+- 智能体与 OCR 入口统一为“智能体（Harness）”“截图识别（OCR）”；JSON、Base64 等微工具继续保留“标准名 + 中文动作”，兼顾中文可读性与工程师搜索习惯。
+- 新增工具命名契约测试，后续新增独立工具若缺少中文用途或英文标识会直接测试失败。
 
 ## 2026-08-22 当前增量状态
 
@@ -92,6 +108,10 @@ Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构�
 
 工具能力注册已收敛为单一清单：复杂工作区的 Harness IDs 写在 `ToolSpec.harnessToolIds`，界面日志和合同测试直接复用；带 `run/runAsync` 的微工具自动得到 `vibekits.<id>`、参数 Schema、“适合/不适合/本地优先”描述和 MCP 调用入口。最高准则见 `22_CAPABILITY_INTEGRATION_STANDARD.md`。
 
+`v1.9.0-dev.83+93` 新增 `vibekits.system.capability_check` 智能体能力自检：运行时核对公开能力、实际执行器、当前平台可用性和风险级别，当前自动验收确认 `missingHandlers = 0`。30 个轻量工具已逐项经过 Harness 调用、真实结果和审计日志闭环；资源探针改为可取消子进程，页面退出和应用关闭不再遗留长时间运行的 PowerShell。当前串行全量门禁为 482 项通过、5 项环境门禁跳过、0 项失败，静态分析 0 问题。
+
+`v1.9.0-dev.84+94` 将 Clash Verge 与轻量虚拟机拆为两个独立工具：Clash 内部使用标准 8 项导航和浅蓝选中态，QEMU 不再占用 Clash 栏目且无需代理运行。Windows 关闭窗口改为隐藏到系统托盘并保留显式后台服务；只有托盘“退出并停止后台服务”才结束进程树。
+
 Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.0-rc.7` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
 
 DSH、Node 和全部 npm 依赖均从 Release 同级 `tools/harness` 本地启动，启动阶段不执行 npm 下载。Windows 首次扫描新 Release 目录时官方 DSH 组合 Web profile 可能超过 60 秒：dev.30 启用持久化 Node 编译缓存，将存活进程等待上限改为 3 分钟并每 5 秒显示真实已用时间；进程退出则立即失败，且 stdout/stderr 在退出前排空到调试日志，不再因旧的固定窗口误判后循环重启。
@@ -164,10 +184,11 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 1. macOS 需要在 Apple Silicon/Intel 机器运行 `flutter build macos --release`，验证 Swift 编译、Open With、废纸篓、系统菜单、图片、压缩和 SQLite。
 2. macOS PP-OCRv6 的 ONNX Runtime 动态桥接和 arm64/x64 原生库尚未完成。
 3. HEIF/AVIF/JXL/RAW 的一致内置解码、ICC 色彩管理和动画播放仍需专门后端。
-4. MySQL/MariaDB 成功连接尚缺本机真实服务证据；数据库写会话、API 历史脱敏持久化、Git 写操作辅助尚未进入本版。
+4. MySQL/MariaDB 成功连接尚缺本机真实服务证据；API 脱敏历史已经进入 dev.119，数据库写会话和 Git 写操作辅助仍需后续闭环。
 5. 串口原生资产与失败路径已验证，但当前机器没有物理 COM 设备；Windows/macOS 真实 USB 串口回环仍未完成。
 6. Windows 已打包官方 `@deepseek-ai/dsh@0.1.0-rc.7` 并通过本地兼容模型端点实启；模型发起 MCP SHA-256、APP 执行、结果回传和最终回复全链路通过。真实 DeepSeek Key、macOS 实启与 ACP 原生会话仍待验证。
 7. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
 8. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
 9. SSH/SFTP/转发仍需真实服务端证据；系统远程桌面仍需 Windows 真实目标与 macOS 实机证据；ADB 通用命令终端与智能体会话授权已接入，文件可视化、Logcat 流式视图、截图、APK 安装向导和无线配对仍需真机逐项验收。
+- dev.97：Android ARM64 已内置 ONNX 原生桥，PP-OCRv6 在 `192.168.3.62` 上真实识别 15 行文字；Harness 已解除 Windows DSH 运行时依赖，清理页改为 App 私有沙箱安全策略。真机未配 DeepSeek Key，真实模型回答仍为外部配置门禁，不标记为已验收。
 - dev.80 已将清理器拆为公共决策内核与 Windows/macOS/Android 平台边界：规则互斥加载、Android App 沙箱删除、macOS 独立风险映射及删除前二次校验已完成；macOS 全盘分类与 Android 其他 App 统计等待原生适配，当前安全禁用。

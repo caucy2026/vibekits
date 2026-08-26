@@ -10,7 +10,15 @@ import '../domain/network_virtualization_service.dart';
 import '../domain/system_proxy_service.dart';
 
 class NetworkVirtualizationWorkspace extends StatefulWidget {
-  const NetworkVirtualizationWorkspace({super.key});
+  const NetworkVirtualizationWorkspace({
+    super.key,
+    this.virtualMachineOnly = false,
+  });
+
+  /// Keeps the proxy workspace identical to Clash Verge's eight-page layout
+  /// while exposing QEMU as its own first-class tool instead of a ninth,
+  /// non-standard Clash navigation item.
+  final bool virtualMachineOnly;
 
   @override
   State<NetworkVirtualizationWorkspace> createState() =>
@@ -571,7 +579,7 @@ class _NetworkVirtualizationWorkspaceState
 
   @override
   Widget build(BuildContext context) {
-    return _proxyTab();
+    return widget.virtualMachineOnly ? _vmTab() : _proxyTab();
   }
 
   Widget _proxyTab() => LayoutBuilder(
@@ -586,7 +594,7 @@ class _NetworkVirtualizationWorkspaceState
       }
       return Row(
         children: <Widget>[
-          SizedBox(width: 178, child: _clashSidebar()),
+          SizedBox(width: 210, child: _clashSidebar()),
           const VerticalDivider(width: 1),
           Expanded(child: _clashPageBody()),
         ],
@@ -618,33 +626,38 @@ class _NetworkVirtualizationWorkspaceState
     ),
   );
 
-  Widget _clashSidebar() => Container(
-    color: Theme.of(context).colorScheme.surfaceContainerLowest,
-    padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
-    child: Column(
-      children: <Widget>[
-        for (int index = 0; index < _clashPages.length; index++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: ListTile(
-              key: ValueKey<String>('clash-nav-$index'),
-              minTileHeight: 52,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+  Widget _clashSidebar() => Material(
+    color: const Color(0xFFF7F7F7),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
+      child: Column(
+        children: <Widget>[
+          for (int index = 0; index < _clashPages.length; index++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: ListTile(
+                key: ValueKey<String>('clash-nav-$index'),
+                minTileHeight: 52,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                selected: _clashPage == index,
+                selectedTileColor: const Color(0xFFDCEBFC),
+                iconColor: const Color(0xFF111111),
+                textColor: const Color(0xFF111111),
+                selectedColor: const Color(0xFF111111),
+                leading: Icon(_clashPages[index].$2, size: 24),
+                title: Text(
+                  _clashPages[index].$1,
+                  style: const TextStyle(fontSize: 16),
+                ),
+                onTap: () => setState(() => _clashPage = index),
               ),
-              selected: _clashPage == index,
-              selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
-              leading: Icon(_clashPages[index].$2, size: 24),
-              title: Text(
-                _clashPages[index].$1,
-                style: const TextStyle(fontSize: 16),
-              ),
-              onTap: () => setState(() => _clashPage = index),
             ),
-          ),
-        const Spacer(),
-        _trafficFooter(),
-      ],
+          const Spacer(),
+          _trafficFooter(),
+        ],
+      ),
     ),
   );
 
@@ -666,19 +679,26 @@ class _NetworkVirtualizationWorkspaceState
               ),
             ),
           ),
+          const Padding(
+            padding: EdgeInsets.only(top: 4, bottom: 2),
+            child: Text(
+              '橙色：上传  ·  蓝色：下载',
+              style: TextStyle(fontSize: 11, color: Color(0xFF666666)),
+            ),
+          ),
           _trafficLine(
             Icons.arrow_upward,
-            '${_rateText(_uploadRates)} /s',
+            '上传 ${_rateText(_uploadRates)} /s',
             Colors.deepOrangeAccent,
           ),
           _trafficLine(
             Icons.arrow_downward,
-            '${_rateText(_downloadRates)} /s',
+            '下载 ${_rateText(_downloadRates)} /s',
             Colors.blue,
           ),
           _trafficLine(
             Icons.link,
-            '${snapshot?.connectionCount ?? 0} 个连接',
+            '活动连接 ${snapshot?.connectionCount ?? 0} 个',
             Theme.of(context).colorScheme.onSurface,
           ),
         ],
@@ -1157,14 +1177,6 @@ class _NetworkVirtualizationWorkspaceState
         title: const Text('数据目录'),
         subtitle: SelectableText(_proxyDataDirectory),
       ),
-      const Divider(),
-      ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        leading: const Icon(Icons.computer_outlined),
-        title: const Text('轻量虚拟机'),
-        subtitle: const Text('QEMU 独立运行环境'),
-        children: <Widget>[SizedBox(height: 620, child: _vmTab())],
-      ),
     ],
   );
 
@@ -1294,14 +1306,12 @@ class _NetworkVirtualizationWorkspaceState
         ? Colors.orange
         : Colors.red;
     return Material(
-      color: selected
-          ? Theme.of(context).colorScheme.primaryContainer
-          : Theme.of(context).colorScheme.surfaceContainerLowest,
+      color: selected ? const Color(0xFFDCEBFC) : const Color(0xFFFFFFFF),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(9),
         side: BorderSide(
           color: selected
-              ? Theme.of(context).colorScheme.primary
+              ? const Color(0xFF087BF5)
               : Theme.of(context).dividerColor,
         ),
       ),

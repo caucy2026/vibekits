@@ -57,6 +57,34 @@
 51. [dev.79 Android UI 与局域网 Key 验收](acceptance/V1_9_0_DEV79_ANDROID_UI_LAN_KEY_2026-08-23.md)——底部导航、返回历史、Keystore、一次性二维码网页输入与 APK 构建
 52. [清理算法跨平台拆分与迁移基线](32_CLEANER_PLATFORM_MIGRATION.md)——公共内核、Windows/macOS/Android 独立规则与删除边界
 53. [dev.80 清理平台拆分验收](acceptance/V1_9_0_DEV80_CLEANER_PLATFORM_SPLIT_2026-08-23.md)——规则互斥、Android 沙箱、双重越界保护与轻量回归
+54. [智能体原生产品与持续演进规范](33_AGENT_NATIVE_PRODUCT_AND_EVOLUTION.md)——产品简介、逐工具智能体验收、Harness 上游发现、候选验证、灰度和回滚
+55. [dev.81 智能体协作与演进验收](acceptance/V1_9_0_DEV81_AGENT_NATIVE_EVOLUTION_2026-08-23.md)——高频工具回归、真实模型 MCP 主链、音频时间定位和上游候选检测
+56. [系统资源诊断与 Harness 接口](34_SYSTEM_RESOURCE_HARNESS_API.md)——Windows/macOS/Android 的 CPU、内存、GPU、磁盘、Top 进程和连续采样合同
+57. [dev.82 系统资源诊断验收](acceptance/V1_9_0_DEV82_SYSTEM_RESOURCE_DIAGNOSTICS_2026-08-23.md)——本机真采样、ADB Android、界面与 Harness 闭环
+58. [全部工具的智能体闭环验收准则](35_HARNESS_ALL_CAPABILITY_ACCEPTANCE.md)——公开工具执行器、真实调用、日志、授权、环境门禁和 APP 自检
+59. [dev.83 全工具智能体闭环验收](acceptance/V1_9_0_DEV83_ALL_HARNESS_CAPABILITIES_2026-08-23.md)——482 项全量结果、30/30 微工具和生命周期修复
+60. [Android 单屏/双屏启动规范](36_ANDROID_DUAL_SINGLE_SCREEN.md)——默认双屏、长按单屏、跨屏路由与原子退出规范
+61. [dev.86 Android 双屏退出验收](acceptance/V1_9_0_DEV86_ANDROID_DUAL_EXIT_2026-08-24.md)——192.168.3.62 上 D0/D2 任一屏关闭后双屏同时退出
+62. [dev.87 Android 双屏异显验收](acceptance/V1_9_0_DEV87_ANDROID_HETEROGENEOUS_2026-08-24.md)——D0 Harness、D2 资源诊断、图表说明与双屏退出真机证据
+63. [dev.88 Android 1920×2560 双屏布局验收](acceptance/V1_9_0_DEV88_ANDROID_1920X2560_2026-08-24.md)——图标文字底栏、上下屏区段和可见退出按钮真机闭环
+64. [dev.93 Android 连续跨屏画布验收](acceptance/V1_9_0_DEV93_ANDROID_CONTINUOUS_CANVAS_2026-08-24.md)——唯一 Activity/Engine/状态树，D2 上半区、D0 下半区、D2 触摸联动与双屏退出真机闭环
+65. [dev.97 Android Harness/清理/OCR 真机验收](acceptance/V1_9_0_DEV97_ANDROID_REAL_DEVICE_2026-08-24.md)——移动 Harness 原生链、Android 安全清理、PP-OCRv6 ONNX 真推理和双屏退出
+66. [dev.106 Harness 连续启停 100 次验收](acceptance/V1_9_0_DEV106_HARNESS_100_RESTART_2026-08-26.md)——真实 DSH HTTP、托盘退出、子进程回收与启动/退出分位数据
+67. [Harness 功能模块与工具接口目录](37_HARNESS_CAPABILITY_CATALOG.md)——从注册表生成的模块、130 个可执行接口、参数和统一调用协议
+68. [dev.107 Harness 能力认知闭环验收](acceptance/V1_9_0_DEV107_HARNESS_CAPABILITY_INVENTORY_2026-08-26.md)——真实模型主动调用能力检查的历史检查点；当前动态数字以能力目录为准
+69. [dev.108 Harness 冷启动修复验收](acceptance/V1_9_0_DEV108_HARNESS_COLD_START_2026-08-26.md)——现场 84.858 秒定位、可选插件裁剪及两轮 5～6 秒 Release 实测
+70. [dev.109 Harness 幽灵会话删除验收](acceptance/V1_9_0_DEV109_HARNESS_SESSION_DELETE_2026-08-26.md)——旧自测会话清理、内存投影刷新、真实工作区保护与 Release 实测
+71. [dev.113 Harness 滚轮与阅读密度验收](acceptance/V1_9_0_DEV113_HARNESS_SCROLL_DENSITY_2026-08-26.md)——长会话真实鼠标滚轮、Codex 字体密度、远程分享与会话日志分离
+72. [dev.114 SSH 密码认证验收](acceptance/V1_9_0_DEV114_SSH_PASSWORD_AUTH_2026-08-26.md)——密码/私钥模式、凭据安全映射、网络可达与 SFTP 复用
+73. [dev.115 SFTP 双栏导航验收](acceptance/V1_9_0_DEV115_SFTP_NAVIGATION_2026-08-26.md)——本地/远端独立后退、上一级、根目录边界与轻量闭环
+74. [dev.116 远程历史与多设备验收](acceptance/V1_9_0_DEV116_REMOTE_HISTORY_MULTI_DEVICE_2026-08-26.md)——成功后自动记住、系统凭据、多终端并行与 Harness 在线状态
+75. [网络抓包（PCAP）与 Harness 接口](38_NETWORK_PACKET_CAPTURE_HARNESS_API.md)——内置 WinDivert、实时抓包、保存读取、协议分析和 5 个智能体接口
+76. [dev.117 网络抓包验收](acceptance/V1_9_0_DEV117_NETWORK_CAPTURE_2026-08-26.md)——Release 真抓、PCAP 解析、Harness 回读和权限失败边界
+77. [dev.118 Android 63 Harness/Pad 全接口验收](acceptance/V1_9_0_DEV118_ANDROID63_HARNESS_PAD_2026-08-26.md)——ARM64 真机构建、130 接口可发现、平台门禁、五入口触控与 118 项自动化
+78. [工具真实连续使用场景矩阵](39_TOOL_REAL_USAGE_SCENARIO_MATRIX.md)——再次进入、多目标并存、安全凭据、Harness 共用历史与逐工具缺口
+79. [dev.119 工具连续使用验收](acceptance/V1_9_0_DEV119_TOOL_CONTINUITY_2026-08-27.md)——SSH 多设备复核、API 脱敏历史、ADB/串口复用和 19 工作区合同门禁
+80. [多平台存储与清理策略](40_PLATFORM_STORAGE_AND_CLEANUP_POLICY.md)——Windows/macOS/Android 的持久目录、缓存、凭据库与不同清理边界
+81. [dev.120 多平台策略验收](acceptance/V1_9_0_DEV120_PLATFORM_POLICY_2026-08-27.md)——平台合同、设置迁移、Windows 真扫与 Android/macOS 环境门禁
 
 ## 完成定义
 

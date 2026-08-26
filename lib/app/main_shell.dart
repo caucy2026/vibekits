@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
 import '../features/cleaner/presentation/cleaner_tab.dart';
@@ -14,7 +15,9 @@ import '../features/local_models/presentation/local_models_tab.dart';
 import 'app_shortcuts.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
+import 'platform_storage_layout.dart';
 import 'app_version.dart';
+import 'android_display_context.dart';
 import 'dropped_file_router.dart';
 import 'supported_file_types.dart';
 import 'windows_file_drop.dart';
@@ -42,7 +45,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   static const List<String> _tabTitles = <String>[
-    'Harness（智能体）',
+    '智能体（Harness）',
     '解压缩',
     '系统清理',
     '文档阅读',
@@ -66,7 +69,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   static const List<String> _tabDescriptions = <String>[
-    '开发智能体、任务会话与截图 OCR',
+    '开发智能体（Harness）、任务会话与截图识别（OCR）',
     '安全查看、创建与提取压缩文件',
     '扫描可清理空间并生成可核对报告',
     '快速查看文本、结构化数据与二进制文件',
@@ -74,6 +77,7 @@ class _MainShellState extends State<MainShell> {
   ];
 
   int _selectedIndex = 0;
+  AndroidDisplayContext? _androidDisplayContext;
   final List<int> _mobileNavigationHistory = <int>[];
   bool _hasUserSelectedTab = false;
   late final Set<int> _loadedTabs;
@@ -118,18 +122,18 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
-    // Harness currently ships a desktop Node/DSH runtime. On Android, open a
-    // genuinely usable offline workspace instead of presenting a broken
-    // desktop-runtime warning as the first experience.
-    if (Platform.isAndroid &&
-        startupKind == VibekitsFileKind.unsupported &&
-        _selectedIndex == 0) {
-      _selectedIndex = 4;
+    // Android starts with Harness. In dual-display mode this exact same widget
+    // tree spans the full 1920x2560 canvas; no second route is created.
+    if (Platform.isAndroid && startupKind == VibekitsFileKind.unsupported) {
+      _selectedIndex = 0;
     }
     // First frame contains only the navigation shell. Heavy workspaces are
     // mounted on the next frame so a click always produces visible UI before
     // disk discovery, WebView/DSH startup or model inspection begins.
     _loadedTabs = <int>{};
+    if (Platform.isAndroid && startupKind == VibekitsFileKind.unsupported) {
+      unawaited(_resolveAndroidDisplayContext());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() => _loadedTabs.add(_selectedIndex));
@@ -157,14 +161,28 @@ class _MainShellState extends State<MainShell> {
     }
   }
 
+  Future<void> _resolveAndroidDisplayContext() async {
+    try {
+      final AndroidDisplayContext display = await AndroidDisplayContext.read();
+      if (!mounted) return;
+      setState(() {
+        _androidDisplayContext = display;
+      });
+    } on MissingPluginException {
+      // Widget tests and non-embedded Android runners keep the primary role.
+    } on PlatformException {
+      // A display-context failure must not block the usable Harness workspace.
+    }
+  }
+
   void _applySettings() {
     if (widget.initialFilePath != null || widget.initialFilePaths.isNotEmpty) {
       return;
     }
     final AppSettings settings = widget.settingsController.value;
     int restoredIndex = _indexForWorkspace(settings);
-    if (Platform.isAndroid && !_hasUserSelectedTab && restoredIndex == 0) {
-      restoredIndex = 4;
+    if (Platform.isAndroid && !_hasUserSelectedTab) {
+      restoredIndex = 0;
     }
     if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
       setState(() {
@@ -448,11 +466,8 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.image
                 ? widget.initialFilePath
                 : null),
-        // The bundled Harness runtime is desktop-only. Android opens the
-        // useful local OCR workspace immediately instead of spending the
-        // first interaction probing a runtime that cannot execute there.
         initialLargeModelView: Platform.isAndroid
-            ? 'ocr'
+            ? 'agent'
             : settings.lastLargeModelView,
         onLargeModelViewChanged: (String view) =>
             widget.settingsController.updateInBackground(
@@ -570,14 +585,44 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
         initialSerialPortSettings: settings.serialPortSettings,
+        initialSerialSendHistory: settings.serialSendHistory,
         onSerialPortSettingsChanged: (String serialSettings) =>
             widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(
                 serialPortSettings: serialSettings,
               ),
             ),
+        onSerialSendHistoryChanged: (List<String> history) =>
+            widget.settingsController.updateInBackground(
+              widget.settingsController.value.copyWith(
+                serialSendHistory: history,
+              ),
+            ),
+        initialAdbRecentAddresses: settings.adbRecentAddresses,
+        initialAdbCommandHistory: settings.adbCommandHistory,
+        onAdbRecentAddressesChanged: (List<String> history) =>
+            widget.settingsController.updateInBackground(
+              widget.settingsController.value.copyWith(
+                adbRecentAddresses: history,
+              ),
+            ),
+        onAdbCommandHistoryChanged: (List<String> history) =>
+            widget.settingsController.updateInBackground(
+              widget.settingsController.value.copyWith(
+                adbCommandHistory: history,
+              ),
+            ),
+        initialApiRequestHistory: settings.apiRequestHistory,
+        onApiRequestHistoryChanged: (List<String> history) =>
+            widget.settingsController.updateInBackground(
+              widget.settingsController.value.copyWith(
+                apiRequestHistory: history,
+              ),
+            ),
         remoteWorkspaceIntent: _remoteWorkspaceIntent,
         remoteWorkspaceIntentSerial: _remoteWorkspaceIntentSerial,
+        onAskHarness: _openHarnessWithPrompt,
+        initialToolId: null,
       ),
     ];
     final List<Widget> tabPages = List<Widget>.generate(
@@ -644,9 +689,10 @@ class _MainShellState extends State<MainShell> {
             bottomNavigationBar: mobile
                 ? NavigationBar(
                     key: const Key('primary-navigation-mobile'),
+                    height: 76,
                     selectedIndex: _selectedIndex,
                     labelBehavior:
-                        NavigationDestinationLabelBehavior.onlyShowSelected,
+                        NavigationDestinationLabelBehavior.alwaysShow,
                     onDestinationSelected: _selectTab,
                     destinations: List<NavigationDestination>.generate(
                       _tabTitles.length,
@@ -763,6 +809,22 @@ class _MainShellState extends State<MainShell> {
             ),
             const SizedBox(width: 4),
           ],
+          if (compact &&
+              _androidDisplayContext?.isContinuousCanvas == true) ...<Widget>[
+            _StatusPill(
+              icon: Icons.vertical_align_center,
+              label: '连续画布 · 1920×2560',
+              color: context.vibe.success,
+            ),
+            const SizedBox(width: 4),
+          ],
+          if (Platform.isAndroid)
+            IconButton(
+              key: const Key('android-exit-app'),
+              tooltip: '退出应用（关闭两屏）',
+              onPressed: _exitAndroidApp,
+              icon: const Icon(Icons.logout_rounded),
+            ),
           IconButton(
             key: const Key('app-settings-button'),
             tooltip: '设置 (Ctrl+,)',
@@ -772,6 +834,16 @@ class _MainShellState extends State<MainShell> {
         ],
       ),
     );
+  }
+
+  Future<void> _exitAndroidApp() async {
+    try {
+      await AndroidDisplayContext.exitApp();
+    } on PlatformException {
+      await SystemNavigator.pop();
+    } on MissingPluginException {
+      await SystemNavigator.pop();
+    }
   }
 
   Widget _buildCompactNavigation(BuildContext context) {
@@ -1144,15 +1216,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _rustDeskWebClientUrl =
       TextEditingController(text: _value.rustDeskWebClientUrl);
 
-  String get _defaultDebugDirectory =>
-      '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp';
+  PlatformStorageLayout get _storage => PlatformStorageLayout.current();
+
+  String get _defaultDebugDirectory => _storage.harnessDebugDirectory;
 
   String get _defaultToolDownloadDirectory {
-    final String base =
-        Platform.environment['LOCALAPPDATA'] ??
-        Platform.environment['APPDATA'] ??
-        Directory.current.path;
-    return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}downloads';
+    return _storage.downloadsDirectory;
   }
 
   Future<void> _pickDirectory(TextEditingController controller) async {
@@ -1256,6 +1325,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 },
               ),
               const SizedBox(height: 12),
+              Container(
+                key: const Key('platform-storage-locations'),
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: context.vibe.canvas,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: context.vibe.border),
+                ),
+                child: SelectableText(
+                  '${_storage.platform.toUpperCase()} 存储位置\n'
+                  '设置：${_storage.settingsFile}\n'
+                  '缓存：${_storage.cacheDirectory}\n'
+                  '凭据：${_storage.credentialStoreLabel}',
+                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                ),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _modelDirectory,
                 decoration: const InputDecoration(labelText: '模型目录（留空使用默认目录）'),
@@ -1265,7 +1352,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 key: const Key('harness-debug-directory'),
                 controller: _harnessDebugDirectory,
                 decoration: InputDecoration(
-                  labelText: 'Harness 调试临时目录',
+                  labelText: '智能体调试临时目录（Harness）',
                   helperText: '默认：$_defaultDebugDirectory',
                   suffixIcon: IconButton(
                     tooltip: '选择目录',

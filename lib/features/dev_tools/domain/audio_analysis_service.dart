@@ -69,6 +69,7 @@ class AudioAnalysisResult {
     required this.waveformMax,
     required this.spectrum,
     required this.quality,
+    required this.timeline,
     required this.findings,
   });
 
@@ -87,6 +88,7 @@ class AudioAnalysisResult {
   final List<List<double>> waveformMax;
   final List<double> spectrum;
   final AudioSignalQuality quality;
+  final List<AudioTimelineSegment> timeline;
   final List<String> findings;
 
   Map<String, Object?> toJson({bool includeVisualData = false}) =>
@@ -105,14 +107,86 @@ class AudioAnalysisResult {
         'clippedRatio': clippedRatio,
         'silenceRatio': silenceRatio,
         'quality': quality.toJson(),
+        'timelineSummary': _timelineSummary(),
         'findings': findings,
         if (includeVisualData) 'waveformMin': waveformMin,
         if (includeVisualData) 'waveformMax': waveformMax,
         if (includeVisualData) 'spectrum': spectrum,
+        if (includeVisualData)
+          'timeline': timeline
+              .map((AudioTimelineSegment item) => item.toJson())
+              .toList(growable: false),
       };
+
+  Map<String, Object?> _timelineSummary() {
+    final List<AudioTimelineSegment> harmonic =
+        timeline
+            .where((AudioTimelineSegment item) => item.tonalConfidence >= 0.1)
+            .toList(growable: false)
+          ..sort(
+            (AudioTimelineSegment left, AudioTimelineSegment right) =>
+                right.thdPercent.compareTo(left.thdPercent),
+          );
+    final List<AudioTimelineSegment> noisy = timeline.toList(growable: false)
+      ..sort(
+        (AudioTimelineSegment left, AudioTimelineSegment right) =>
+            left.estimatedSnrDb.compareTo(right.estimatedSnrDb),
+      );
+    return <String, Object?>{
+      'windowCount': timeline.length,
+      'harmonicHotspots': harmonic
+          .take(5)
+          .map((AudioTimelineSegment item) => item.toJson())
+          .toList(growable: false),
+      'noiseHotspots': noisy
+          .take(5)
+          .map((AudioTimelineSegment item) => item.toJson())
+          .toList(growable: false),
+      'note': '时间段指标按有界窗口计算；THD/SNR 对稳态单音最可靠，语音和音乐需结合频谱解释。',
+    };
+  }
 
   static double _dbfs(double value) =>
       value <= 0 ? -120 : 20 * math.log(value) / math.ln10;
+}
+
+class AudioTimelineSegment {
+  const AudioTimelineSegment({
+    required this.startSeconds,
+    required this.endSeconds,
+    required this.peakDbfs,
+    required this.rmsDbfs,
+    required this.clippedRatio,
+    required this.dominantFrequencyHz,
+    required this.thdPercent,
+    required this.estimatedSnrDb,
+    required this.noiseFloorDbfs,
+    required this.tonalConfidence,
+  });
+
+  final double startSeconds;
+  final double endSeconds;
+  final double peakDbfs;
+  final double rmsDbfs;
+  final double clippedRatio;
+  final double dominantFrequencyHz;
+  final double thdPercent;
+  final double estimatedSnrDb;
+  final double noiseFloorDbfs;
+  final double tonalConfidence;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'startSeconds': startSeconds,
+    'endSeconds': endSeconds,
+    'peakDbfs': peakDbfs,
+    'rmsDbfs': rmsDbfs,
+    'clippedRatio': clippedRatio,
+    'dominantFrequencyHz': dominantFrequencyHz,
+    'thdPercent': thdPercent,
+    'estimatedSnrDb': estimatedSnrDb,
+    'noiseFloorDbfs': noiseFloorDbfs,
+    'tonalConfidence': tonalConfidence,
+  };
 }
 
 class AudioSignalQuality {
@@ -164,6 +238,7 @@ class AudioSignalQuality {
 abstract final class AudioAnalysisService {
   static const int waveformBins = 1200;
   static const int fftSize = 4096;
+  static const int timelineMaxSegments = 240;
 
   static Future<AudioAnalysisResult> inspect(
     String path, {
@@ -268,6 +343,12 @@ abstract final class AudioAnalysisService {
       correlation,
       clippedRatio,
     );
+    final List<AudioTimelineSegment> timeline = _timeline(
+      decoded.audioBytes,
+      audioData,
+      format,
+      frames,
+    );
     final List<String> findings = <String>[];
     if (clippedRatio > 0.0001) {
       findings.add('检测到削波 ${(clippedRatio * 100).toStringAsFixed(3)}%');
@@ -311,8 +392,71 @@ abstract final class AudioAnalysisService {
       waveformMax: maximum,
       spectrum: _spectrum(fftInput),
       quality: quality,
+      timeline: timeline,
       findings: findings,
     );
+  }
+
+  static List<AudioTimelineSegment> _timeline(
+    Uint8List bytes,
+    ByteData data,
+    PcmAudioFormat format,
+    int frames,
+  ) {
+    final int framesPerSegment = math.max(
+      fftSize,
+      (frames / timelineMaxSegments).ceil(),
+    );
+    final List<AudioTimelineSegment> result = <AudioTimelineSegment>[];
+    for (int start = 0; start < frames; start += framesPerSegment) {
+      final int end = math.min(frames, start + framesPerSegment);
+      final int segmentFrames = end - start;
+      final Float64List fftInput = Float64List(
+        math.min(fftSize, segmentFrames),
+      );
+      double peak = 0;
+      double squareSum = 0;
+      int clipped = 0;
+      for (int frame = start; frame < end; frame++) {
+        double mixed = 0;
+        for (int channel = 0; channel < format.channels; channel++) {
+          final int offset =
+              frame * format.bytesPerFrame + channel * format.bytesPerSample;
+          mixed += _sample(bytes, data, offset, format).clamp(-1.0, 1.0);
+        }
+        final double sample = mixed / format.channels;
+        peak = math.max(peak, sample.abs());
+        squareSum += sample * sample;
+        if (sample.abs() >= 0.999) clipped++;
+        final int local = frame - start;
+        if (local < fftInput.length) fftInput[local] = sample;
+      }
+      final double rms = math.sqrt(squareSum / segmentFrames);
+      final double clippedRatio = clipped / segmentFrames;
+      final AudioSignalQuality quality = _signalQuality(
+        fftInput,
+        format.sampleRate,
+        <double>[peak],
+        <double>[rms],
+        null,
+        clippedRatio,
+      );
+      result.add(
+        AudioTimelineSegment(
+          startSeconds: start / format.sampleRate,
+          endSeconds: end / format.sampleRate,
+          peakDbfs: AudioAnalysisResult._dbfs(peak),
+          rmsDbfs: AudioAnalysisResult._dbfs(rms),
+          clippedRatio: clippedRatio,
+          dominantFrequencyHz: quality.dominantFrequencyHz,
+          thdPercent: quality.thdPercent,
+          estimatedSnrDb: quality.estimatedSnrDb,
+          noiseFloorDbfs: quality.noiseFloorDbfs,
+          tonalConfidence: quality.tonalConfidence,
+        ),
+      );
+    }
+    return result;
   }
 
   static Future<String> pcmToWav(

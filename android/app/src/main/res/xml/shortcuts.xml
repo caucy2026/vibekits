@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="single_screen"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/single_screen_shortcut_short"
+        android:shortcutLongLabel="@string/single_screen_shortcut_long"
+        android:shortcutDisabledMessage="@string/single_screen_shortcut_disabled">
+        <intent
+            android:action="com.vibekits.vibekits.action.SINGLE_SCREEN"
+            android:targetPackage="com.vibekits.vibekits"
+            android:targetClass="com.vibekits.vibekits.SingleScreenActivity" />
+    </shortcut>
+</shortcuts>

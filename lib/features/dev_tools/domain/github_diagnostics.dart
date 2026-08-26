@@ -64,9 +64,6 @@ abstract final class GithubDiagnosticsService {
     if (https?.status == DiagnosticStatus.failed) {
       return 'HTTPS 基础连接失败：先检查系统时间、代理、防火墙和 DNS；不要通过关闭 TLS 校验解决。';
     }
-    if (credentials?.status != DiagnosticStatus.ok) {
-      return '未确认 Git Credential Manager 账号；这与网络可达是两个独立状态，请先完成凭据登录。';
-    }
     if (gitRoute?.status == DiagnosticStatus.failed &&
         https?.status == DiagnosticStatus.ok) {
       return '浏览器 HTTPS 可达但内置 Git 路由失败；检查 Git host-scoped 代理、凭据和远端权限。';
@@ -74,6 +71,9 @@ abstract final class GithubDiagnosticsService {
     if (ssh22?.status == DiagnosticStatus.failed &&
         ssh443?.status == DiagnosticStatus.ok) {
       return 'SSH 22 被阻断但 ssh.github.com:443 可用，可按 GitHub 官方文档显式配置 SSH over 443。';
+    }
+    if (credentials?.status != DiagnosticStatus.ok) {
+      return '未确认 Git Credential Manager 账号；这与网络可达是两个独立状态，请先完成凭据登录。';
     }
     if (checks.any(
       (DiagnosticCheck item) =>

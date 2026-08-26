@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'platform_storage_layout.dart';
+
 enum AppLogLevel { error, warning, info, debug }
 
 @immutable
@@ -29,6 +31,10 @@ class AppSettings {
     this.remoteDatabaseProfiles = const <String>[],
     this.remoteSessionProfiles = const <String>[],
     this.serialPortSettings = '',
+    this.apiRequestHistory = const <String>[],
+    this.adbRecentAddresses = const <String>[],
+    this.adbCommandHistory = const <String>[],
+    this.serialSendHistory = const <String>[],
     this.deepSeekHarnessWorkspace = '',
     this.deepSeekHarnessDebugDirectory = '',
     this.rustDeskExecutable = '',
@@ -55,6 +61,10 @@ class AppSettings {
   final List<String> remoteDatabaseProfiles;
   final List<String> remoteSessionProfiles;
   final String serialPortSettings;
+  final List<String> apiRequestHistory;
+  final List<String> adbRecentAddresses;
+  final List<String> adbCommandHistory;
+  final List<String> serialSendHistory;
   final String deepSeekHarnessWorkspace;
   final String deepSeekHarnessDebugDirectory;
   final String rustDeskExecutable;
@@ -81,6 +91,10 @@ class AppSettings {
     List<String>? remoteDatabaseProfiles,
     List<String>? remoteSessionProfiles,
     String? serialPortSettings,
+    List<String>? apiRequestHistory,
+    List<String>? adbRecentAddresses,
+    List<String>? adbCommandHistory,
+    List<String>? serialSendHistory,
     String? deepSeekHarnessWorkspace,
     String? deepSeekHarnessDebugDirectory,
     String? rustDeskExecutable,
@@ -109,6 +123,10 @@ class AppSettings {
         remoteDatabaseProfiles ?? this.remoteDatabaseProfiles,
     remoteSessionProfiles: remoteSessionProfiles ?? this.remoteSessionProfiles,
     serialPortSettings: serialPortSettings ?? this.serialPortSettings,
+    apiRequestHistory: apiRequestHistory ?? this.apiRequestHistory,
+    adbRecentAddresses: adbRecentAddresses ?? this.adbRecentAddresses,
+    adbCommandHistory: adbCommandHistory ?? this.adbCommandHistory,
+    serialSendHistory: serialSendHistory ?? this.serialSendHistory,
     deepSeekHarnessWorkspace:
         deepSeekHarnessWorkspace ?? this.deepSeekHarnessWorkspace,
     deepSeekHarnessDebugDirectory:
@@ -138,6 +156,10 @@ class AppSettings {
     'remoteDatabaseProfiles': remoteDatabaseProfiles,
     'remoteSessionProfiles': remoteSessionProfiles,
     'serialPortSettings': serialPortSettings,
+    'apiRequestHistory': apiRequestHistory,
+    'adbRecentAddresses': adbRecentAddresses,
+    'adbCommandHistory': adbCommandHistory,
+    'serialSendHistory': serialSendHistory,
     'deepSeekHarnessWorkspace': deepSeekHarnessWorkspace,
     'deepSeekHarnessDebugDirectory': deepSeekHarnessDebugDirectory,
     'rustDeskExecutable': rustDeskExecutable,
@@ -152,6 +174,22 @@ class AppSettings {
       final Object? value = json[key];
       return value is int && value >= min && value <= max ? value : fallback;
     }
+
+    List<String> safeHistory(Object? raw, int limit, int maxLength) =>
+        raw is List<Object?>
+        ? raw
+              .whereType<String>()
+              .map((String value) => value.trim())
+              .where(
+                (String value) =>
+                    value.isNotEmpty &&
+                    value.length <= maxLength &&
+                    !value.contains('\u0000'),
+              )
+              .toSet()
+              .take(limit)
+              .toList(growable: false)
+        : const <String>[];
 
     final int legacyLastTab = boundedInt('lastTab', 0, 0, 4);
     const List<String> legacyWorkspaceOrder = <String>[
@@ -278,6 +316,16 @@ class AppSettings {
               !(json['serialPortSettings']! as String).contains('\u0000')
           ? json['serialPortSettings']! as String
           : '',
+      apiRequestHistory: json['apiRequestHistory'] is List<Object?>
+          ? (json['apiRequestHistory']! as List<Object?>)
+                .whereType<String>()
+                .where((String value) => value.length <= 8192)
+                .take(30)
+                .toList(growable: false)
+          : const <String>[],
+      adbRecentAddresses: safeHistory(json['adbRecentAddresses'], 20, 512),
+      adbCommandHistory: safeHistory(json['adbCommandHistory'], 50, 4096),
+      serialSendHistory: safeHistory(json['serialSendHistory'], 50, 4096),
       deepSeekHarnessWorkspace:
           json['deepSeekHarnessWorkspace'] is String &&
               (json['deepSeekHarnessWorkspace']! as String).length <= 32768 &&
@@ -310,40 +358,55 @@ class AppSettings {
 }
 
 class AppSettingsStore {
-  AppSettingsStore({File? file}) : _file = file ?? _defaultFile();
+  AppSettingsStore({File? file, List<File>? legacyFiles})
+    : _file = file ?? _defaultFile(),
+      _legacyFiles =
+          legacyFiles ??
+          (file == null ? _defaultLegacyFiles() : const <File>[]);
 
   final File _file;
+  final List<File> _legacyFiles;
 
   static File _defaultFile() {
-    final String base =
-        Platform.environment['LOCALAPPDATA'] ??
-        Platform.environment['APPDATA'] ??
-        Directory.current.path;
-    return File(
-      '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}settings.json',
-    );
+    return File(PlatformStorageLayout.current().settingsFile);
+  }
+
+  static List<File> _defaultLegacyFiles() {
+    if (Platform.isWindows) return const <File>[];
+    return <File>[
+      File(
+        '${Directory.current.path}${Platform.pathSeparator}Vibekits'
+        '${Platform.pathSeparator}settings.json',
+      ),
+      File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}Vibekits'
+        '${Platform.pathSeparator}settings.json',
+      ),
+    ];
   }
 
   Future<AppSettings> load() async {
-    try {
-      if (!await _file.exists()) return const AppSettings();
-      final Object? decoded = jsonDecode(await _file.readAsString());
-      return decoded is Map<String, Object?>
-          ? AppSettings.fromJson(decoded)
-          : const AppSettings();
-    } on Object {
-      return const AppSettings();
+    for (final File candidate in <File>[_file, ..._legacyFiles]) {
+      try {
+        if (!await candidate.exists()) continue;
+        final Object? decoded = jsonDecode(await candidate.readAsString());
+        if (decoded is! Map<String, Object?>) continue;
+        final AppSettings settings = AppSettings.fromJson(decoded);
+        if (candidate.path != _file.path) await save(settings);
+        return settings;
+      } on Object {
+        continue;
+      }
     }
+    return const AppSettings();
   }
 
   Future<void> save(AppSettings settings) async {
-    final List<File> candidates = <File>[
-      _file,
-      File(
-        '${Directory.systemTemp.path}'
-        '${Platform.pathSeparator}Vibekits${Platform.pathSeparator}settings.json',
-      ),
-    ];
+    // Settings are persistent state. Never silently move them into a temp
+    // folder: that creates two sources of truth and loses history after OS
+    // cleanup. Every supported platform resolves to an app-owned writable
+    // persistent directory in PlatformStorageLayout.
+    final List<File> candidates = <File>[_file];
     final String payload = jsonEncode(settings.toJson());
     Exception? lastError;
 

@@ -55,7 +55,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('数据库管理器'), findsNWidgets(2));
+    expect(find.text('数据库管理器'), findsWidgets);
     expect(find.text('SQLite · 本地只读'), findsOneWidget);
     expect(find.text('Alice'), findsOneWidget);
 

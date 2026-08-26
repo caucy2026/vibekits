@@ -57,6 +57,9 @@ void main() {
     );
     await tester.pump();
 
+    expect(find.byKey(const Key('cleaner-platform-policy')), findsOneWidget);
+    expect(find.textContaining('Windows：'), findsOneWidget);
+
     expect(
       savedIds,
       containsAll(<String>['test-temp', 'est-encryption-old-logs']),
@@ -246,7 +249,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('智能选择清理计划'), findsOneWidget);
-    expect(find.textContaining('还差'), findsOneWidget);
+    expect(find.textContaining('还差'), findsWidgets);
     expect(find.textContaining('永久清空系统回收站 2.00 GB'), findsOneWidget);
     expect(
       tester

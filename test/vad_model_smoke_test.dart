@@ -18,6 +18,19 @@ void main() {
         '$pubCache${Platform.pathSeparator}hosted'
         '${Platform.pathSeparator}pub.dev${Platform.pathSeparator}'
         'sherpa_onnx_windows-1.13.5';
+    final List<String> nativeCandidates = <String>[
+      'build${Platform.pathSeparator}windows${Platform.pathSeparator}x64'
+          '${Platform.pathSeparator}runner${Platform.pathSeparator}Release',
+      'build${Platform.pathSeparator}windows${Platform.pathSeparator}x64'
+          '${Platform.pathSeparator}runner${Platform.pathSeparator}Debug',
+      '$packageRoot${Platform.pathSeparator}windows',
+    ];
+    final String nativeDirectory = nativeCandidates.firstWhere(
+      (String directory) =>
+          File('$directory${Platform.pathSeparator}onnxruntime.dll')
+              .existsSync(),
+      orElse: () => nativeCandidates.last,
+    );
     final VadInferenceResult result = runVadInference(
       modelPath:
           'test_data${Platform.pathSeparator}models'
@@ -25,7 +38,7 @@ void main() {
       wavPath:
           'test_data${Platform.pathSeparator}audio'
           '${Platform.pathSeparator}lei-jun-test.wav',
-      nativeLibraryDirectory: '$packageRoot${Platform.pathSeparator}windows',
+      nativeLibraryDirectory: nativeDirectory,
     );
 
     expect(result.runtimeVersion, isNotEmpty);

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,12 @@ void main() {
       remoteDatabaseProfiles: <String>['{"id":"postgres-1"}'],
       remoteSessionProfiles: <String>['{"id":"remote-1"}'],
       serialPortSettings: '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
+      serialSendHistory: <String>['status', 'help'],
+      adbRecentAddresses: <String>['192.168.3.63:5555', '192.168.3.62:5555'],
+      adbCommandHistory: <String>[
+        'shell getprop ro.product.model',
+        'shell wm size',
+      ],
       deepSeekHarnessWorkspace: r'D:\Work\demo',
       deepSeekHarnessDebugDirectory: r'D:\Vibekits\tmp',
       rustDeskExecutable: r'C:\Program Files\RustDesk\RustDesk.exe',
@@ -69,5 +76,43 @@ void main() {
 
     expect(actual.themeMode, ThemeMode.system);
     expect(actual.cacheLimitMb, 512);
+  });
+
+  test('平台存储位置变化时迁移旧设置而不丢历史', () async {
+    final Directory directory = await Directory.systemTemp.createTemp(
+      'vibekits_settings_migration_',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final File legacy = File(
+      '${directory.path}${Platform.pathSeparator}legacy.json',
+    );
+    final File current = File(
+      '${directory.path}${Platform.pathSeparator}new'
+      '${Platform.pathSeparator}settings.json',
+    );
+    await legacy.writeAsString(
+      jsonEncode(
+        const AppSettings(
+          remoteSessionProfiles: <String>['{"id":"ssh-remembered"}'],
+          adbRecentAddresses: <String>['192.168.3.63:5555'],
+        ).toJson(),
+      ),
+    );
+    final AppSettingsStore store = AppSettingsStore(
+      file: current,
+      legacyFiles: <File>[legacy],
+    );
+
+    final AppSettings migrated = await store.load();
+
+    expect(migrated.remoteSessionProfiles.single, contains('ssh-remembered'));
+    expect(migrated.adbRecentAddresses.single, '192.168.3.63:5555');
+    expect(await current.exists(), isTrue);
+    expect(
+      AppSettings.fromJson(
+        jsonDecode(await current.readAsString()) as Map<String, Object?>,
+      ).adbRecentAddresses,
+      <String>['192.168.3.63:5555'],
+    );
   });
 }

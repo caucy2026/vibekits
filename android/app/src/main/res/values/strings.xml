@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VibeKits</string>
+    <string name="single_screen_shortcut_short">单屏模式</string>
+    <string name="single_screen_shortcut_long">只在当前屏幕启动 VibeKits</string>
+    <string name="single_screen_shortcut_disabled">单屏模式暂不可用</string>
+</resources>

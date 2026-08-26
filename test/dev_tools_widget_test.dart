@@ -21,7 +21,7 @@ void main() {
     await tester.enterText(search, 'Base64');
     await tester.pump();
     expect(find.text('Base64 编码'), findsNothing);
-    await tester.tap(find.widgetWithText(ListTile, '转换与检查'));
+    await tester.tap(find.widgetWithText(ListTile, '转换与检查（Convert）'));
     await tester.pumpAndSettle();
     expect(find.text('Base64 编码'), findsOneWidget);
     return find.byKey(const Key('utility-input'));
@@ -56,7 +56,7 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: DevToolsTab())),
     );
-    expect(find.text('程序员计算器'), findsWidgets);
+    expect(find.text('程序员计算器（HEX/DEC）'), findsWidgets);
     final Finder input = find.byKey(const Key('programmer-calculator-input'));
     expect(input, findsOneWidget);
 
@@ -91,7 +91,7 @@ void main() {
     );
     await tester.enterText(search, 'Clash Verge');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'Clash Verge / 虚拟机'));
+    await tester.tap(find.widgetWithText(ListTile, '网络代理（Clash Verge）'));
     await tester.pump();
     expect(
       find.byKey(const Key('current-tool-harness-activity')),
@@ -104,15 +104,33 @@ void main() {
       ),
       findsNothing,
     );
-    expect(find.text('Clash Verge'), findsWidgets);
-    expect(find.text('轻量虚拟机'), findsOneWidget);
-    expect(find.text('订阅与配置'), findsOneWidget);
-    expect(find.text('代理模式'), findsOneWidget);
-    expect(find.byKey(const Key('mihomo-system-proxy-switch')), findsOneWidget);
+    expect(find.text('网络代理（Clash Verge）'), findsWidgets);
+    expect(find.text('轻量虚拟机'), findsNothing);
+    expect(find.text('首页'), findsOneWidget);
+    expect(find.text('代理'), findsOneWidget);
+    expect(find.text('订阅'), findsOneWidget);
+    expect(find.text('设置'), findsOneWidget);
     expect(find.byKey(const Key('mihomo-start')), findsOneWidget);
-    await tester.tap(find.text('轻量虚拟机'));
+    await tester.enterText(search, '轻量虚拟机');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ListTile, '轻量虚拟机（QEMU）'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('qemu-start')), findsOneWidget);
+  });
+
+  testWidgets('资源诊断可从统一工具列表搜索', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: DevToolsTab())),
+    );
+    final Finder search = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is TextField && widget.decoration?.hintText == '搜索工具',
+    );
+    await tester.enterText(search, '资源诊断');
+    await tester.pump();
+    expect(find.widgetWithText(ListTile, '资源诊断（CPU/GPU）'), findsOneWidget);
   });
 
   testWidgets('DEV-002 执行并将结果继续作为输入', (WidgetTester tester) async {
@@ -183,10 +201,10 @@ void main() {
     );
     await tester.enterText(search, '代码统计');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '转换与检查'));
+    await tester.tap(find.widgetWithText(ListTile, '转换与检查（Convert）'));
     await tester.pumpAndSettle();
 
-    expect(find.text('代码统计'), findsWidgets);
+    expect(find.text('代码统计（LOC）'), findsWidgets);
     expect(
       find.byKey(const Key('code-statistics-pick-directory')),
       findsOneWidget,
@@ -202,7 +220,7 @@ void main() {
     );
     await tester.enterText(search, '重复文件');
     await tester.pump();
-    final Finder entry = find.widgetWithText(ListTile, '重复文件');
+    final Finder entry = find.widgetWithText(ListTile, '重复文件（Duplicate）');
     await tester.tap(entry);
     await tester.pumpAndSettle();
 
@@ -227,7 +245,7 @@ void main() {
     );
     await tester.enterText(search, '串口');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '串口调试'));
+    await tester.tap(find.widgetWithText(ListTile, '串口调试（Serial）'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('serial-port-name')), findsOneWidget);
@@ -272,7 +290,7 @@ void main() {
     );
     await tester.enterText(search, '文件哈希');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '文件哈希'));
+    await tester.tap(find.widgetWithText(ListTile, '文件哈希（Hash）'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('hash-pick-files')), findsOneWidget);
     expect(find.text('SHA-256'), findsOneWidget);

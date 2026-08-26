@@ -52,6 +52,16 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# VibeKits packet capture helper. WinDivert is bundled beside this executable,
+# so live capture does not depend on a separately installed Npcap/WinPcap.
+set(WINDIVERT_DIR "${CMAKE_SOURCE_DIR}/../native/windivert/WinDivert-2.2.2-A")
+add_executable(vibekits_packet_capture "runner/packet_capture_helper.cpp")
+target_compile_features(vibekits_packet_capture PUBLIC cxx_std_17)
+target_compile_definitions(vibekits_packet_capture PRIVATE "NOMINMAX")
+target_include_directories(vibekits_packet_capture PRIVATE "${WINDIVERT_DIR}/include")
+target_link_libraries(vibekits_packet_capture PRIVATE
+  "${WINDIVERT_DIR}/x64/WinDivert.lib" "ws2_32.lib")
+
 # Minimal generic ONNX bridge used by local OCR. It dynamically loads the
 # onnxruntime.dll already bundled by sherpa_onnx_windows, avoiding duplicate
 # runtime versions in the Release directory.
@@ -81,6 +91,16 @@ set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
+install(TARGETS vibekits_packet_capture RUNTIME
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/packet_capture" COMPONENT Runtime)
+install(FILES
+  "${WINDIVERT_DIR}/x64/WinDivert.dll"
+  "${WINDIVERT_DIR}/x64/WinDivert64.sys"
+  "${WINDIVERT_DIR}/LICENSE"
+  "${WINDIVERT_DIR}/README"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/packet_capture"
   COMPONENT Runtime)
 
 install(TARGETS vibekits_onnx RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"

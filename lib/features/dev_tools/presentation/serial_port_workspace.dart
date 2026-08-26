@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
 import '../domain/serial_port_service.dart';
+import 'harness_tool_activity_dialog.dart';
 
 typedef SerialPortLister = Future<List<SerialPortDescriptor>> Function();
 typedef SerialPortOpener = Future<SerialPortSession> Function(
@@ -23,14 +24,18 @@ class SerialPortWorkspace extends StatefulWidget {
   const SerialPortWorkspace({
     super.key,
     this.initialSettings,
+    this.initialSendHistory = const <String>[],
     this.onSettingsChanged,
+    this.onSendHistoryChanged,
     this.listPorts,
     this.openSession,
     this.saveLog,
   });
 
   final String? initialSettings;
+  final List<String> initialSendHistory;
   final Future<void> Function(String encodedSettings)? onSettingsChanged;
+  final Future<void> Function(List<String> history)? onSendHistoryChanged;
   final SerialPortLister? listPorts;
   final SerialPortOpener? openSession;
   final SerialLogSaver? saveLog;
@@ -90,10 +95,14 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
   List<SerialPortDescriptor> _ports = const <SerialPortDescriptor>[];
   final List<_SerialLogEntry> _logs = <_SerialLogEntry>[];
   final List<int> _pendingReceived = <int>[];
-  final List<String> _sendHistory = <String>[];
+  late final List<String> _sendHistory = widget.initialSendHistory
+      .where((String value) => value.trim().isNotEmpty)
+      .take(50)
+      .toList();
   SerialPortSession? _session;
   StreamSubscription<SerialPortEvent>? _eventSubscription;
   Timer? _receiveFlushTimer;
+  Timer? _hotplugTimer;
   String? _error;
   String _status = '未连接';
   bool _refreshing = false;
@@ -101,23 +110,22 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
   bool _advanced = false;
   bool _timestamps = true;
   bool _autoScroll = true;
+  bool _automaticPortApplied = false;
+  bool _pollingHotplug = false;
+  bool _reconnectAfterHotplug = false;
+  String? _recommendedPortName;
   int _loggedBytes = 0;
+  int _receivedBytes = 0;
+  int _receivedChunks = 0;
+  DateTime? _lastReceivedAt;
 
   bool get _connected => _session?.isOpen == true;
 
   List<SerialPortDescriptor> get _selectablePorts {
-    if (!Platform.isWindows) return _ports;
-    final Map<String, SerialPortDescriptor> ports =
-        <String, SerialPortDescriptor>{
-          for (final SerialPortDescriptor port in _ports)
-            port.name.toUpperCase(): port,
-        };
-    for (int index = 1; index <= 256; index++) {
-      final String name = 'COM$index';
-      ports.putIfAbsent(name, () => SerialPortDescriptor(name: name));
-    }
-    final List<SerialPortDescriptor> result = ports.values.toList();
+    final List<SerialPortDescriptor> result = _ports.toList();
     result.sort((SerialPortDescriptor a, SerialPortDescriptor b) {
+      final int score = _portScore(b).compareTo(_portScore(a));
+      if (score != 0) return score;
       int? number(String value) => int.tryParse(
         value.replaceFirst(RegExp(r'^COM', caseSensitive: false), ''),
       );
@@ -129,15 +137,51 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
     return result;
   }
 
+  static int _portScore(SerialPortDescriptor port) {
+    final String detail = '${port.description} ${port.transport}'.toLowerCase();
+    int score = 0;
+    if (port.vendorId != null || port.productId != null) score += 100;
+    if (detail.contains('usb')) score += 80;
+    if (detail.contains('ch340') || detail.contains('ch341')) score += 40;
+    if (detail.contains('bluetooth') || detail.contains('bth')) score -= 200;
+    return score;
+  }
+
+  static bool _requiresRtsCts(SerialPortDescriptor port) {
+    final String detail = '${port.description} ${port.transport}'.toLowerCase();
+    return detail.contains('ch340') ||
+        detail.contains('ch341') ||
+        (port.vendorId == 0x1a86 && port.productId == 0x7523);
+  }
+
+  static SerialPortDescriptor? _recommendedPort(
+    List<SerialPortDescriptor> ports,
+  ) {
+    if (ports.isEmpty) return null;
+    return ports.reduce(
+      (SerialPortDescriptor best, SerialPortDescriptor candidate) =>
+          _portScore(candidate) > _portScore(best) ? candidate : best,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPorts());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshPorts();
+      if (widget.listPorts == null) {
+        _hotplugTimer = Timer.periodic(
+          const Duration(seconds: 1),
+          (_) => unawaited(_pollHotplug()),
+        );
+      }
+    });
   }
 
   @override
   void dispose() {
     _receiveFlushTimer?.cancel();
+    _hotplugTimer?.cancel();
     _eventSubscription?.cancel();
     final SerialPortSession? session = _session;
     if (session != null) unawaited(session.close());
@@ -150,6 +194,7 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
 
   Future<void> _refreshPorts() async {
     if (_refreshing) return;
+    final bool firstDiscovery = !_automaticPortApplied;
     setState(() {
       _refreshing = true;
       _error = null;
@@ -159,13 +204,44 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
           ? widget.listPorts!()
           : SerialPortService.listPorts());
       if (!mounted) return;
+      final SerialPortDescriptor? recommended = _recommendedPort(ports);
+      final String current = _portController.text.trim();
+      final SerialPortDescriptor? currentPort = ports
+          .where(
+            (SerialPortDescriptor port) =>
+                port.name.toUpperCase() == current.toUpperCase(),
+          )
+          .firstOrNull;
+      final bool shouldAutoOpen =
+          firstDiscovery &&
+          recommended != null &&
+          _portScore(recommended) >= 100 &&
+          !_connected &&
+          !_opening;
       setState(() {
         _ports = ports;
         _refreshing = false;
-        if (_portController.text.trim().isEmpty && ports.isNotEmpty) {
-          _portController.text = ports.first.name;
+        _recommendedPortName = recommended?.name;
+        if (!_automaticPortApplied &&
+            recommended != null &&
+            (currentPort == null ||
+                _portScore(recommended) > _portScore(currentPort))) {
+          _portController.text = recommended.name;
         }
+        if (recommended != null &&
+            _requiresRtsCts(recommended) &&
+            _flowControl == SerialFlowControl.none) {
+          _flowControl = SerialFlowControl.rtsCts;
+        }
+        _automaticPortApplied = true;
       });
+      if (shouldAutoOpen) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _connected || _opening) return;
+          setState(() => _status = '已识别 ${recommended.name}，正在自动打开…');
+          unawaited(_open());
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -173,6 +249,62 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
         _error = '刷新串口失败：$error。仍可手动输入端口名称。';
       });
     }
+  }
+
+  Future<void> _pollHotplug() async {
+    if (_pollingHotplug || !mounted) return;
+    _pollingHotplug = true;
+    try {
+      final List<SerialPortDescriptor> ports =
+          await SerialPortService.listPorts();
+      if (!mounted) return;
+      final Set<String> names = ports
+          .map((SerialPortDescriptor port) => port.name.toUpperCase())
+          .toSet();
+      final String selected = _portController.text.trim().toUpperCase();
+      final bool present = selected.isNotEmpty && names.contains(selected);
+
+      if (_connected && !present) {
+        _reconnectAfterHotplug = true;
+        _close(status: '设备已拔出，等待插回…', systemMessage: '设备已拔出');
+        if (mounted) setState(() => _ports = ports);
+        return;
+      }
+
+      if (!_connected && _reconnectAfterHotplug && present && !_opening) {
+        setState(() {
+          _ports = ports;
+          _status = '检测到设备已插回，正在重新打开…';
+        });
+        await _open();
+        if (_connected) {
+          _reconnectAfterHotplug = false;
+          _appendSystem('设备已插回并自动重新连接');
+        }
+        return;
+      }
+
+      if (!_setEqualsByName(_ports, ports)) {
+        setState(() => _ports = ports);
+      }
+    } on Object {
+      // A transient PnP query failure must not interrupt an active session.
+    } finally {
+      _pollingHotplug = false;
+    }
+  }
+
+  static bool _setEqualsByName(
+    List<SerialPortDescriptor> left,
+    List<SerialPortDescriptor> right,
+  ) {
+    if (left.length != right.length) return false;
+    final Set<String> names = left
+        .map((SerialPortDescriptor value) => value.name.toUpperCase())
+        .toSet();
+    return right.every(
+      (SerialPortDescriptor value) => names.contains(value.name.toUpperCase()),
+    );
   }
 
   SerialConnectionSettings _settings() {
@@ -188,6 +320,25 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
     );
     settings.validate();
     return settings;
+  }
+
+  void _setFlowControl({bool? dtrDsr, bool? rtsCts, bool? xonXoff}) {
+    final bool dtr = dtrDsr ?? _flowControl.usesDtrDsr;
+    final bool rts = rtsCts ?? _flowControl.usesRtsCts;
+    final bool xon = xonXoff ?? _flowControl.usesXonXoff;
+    final int mask = (dtr ? 4 : 0) | (rts ? 2 : 0) | (xon ? 1 : 0);
+    setState(() {
+      _flowControl = switch (mask) {
+        1 => SerialFlowControl.xonXoff,
+        2 => SerialFlowControl.rtsCts,
+        3 => SerialFlowControl.rtsCtsXonXoff,
+        4 => SerialFlowControl.dtrDsr,
+        5 => SerialFlowControl.dtrDsrXonXoff,
+        6 => SerialFlowControl.dtrDsrRtsCts,
+        7 => SerialFlowControl.all,
+        _ => SerialFlowControl.none,
+      };
+    });
   }
 
   Future<void> _open() async {
@@ -217,7 +368,10 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
       await widget.onSettingsChanged?.call(settings.encode());
       setState(() {
         _opening = false;
-        _status = '${settings.portName} · ${settings.summary}';
+        _receivedBytes = 0;
+        _receivedChunks = 0;
+        _lastReceivedAt = null;
+        _status = '${settings.portName} · 实时监听中 · ${settings.summary}';
       });
       _appendSystem('已打开 ${settings.portName} · ${settings.summary}');
     } catch (error) {
@@ -230,7 +384,7 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
     }
   }
 
-  void _close() {
+  void _close({String status = '未连接', String systemMessage = '串口已关闭'}) {
     final SerialPortSession? session = _session;
     if (session == null) return;
     _flushReceived();
@@ -240,9 +394,9 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
     setState(() {
       _session = null;
       _opening = false;
-      _status = '未连接';
+      _status = status;
     });
-    _appendSystem('串口已关闭');
+    _appendSystem(systemMessage);
     unawaited(_shutdownSession(session, subscription));
   }
 
@@ -299,6 +453,11 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
     if (_pendingReceived.isEmpty || !mounted) return;
     final Uint8List bytes = Uint8List.fromList(_pendingReceived);
     _pendingReceived.clear();
+    _receivedBytes += bytes.length;
+    _receivedChunks += 1;
+    _lastReceivedAt = DateTime.now();
+    final String port = _portController.text.trim();
+    _status = '$port · 已接收 ${_formatBytes(_receivedBytes)}';
     _appendLog(
       _SerialLogEntry(
         direction: _SerialDirection.rx,
@@ -363,10 +522,21 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
       if (historyValue.isNotEmpty) {
         _sendHistory.remove(historyValue);
         _sendHistory.insert(0, historyValue);
-        if (_sendHistory.length > 20) _sendHistory.removeLast();
+        if (_sendHistory.length > 50) _sendHistory.removeLast();
+        unawaited(_persistSendHistory());
       }
     } catch (error) {
       if (mounted) setState(() => _error = _message(error));
+    }
+  }
+
+  Future<void> _persistSendHistory() async {
+    try {
+      await widget.onSendHistoryChanged?.call(
+        List<String>.unmodifiable(_sendHistory),
+      );
+    } catch (_) {
+      // Sending data must remain successful if local history storage fails.
     }
   }
 
@@ -432,6 +602,19 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                 '读取与写入均在独立工作线程',
                 style: TextStyle(fontSize: 11, color: context.vibe.muted),
               ),
+              OutlinedButton.icon(
+                key: const Key('serial-harness-activity'),
+                onPressed: () => showHarnessToolActivityDialog(
+                  context,
+                  toolName: '串口调试',
+                  toolIds: const <String>{
+                    'vibekits.serial.list_ports',
+                    'vibekits.serial.transact',
+                  },
+                ),
+                icon: const Icon(Icons.history, size: 17),
+                label: const Text('Harness 记录'),
+              ),
             ],
           ),
         ),
@@ -487,24 +670,26 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                     hintText: Platform.isWindows ? 'COM3' : '/dev/cu.usbserial',
                     isDense: true,
                     suffixIcon: PopupMenuButton<String>(
-                      tooltip: '选择串口（Windows 支持 COM1–COM256）',
+                      tooltip: '选择已检测串口（其他 COM 编号可直接输入）',
                       onSelected: (String value) =>
                           _portController.text = value,
                       itemBuilder: (BuildContext context) => _selectablePorts
                           .map(
-                            (SerialPortDescriptor port) =>
-                                PopupMenuItem<String>(
-                                  value: port.name,
-                                  child: Text(
-                                    _ports.any(
-                                          (SerialPortDescriptor value) =>
-                                              value.name.toUpperCase() ==
-                                              port.name.toUpperCase(),
-                                        )
-                                        ? '${port.label} · 已检测'
-                                        : port.name,
-                                  ),
-                                ),
+                            (
+                              SerialPortDescriptor port,
+                            ) => PopupMenuItem<String>(
+                              value: port.name,
+                              child: Text(
+                                _ports.any(
+                                      (SerialPortDescriptor value) =>
+                                          value.name.toUpperCase() ==
+                                          port.name.toUpperCase(),
+                                    )
+                                    ? '${port.label}'
+                                          '${port.name == _recommendedPortName ? ' · 推荐' : ''}'
+                                    : port.name,
+                              ),
+                            ),
                           )
                           .toList(growable: false),
                       icon: const Icon(Icons.arrow_drop_down),
@@ -560,6 +745,24 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                       : '$_dataBits-${_parityCode(_parity)}-$_stopBits',
                 ),
               ),
+              Tooltip(
+                message: '硬件流控；当前 CH340 调试串口必须启用',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Checkbox(
+                      key: const Key('serial-rts-cts'),
+                      value: _flowControl.usesRtsCts,
+                      onChanged: controlsEnabled
+                          ? (bool? value) =>
+                                _setFlowControl(rtsCts: value == true)
+                          : null,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    const Text('RTS/CTS 流控'),
+                  ],
+                ),
+              ),
               FilledButton.icon(
                 key: const Key('serial-open'),
                 onPressed: controlsEnabled ? _open : null,
@@ -569,7 +772,7 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
               if (_connected)
                 OutlinedButton.icon(
                   key: const Key('serial-close'),
-                  onPressed: _opening ? null : _close,
+                  onPressed: _opening ? null : () => _close(),
                   icon: const Icon(Icons.stop_circle_outlined, size: 17),
                   label: const Text('关闭'),
                 ),
@@ -603,19 +806,68 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                   text: (int value) => '$value',
                   onChanged: (int value) => setState(() => _stopBits = value),
                 ),
-                _SettingDropdown<SerialFlowControl>(
-                  label: '流控',
-                  value: _flowControl,
-                  values: SerialFlowControl.values,
-                  text: (SerialFlowControl value) => value.label,
-                  onChanged: (SerialFlowControl value) =>
-                      setState(() => _flowControl = value),
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: '流控',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      _flowCheckbox(
+                        key: const Key('serial-flow-dtr-dsr'),
+                        label: 'DTR/DSR',
+                        value: _flowControl.usesDtrDsr,
+                        onChanged: (bool value) =>
+                            _setFlowControl(dtrDsr: value),
+                      ),
+                      _flowCheckbox(
+                        key: const Key('serial-flow-rts-cts'),
+                        label: 'RTS/CTS',
+                        value: _flowControl.usesRtsCts,
+                        onChanged: (bool value) =>
+                            _setFlowControl(rtsCts: value),
+                      ),
+                      _flowCheckbox(
+                        key: const Key('serial-flow-xon-xoff'),
+                        label: 'XON/XOFF',
+                        value: _flowControl.usesXonXoff,
+                        onChanged: (bool value) =>
+                            _setFlowControl(xonXoff: value),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ],
         ],
       ),
+    );
+  }
+
+  Widget _flowCheckbox({
+    required Key key,
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Row(
+      key: key,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Checkbox(
+          value: value,
+          onChanged: (bool? checked) => onChanged(checked == true),
+          visualDensity: VisualDensity.compact,
+        ),
+        Text(label),
+      ],
     );
   }
 
@@ -667,7 +919,9 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
                       setState(() => _autoScroll = value),
                 ),
                 Text(
-                  '${_logs.length} 条 · ${_formatBytes(_loggedBytes)}',
+                  '${_logs.length} 条 · RX ${_formatBytes(_receivedBytes)}'
+                  ' / $_receivedChunks 次'
+                  '${_lastReceivedAt == null ? '' : ' · 最近 ${_time(_lastReceivedAt!)}'}',
                   style: TextStyle(fontSize: 11, color: context.vibe.muted),
                 ),
                 IconButton(
@@ -689,7 +943,11 @@ class _SerialPortWorkspaceState extends State<SerialPortWorkspace> {
             child: _logs.isEmpty
                 ? Center(
                     child: Text(
-                      _connected ? '等待接收数据…' : '打开串口后在此查看收发数据',
+                      _connected
+                          ? '串口已打开并实时监听 · 当前接收 0 B\n'
+                                '真机没有输出时，请核对端口、波特率、流控，或先发送设备要求的查询命令'
+                          : '打开串口后在此查看实时收发数据',
+                      textAlign: TextAlign.center,
                       style: TextStyle(color: context.vibe.muted),
                     ),
                   )

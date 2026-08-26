@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/port_forward_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_desktop_service.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_connection_status.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/domain/sftp_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
@@ -69,8 +70,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('SSH / SFTP'));
-    await tester.pump();
+    await _openRemoteToolIfNeeded(tester);
     await tester.enterText(
       find.byKey(const Key('remote-host')),
       'server.example.com',
@@ -94,6 +94,127 @@ void main() {
     expect(fake.running, isFalse);
   });
 
+  testWidgets('SSH 密码框不会再被当作私钥文件路径', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    RemoteLaunchRequest? captured;
+    String? capturedSecret;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            secureStartSession:
+                (
+                  RemoteLaunchRequest request,
+                  String? secret,
+                  RemoteHostKeyVerifier verifyHostKey,
+                ) async {
+                  captured = request;
+                  capturedSecret = secret;
+                  return _FakeRemoteSession();
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(find.byKey(const Key('remote-host')), '10.0.0.8');
+    await tester.enterText(find.byKey(const Key('remote-user')), 'root');
+    await tester.enterText(
+      find.byKey(const Key('remote-password')),
+      'not-a-private-key-path',
+    );
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+
+    expect(captured?.profile.identityFile, isNull);
+    expect(capturedSecret, 'not-a-private-key-path');
+    expect(find.byKey(const Key('remote-session-secret')), findsNothing);
+    expect(find.textContaining('私钥路径不是'), findsNothing);
+  });
+
+  testWidgets('成功连接自动记住凭据并可同时保持多设备', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(RemoteConnectionStatusRegistry.clearForTests);
+    final List<String> persisted = <String>[];
+    final Map<String, String> credentials = <String, String>{};
+    int ids = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RemoteWorkspace(
+            profileIdGenerator: () => 'auto_${++ids}',
+            onProfilesChanged: (List<String> profiles) async {
+              persisted
+                ..clear()
+                ..addAll(profiles);
+            },
+            readCredential: (String key) async => credentials[key],
+            writeCredential: (String key, String secret) async {
+              credentials[key] = secret;
+            },
+            deleteCredential: (String key) async => credentials.remove(key),
+            secureStartSession: (
+              RemoteLaunchRequest request,
+              String? secret,
+              RemoteHostKeyVerifier verifyHostKey,
+            ) async => _FakeRemoteSession(),
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byKey(const Key('remote-host')), 'server-a');
+    await tester.enterText(find.byKey(const Key('remote-user')), 'root');
+    await tester.enterText(
+      find.byKey(const Key('remote-password')),
+      'secret-a',
+    );
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+    expect(persisted, hasLength(1));
+    expect(persisted.single, isNot(contains('secret-a')));
+    expect(credentials['vibekits.remote-session.auto_1'], 'secret-a');
+    expect(RemoteConnectionStatusRegistry.statusFor('auto_1').online, isTrue);
+
+    await tester.tap(find.byKey(const Key('remote-new-terminal')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('remote-profile-new')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('remote-host')), 'server-b');
+    await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
+    await tester.enterText(
+      find.byKey(const Key('remote-password')),
+      'secret-b',
+    );
+    await tester.tap(find.byKey(const Key('remote-primary-action')));
+    await tester.pumpAndSettle();
+
+    expect(persisted, hasLength(2));
+    expect(credentials['vibekits.remote-session.auto_2'], 'secret-b');
+    expect(find.byKey(const Key('remote-terminal-tabs')), findsOneWidget);
+    expect(find.text('root@server-a'), findsOneWidget);
+    expect(find.text('dev@server-b'), findsOneWidget);
+    expect(RemoteConnectionStatusRegistry.statusFor('auto_1').online, isTrue);
+    expect(RemoteConnectionStatusRegistry.statusFor('auto_2').online, isTrue);
+
+    await tester.tap(find.text('root@server-a'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('remote-host')))
+          .controller!
+          .text,
+      'server-a',
+    );
+  });
+
   testWidgets('非法主机在启动进程前给出明确错误', (WidgetTester tester) async {
     bool started = false;
     await tester.pumpWidget(
@@ -108,8 +229,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('SSH / SFTP'));
-    await tester.pump();
+    await _openRemoteToolIfNeeded(tester);
     await tester.enterText(find.byKey(const Key('remote-host')), '-oBad');
     await tester.enterText(find.byKey(const Key('remote-user')), 'dev');
     await tester.tap(find.byKey(const Key('remote-primary-action')));
@@ -145,8 +265,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('SSH / SFTP'));
-    await tester.pump();
+    await _openRemoteToolIfNeeded(tester);
     await tester.enterText(
       find.byKey(const Key('remote-host')),
       'server.example.com',
@@ -197,8 +316,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('SSH / SFTP'));
-    await tester.pump();
+    await _openRemoteToolIfNeeded(tester);
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('生产服务器').last);
@@ -256,8 +374,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('SSH / SFTP'));
-    await tester.pump();
+    await _openRemoteToolIfNeeded(tester);
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('目标').last);
@@ -726,6 +843,27 @@ void main() {
     expect(launched?.port, 3390);
     expect(find.textContaining('已交给系统远程桌面客户端'), findsOneWidget);
   });
+}
+
+Future<void> _openRemoteToolIfNeeded(WidgetTester tester) async {
+  if (find.byKey(const Key('remote-host')).evaluate().isNotEmpty) return;
+  Finder entry = find.byKey(
+    const ValueKey<String>('dev-tool-nav-remote_workspace'),
+  );
+  if (entry.evaluate().isEmpty) {
+    await tester.enterText(
+      find.byKey(const Key('dev-tool-search')),
+      '远程连接',
+    );
+    await tester.pump();
+    entry = find.byKey(
+      const ValueKey<String>('dev-tool-nav-remote_workspace'),
+    );
+  }
+  expect(entry, findsOneWidget);
+  await tester.ensureVisible(entry);
+  await tester.tap(entry);
+  await tester.pump();
 }
 
 class _FakeRemoteSession implements RemoteSessionHandle {

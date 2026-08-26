@@ -9,6 +9,7 @@ import '../../../app/app_theme.dart';
 import '../domain/platform_credential_store.dart';
 import '../domain/port_forward_service.dart';
 import '../domain/remote_connection_record.dart';
+import '../domain/remote_connection_status.dart';
 import '../domain/remote_desktop_service.dart';
 import '../domain/remote_session.dart';
 import '../domain/sftp_service.dart';
@@ -45,6 +46,8 @@ typedef PortForwardConnector = Future<PortForwardConnection> Function(
 typedef RemoteDesktopLauncher = Future<void> Function(
   RemoteDesktopTarget target,
 );
+
+enum _RemoteAuthMode { password, privateKey }
 
 class RemoteWorkspace extends StatefulWidget {
   const RemoteWorkspace({
@@ -91,6 +94,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   final TextEditingController _user = TextEditingController();
   final TextEditingController _port = TextEditingController(text: '22');
   final TextEditingController _identity = TextEditingController();
+  final TextEditingController _secret = TextEditingController();
   final TextEditingController _localPort = TextEditingController(text: '8080');
   final TextEditingController _targetHost = TextEditingController(
     text: '127.0.0.1',
@@ -101,6 +105,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   final ScrollController _outputScroll = ScrollController();
   Terminal _terminal = Terminal(maxLines: 10000);
   RemoteSessionMode _mode = RemoteSessionMode.ssh;
+  _RemoteAuthMode _authMode = _RemoteAuthMode.password;
+  bool _obscureSecret = true;
   PortForwardKind _forwardKind = PortForwardKind.local;
   RemoteSessionHandle? _session;
   RemoteFileClient? _sftpClient;
@@ -122,6 +128,9 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   bool _savedCredentialAvailable = false;
   bool _searchVisible = false;
   int _terminalSearchMatches = 0;
+  String? _pendingHostKeyType;
+  String? _pendingHostKeyFingerprint;
+  String? _sftpStatusToken;
 
   bool get _running => _session?.running == true;
   bool get _connected =>
@@ -206,6 +215,10 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _user.text = saved?.user ?? intent.user;
       _port.text = '${saved?.port ?? intent.port}';
       _identity.text = saved?.identityFile ?? '';
+      _secret.clear();
+      _authMode = _identity.text.trim().isEmpty
+          ? _RemoteAuthMode.password
+          : _RemoteAuthMode.privateKey;
       _savedCredentialAvailable = false;
       _openSftpAfterConnect = intent.openSftpAfterConnect;
       _error = intent.user.isEmpty && saved == null
@@ -271,6 +284,16 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _terminal = tab.terminal;
       _output = tab.output;
       _error = null;
+      _selectedProfileId = tab.profile.id;
+      _host.text = tab.profile.host;
+      _user.text = tab.profile.user;
+      _port.text = '${tab.profile.port}';
+      _identity.text = tab.profile.identityFile ?? '';
+      _secret.clear();
+      _authMode = tab.profile.identityFile == null
+          ? _RemoteAuthMode.password
+          : _RemoteAuthMode.privateKey;
+      _savedCredentialAvailable = true;
     });
   }
 
@@ -285,6 +308,77 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _searchVisible = false;
       _terminalSearchMatches = 0;
     });
+  }
+
+  Future<RemoteConnectionRecord> _rememberSuccessfulConnection(
+    RemoteConnectionProfile connection,
+    RemoteSessionMode mode,
+    String? secret,
+  ) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final RemoteConnectionRecord? matching = _profiles
+        .where(
+          (RemoteConnectionRecord item) =>
+              item.mode != RemoteSessionMode.remoteDesktop &&
+              item.host.toLowerCase() == connection.host.trim().toLowerCase() &&
+              item.user == connection.user.trim() &&
+              item.port == connection.port,
+        )
+        .firstOrNull;
+    final RemoteConnectionRecord? selected = _selectedProfile;
+    final RemoteConnectionRecord? existing =
+        selected != null &&
+            selected.host.toLowerCase() ==
+                connection.host.trim().toLowerCase() &&
+            selected.user == connection.user.trim() &&
+            selected.port == connection.port
+        ? selected
+        : matching;
+    final String id =
+        existing?.id ??
+        (widget.profileIdGenerator?.call() ??
+            'remote_${DateTime.now().microsecondsSinceEpoch}');
+    final RemoteConnectionRecord record = RemoteConnectionRecord(
+      id: id,
+      name:
+          existing?.name ??
+          '${connection.user.trim()}@${connection.host.trim()}:${connection.port}',
+      mode: mode,
+      host: connection.host.trim(),
+      user: connection.user.trim(),
+      port: connection.port,
+      identityFile: connection.identityFile,
+      favorite: existing?.favorite ?? false,
+      lastUsedEpochMs: now,
+      hostKeyType: _pendingHostKeyType ?? existing?.hostKeyType,
+      hostKeyFingerprint:
+          _pendingHostKeyFingerprint ?? existing?.hostKeyFingerprint,
+    );
+    if (existing == null) {
+      _profiles.add(record);
+    } else {
+      _profiles[_profiles.indexOf(existing)] = record;
+    }
+    _selectedProfileId = record.id;
+    String? credentialWarning;
+    if (secret?.isNotEmpty == true) {
+      try {
+        await _writeCredential(record.credentialKey, secret!);
+        _savedCredentialAvailable = true;
+      } on Object catch (error) {
+        credentialWarning = error.toString().replaceFirst('Bad state: ', '');
+        _savedCredentialAvailable = false;
+      }
+    } else {
+      _savedCredentialAvailable = connection.identityFile?.isNotEmpty == true;
+    }
+    await _persistProfiles();
+    _pendingHostKeyType = null;
+    _pendingHostKeyFingerprint = null;
+    if (credentialWarning != null && mounted) {
+      setState(() => _error = '连接成功，但系统凭据保存失败：$credentialWarning');
+    }
+    return record;
   }
 
   void _toggleTerminalSearch() {
@@ -412,6 +506,10 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     _user.text = profile.user;
     _port.text = '${profile.port}';
     _identity.text = profile.identityFile ?? '';
+    _secret.clear();
+    _authMode = _identity.text.trim().isEmpty
+        ? _RemoteAuthMode.password
+        : _RemoteAuthMode.privateKey;
     setState(() {
       _savedCredentialAvailable = false;
       _error = null;
@@ -432,6 +530,8 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _user.clear();
       _port.text = '22';
       _identity.clear();
+      _secret.clear();
+      _authMode = _RemoteAuthMode.password;
       _error = null;
       _desktopStatus = null;
     });
@@ -462,7 +562,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         host: _host.text,
         user: _user.text,
         port: int.tryParse(_port.text) ?? 0,
-        identityFile: _identity.text.trim().isEmpty ? null : _identity.text,
+        identityFile:
+            _authMode == _RemoteAuthMode.privateKey &&
+                _identity.text.trim().isNotEmpty
+            ? _identity.text.trim()
+            : null,
       ),
       localPort: int.tryParse(_localPort.text),
       targetHost: _targetHost.text,
@@ -571,7 +675,10 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       host: _host.text.trim(),
       user: desktop ? '' : _user.text.trim(),
       port: int.parse(_port.text),
-      identityFile: desktop || _identity.text.trim().isEmpty
+      identityFile:
+          desktop ||
+              _authMode != _RemoteAuthMode.privateKey ||
+              _identity.text.trim().isEmpty
           ? null
           : _identity.text.trim(),
       favorite: favorite,
@@ -589,7 +696,9 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           ? selected?.hostKeyFingerprint
           : null,
     );
-    final String newSecret = desktop ? '' : secret.text;
+    final String newSecret = desktop
+        ? ''
+        : (secret.text.isNotEmpty ? secret.text : _secret.text);
     _disposeDialogControllersLater(name, secret);
     if (selected == null) {
       _profiles.add(updated);
@@ -650,12 +759,17 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   @override
   void dispose() {
     for (final _RemoteTerminalTab tab in _terminalTabs) {
+      RemoteConnectionStatusRegistry.disconnected(tab.id);
       unawaited(tab.outputSubscription.cancel());
       unawaited(tab.session.stop());
       tab.controller.dispose();
     }
     final RemoteFileClient? sftp = _sftpClient;
     if (sftp != null) unawaited(sftp.close());
+    final String? sftpStatusToken = _sftpStatusToken;
+    if (sftpStatusToken != null) {
+      RemoteConnectionStatusRegistry.disconnected(sftpStatusToken);
+    }
     final PortForwardConnection? forwards = _forwardConnection;
     if (forwards != null) unawaited(forwards.close());
     for (final TextEditingController controller in <TextEditingController>[
@@ -663,6 +777,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       _user,
       _port,
       _identity,
+      _secret,
       _localPort,
       _targetHost,
       _targetPort,
@@ -726,7 +841,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     final bool known =
         selected?.hostKeyType == type &&
         selected?.hostKeyFingerprint == fingerprint;
-    if (known) return true;
+    if (known) {
+      _pendingHostKeyType = type;
+      _pendingHostKeyFingerprint = fingerprint;
+      return true;
+    }
     if (!mounted) return false;
     final bool changed = selected?.hostKeyFingerprint?.isNotEmpty == true;
     final bool? accepted = await showDialog<bool>(
@@ -781,12 +900,16 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         ],
       ),
     );
-    if (accepted == true && selected != null) {
-      _profiles[_profiles.indexOf(selected)] = selected.copyWith(
-        hostKeyType: type,
-        hostKeyFingerprint: fingerprint,
-      );
-      await _persistProfiles();
+    if (accepted == true) {
+      _pendingHostKeyType = type;
+      _pendingHostKeyFingerprint = fingerprint;
+      if (selected != null) {
+        _profiles[_profiles.indexOf(selected)] = selected.copyWith(
+          hostKeyType: type,
+          hostKeyFingerprint: fingerprint,
+        );
+        await _persistProfiles();
+      }
     }
     return accepted == true;
   }
@@ -809,16 +932,24 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         host: _host.text,
         user: _user.text,
         port: int.tryParse(_port.text) ?? 0,
-        identityFile: _identity.text.trim().isEmpty ? null : _identity.text,
+        identityFile:
+            _authMode == _RemoteAuthMode.privateKey &&
+                _identity.text.trim().isNotEmpty
+            ? _identity.text.trim()
+            : null,
       );
       profile.validate();
       final PortForwardSpec spec = _buildForwardSpec()..validate();
       PortForwardConnection? connection = _forwardConnection;
       if (connection == null || !connection.connected) {
-        String? secret;
+        String? secret = _authMode == _RemoteAuthMode.password
+            ? _secret.text
+            : null;
         final RemoteConnectionRecord? selected = _selectedProfile;
         if (selected != null) {
-          secret = await _readCredential(selected.credentialKey);
+          if (secret?.isNotEmpty != true) {
+            secret = await _readCredential(selected.credentialKey);
+          }
         }
         if (secret?.isNotEmpty != true &&
             profile.identityFile?.isNotEmpty != true) {
@@ -963,7 +1094,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           host: _host.text,
           user: _user.text,
           port: int.tryParse(_port.text) ?? 0,
-          identityFile: _identity.text.trim().isEmpty ? null : _identity.text,
+          identityFile:
+              _authMode == _RemoteAuthMode.privateKey &&
+                  _identity.text.trim().isNotEmpty
+              ? _identity.text.trim()
+              : null,
         ),
         localPort: int.tryParse(_localPort.text),
         targetHost: _targetHost.text,
@@ -971,12 +1106,16 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
       );
       // Build first so validation errors appear before process creation.
       request.buildArguments();
-      String? secret;
+      String? secret = _authMode == _RemoteAuthMode.password
+          ? _secret.text
+          : null;
       if (widget.startSession == null &&
           (_mode == RemoteSessionMode.ssh || _mode == RemoteSessionMode.sftp)) {
         final RemoteConnectionRecord? selected = _selectedProfile;
         if (selected != null) {
-          secret = await _readCredential(selected.credentialKey);
+          if (secret?.isNotEmpty != true) {
+            secret = await _readCredential(selected.credentialKey);
+          }
         }
         if (secret?.isNotEmpty != true &&
             request.profile.identityFile?.isNotEmpty != true) {
@@ -1004,14 +1143,21 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
           return;
         }
         _sftpClient = client;
+        final RemoteConnectionRecord record =
+            await _rememberSuccessfulConnection(
+              request.profile,
+              RemoteSessionMode.sftp,
+              secret,
+            );
+        final String statusToken =
+            'sftp_${DateTime.now().microsecondsSinceEpoch}';
+        _sftpStatusToken = statusToken;
+        RemoteConnectionStatusRegistry.connected(
+          token: statusToken,
+          profileId: record.id,
+          kind: 'sftp',
+        );
         setState(() => _starting = false);
-        final RemoteConnectionRecord? selected = _selectedProfile;
-        if (selected != null) {
-          _profiles[_profiles.indexOf(selected)] = selected.copyWith(
-            lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
-          );
-          unawaited(_persistProfiles());
-        }
         return;
       }
       final RemoteSessionHandle session = await (widget.startSession != null
@@ -1027,10 +1173,17 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         await session.stop();
         return;
       }
+      final RemoteConnectionRecord record = await _rememberSuccessfulConnection(
+        request.profile,
+        _mode,
+        secret,
+      );
       final Terminal terminal = _terminalFor(session);
+      final String tabId = 'terminal_${DateTime.now().microsecondsSinceEpoch}';
       final _RemoteTerminalTab tab = _RemoteTerminalTab(
-        id: 'terminal_${DateTime.now().microsecondsSinceEpoch}',
+        id: tabId,
         title: '${request.profile.user.trim()}@${request.profile.host.trim()}',
+        profile: record,
         session: session,
         terminal: terminal,
         output: _mode == RemoteSessionMode.localForward ? '正在建立本地转发…\n' : '',
@@ -1039,6 +1192,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         (String chunk) => _appendOutput(tab, chunk),
       );
       _terminalTabs.add(tab);
+      RemoteConnectionStatusRegistry.connected(
+        token: tab.id,
+        profileId: record.id,
+        kind: _mode.name,
+      );
       _activeTerminalTab = _terminalTabs.length - 1;
       _session = session;
       _outputSubscription = tab.outputSubscription;
@@ -1047,15 +1205,9 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
         _starting = false;
         _output = tab.output;
       });
-      final RemoteConnectionRecord? selected = _selectedProfile;
-      if (selected != null) {
-        _profiles[_profiles.indexOf(selected)] = selected.copyWith(
-          lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
-        );
-        unawaited(_persistProfiles());
-      }
       unawaited(
         session.exitCode.then((int code) {
+          RemoteConnectionStatusRegistry.disconnected(tab.id);
           if (!mounted) return;
           _appendOutput(tab, '\n[会话已结束 · exit $code]\n');
         }),
@@ -1125,6 +1277,11 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
     final RemoteFileClient? client = _sftpClient;
     if (client == null) return;
     _sftpClient = null;
+    final String? statusToken = _sftpStatusToken;
+    _sftpStatusToken = null;
+    if (statusToken != null) {
+      RemoteConnectionStatusRegistry.disconnected(statusToken);
+    }
     setState(() {});
     await client.close();
   }
@@ -1168,6 +1325,7 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
   Future<void> _closeTerminalTab(int index) async {
     if (index < 0 || index >= _terminalTabs.length) return;
     final _RemoteTerminalTab tab = _terminalTabs[index];
+    RemoteConnectionStatusRegistry.disconnected(tab.id);
     await tab.session.stop();
     await tab.outputSubscription.cancel();
     tab.controller.dispose();
@@ -1335,27 +1493,90 @@ class _RemoteWorkspaceState extends State<RemoteWorkspace> {
                 keyName: 'remote-port',
                 enabled: !_connected && !_starting,
               ),
-              if (_mode != RemoteSessionMode.remoteDesktop)
+              if (_mode != RemoteSessionMode.remoteDesktop) ...<Widget>[
                 SizedBox(
-                  width: 300,
-                  child: TextField(
-                    key: const Key('remote-identity'),
-                    controller: _identity,
-                    enabled: !_connected && !_starting,
-                    decoration: InputDecoration(
-                      labelText: '私钥（可选）',
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        tooltip: '选择私钥',
-                        onPressed: _connected || _starting
-                            ? null
-                            : _pickIdentity,
-                        icon: const Icon(Icons.key_outlined, size: 17),
+                  width: 190,
+                  child: SegmentedButton<_RemoteAuthMode>(
+                    key: const Key('remote-auth-mode'),
+                    showSelectedIcon: false,
+                    segments: const <ButtonSegment<_RemoteAuthMode>>[
+                      ButtonSegment<_RemoteAuthMode>(
+                        value: _RemoteAuthMode.password,
+                        icon: Icon(Icons.password_rounded, size: 16),
+                        label: Text('密码'),
+                      ),
+                      ButtonSegment<_RemoteAuthMode>(
+                        value: _RemoteAuthMode.privateKey,
+                        icon: Icon(Icons.key_outlined, size: 16),
+                        label: Text('私钥'),
+                      ),
+                    ],
+                    selected: <_RemoteAuthMode>{_authMode},
+                    onSelectionChanged: _connected || _starting
+                        ? null
+                        : (Set<_RemoteAuthMode> value) => setState(() {
+                            _authMode = value.first;
+                            _error = null;
+                          }),
+                  ),
+                ),
+                if (_authMode == _RemoteAuthMode.password)
+                  SizedBox(
+                    width: 300,
+                    child: TextField(
+                      key: const Key('remote-password'),
+                      controller: _secret,
+                      enabled: !_connected && !_starting,
+                      obscureText: _obscureSecret,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      autofillHints: const <String>[AutofillHints.password],
+                      onSubmitted: (_) => unawaited(_start()),
+                      decoration: InputDecoration(
+                        labelText: _savedCredentialAvailable
+                            ? '密码（已保存，留空可直接连接）'
+                            : '密码',
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          tooltip: _obscureSecret ? '显示密码' : '隐藏密码',
+                          onPressed: _connected || _starting
+                              ? null
+                              : () => setState(
+                                  () => _obscureSecret = !_obscureSecret,
+                                ),
+                          icon: Icon(
+                            _obscureSecret
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            size: 17,
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                if (_authMode == _RemoteAuthMode.privateKey)
+                  SizedBox(
+                    width: 300,
+                    child: TextField(
+                      key: const Key('remote-identity'),
+                      controller: _identity,
+                      enabled: !_connected && !_starting,
+                      decoration: InputDecoration(
+                        labelText: '私钥文件',
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          tooltip: '选择私钥',
+                          onPressed: _connected || _starting
+                              ? null
+                              : _pickIdentity,
+                          icon: const Icon(Icons.key_outlined, size: 17),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ],
           ),
           if (_mode == RemoteSessionMode.localForward) ...<Widget>[
@@ -1856,6 +2077,7 @@ class _RemoteTerminalTab {
   _RemoteTerminalTab({
     required this.id,
     required this.title,
+    required this.profile,
     required this.session,
     required this.terminal,
     required this.output,
@@ -1863,6 +2085,7 @@ class _RemoteTerminalTab {
 
   final String id;
   final String title;
+  final RemoteConnectionRecord profile;
   final RemoteSessionHandle session;
   final Terminal terminal;
   final TerminalController controller = TerminalController();

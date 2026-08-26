@@ -1,12 +1,20 @@
 param(
   [string]$NodeDirectory = "C:\Program Files\nodejs",
-  [string]$OutputDirectory = "native\harness\windows\runtime"
+  [string]$OutputDirectory = "native\harness\windows\runtime",
+  [string]$PackageVersion = "0.1.0-rc.7"
 )
 
 $ErrorActionPreference = 'Stop'
-$packageVersion = '0.1.0-rc.7'
+$packageVersion = $PackageVersion.Trim()
+if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+  throw "Invalid Harness package version: $PackageVersion"
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$target = Join-Path $projectRoot $OutputDirectory
+$target = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+  $OutputDirectory
+} else {
+  Join-Path $projectRoot $OutputDirectory
+}
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) "vibekits-harness-$packageVersion"
 
 if (-not (Test-Path -LiteralPath (Join-Path $NodeDirectory 'node.exe'))) {

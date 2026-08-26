@@ -20,10 +20,15 @@ void main() {
         containsAll(<String>[
           'vibekits.proxy.system_apply',
           'vibekits.proxy.system_restore',
-          'vibekits.vm.create_disk',
         ]),
       );
+      final ToolSpec vmSpec = allDevToolRegistry.singleWhere(
+        (ToolSpec value) => value.id == 'virtual_machine',
+      );
+      expect(vmSpec.harnessToolIds, contains('vibekits.vm.create_disk'));
+      expect(catalog, containsAll(vmSpec.harnessToolIds));
       expect(devToolRegistry[1].id, 'network_virtualization');
+      expect(devToolRegistry[2].id, 'virtual_machine');
     },
   );
 

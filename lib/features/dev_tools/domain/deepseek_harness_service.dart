@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../app/platform_process_lifecycle.dart';
+import '../../../app/platform_storage_layout.dart';
+import 'harness_session_store.dart';
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
 import 'harness_agent_preferences.dart';
@@ -57,6 +59,7 @@ class HarnessAgentRequest {
     this.permissionMode = HarnessAgentPermissionMode.assisted,
     this.approveTool,
     this.toolBridge,
+    this.allowedToolIds = const <String>{},
   });
   final String workspace;
   final String prompt;
@@ -67,6 +70,7 @@ class HarnessAgentRequest {
   final HarnessAgentPermissionMode permissionMode;
   final HarnessToolApproval? approveTool;
   final VibekitsHarnessToolBridge? toolBridge;
+  final Set<String> allowedToolIds;
   String get nativeSandboxMode => switch (permissionMode) {
     HarnessAgentPermissionMode.requestApproval ||
     HarnessAgentPermissionMode.assisted => 'workspace-write',
@@ -186,18 +190,41 @@ typedef HarnessModelLister = Future<List<String>> Function(
 );
 
 abstract final class DeepSeekHarnessService {
+  /// Official DSH ships optional multi-provider, telemetry and HMR plugins.
+  /// VibeKits currently exposes only DeepSeek inside a production WebView, so
+  /// loading those dormant dependency trees on every cold start only makes
+  /// Windows inspect thousands of files before the local server can bind.
+  static const String harnessWebPerformancePatch =
+      '- id: llm-pi-ai\n'
+      '  disabled: true\n'
+      '- id: session-telemetry-otel\n'
+      '  disabled: true\n'
+      '- id: client-hmr\n'
+      '  disabled: true\n';
+
+  static const String harnessCapabilityInstructions =
+      r'''<!-- VIBEKITS_CAPABILITIES_BEGIN -->
+# VibeKits Harness 工具使用准则
+
+你运行在 VibeKits 内部。询问 APP 功能时，先调用只读工具 `vibekits.system.capability_check`，并分别报告 5 个产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。
+
+从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
+
+遵循 `list/inspect/status → plan/preview → apply/start/send → verify/status`：先只读发现并锁定目标，再执行写入或设备控制。写数据、控制设备和破坏性操作服从当前权限模式。工具结果必须形成证据；工具存在不等于真实设备已验收。
+
+产品一级页面：智能体（Harness）、解压缩、系统清理、文档阅读、开发工具。业务模块：计算调试、系统诊断、数据库、远程连接、网络开发、版本控制、文件工具、音频调试、编码转换、加密生成、时间文本、格式处理和虚拟化。
+
+常用链路：串口 `serial.list_ports → serial.transact`；ADB `adb.list_devices/connect → adb.*`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
+
+完整目录位于项目 `docs/37_HARNESS_CAPABILITY_CATALOG.md`；运行时以本轮 `capability_check` 和 MCP Schema 为准。
+<!-- VIBEKITS_CAPABILITIES_END -->''';
   static const String defaultBaseUrl = 'https://api.deepseek.com';
   static const String defaultModel = 'deepseek-v4-flash';
   static const String _deepSeekCredentialRef = 'DEEPSEEK_API_KEY';
   static Future<_HarnessRuntime>? _runtimeFuture;
 
   static String defaultDebugDirectory() {
-    if (Platform.isAndroid || Platform.isIOS) {
-      return '${Directory.systemTemp.parent.path}${Platform.pathSeparator}'
-          'files${Platform.pathSeparator}Vibekits${Platform.pathSeparator}tmp';
-    }
-    final File executable = File(Platform.resolvedExecutable);
-    return '${executable.parent.path}${Platform.pathSeparator}tmp';
+    return PlatformStorageLayout.current().harnessDebugDirectory;
   }
 
   static String redactSensitiveOutput(String output, Iterable<String> secrets) {
@@ -321,6 +348,16 @@ abstract final class DeepSeekHarnessService {
         message: '组件测试未启动外部 Harness 进程',
       );
     }
+    if (Platform.isAndroid || Platform.isIOS) {
+      return const HarnessEnvironmentReport(
+        ready: true,
+        nodeVersion: null,
+        npxVersion: 'mobile-native',
+        baseUrl: defaultBaseUrl,
+        model: defaultModel,
+        message: '移动端原生 Harness 已就绪 · 直接连接模型 API，无需 Node/DSH 运行时',
+      );
+    }
     try {
       final _HarnessRuntime runtime = await _cachedBundledRuntime();
       final ProcessResult node = await Process.run(
@@ -394,6 +431,9 @@ abstract final class DeepSeekHarnessService {
       throw StateError('请先填写 DeepSeek API Key');
     }
     _validateEndpoint(request.baseUrl);
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _MobileHarnessAgent.start(request);
+    }
     final _HarnessRuntime runtime = await _cachedBundledRuntime();
     final HarnessDebugPaths debug = await prepareDebugDirectory(
       request.debugDirectory,
@@ -459,6 +499,21 @@ abstract final class DeepSeekHarnessService {
       await toolServer.close();
       rethrow;
     }
+  }
+
+  /// Runs the same model-driven tool loop used by the mobile Harness client.
+  ///
+  /// Desktop normally launches the bundled DSH process. This entry point is a
+  /// bounded fallback for diagnostics when that process cannot reach its first
+  /// turn; the model still has to select and invoke tools through the native
+  /// Vibekits bridge.
+  static HarnessAgentHandle startNativeToolAgent(HarnessAgentRequest request) {
+    request.validate();
+    if (request.apiKey.trim().isEmpty) {
+      throw StateError('请先填写 DeepSeek API Key');
+    }
+    _validateEndpoint(request.baseUrl);
+    return _MobileHarnessAgent.start(request);
   }
 
   static Future<HarnessSessionHandle> startWebAgent(
@@ -616,6 +671,10 @@ abstract final class DeepSeekHarnessService {
   }) async {
     final Directory home = officialHarnessHomeDirectory();
     await home.create(recursive: true);
+    // Old native acceptance probes used a fresh TEMP workspace on every run.
+    // Their orphaned session folders are not real user workspaces and can be
+    // rediscovered by DSH as ghost rows even after the session is gone.
+    await HarnessSessionStore(home: home).deleteLegacyNativeProbeSessions();
     final File patch = File(
       '${home.path}${Platform.pathSeparator}cordis.patch.yml',
     );
@@ -625,7 +684,7 @@ abstract final class DeepSeekHarnessService {
               '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n'
         : '';
     final String patchContents =
-        '- insert:\n'
+        '$harnessWebPerformancePatch- insert:\n'
         '    - id: vibekits-mcp\n'
         "      name: '@deepseek-ai/dsh-mcp-client'\n"
         '      config:\n'
@@ -649,7 +708,46 @@ abstract final class DeepSeekHarnessService {
     if (current != patchContents) {
       await patch.writeAsString(patchContents, flush: true);
     }
+    await prepareHarnessCapabilityInstructions(directory: home);
     return home;
+  }
+
+  /// Installs the app-owned instruction block without overwriting user text.
+  ///
+  /// DSH's official agent-instructions plugin loads `$DSH_HOME/AGENTS.md` on
+  /// the first turn, so this makes the live Harness aware of the VibeKits
+  /// catalog in every workspace rather than only documenting it for humans.
+  static Future<File> prepareHarnessCapabilityInstructions({
+    Directory? directory,
+  }) async {
+    final Directory harnessDirectory =
+        directory ?? officialHarnessHomeDirectory();
+    await harnessDirectory.create(recursive: true);
+    final File instructions = File(
+      '${harnessDirectory.path}${Platform.pathSeparator}AGENTS.md',
+    );
+    final String current = await instructions.exists()
+        ? await instructions.readAsString()
+        : '';
+    const String begin = '<!-- VIBEKITS_CAPABILITIES_BEGIN -->';
+    const String end = '<!-- VIBEKITS_CAPABILITIES_END -->';
+    final int beginIndex = current.indexOf(begin);
+    final int endIndex = current.indexOf(end);
+    final String next;
+    if (beginIndex >= 0 && endIndex >= beginIndex) {
+      next =
+          '${current.substring(0, beginIndex)}'
+          '$harnessCapabilityInstructions'
+          '${current.substring(endIndex + end.length)}';
+    } else {
+      next = current.trim().isEmpty
+          ? '$harnessCapabilityInstructions\n'
+          : '${current.trimRight()}\n\n$harnessCapabilityInstructions\n';
+    }
+    if (next != current) {
+      await instructions.writeAsString(next, flush: true);
+    }
+    return instructions;
   }
 
   static Future<_HarnessRuntime> _cachedBundledRuntime() {
@@ -776,6 +874,235 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');
+}
+
+class _MobileHarnessAgent implements HarnessAgentHandle {
+  _MobileHarnessAgent._(this._request) {
+    _run();
+  }
+
+  static HarnessAgentHandle start(HarnessAgentRequest request) =>
+      _MobileHarnessAgent._(request);
+
+  final HarnessAgentRequest _request;
+  final StreamController<String> _output = StreamController<String>();
+  final Completer<int> _exit = Completer<int>();
+  HttpClient? _client;
+  bool _running = true;
+  bool _stopped = false;
+
+  @override
+  Stream<String> get output => _output.stream;
+  @override
+  Future<int> get exitCode => _exit.future;
+  @override
+  bool get running => _running;
+
+  Future<void> _run() async {
+    int code = 0;
+    try {
+      final VibekitsHarnessToolBridge bridge =
+          _request.toolBridge ?? VibekitsHarnessToolBridge();
+      final List<Map<String, Object?>> tools = bridge.executableCatalog
+          .where(
+            (HarnessToolDefinition tool) =>
+                _request.allowedToolIds.isEmpty ||
+                _request.allowedToolIds.contains(tool.id),
+          )
+          .map(
+            (HarnessToolDefinition tool) => <String, Object?>{
+              'type': 'function',
+              'function': <String, Object?>{
+                'name': _functionName(tool.id),
+                'description': tool.description,
+                'parameters': tool.inputSchema,
+              },
+            },
+          )
+          .toList(growable: false);
+      final List<Map<String, Object?>> messages = <Map<String, Object?>>[
+        <String, Object?>{
+          'role': 'system',
+          'content':
+              '你是 Vibekits 移动端 Harness。优先使用已提供的本地工具取得真实证据；'
+              '全部 APP 工具都会显式提供给你。Android 本地可执行的工具直接执行；'
+              '需要 Windows/macOS 二进制、主机端口或驱动的工具会返回结构化的“需要桌面节点”结果。'
+              '你必须如实告知用户，不能伪造执行成功。当前工作区：${_request.workspace}',
+        },
+        <String, Object?>{'role': 'user', 'content': _request.prompt.trim()},
+      ];
+      for (int turn = 0; turn < 6 && !_stopped; turn++) {
+        final Map<String, Object?> message = await _requestCompletion(
+          messages,
+          tools,
+        );
+        if (_stopped) break;
+        final List<Object?> toolCalls = message['tool_calls'] is List
+            ? (message['tool_calls']! as List).cast<Object?>()
+            : const <Object?>[];
+        final String content = '${message['content'] ?? ''}'.trim();
+        if (toolCalls.isEmpty) {
+          _emit(content.isEmpty ? '任务已完成。' : content);
+          break;
+        }
+        messages.add(message);
+        for (final Object? rawCall in toolCalls) {
+          if (_stopped || rawCall is! Map) break;
+          final Map<Object?, Object?> call = rawCall;
+          final Map<Object?, Object?> function = call['function'] is Map
+              ? call['function']! as Map<Object?, Object?>
+              : const <Object?, Object?>{};
+          final String toolId = _toolId('${function['name'] ?? ''}'.trim());
+          final Map<String, Object?> arguments = _decodeArguments(
+            function['arguments'],
+          );
+          _emit(
+            '\n[Harness 工具调用]\n工具: $toolId\n参数: ${jsonEncode(arguments)}\n',
+          );
+          final HarnessToolCallResult result = await bridge.invoke(
+            toolId: toolId,
+            arguments: arguments,
+            approve:
+                _request.approveTool ??
+                (HarnessToolApprovalRequest _) async => false,
+          );
+          _emit(
+            '[Harness 工具结果]\n工具: $toolId\n'
+            '状态: ${result.ok ? '成功' : '失败'}\n'
+            '结果: ${jsonEncode(result.toJson())}\n',
+          );
+          messages.add(<String, Object?>{
+            'role': 'tool',
+            'tool_call_id': '${call['id'] ?? toolId}',
+            'content': jsonEncode(result.toJson()),
+          });
+        }
+      }
+    } on Object catch (error) {
+      code = _stopped ? 0 : 1;
+      if (!_stopped) _emit('移动端 Harness 请求失败：$error');
+    } finally {
+      _running = false;
+      _client?.close(force: true);
+      if (!_exit.isCompleted) _exit.complete(code);
+      await _output.close();
+    }
+  }
+
+  Future<Map<String, Object?>> _requestCompletion(
+    List<Map<String, Object?>> messages,
+    List<Map<String, Object?>> tools,
+  ) async {
+    final String base =
+        (_request.baseUrl.trim().isEmpty
+                ? DeepSeekHarnessService.defaultBaseUrl
+                : _request.baseUrl.trim())
+            .replaceFirst(RegExp(r'/+$'), '');
+    final HttpClient client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
+    _client = client;
+    final HttpClientRequest http = await client
+        .postUrl(Uri.parse('$base/chat/completions'))
+        .timeout(const Duration(seconds: 12));
+    http.headers.set(
+      HttpHeaders.authorizationHeader,
+      'Bearer ${_request.apiKey.trim()}',
+    );
+    http.headers.contentType = ContentType.json;
+    http.write(
+      jsonEncode(<String, Object?>{
+        'model': _request.model.trim().isEmpty
+            ? DeepSeekHarnessService.defaultModel
+            : _request.model.trim(),
+        'messages': messages,
+        if (tools.isNotEmpty) 'tools': tools,
+        if (tools.isNotEmpty) 'tool_choice': 'auto',
+        'stream': false,
+      }),
+    );
+    final HttpClientResponse response = await http.close().timeout(
+      const Duration(seconds: 90),
+    );
+    final BytesBuilder bytes = BytesBuilder(copy: false);
+    int length = 0;
+    await for (final List<int> chunk in response.timeout(
+      const Duration(seconds: 90),
+    )) {
+      length += chunk.length;
+      if (length > 8 * 1024 * 1024) {
+        throw const FormatException('模型响应超过 8 MiB');
+      }
+      bytes.add(chunk);
+    }
+    final String body = utf8.decode(bytes.takeBytes(), allowMalformed: true);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError(
+        response.statusCode == 401 || response.statusCode == 403
+            ? 'API Key 无效或无权访问当前模型'
+            : '模型接口返回 HTTP ${response.statusCode}：${_safeError(body)}',
+      );
+    }
+    final Object? decoded = jsonDecode(body);
+    if (decoded is! Map || decoded['choices'] is! List) {
+      throw const FormatException('模型响应格式不兼容');
+    }
+    final List<Object?> choices = (decoded['choices']! as List).cast<Object?>();
+    if (choices.isEmpty || choices.first is! Map) {
+      throw const FormatException('模型没有返回回复');
+    }
+    final Object? rawMessage = (choices.first as Map)['message'];
+    if (rawMessage is! Map) throw const FormatException('模型回复缺少 message');
+    return rawMessage.map<String, Object?>(
+      (Object? key, Object? value) => MapEntry<String, Object?>('$key', value),
+    );
+  }
+
+  static String _functionName(String toolId) => toolId.replaceAll('.', '__');
+
+  static String _toolId(String functionName) =>
+      functionName.replaceAll('__', '.');
+
+  static Map<String, Object?> _decodeArguments(Object? value) {
+    if (value is Map) {
+      return value.map<String, Object?>(
+        (Object? key, Object? item) => MapEntry<String, Object?>('$key', item),
+      );
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      final Object? decoded = jsonDecode(value);
+      if (decoded is Map) {
+        return decoded.map<String, Object?>(
+          (Object? key, Object? item) =>
+              MapEntry<String, Object?>('$key', item),
+        );
+      }
+    }
+    return <String, Object?>{};
+  }
+
+  static String _safeError(String body) {
+    final String compact = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return compact.length <= 300 ? compact : '${compact.substring(0, 300)}…';
+  }
+
+  void _emit(String value) {
+    if (!_stopped && !_output.isClosed) {
+      _output.add(
+        DeepSeekHarnessService.redactSensitiveOutput(value, <String>[
+          _request.apiKey.trim(),
+        ]),
+      );
+    }
+  }
+
+  @override
+  Future<void> stop() async {
+    if (!_running) return;
+    _stopped = true;
+    _running = false;
+    _client?.close(force: true);
+    await _exit.future.timeout(const Duration(seconds: 3), onTimeout: () => 0);
+  }
 }
 
 class _ProcessHarnessAgent implements HarnessAgentHandle {

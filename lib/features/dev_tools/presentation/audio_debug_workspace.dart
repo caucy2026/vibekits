@@ -380,6 +380,11 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          const Text(
+            '图表说明：横向表示播放时间，纵向表示归一化振幅；波形贴近上下边缘通常意味着电平过高或可能削波。多声道按上下分区显示。',
+            style: TextStyle(color: Colors.grey),
+          ),
         ],
       ),
     ),
@@ -481,6 +486,11 @@ class _AudioDebugWorkspaceState extends State<AudioDebugWorkspace> {
                 Theme.of(context).colorScheme.secondary,
               ),
             ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '图表说明：横向从低频到高频，柱线越高表示该频率能量越强；主峰之外有规律的倍频峰可能是谐波，连续抬高的底部通常是宽带噪声。',
+            style: TextStyle(color: Colors.grey),
           ),
         ],
       ),

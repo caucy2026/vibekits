@@ -139,7 +139,7 @@ class GithubProxyService {
     this.candidateProbe,
   }) : _processRunner = processRunner ?? _runProcess,
        _usesBundledRunner = processRunner == null,
-       _gitExecutable = gitExecutable ?? GitRepositoryService.bundledExecutable,
+       _gitExecutable = gitExecutable,
        _clock = clock ?? DateTime.now,
        _random = random ?? Random.secure();
 
@@ -148,7 +148,9 @@ class GithubProxyService {
 
   final GithubProxyProcessRunner _processRunner;
   final bool _usesBundledRunner;
-  final String _gitExecutable;
+  final String? _gitExecutable;
+  String get _resolvedGitExecutable =>
+      _gitExecutable ?? GitRepositoryService.bundledExecutable;
   final DateTime Function() _clock;
   final Random _random;
   final GithubProxyCandidateProbe? candidateProbe;
@@ -349,12 +351,10 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
   }
 
   Future<String?> _readCurrentValue() async {
-    final ProcessResult result = await _processRunner(_gitExecutable, <String>[
-      'config',
-      '--global',
-      '--get',
-      githubProxyKey,
-    ]).timeout(const Duration(seconds: 5));
+    final ProcessResult result = await _processRunner(
+      _resolvedGitExecutable,
+      <String>['config', '--global', '--get', githubProxyKey],
+    ).timeout(const Duration(seconds: 5));
     final String value = '${result.stdout}'.trim();
     return result.exitCode == 0 && value.isNotEmpty ? value : null;
   }
@@ -397,7 +397,7 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
       }
       try {
         final ProcessResult result = await _processRunner(
-          _gitExecutable,
+          _resolvedGitExecutable,
           <String>[
             ..._networkGitOptions(),
             '-c',
@@ -440,10 +440,10 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
     bool allowMissing = false,
   }) async {
     final bool networkCommand = arguments.contains('ls-remote');
-    final ProcessResult result = await _processRunner(_gitExecutable, <String>[
-      if (networkCommand) ..._networkGitOptions(),
-      ...arguments,
-    ]).timeout(timeout);
+    final ProcessResult result = await _processRunner(
+      _resolvedGitExecutable,
+      <String>[if (networkCommand) ..._networkGitOptions(), ...arguments],
+    ).timeout(timeout);
     if (result.exitCode != 0 && !allowMissing) {
       throw FormatException(_safeOutput(result.stderr));
     }
@@ -459,7 +459,7 @@ $rows | Sort-Object processId,port -Unique | ConvertTo-Json -Compress
 
   List<String> _networkGitOptions() {
     if (!_usesBundledRunner || !Platform.isWindows) return const <String>[];
-    final String runtimeRoot = File(_gitExecutable).parent.parent.path;
+    final String runtimeRoot = File(_resolvedGitExecutable).parent.parent.path;
     return <String>[
       '--exec-path=$runtimeRoot${Platform.pathSeparator}mingw64'
           '${Platform.pathSeparator}bin',

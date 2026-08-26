@@ -1,5 +1,14 @@
 # 音频 Harness 工具接口
 
+`vibekits.audio.inspect` 除整段质量指标外，还返回 `timelineSummary`：
+
+- `harmonicHotspots`：按 THD 排序的最多五个时间段；
+- `noiseHotspots`：按估算 SNR 从低到高排列的最多五个时间段；
+- 每段包含开始/结束时间、峰值、RMS、削波比例、基频、THD、SNR、噪声底和单音可信度；
+- `includeVisualData=true` 时返回完整有界 `timeline`，用于界面定位和点击试听。
+
+这些指标对稳态单音最可靠。语音和音乐必须结合频谱、波形和上下文，不得把估算结果描述成实验室仪器结论。
+
 音频工具与 APP 的“开发工具 → 音频调试”共用 `AudioAnalysisService`，Harness 调用会进入统一工具日志。RAW PCM 未携带格式头，必须在调用时给出真实格式；WAV 会自动读取格式头。
 
 ## 通用 RAW PCM 参数

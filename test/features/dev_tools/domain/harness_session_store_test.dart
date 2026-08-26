@@ -46,6 +46,7 @@ void main() {
       await HarnessSessionStore(home: home).deleteSession(deleted);
 
       expect(await session.exists(), isFalse);
+      expect(await session.parent.exists(), isFalse);
       final dynamic workspace = jsonDecode(
         await File('${stores.path}/workspace.json').readAsString(),
       );
@@ -67,5 +68,29 @@ void main() {
       () => HarnessSessionStore(home: home).deleteSession('../sessions'),
       throwsFormatException,
     );
+  });
+
+  test('removes only legacy native probe workspaces', () async {
+    final Directory home = await Directory.systemTemp.createTemp(
+      'vibekits-harness-probe-cleanup-',
+    );
+    addTearDown(() => home.delete(recursive: true));
+    final Directory probe = Directory(
+      '${home.path}/sessions/--C-Users-test-AppData-Local-Temp-vibekits_harness_native_411a3ec8--',
+    );
+    final Directory userWorkspace = Directory(
+      '${home.path}/sessions/--D-vibecode-vibekits--',
+    );
+    await probe.create(recursive: true);
+    await File('${probe.path}/probe.txt').writeAsString('temporary');
+    await userWorkspace.create(recursive: true);
+    await File('${userWorkspace.path}/keep.txt').writeAsString('user');
+
+    final int removed = await HarnessSessionStore(home: home)
+        .deleteLegacyNativeProbeSessions();
+
+    expect(removed, 1);
+    expect(await probe.exists(), isFalse);
+    expect(await userWorkspace.exists(), isTrue);
   });
 }

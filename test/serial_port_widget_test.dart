@@ -7,6 +7,45 @@ import 'package:vibekits/features/dev_tools/domain/serial_port_service.dart';
 import 'package:vibekits/features/dev_tools/presentation/serial_port_workspace.dart';
 
 void main() {
+  testWidgets('启动时用 USB 真串口替换旧的蓝牙串口选择', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SerialPortWorkspace(
+            initialSettings: const SerialConnectionSettings(portName: 'COM6')
+                .encode(),
+            listPorts: () async => const <SerialPortDescriptor>[
+              SerialPortDescriptor(
+                name: 'COM6',
+                description: 'Standard Serial over Bluetooth link',
+                transport: 'bluetooth',
+              ),
+              SerialPortDescriptor(
+                name: 'COM33',
+                description: 'USB-SERIAL CH340',
+                transport: 'usb',
+                vendorId: 0x1A86,
+                productId: 0x7523,
+              ),
+            ],
+            openSession: (_) async => _FakeSerialSession(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('serial-port-name')))
+          .controller
+          ?.text,
+      'COM33',
+    );
+    expect(find.byKey(const Key('serial-close')), findsOneWidget);
+    expect(find.textContaining('实时监听中'), findsOneWidget);
+  });
+
   testWidgets('自动选择端口后打开、收发并关闭', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1100, 760);
     tester.view.devicePixelRatio = 1;
@@ -15,6 +54,7 @@ void main() {
     final _FakeSerialSession session = _FakeSerialSession();
     SerialConnectionSettings? openedSettings;
     String? savedSettings;
+    List<String>? sendHistory;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -29,6 +69,9 @@ void main() {
             },
             onSettingsChanged: (String settings) async {
               savedSettings = settings;
+            },
+            onSendHistoryChanged: (List<String> values) async {
+              sendHistory = values;
             },
           ),
         ),
@@ -59,6 +102,7 @@ void main() {
     await tester.tap(find.byKey(const Key('serial-send')));
     await tester.pumpAndSettle();
     expect(session.sent.single, <int>[80, 73, 78, 71, 13, 10]);
+    expect(sendHistory, <String>['PING']);
 
     await tester.tap(find.byKey(const Key('serial-close')));
     await tester.pump(const Duration(milliseconds: 500));

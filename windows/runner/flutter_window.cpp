@@ -8,7 +8,15 @@
 #include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "resource.h"
 #include "utils.h"
+
+namespace {
+constexpr UINT kTrayCallbackMessage = WM_APP + 41;
+constexpr UINT kTrayIconId = 1;
+constexpr UINT kTrayOpenCommand = 41001;
+constexpr UINT kTrayExitCommand = 41002;
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -44,6 +52,7 @@ bool FlutterWindow::OnCreate() {
   // surface; no disk, network or Harness work is allowed to block it.
   Show();
   ::UpdateWindow(GetHandle());
+  AddTrayIcon();
 
   RECT frame = GetClientArea();
 
@@ -169,6 +178,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  RemoveTrayIcon();
   DragAcceptFiles(GetHandle(), FALSE);
   file_drop_channel_.reset();
   process_lifecycle_channel_.reset();
@@ -191,6 +201,21 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Tray lifecycle commands belong to the native runner. Handle them before
+  // forwarding WM_COMMAND to Flutter plugins; otherwise a plugin can consume
+  // the message and make "Exit VibeKits" intermittently behave like no-op.
+  if (message == WM_COMMAND) {
+    if (LOWORD(wparam) == kTrayOpenCommand) {
+      RestoreFromTray();
+      return 0;
+    }
+    if (LOWORD(wparam) == kTrayExitCommand) {
+      exiting_ = true;
+      ::DestroyWindow(hwnd);
+      return 0;
+    }
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -202,6 +227,27 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case WM_CLOSE:
+      // Closing the main window keeps explicit long-running services (SSH,
+      // SFTP, port forwards, proxy and remote sharing) alive. The user can
+      // still terminate everything deliberately from the tray menu.
+      if (!exiting_) {
+        ::ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
+      break;
+    case kTrayCallbackMessage:
+      if (lparam == WM_LBUTTONDBLCLK) {
+        RestoreFromTray();
+        return 0;
+      }
+      if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU) {
+        ShowTrayMenu();
+        return 0;
+      }
+      break;
+    case WM_COMMAND:
+      break;
     case WM_ERASEBKGND:
       if (startup_surface_visible_) return 1;
       break;
@@ -233,6 +279,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       }
       break;
     case WM_COPYDATA: {
+      RestoreFromTray();
       const COPYDATASTRUCT* data =
           reinterpret_cast<const COPYDATASTRUCT*>(lparam);
       if (data == nullptr || data->dwData != 0x564B464C ||
@@ -283,4 +330,53 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+void FlutterWindow::AddTrayIcon() {
+  if (tray_icon_added_ || GetHandle() == nullptr) return;
+  NOTIFYICONDATAW data{};
+  data.cbSize = sizeof(data);
+  data.hWnd = GetHandle();
+  data.uID = kTrayIconId;
+  data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  data.uCallbackMessage = kTrayCallbackMessage;
+  data.hIcon = ::LoadIconW(::GetModuleHandleW(nullptr),
+                           MAKEINTRESOURCEW(IDI_APP_ICON));
+  wcscpy_s(data.szTip,
+           L"Vibekits - \u540e\u53f0\u670d\u52a1\u8fd0\u884c\u4e2d");
+  tray_icon_added_ = ::Shell_NotifyIconW(NIM_ADD, &data) == TRUE;
+}
+
+void FlutterWindow::RemoveTrayIcon() {
+  if (!tray_icon_added_) return;
+  NOTIFYICONDATAW data{};
+  data.cbSize = sizeof(data);
+  data.hWnd = GetHandle();
+  data.uID = kTrayIconId;
+  ::Shell_NotifyIconW(NIM_DELETE, &data);
+  tray_icon_added_ = false;
+}
+
+void FlutterWindow::RestoreFromTray() {
+  if (GetHandle() == nullptr) return;
+  ::ShowWindow(GetHandle(), SW_RESTORE);
+  ::SetForegroundWindow(GetHandle());
+}
+
+void FlutterWindow::ShowTrayMenu() {
+  if (GetHandle() == nullptr) return;
+  HMENU menu = ::CreatePopupMenu();
+  if (menu == nullptr) return;
+  ::AppendMenuW(menu, MF_STRING, kTrayOpenCommand,
+                L"\u6253\u5f00 Vibekits");
+  ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  ::AppendMenuW(
+      menu, MF_STRING, kTrayExitCommand,
+      L"\u9000\u51fa\u5e76\u505c\u6b62\u540e\u53f0\u670d\u52a1");
+  POINT point{};
+  ::GetCursorPos(&point);
+  ::SetForegroundWindow(GetHandle());
+  ::TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN,
+                   point.x, point.y, 0, GetHandle(), nullptr);
+  ::DestroyMenu(menu);
 }

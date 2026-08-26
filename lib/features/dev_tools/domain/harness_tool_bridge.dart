@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../app/app_settings.dart';
+import '../../../app/platform_storage_layout.dart';
+import '../../cleaner/domain/cleanup_platform_policy.dart';
 import '../../cleaner/domain/cleanup_task.dart';
 import '../../cleaner/domain/installed_application_service.dart';
 import '../../cleaner/domain/software_storage_analyzer.dart';
@@ -24,10 +26,13 @@ import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_work_status.dart';
 import 'network_virtualization_service.dart';
+import 'packet_capture_service.dart';
 import 'system_proxy_service.dart';
+import 'system_resource_service.dart';
 import 'programmer_calculator.dart';
 import 'platform_credential_store.dart';
 import 'remote_connection_record.dart';
+import 'remote_connection_status.dart';
 import 'remote_database_service.dart';
 import 'remote_session.dart';
 import 'serial_port_service.dart';
@@ -296,6 +301,13 @@ class VibekitsHarnessToolBridge {
   static const String audioPauseId = 'vibekits.audio.pause';
   static const String audioStopId = 'vibekits.audio.stop';
   static const String audioGenerateToneId = 'vibekits.audio.generate_tone';
+  static const String systemResourcesId = 'vibekits.system.resources';
+  static const String capabilityCheckId = 'vibekits.system.capability_check';
+  static const String captureStatusId = 'vibekits.capture.status';
+  static const String captureStartId = 'vibekits.capture.start';
+  static const String captureStopId = 'vibekits.capture.stop';
+  static const String captureReadId = 'vibekits.capture.read';
+  static const String captureAnalyzeId = 'vibekits.capture.analyze';
 
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
@@ -317,6 +329,8 @@ class VibekitsHarnessToolBridge {
   final Future<void> Function(int processId)? _runtimeBindProcessTree;
   final Future<void> Function(int processId)? _runtimeReleaseProcessTree;
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
+  final PacketCaptureService _packetCaptureService =
+      PacketCaptureService.instance;
 
   String? get _mihomoRuntimeExecutable => _runtimeToolRoot == null
       ? null
@@ -335,10 +349,85 @@ class VibekitsHarnessToolBridge {
   _definitions = <String, HarnessToolDefinition>{
     for (final ToolSpec spec in allDevToolRegistry)
       'vibekits.${spec.id}': _fromToolSpec(spec),
+    systemResourcesId: _definition(
+      id: systemResourcesId,
+      name: '检查系统资源',
+      description: '只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。',
+      properties: <String, Object?>{
+        'adbSerial': _string('可选；已连接 Android 设备序列号，留空分析本机'),
+        'samples': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 10,
+          'description': '连续采样次数，默认 3；间歇卡顿建议 5-10',
+        },
+        'intervalMs': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 250,
+          'maximum': 5000,
+          'description': '采样间隔毫秒，默认 700',
+        },
+      },
+    ),
+    capabilityCheckId: _definition(
+      id: capabilityCheckId,
+      name: '检查智能体工具链',
+      description: '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
+      properties: const <String, Object?>{},
+    ),
+    captureStatusId: _definition(
+      id: captureStatusId,
+      name: '检查网络抓包状态',
+      description: '只读返回内置 WinDivert 抓包内核、当前任务、已收包数、输出 PCAP 和最近错误。',
+      properties: const <String, Object?>{},
+    ),
+    captureStartId: _definition(
+      id: captureStartId,
+      name: '开始网络抓包',
+      description: '使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'outputPath': _string('可选；PCAP 输出绝对路径，留空写入 APP tmp/network-capture'),
+        'filter': _string('WinDivert 过滤器，默认 true；例如 tcp、udp.DstPort == 53'),
+        'maxPackets': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 0,
+          'maximum': 1000000,
+        },
+      },
+    ),
+    captureStopId: _definition(
+      id: captureStopId,
+      name: '停止并保存网络抓包',
+      description: '停止当前抓包，刷新 PCAP 文件并返回实际包数、协议统计和保存路径。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
+    ),
+    captureReadId: _definition(
+      id: captureReadId,
+      name: '读取 PCAP 数据包',
+      description: '只读解析标准 PCAP，返回时间、协议、源、目标、长度及汇总；不会修改原文件。',
+      properties: <String, Object?>{
+        'path': _string('PCAP 文件绝对路径'),
+        'maxPackets': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 10000,
+        },
+      },
+      required: const <String>['path'],
+    ),
+    captureAnalyzeId: _definition(
+      id: captureAnalyzeId,
+      name: '分析 PCAP 流量',
+      description: '只读统计协议、字节数和 Top 端点，给智能体提供可核验的网络流量证据。',
+      properties: <String, Object?>{'path': _string('PCAP 文件绝对路径')},
+      required: const <String>['path'],
+    ),
     audioInspectId: _definition(
       id: audioInspectId,
       name: '分析 PCM / WAV 质量',
-      description: '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性。复杂音乐的单音指标仅作诊断参考。',
+      description: '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性，并返回谐波和噪声最明显的时间段。复杂音乐的单音指标仅作诊断参考。',
       properties: _audioProperties(includePath: true),
       required: const <String>['path'],
     ),
@@ -539,8 +628,8 @@ class VibekitsHarnessToolBridge {
     ),
     serialTransactId: _definition(
       id: serialTransactId,
-      name: '串口一次收发',
-      description: '后台打开串口、发送文本或 HEX、短暂接收后自动关闭。',
+      name: '串口收发与监听',
+      description: '后台打开串口；data 为空时仅实时监听，非空时发送文本或 HEX，再接收后自动关闭。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'port': _string('串口名，例如 COM3'),
@@ -557,10 +646,10 @@ class VibekitsHarnessToolBridge {
         'waitMs': <String, Object?>{
           'type': 'integer',
           'minimum': 50,
-          'maximum': 5000,
+          'maximum': 30000,
         },
       },
-      required: <String>['port', 'data'],
+      required: <String>['port'],
     ),
     sqliteInspectId: _definition(
       id: sqliteInspectId,
@@ -833,7 +922,7 @@ class VibekitsHarnessToolBridge {
     remoteListProfilesId: _definition(
       id: remoteListProfilesId,
       name: '列出远程会话',
-      description: '列出已保存且已确认主机指纹的 SSH/SFTP 会话；不返回密码或私钥内容。',
+      description: '列出已保存的 SSH/SFTP 历史、最近使用时间和当前在线连接数；不返回密码或私钥内容。',
       properties: const <String, Object?>{},
     ),
     remoteOpenInteractiveId: HarnessToolDefinition(
@@ -1140,6 +1229,34 @@ class VibekitsHarnessToolBridge {
       return HarnessToolCallResult.failure('工具尚未接入 Harness 执行器：$toolId');
     }
     final String target = _targetSummary(toolId, arguments);
+    if ((Platform.isAndroid || Platform.isIOS) && requiresDesktopNode(toolId)) {
+      final Map<String, Object?> gate = <String, Object?>{
+        'available': false,
+        'executed': false,
+        'platform': Platform.operatingSystem,
+        'requiresDesktopNode': true,
+        'toolId': toolId,
+        'reason': '该能力需要桌面系统的驱动、端口或内置二进制，移动端不会伪执行。',
+        'nextAction': '连接已登记的 Vibekits Windows/macOS 桌面节点后重试。',
+      };
+      await _recordActivity(
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+        arguments: arguments,
+        result: gate,
+        status: HarnessToolActivityStatus.failed,
+        startedAt: startedAt,
+      );
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.ready,
+        message: '${definition.name}需要桌面节点',
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+      );
+      return HarnessToolCallResult.success(gate);
+    }
     if (definition.risk != HarnessToolRisk.readOnly) {
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.waitingApproval,
@@ -1224,6 +1341,24 @@ class VibekitsHarnessToolBridge {
       );
       return HarnessToolCallResult.failure('$error');
     }
+  }
+
+  /// Tools that remain visible to the mobile agent but must execute on a
+  /// registered desktop node. Keeping them in the schema lets Harness explain
+  /// and plan the workflow instead of silently pretending the APP lacks them.
+  static bool requiresDesktopNode(String toolId) {
+    const Set<String> prefixes = <String>{
+      'vibekits.adb.',
+      'vibekits.capture.',
+      'vibekits.proxy.',
+      'vibekits.vm.',
+      'vibekits.runtime.',
+      'vibekits.windows_',
+      'vibekits.serial',
+      'vibekits.git.',
+      'vibekits.github',
+    };
+    return prefixes.any(toolId.startsWith);
   }
 
   bool _adbExecutionIsAuditedByService(String toolId) =>
@@ -1360,6 +1495,13 @@ class VibekitsHarnessToolBridge {
     if (toolId == audioGenerateToneId) {
       return _audioHarnessService.generateTone;
     }
+    if (toolId == systemResourcesId) return _inspectSystemResources;
+    if (toolId == capabilityCheckId) return _checkHarnessCapabilities;
+    if (toolId == captureStatusId) return _captureStatus;
+    if (toolId == captureStartId) return _captureStart;
+    if (toolId == captureStopId) return _captureStop;
+    if (toolId == captureReadId) return _captureRead;
+    if (toolId == captureAnalyzeId) return _captureAnalyze;
     if (toolId == 'vibekits.file_hash') return _hashFileInBackground;
     if (toolId == programmerCalculatorId) return _calculate;
     final String specId = toolId.startsWith('vibekits.')
@@ -1387,6 +1529,81 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _captureStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final File helper = File(_packetCaptureService.helperPath);
+    return <String, Object?>{
+      'available': Platform.isWindows && await helper.exists(),
+      'helperPath': helper.path,
+      'capturing': _packetCaptureService.isCapturing,
+      'packetCount': _packetCaptureService.packetCount,
+      'outputPath': _packetCaptureService.outputPath,
+      'lastError': _packetCaptureService.lastError,
+      'requiresAdministrator': Platform.isWindows,
+    };
+  }
+
+  Future<Map<String, Object?>> _captureStart(
+    Map<String, Object?> arguments,
+  ) async {
+    final String requestedPath = (arguments['outputPath'] ?? '')
+        .toString()
+        .trim();
+    final String outputPath = requestedPath.isEmpty
+        ? await _packetCaptureService.defaultOutputPath()
+        : requestedPath;
+    await _packetCaptureService.start(
+      outputPath: outputPath,
+      filter: (arguments['filter'] ?? 'true').toString(),
+      maxPackets: (arguments['maxPackets'] as num?)?.toInt() ?? 0,
+    );
+    return <String, Object?>{
+      'started': true,
+      'outputPath': outputPath,
+      'filter': (arguments['filter'] ?? 'true').toString(),
+      'note': '抓包在后台运行；完成后调用 vibekits.capture.stop。',
+    };
+  }
+
+  Future<Map<String, Object?>> _captureStop(
+    Map<String, Object?> arguments,
+  ) async {
+    final String? path = _packetCaptureService.outputPath;
+    await _packetCaptureService.stop();
+    if (path == null || !await File(path).exists()) {
+      return <String, Object?>{
+        'stopped': true,
+        'outputPath': path,
+        'packetCount': 0,
+      };
+    }
+    final PacketCaptureSummary summary = await _packetCaptureService.read(path);
+    return <String, Object?>{'stopped': true, ...summary.toJson()};
+  }
+
+  Future<Map<String, Object?>> _captureRead(
+    Map<String, Object?> arguments,
+  ) async {
+    final PacketCaptureSummary summary = await _packetCaptureService.read(
+      (arguments['path'] ?? '').toString(),
+      maxPackets: (arguments['maxPackets'] as num?)?.toInt() ?? 2000,
+    );
+    return summary.toJson();
+  }
+
+  Future<Map<String, Object?>> _captureAnalyze(
+    Map<String, Object?> arguments,
+  ) async {
+    final PacketCaptureSummary summary = await _packetCaptureService.read(
+      (arguments['path'] ?? '').toString(),
+      maxPackets: 10000,
+    );
+    final Map<String, Object> json = summary.toJson();
+    json.remove('packets');
+    return json;
+  }
+
   Future<Map<String, Object?>> _inspectBundledRuntimes(
     Map<String, Object?> arguments,
   ) async {
@@ -1404,6 +1621,164 @@ class VibekitsHarnessToolBridge {
       'runtimes': runtimes
           .map((BundledRuntimeStatus value) => value.toJson())
           .toList(),
+    };
+  }
+
+  Future<Map<String, Object?>> _inspectSystemResources(
+    Map<String, Object?> arguments,
+  ) async {
+    final String serial = (arguments['adbSerial'] ?? '').toString().trim();
+    final int sampleCount = _integer(arguments['samples'], 3).clamp(1, 10);
+    final int intervalMs = _integer(
+      arguments['intervalMs'],
+      700,
+    ).clamp(250, 5000);
+    final List<SystemResourceSnapshot> snapshots = <SystemResourceSnapshot>[];
+    for (int index = 0; index < sampleCount; index += 1) {
+      snapshots.add(
+        serial.isEmpty
+            ? await SystemResourceService.inspectLocal()
+            : await SystemResourceService.inspectAndroidDevice(
+                serial: serial,
+                adbExecutable:
+                    _adbExecutable ?? AdbService.bundledExecutablePath(),
+              ),
+      );
+      if (index + 1 < sampleCount) {
+        await Future<void>.delayed(Duration(milliseconds: intervalMs));
+      }
+    }
+    final SystemResourceSnapshot latest = snapshots.last;
+    double average(double Function(SystemResourceSnapshot value) read) =>
+        snapshots.map(read).reduce((double a, double b) => a + b) /
+        snapshots.length;
+    double maximum(double Function(SystemResourceSnapshot value) read) =>
+        snapshots.map(read).reduce((double a, double b) => a > b ? a : b);
+    final Map<String, int> recurringProcesses = <String, int>{};
+    for (final SystemResourceSnapshot snapshot in snapshots) {
+      for (final ResourceProcessSample process in snapshot.processes.take(5)) {
+        recurringProcesses.update(
+          process.name,
+          (int value) => value + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+    return <String, Object?>{
+      ...latest.toJson(),
+      'series': snapshots
+          .map(
+            (SystemResourceSnapshot value) => <String, Object?>{
+              'capturedAt': value.capturedAt.toIso8601String(),
+              'cpuPercent': value.cpuPercent,
+              'memoryUsedPercent': value.memoryUsedPercent,
+              if (value.gpuPercent != null) 'gpuPercent': value.gpuPercent,
+            },
+          )
+          .toList(),
+      'summary': <String, Object?>{
+        'samples': snapshots.length,
+        'cpuAveragePercent': average(
+          (SystemResourceSnapshot value) => value.cpuPercent,
+        ),
+        'cpuMaximumPercent': maximum(
+          (SystemResourceSnapshot value) => value.cpuPercent,
+        ),
+        'memoryAveragePercent': average(
+          (SystemResourceSnapshot value) => value.memoryUsedPercent,
+        ),
+        'memoryMaximumPercent': maximum(
+          (SystemResourceSnapshot value) => value.memoryUsedPercent,
+        ),
+        'recurringTopProcesses': recurringProcesses.entries
+            .where((MapEntry<String, int> value) => value.value > 1)
+            .map(
+              (MapEntry<String, int> value) => <String, Object?>{
+                'name': value.key,
+                'appearances': value.value,
+              },
+            )
+            .toList(),
+      },
+    };
+  }
+
+  Future<Map<String, Object?>> _checkHarnessCapabilities(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<HarnessToolDefinition> executable = executableCatalog;
+    final List<String> missingHandlers = <String>[
+      for (final HarnessToolDefinition tool in executable)
+        if (_handlerFor(tool.id) == null) tool.id,
+    ];
+    final List<Map<String, Object?>> unavailable = <Map<String, Object?>>[
+      for (final HarnessToolDefinition tool in fullCatalog)
+        if (!tool.available && !_customHandlers.containsKey(tool.id))
+          <String, Object?>{
+            'id': tool.id,
+            'name': tool.name,
+            'reason': tool.description,
+          },
+    ];
+    final Map<String, int> riskCounts = <String, int>{};
+    for (final HarnessToolDefinition tool in executable) {
+      riskCounts.update(
+        tool.risk.name,
+        (int value) => value + 1,
+        ifAbsent: () => 1,
+      );
+    }
+    final List<String> businessModules = <String>[];
+    for (final ToolSpec spec in allDevToolRegistry) {
+      if (!businessModules.contains(spec.group)) {
+        businessModules.add(spec.group);
+      }
+    }
+    return <String, Object?>{
+      'ready': missingHandlers.isEmpty,
+      'protocol': protocolVersion,
+      'productHierarchy': <String, Object?>{
+        'topLevelPageCount': 5,
+        'topLevelPages': const <String>[
+          '智能体（Harness）',
+          '解压缩',
+          '系统清理',
+          '文档阅读',
+          '开发工具',
+        ],
+        'developerCapabilityEntries': allDevToolRegistry.length,
+        'independentDeveloperWorkspaces': devToolRegistry.length,
+        'businessModuleCount': businessModules.length,
+        'businessModules': businessModules,
+        'countingRule': '页面、业务能力、工作区和机器接口属于不同层级，不得相加为总功能数',
+        'usageContracts': <String, Object?>{
+          for (final ToolSpec tool in devToolRegistry)
+            tool.id: devToolUsageContracts[tool.id]!.toJson(),
+        },
+      },
+      'definedTools': fullCatalog.length,
+      'executableTools': executable.length,
+      'missingHandlers': missingHandlers,
+      'unavailableTools': unavailable,
+      'riskCounts': riskCounts,
+      'platform': <String, Object?>{
+        'name': Platform.operatingSystem,
+        'storageLocations': PlatformStorageLayout.current().toJson(),
+        'cleanup': CleanupPlatformPolicy.capabilities(CleanupPlatform.current)
+            .toJson(),
+        'allToolsVisibleToHarness': true,
+        'desktopNodeToolCount': executable
+            .where((HarnessToolDefinition tool) => requiresDesktopNode(tool.id))
+            .length,
+        'localToolCount': executable
+            .where(
+              (HarnessToolDefinition tool) => !requiresDesktopNode(tool.id),
+            )
+            .length,
+        'desktopNodeRule': '移动端保留完整 Schema；桌面专属项返回 requiresDesktopNode，不伪执行。',
+      },
+      'checkedAt': DateTime.now().toIso8601String(),
+      'scope': '注册、公开状态与执行器接线；真实设备、网络、凭据和硬件另按环境门禁验收',
     };
   }
 
@@ -1834,7 +2209,7 @@ class VibekitsHarnessToolBridge {
     final SerialDataMode mode = arguments['mode'] == 'hex'
         ? SerialDataMode.hex
         : SerialDataMode.text;
-    final int waitMs = _integer(arguments['waitMs'], 350).clamp(50, 5000);
+    final int waitMs = _integer(arguments['waitMs'], 3000).clamp(50, 30000);
     final SerialPortSession session = await SerialPortService.open(settings);
     final BytesBuilder received = BytesBuilder(copy: false);
     final StreamSubscription<SerialPortEvent> subscription = session.events
@@ -1849,7 +2224,7 @@ class VibekitsHarnessToolBridge {
         (arguments['data'] ?? '').toString(),
         mode,
       );
-      final int sent = await session.send(output);
+      final int sent = output.isEmpty ? 0 : await session.send(output);
       await Future<void>.delayed(Duration(milliseconds: waitMs));
       final Uint8List input = received.takeBytes();
       return <String, Object?>{
@@ -2227,6 +2602,16 @@ class VibekitsHarnessToolBridge {
         for (final RemoteConnectionRecord profile in profiles)
           if (profile.mode != RemoteSessionMode.remoteDesktop)
             <String, Object?>{
+              ...() {
+                final RemoteConnectionStatus status =
+                    RemoteConnectionStatusRegistry.statusFor(profile.id);
+                return <String, Object?>{
+                  'status': status.online ? 'online' : 'offline',
+                  'activeConnections': status.activeConnections,
+                  'activeKinds': status.kinds,
+                  'connectedSinceEpochMs': status.connectedSinceEpochMs,
+                };
+              }(),
               'id': profile.id,
               'name': profile.name,
               'mode': profile.mode.name,
@@ -2235,6 +2620,7 @@ class VibekitsHarnessToolBridge {
               'user': profile.user,
               'hostKeyPinned': profile.hostKeyFingerprint != null,
               'hasIdentityFile': profile.identityFile != null,
+              'lastUsedEpochMs': profile.lastUsedEpochMs,
             },
       ],
     };
@@ -2821,6 +3207,10 @@ class VibekitsHarnessToolBridge {
   };
 
   static String _targetSummary(String toolId, Map<String, Object?> arguments) {
+    if (toolId == systemResourcesId) {
+      final String serial = (arguments['adbSerial'] ?? '').toString().trim();
+      return serial.isEmpty ? '本机' : serial;
+    }
     if (toolId == adbConnectId) {
       return AdbService.normalizeWirelessAddress(
         (arguments['address'] ?? '').toString(),

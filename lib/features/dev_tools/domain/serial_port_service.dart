@@ -300,8 +300,12 @@ class _WorkerSerialPortSession implements SerialPortSession {
   final ReceivePort _resultPort = ReceivePort();
   final ReceivePort _errorPort = ReceivePort();
   final ReceivePort _exitPort = ReceivePort();
+  // A serial session has exactly one consumer (the workspace or one Harness
+  // tool call). A single-subscription controller buffers bytes that arrive
+  // between the worker reporting `ready` and the caller attaching its
+  // listener. A broadcast controller silently dropped that first burst.
   final StreamController<SerialPortEvent> _events =
-      StreamController<SerialPortEvent>.broadcast();
+      StreamController<SerialPortEvent>();
   final Completer<void> _ready = Completer<void>();
   final Completer<void> _closed = Completer<void>();
   final Map<int, Completer<int>> _pendingWrites = <int, Completer<int>>{};

@@ -6,6 +6,7 @@ import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_connection_record.dart';
+import 'package:vibekits/features/dev_tools/domain/remote_connection_status.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_database_service.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_session.dart';
 import 'package:vibekits/features/dev_tools/domain/sftp_service.dart';
@@ -14,6 +15,39 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('移动端保留完整工具目录并明确桌面节点边界', () {
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.adbCommandId,
+      ),
+      isTrue,
+    );
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.serialTransactId,
+      ),
+      isTrue,
+    );
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.fileDiffId,
+      ),
+      isFalse,
+    );
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.remoteSshExecId,
+      ),
+      isFalse,
+    );
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.remoteDatabaseQueryId,
+      ),
+      isFalse,
+    );
+  });
+
   test('导出版本化可执行工具目录且不暴露未接工具', () {
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     final Map<String, Object?> catalog = bridge.exportCatalog();
@@ -92,6 +126,7 @@ void main() {
       VibekitsHarnessToolBridge.audioPauseId,
       VibekitsHarnessToolBridge.audioStopId,
       VibekitsHarnessToolBridge.audioGenerateToneId,
+      VibekitsHarnessToolBridge.systemResourcesId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
     }
@@ -132,6 +167,47 @@ void main() {
         reason: '${workspace.id} 没有当前环境可执行的 Harness 适配器',
       );
     }
+  });
+
+  test('智能体能力自检保证所有公开工具都有本地执行器', () async {
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    int approvals = 0;
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.capabilityCheckId,
+      arguments: const <String, Object?>{},
+      approve: (_) async {
+        approvals += 1;
+        return true;
+      },
+    );
+    expect(result.ok, isTrue);
+    expect(result.data?['ready'], isTrue);
+    expect(result.data?['missingHandlers'], isEmpty);
+    expect(result.data?['executableTools'], greaterThan(50));
+    expect(result.data?['unavailableTools'], isNotEmpty);
+    final Map<String, Object?> productHierarchy =
+        (result.data?['productHierarchy'] as Map).cast<String, Object?>();
+    expect(productHierarchy['topLevelPageCount'], 5);
+    expect(productHierarchy['topLevelPages'], hasLength(5));
+    expect(
+      productHierarchy['developerCapabilityEntries'],
+      allDevToolRegistry.length,
+    );
+    expect(
+      productHierarchy['independentDeveloperWorkspaces'],
+      devToolRegistry.length,
+    );
+    final Map<String, Object?> platform = (result.data?['platform'] as Map)
+        .cast<String, Object?>();
+    final Map<String, Object?> storage = (platform['storageLocations'] as Map)
+        .cast<String, Object?>();
+    final Map<String, Object?> cleanup = (platform['cleanup'] as Map)
+        .cast<String, Object?>();
+    expect(storage['settings'], isNotEmpty);
+    expect(storage['credentials'], isNotEmpty);
+    expect(cleanup['platform'], Platform.operatingSystem);
+    expect(cleanup['scanScope'], isNotEmpty);
+    expect(approvals, 0);
   });
 
   test('Harness 可列出节点设备并导出不含秘密的 onboarding', () async {
@@ -196,6 +272,29 @@ void main() {
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
   });
+
+  test(
+    'Harness 真实调用本机资源探针并返回采样汇总',
+    () async {
+      final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+      int approvals = 0;
+      final HarnessToolCallResult result = await bridge.invoke(
+        toolId: VibekitsHarnessToolBridge.systemResourcesId,
+        arguments: const <String, Object?>{'samples': 1},
+        approve: (_) async {
+          approvals += 1;
+          return true;
+        },
+      );
+      expect(result.ok, isTrue, reason: result.error);
+      expect(result.data!['platform'], 'windows');
+      expect((result.data!['summary']! as Map)['samples'], 1);
+      expect(result.data!['series'], isNotEmpty);
+      expect(approvals, 0, reason: '资源探针是只读工具');
+    },
+    skip: !Platform.isWindows,
+    timeout: const Timeout(Duration(seconds: 20)),
+  );
 
   test('新增微工具由能力清单自动进入 Harness 并可直接调用', () async {
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
@@ -601,6 +700,12 @@ void main() {
     final List<String> transfers = <String>[];
     final List<Map<String, Object?>> activities = <Map<String, Object?>>[];
     int approvals = 0;
+    RemoteConnectionStatusRegistry.connected(
+      token: 'test-active-session',
+      profileId: profile.id,
+      kind: 'ssh',
+    );
+    addTearDown(RemoteConnectionStatusRegistry.clearForTests);
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
       activityRecorder:
           ({
@@ -699,6 +804,8 @@ void main() {
     );
 
     expect(profiles.ok, isTrue);
+    expect(profiles.data.toString(), contains('online'));
+    expect(profiles.data.toString(), contains('activeConnections: 1'));
     expect(profiles.data.toString(), isNot(contains('vault-secret')));
     expect(command.data?['stdout'], 'HARNESS_SSH_OK');
     expect(listing.data.toString(), contains('remote.txt'));

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/platform_storage_layout.dart';
 import '../../archive/domain/disk_space.dart';
 import '../domain/cleanup_background_runner.dart';
 import '../domain/cleanup_deleter.dart';
@@ -74,7 +75,8 @@ enum _CleanupResultView {
   final IconData icon;
 }
 
-/// T2 Windows 清理 Tab（对标 360/CCleaner，docs/08 §4）。
+/// Platform-aware cleanup workspace. Every scan and deletion is constrained
+/// by the current operating system policy.
 class CleanerTab extends StatefulWidget {
   const CleanerTab({
     super.key,
@@ -313,9 +315,8 @@ class _CleanerTabState extends State<CleanerTab> {
       final String bundledRuleDatabase = platform == CleanupPlatform.windows
           ? await rootBundle.loadString('assets/cleaner/windows_rules_v6.json')
           : '';
-      final String defaultDebugDirectory = platform == CleanupPlatform.android
-          ? '${Directory.systemTemp.path}${Platform.pathSeparator}vibekits-harness'
-          : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp';
+      final String defaultDebugDirectory =
+          PlatformStorageLayout.current().harnessDebugDirectory;
       final List<CleanupScanTarget> targets =
           await CleanupBackgroundRunner.discoverTargets(
             harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
@@ -732,9 +733,12 @@ class _CleanerTabState extends State<CleanerTab> {
     // Regenerable cache/log candidates use the fast permanent path by default.
     // Review/high-risk items still go through the recycle-bin path.
     bool permanentFallback = true;
-    final bool hasRegenerableCache = plan.any(
-      (CleanupCandidate candidate) => candidate.allowsPermanentFallback,
-    );
+    final bool mobile = Platform.isAndroid || Platform.isIOS;
+    final bool hasRegenerableCache =
+        !mobile &&
+        plan.any(
+          (CleanupCandidate candidate) => candidate.allowsPermanentFallback,
+        );
     final bool emptiesRecycleBin = _planEmptiesRecycleBin(plan);
     final bool? confirm = await showDialog<bool>(
       context: context,
@@ -747,7 +751,11 @@ class _CleanerTabState extends State<CleanerTab> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('将处理 ${plan.length} 个项目（${_formatSize(planSize)}）。'),
+                Text(
+                  mobile
+                      ? '将永久删除 ${plan.length} 个 Vibekits 私有缓存项目（${_formatSize(planSize)}）。'
+                      : '将处理 ${plan.length} 个项目（${_formatSize(planSize)}）。',
+                ),
                 if (hasRegenerableCache) ...<Widget>[
                   const SizedBox(height: 12),
                   CheckboxListTile(
@@ -763,45 +771,51 @@ class _CleanerTabState extends State<CleanerTab> {
                     ),
                   ),
                 ],
-                Builder(
-                  builder: (BuildContext context) {
-                    final int permanentBytes = permanentFallback
-                        ? plan
-                              .where(
-                                (CleanupCandidate item) =>
-                                    item.allowsPermanentFallback,
-                              )
-                              .fold<int>(0, (int sum, item) => sum + item.size)
-                        : 0;
-                    final int recycleCandidateBytes = plan
-                        .where(
-                          (CleanupCandidate item) =>
-                              item.category == CleanupCategory.recycleBin,
-                        )
-                        .fold<int>(0, (int sum, item) => sum + item.size);
-                    final int movedBytes =
-                        planSize - permanentBytes - recycleCandidateBytes;
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        emptiesRecycleBin
-                            ? '预计真正释放：最多 ${_formatSize(planSize)}（直接删除 ${_formatSize(permanentBytes)}；其余移入后连同原回收站永久清空）。'
-                            : '预计直接释放 ${_formatSize(permanentBytes)}；另有 ${_formatSize(movedBytes)} 只移入回收站，不会增加磁盘可用空间。',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: emptiesRecycleBin
-                              ? VibekitsColors.warning
-                              : context.vibe.muted,
+                if (!mobile)
+                  Builder(
+                    builder: (BuildContext context) {
+                      final int permanentBytes = permanentFallback
+                          ? plan
+                                .where(
+                                  (CleanupCandidate item) =>
+                                      item.allowsPermanentFallback,
+                                )
+                                .fold<int>(
+                                  0,
+                                  (int sum, item) => sum + item.size,
+                                )
+                          : 0;
+                      final int recycleCandidateBytes = plan
+                          .where(
+                            (CleanupCandidate item) =>
+                                item.category == CleanupCategory.recycleBin,
+                          )
+                          .fold<int>(0, (int sum, item) => sum + item.size);
+                      final int movedBytes =
+                          planSize - permanentBytes - recycleCandidateBytes;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          emptiesRecycleBin
+                              ? '预计真正释放：最多 ${_formatSize(planSize)}（直接删除 ${_formatSize(permanentBytes)}；其余移入后连同原回收站永久清空）。'
+                              : '预计直接释放 ${_formatSize(permanentBytes)}；另有 ${_formatSize(movedBytes)} 只移入回收站，不会增加磁盘可用空间。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: emptiesRecycleBin
+                                ? VibekitsColors.warning
+                                : context.vibe.muted,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  ),
                 const SizedBox(height: 8),
-                const Text(
-                  '正在被浏览器、编辑器或包管理器占用的文件仍需关闭对应程序后重试。',
-                  style: TextStyle(fontSize: 12),
+                Text(
+                  mobile
+                      ? '当前会话文件、API Key、工作区和模型不会被删除。正在使用的缓存会跳过并保留。'
+                      : '正在被浏览器、编辑器或包管理器占用的文件仍需关闭对应程序后重试。',
+                  style: const TextStyle(fontSize: 12),
                 ),
               ],
             ),
@@ -1412,10 +1426,14 @@ class _CleanerTabState extends State<CleanerTab> {
 
   @override
   Widget build(BuildContext context) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _buildMobileCleaner();
+    }
     return Column(
       children: <Widget>[
         _buildToolbar(),
         _buildVolumeSelector(),
+        _buildPlatformNotice(),
         if (_restoringDriveAnalysis)
           const LinearProgressIndicator(
             key: Key('cleaner-restoring-drive-analysis'),
@@ -1448,6 +1466,105 @@ class _CleanerTabState extends State<CleanerTab> {
               : _buildBody(),
         ),
       ],
+    );
+  }
+
+  Widget _buildMobileCleaner() {
+    return Column(
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(
+            color: context.vibe.panel,
+            border: Border(bottom: BorderSide(color: context.vibe.border)),
+          ),
+          child: Row(
+            children: <Widget>[
+              ElevatedButton.icon(
+                key: const Key('mobile-cleaner-scan'),
+                onPressed:
+                    _scanning ||
+                        _cleaning ||
+                        _discoveringTargets ||
+                        _enabledTargetIds.isEmpty
+                    ? null
+                    : _scan,
+                icon: _scanning
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search, size: 19),
+                label: Text(_scanning ? '正在扫描' : '扫描本应用缓存'),
+              ),
+              if (_scanning || _cleaning) ...<Widget>[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _taskToken?.cancel(),
+                  icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                  label: const Text('取消'),
+                ),
+              ],
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _showCleanupHistory,
+                icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                label: const Text('清理记录'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _scanning || _cleaning || _discoveringTargets
+                    ? null
+                    : _manageScanTargets,
+                icon: const Icon(Icons.tune, size: 18),
+                label: Text('范围 ${_enabledTargetIds.length}'),
+              ),
+              const Spacer(),
+              Text(
+                '已选择 ${_formatSize(_selectedSize)}',
+                style: TextStyle(fontSize: 12, color: context.vibe.muted),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                key: const Key('mobile-cleaner-delete'),
+                onPressed: _selected.isEmpty || _scanning || _cleaning
+                    ? null
+                    : _clean,
+                icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                label: Text(_cleaning ? '清理中' : '清理 ${_selected.length} 项'),
+              ),
+            ],
+          ),
+        ),
+        _buildPlatformNotice(),
+        if (_message.isNotEmpty)
+          Container(
+            key: const Key('mobile-cleaner-message'),
+            width: double.infinity,
+            color: VibekitsColors.info.withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Text(_message, style: const TextStyle(fontSize: 12)),
+          ),
+        if (_lastResult != null) _buildResultSummary(_lastResult!),
+        Expanded(child: _buildBody()),
+      ],
+    );
+  }
+
+  Widget _buildPlatformNotice() {
+    final CleanupPlatformCapabilities capabilities =
+        CleanupPlatformPolicy.capabilities(CleanupPlatform.current);
+    return Container(
+      key: const Key('cleaner-platform-policy'),
+      width: double.infinity,
+      color: context.vibe.canvas,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      child: Text(
+        '${capabilities.platform.label}：${capabilities.scanScope}。'
+        '${capabilities.deletionMode}。',
+        style: const TextStyle(fontSize: 12),
+      ),
     );
   }
 
@@ -2886,7 +3003,9 @@ class _CleanerTabState extends State<CleanerTab> {
     if (_candidates.isEmpty) {
       return Center(
         child: Text(
-          '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
+          Platform.isAndroid || Platform.isIOS
+              ? '点击“扫描本应用缓存”检查 Vibekits 私有临时文件\n扫描只读；确认清理前不会删除任何内容'
+              : '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
           textAlign: TextAlign.center,
           style: TextStyle(color: context.vibe.muted),
         ),
@@ -2966,7 +3085,9 @@ class _CleanerTabState extends State<CleanerTab> {
             style: TextStyle(color: context.vibe.muted),
           ),
           Text(
-            '“潜力”不是实际释放；顶部 10G 验收只按清理后的磁盘增量计算',
+            Platform.isAndroid || Platform.isIOS
+                ? '清理前会再次确认；只处理本应用私有缓存'
+                : '“潜力”不是实际释放；顶部 10G 验收只按清理后的磁盘增量计算',
             style: TextStyle(fontSize: 11, color: context.vibe.muted),
           ),
         ],

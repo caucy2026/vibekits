@@ -3,12 +3,16 @@ import { join, resolve } from 'node:path';
 
 const runtime = resolve(process.argv[2] ?? 'native/harness/windows/runtime');
 
-async function replaceOnce(relativePath, before, after) {
+async function replaceOnce(relativePath, before, after, marker = after) {
   const filename = join(runtime, relativePath);
   const source = await readFile(filename, 'utf8');
+  // Many replacements deliberately keep the original snippet inside the
+  // patched result (for example an existing menu action followed by a new
+  // action). Check the complete result first, otherwise every build injects
+  // the same patch again.
+  if (source.includes(marker)) return;
   const first = source.indexOf(before);
   if (first < 0) {
-    if (source.includes(after)) return;
     throw new Error(`Harness patch target not found: ${relativePath}`);
   }
   if (source.indexOf(before, first + before.length) >= 0) {
@@ -131,6 +135,7 @@ await replaceOnce(
 \t\t\t\t\t\t\t\t\t\tsessionId: node.id,
 \t\t\t\t\t\t\t\t\t\ttitle
 \t\t\t\t\t\t\t\t\t});`,
+  `type: "vibekits.deleteSession"`,
 );
 
 await replaceOnce(

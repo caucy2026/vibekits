@@ -11,10 +11,86 @@ typedef ApiExecutor = Future<ApiResponseData> Function(
   ApiRequestCancellation cancellation,
 );
 
+class ApiRequestHistoryEntry {
+  const ApiRequestHistoryEntry({
+    required this.method,
+    required this.url,
+    required this.headers,
+    required this.lastUsedEpochMs,
+  });
+
+  final String method;
+  final String url;
+  final Map<String, String> headers;
+  final int lastUsedEpochMs;
+
+  String get label => '$method $url';
+
+  String encode() => jsonEncode(<String, Object>{
+    'version': 1,
+    'method': method,
+    'url': url,
+    'headers': headers,
+    'lastUsedEpochMs': lastUsedEpochMs,
+  });
+
+  static ApiRequestHistoryEntry? decode(String source) {
+    try {
+      final Object? decoded = jsonDecode(source);
+      if (decoded is! Map<String, Object?>) return null;
+      final String method = '${decoded['method'] ?? ''}'.toUpperCase();
+      final String url = '${decoded['url'] ?? ''}'.trim();
+      final Uri? uri = Uri.tryParse(url);
+      if (!const <String>{
+            'GET',
+            'POST',
+            'PUT',
+            'PATCH',
+            'DELETE',
+            'HEAD',
+            'OPTIONS',
+          }.contains(method) ||
+          uri == null ||
+          !uri.isAbsolute ||
+          url.length > 4096) {
+        return null;
+      }
+      final Map<String, String> headers = <String, String>{};
+      if (decoded['headers'] is Map) {
+        for (final MapEntry<Object?, Object?> item
+            in (decoded['headers']! as Map).entries) {
+          final String name = '${item.key}'.trim();
+          final String value = '${item.value}'.trim();
+          if (name.isNotEmpty && name.length <= 128 && value.length <= 2048) {
+            headers[name] = value;
+          }
+        }
+      }
+      return ApiRequestHistoryEntry(
+        method: method,
+        url: url,
+        headers: headers,
+        lastUsedEpochMs: decoded['lastUsedEpochMs'] is int
+            ? decoded['lastUsedEpochMs']! as int
+            : 0,
+      );
+    } on Object {
+      return null;
+    }
+  }
+}
+
 class ApiWorkspace extends StatefulWidget {
-  const ApiWorkspace({super.key, this.execute});
+  const ApiWorkspace({
+    super.key,
+    this.execute,
+    this.initialHistory = const <String>[],
+    this.onHistoryChanged,
+  });
 
   final ApiExecutor? execute;
+  final List<String> initialHistory;
+  final Future<void> Function(List<String> history)? onHistoryChanged;
 
   @override
   State<ApiWorkspace> createState() => _ApiWorkspaceState();
@@ -35,6 +111,63 @@ class _ApiWorkspaceState extends State<ApiWorkspace> {
   ApiResponseData? _response;
   String? _error;
   bool _sending = false;
+  late final List<ApiRequestHistoryEntry> _history =
+      widget.initialHistory.map(ApiRequestHistoryEntry.decode).nonNulls.toList()
+        ..sort(
+          (ApiRequestHistoryEntry a, ApiRequestHistoryEntry b) =>
+              b.lastUsedEpochMs.compareTo(a.lastUsedEpochMs),
+        );
+
+  static bool _sensitiveHeader(String name) {
+    final String normalized = name.trim().toLowerCase();
+    return normalized == 'authorization' ||
+        normalized == 'proxy-authorization' ||
+        normalized == 'cookie' ||
+        normalized == 'set-cookie' ||
+        normalized == 'x-api-key' ||
+        normalized.contains('token') ||
+        normalized.contains('secret');
+  }
+
+  Future<void> _remember(ApiRequestSpec spec) async {
+    final Map<String, String> safeHeaders = <String, String>{
+      for (final MapEntry<String, String> item in spec.headers.entries)
+        if (!_sensitiveHeader(item.key)) item.key: item.value,
+    };
+    final ApiRequestHistoryEntry entry = ApiRequestHistoryEntry(
+      method: spec.method,
+      url: spec.url.trim(),
+      headers: safeHeaders,
+      lastUsedEpochMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    _history.removeWhere(
+      (ApiRequestHistoryEntry item) =>
+          item.method == entry.method && item.url == entry.url,
+    );
+    _history.insert(0, entry);
+    if (_history.length > 30) _history.removeRange(30, _history.length);
+    await widget.onHistoryChanged?.call(
+      _history.map((ApiRequestHistoryEntry item) => item.encode()).toList(),
+    );
+  }
+
+  void _restore(ApiRequestHistoryEntry entry) {
+    setState(() {
+      _method = entry.method;
+      _url.text = entry.url;
+      _headers.text = entry.headers.entries
+          .map((MapEntry<String, String> item) => '${item.key}: ${item.value}')
+          .join('\n');
+      _body.clear();
+      _response = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _clearHistory() async {
+    setState(_history.clear);
+    await widget.onHistoryChanged?.call(const <String>[]);
+  }
 
   @override
   void dispose() {
@@ -68,6 +201,8 @@ class _ApiWorkspaceState extends State<ApiWorkspace> {
       final ApiResponseData response = await (widget.execute != null
           ? widget.execute!(spec, cancellation)
           : ApiRequestService.execute(spec, cancellation: cancellation));
+      if (!mounted || cancellation.isCancelled) return;
+      await _remember(spec);
       if (!mounted || cancellation.isCancelled) return;
       setState(() {
         _sending = false;
@@ -129,6 +264,42 @@ class _ApiWorkspaceState extends State<ApiWorkspace> {
                 '本地发送 · 敏感头不记历史',
                 style: TextStyle(fontSize: 11, color: context.vibe.muted),
               ),
+              if (_history.isNotEmpty)
+                PopupMenuButton<Object>(
+                  key: const Key('api-history'),
+                  tooltip: '最近请求',
+                  onSelected: (Object value) {
+                    if (value == 'clear') {
+                      _clearHistory();
+                    } else if (value is ApiRequestHistoryEntry) {
+                      _restore(value);
+                    }
+                  },
+                  itemBuilder: (BuildContext context) =>
+                      <PopupMenuEntry<Object>>[
+                        for (final ApiRequestHistoryEntry item in _history)
+                          PopupMenuItem<Object>(
+                            value: item,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 420),
+                              child: Text(
+                                item.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem<Object>(
+                          value: 'clear',
+                          child: Text('清空最近请求'),
+                        ),
+                      ],
+                  child: const Chip(
+                    avatar: Icon(Icons.history_rounded, size: 17),
+                    label: Text('最近请求'),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 12),

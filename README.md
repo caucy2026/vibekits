@@ -1,17 +1,24 @@
-# vibekits
+# Vibekits
 
-A new Flutter project.
+Vibekits 是一个面向开发者的智能体原生工具工作台。它把 Harness 智能体与文件、设备、远程连接、数据库、网络、音频、文档和系统工具放在同一个任务上下文中，让智能体调用本机的确定性工具取得真实证据，再结合模型完成分析、解释和下一步操作。
 
-## Getting Started
+它不是把几十个小工具堆在一起，也不是只提供一个聊天窗口。Vibekits 的核心体验是：用户描述目标或拖入对象，智能体自动选择合适的本地能力；工具在后台、有界、可取消地执行；结果携带真实日志继续流向下一个能力。
 
-This project is a starting point for a Flutter application.
+例如：
 
-A few resources to get you started if this is your first Flutter project:
+- 分析一段 PCM/WAV，定位谐波和噪声最明显的时间段，并让智能体解释可能原因。
+- 连接 Android 设备，采集 Logcat、截图和 OCR，再关联源码定位问题。
+- 登录 SSH 后复用同一认证打开 SFTP，上传、执行、下载并检查结果。
+- 比较代码或文件，计算哈希、检查 Git 版本并生成可审计的交付报告。
+- 分析磁盘和软件占用，只清理有明确依据的缓存，并复核实际释放空间。
+- 连续采样 Windows、macOS 或 Android 的 CPU、内存、GPU、磁盘和 Top 进程，让智能体用真实证据分析卡顿、发热和资源不足。
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## 产品原则
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- 智能体和工具是一个整体，共享任务、对象、连接、权限和结果。
+- 默认本地优先、无广告、隐私优先；密码、API Key 和文件正文不进入普通日志。
+- 界面简单、操作少、结果可继续处理；技术名称保留，操作与状态使用清晰中文。
+- 慢任务后台运行并可取消，APP 退出时回收自己启动的进程。
+- Windows、macOS、Android 使用独立的平台安全边界，不用一套危险算法强行通用。
+
+当前处于开发阶段。正式能力状态、验收证据和剩余工作以 [统一开发文档](docs/README.md) 与 [发布完成清单](docs/17_RELEASE_COMPLETION_CHECKLIST.md) 为准。

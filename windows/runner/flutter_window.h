@@ -25,6 +25,11 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  void AddTrayIcon();
+  void RemoveTrayIcon();
+  void RestoreFromTray();
+  void ShowTrayMenu();
+
   // The project to run.
   flutter::DartProject project_;
 
@@ -40,6 +45,8 @@ class FlutterWindow : public Win32Window {
   HANDLE app_process_job_ = nullptr;
   std::map<DWORD, HANDLE> child_process_jobs_;
   bool startup_surface_visible_ = true;
+  bool tray_icon_added_ = false;
+  bool exiting_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

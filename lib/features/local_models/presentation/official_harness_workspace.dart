@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_windows/webview_windows.dart';
@@ -63,10 +64,12 @@ class OfficialHarnessWorkspace extends StatefulWidget {
 
 class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
+  static Future<String>? _conversationUxScript;
   final WebviewController _webview = WebviewController();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
   StreamSubscription<dynamic>? _webMessageSubscription;
+  StreamSubscription<LoadingState>? _loadingStateSubscription;
   bool _loading = true;
   bool _starting = false;
   bool _webviewReady = false;
@@ -76,6 +79,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   final StringBuffer _pendingDiagnostics = StringBuffer();
   Timer? _diagnosticsTimer;
   final Set<String> _sessionApprovedToolIds = <String>{};
+  final Set<String> _deletingSessionIds = <String>{};
 
   @override
   void initState() {
@@ -215,8 +219,23 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         if (!mounted || !identical(_session, session)) return;
         _webviewReady = true;
         _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
+        _loadingStateSubscription = _webview.loadingState.listen(
+          (LoadingState state) {
+            if (state == LoadingState.navigationCompleted) {
+              unawaited(_installCodexConversationUx());
+            }
+          },
+        );
       }
       await _webview.loadUrl(session.url.toString());
+      await _installCodexConversationUx();
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 600)).then((_) {
+          if (mounted && identical(_session, session)) {
+            return _installCodexConversationUx();
+          }
+        }),
+      );
       unawaited(_injectExternalPrompt());
       setState(() {
         _starting = false;
@@ -274,6 +293,44 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       }
     });
   }
+
+  Future<void> _installCodexConversationUx() async {
+    try {
+      final String script = await (_conversationUxScript ??= rootBundle
+          .loadString('assets/harness/codex_conversation_ux.js'));
+      await _webview.executeScript(script);
+    } on Object {
+      // The official workspace must remain usable if a visual enhancement
+      // cannot be injected on an older WebView2 runtime.
+    }
+  }
+
+  void _scrollHarnessConversation(PointerSignalEvent signal) {
+    if (signal is! PointerScrollEvent ||
+        !_webviewReady ||
+        signal.localPosition.dx < 300 ||
+        signal.scrollDelta.dy == 0) {
+      return;
+    }
+    final double delta = signal.scrollDelta.dy;
+    unawaited(
+      _webview.executeScript('''
+        (() => {
+          const host = [...document.querySelectorAll('[data-conversation-scroll]')]
+            .find((element) => element instanceof HTMLElement &&
+              element.offsetParent !== null && element.clientHeight > 0);
+          if (!(host instanceof HTMLElement)) return false;
+          host.scrollTop += ${delta.toStringAsFixed(2)};
+          return true;
+        })()
+      '''),
+    );
+  }
+
+  Widget _buildHarnessWebview() => Listener(
+    onPointerSignal: _scrollHarnessConversation,
+    child: Webview(_webview, permissionRequested: _handleWebPermission),
+  );
 
   Future<bool> _approveVibekitsTool(HarnessToolApprovalRequest request) async {
     if (request.tool.risk == HarnessToolRisk.readOnly ||
@@ -496,7 +553,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   }
 
   Future<void> _confirmDeleteSession(String sessionId, String title) async {
-    if (!mounted || _starting || sessionId.isEmpty) return;
+    if (!mounted ||
+        _starting ||
+        sessionId.isEmpty ||
+        !_deletingSessionIds.add(sessionId)) {
+      return;
+    }
     final bool confirmed =
         await showDialog<bool>(
           context: context,
@@ -522,29 +584,32 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           ),
         ) ??
         false;
-    if (!confirmed || !mounted) return;
-    setState(() {
-      _starting = true;
-      _loading = true;
-      _restartOverlay = true;
-      _status = '正在删除会话…';
-    });
+    if (!confirmed || !mounted) {
+      _deletingSessionIds.remove(sessionId);
+      return;
+    }
+    setState(() => _status = '正在删除会话…');
     try {
+      // DSH keeps its workspace/session projection in memory. Editing only the
+      // durable files leaves an undeletable ghost row until the backend exits.
+      // Stop it first so it cannot rewrite the stale projection on shutdown.
       final HarnessSessionHandle? session = _session;
       _session = null;
-      if (session != null && session.running) await session.stop();
-      widget.onRunningChanged?.call(false);
+      if (session != null && session.running) {
+        await session.stop();
+        widget.onRunningChanged?.call(false);
+      }
       await HarnessSessionStore().deleteSession(sessionId);
-      _starting = false;
-      await _start(retries: 1, preserveWebview: true);
+      if (!mounted) return;
+      setState(() => _status = '会话已删除，正在刷新列表…');
+      await _start(preserveWebview: true);
     } on Object catch (error) {
       if (!mounted) return;
       setState(() {
-        _starting = false;
-        _loading = false;
-        _restartOverlay = false;
         _status = '删除会话失败：$error';
       });
+    } finally {
+      _deletingSessionIds.remove(sessionId);
     }
   }
 
@@ -553,6 +618,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _diagnosticsTimer?.cancel();
     _outputSubscription?.cancel();
     _webMessageSubscription?.cancel();
+    _loadingStateSubscription?.cancel();
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
     widget.onRunningChanged?.call(false);
@@ -569,7 +635,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     if (_webviewReady && _restartOverlay) {
       return Stack(
         children: <Widget>[
-          Webview(_webview, permissionRequested: _handleWebPermission),
+          _buildHarnessWebview(),
           const Positioned(
             left: 0,
             right: 0,
@@ -654,9 +720,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       },
       child: Stack(
         children: <Widget>[
-          Webview(_webview, permissionRequested: _handleWebPermission),
+          _buildHarnessWebview(),
           Positioned(
-            right: 12,
+            // Keep this VibeKits extension separate from DSH's native
+            // "Session log" action at the far-right edge.
+            right: 170,
             top: 10,
             child: StreamBuilder<HarnessWorkSnapshot>(
               stream: HarnessWorkStatusHub.changes,
@@ -677,18 +745,28 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         key: const Key('harness-remote-share'),
                         borderRadius: BorderRadius.circular(20),
                         onTap: _showRemoteShare,
-                        child: Tooltip(
-                          message: status.busy
-                              ? status.message
-                              : 'Harness 远程分享',
+                      child: Tooltip(
+                        message: status.busy
+                            ? status.message
+                            : '通过中继网页查看和交互 Harness 工作状态（VibeKits 功能）',
                           child: SizedBox(
-                            width: 36,
+                            width: 112,
                             height: 36,
-                            child: Icon(
-                              status.busy
-                                  ? Icons.sync_rounded
-                                  : Icons.screen_share_outlined,
-                              size: 17,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                Icon(
+                                  status.busy
+                                      ? Icons.sync_rounded
+                                      : Icons.screen_share_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  '远程分享',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ],
                             ),
                           ),
                         ),

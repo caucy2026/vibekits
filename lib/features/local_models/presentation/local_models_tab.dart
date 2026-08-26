@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/platform_storage_layout.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../domain/bundled_model_installer.dart';
@@ -30,37 +31,11 @@ Future<List<int>> loadBundledModelAsset(String path) async {
 
 /// 模型目录默认位置（docs/02 §7）。
 String defaultModelDirectory() {
-  if (Platform.isAndroid || Platform.isIOS) {
-    return '${Directory.systemTemp.parent.path}${Platform.pathSeparator}'
-        'files${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Models';
-  }
-  if (Platform.isMacOS) {
-    final String home = Platform.environment['HOME'] ?? '.';
-    return <String>[
-      home,
-      'Library',
-      'Application Support',
-      'Vibekits',
-      'Models',
-    ].join(Platform.pathSeparator);
-  }
-  final String base =
-      Platform.environment['LOCALAPPDATA'] ??
-      Platform.environment['APPDATA'] ??
-      '.';
-  return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Models';
+  return PlatformStorageLayout.current().modelsDirectory;
 }
 
 String defaultToolDownloadDirectory() {
-  if (Platform.isAndroid || Platform.isIOS) {
-    return '${Directory.systemTemp.path}${Platform.pathSeparator}'
-        'Vibekits${Platform.pathSeparator}downloads';
-  }
-  final String base =
-      Platform.environment['LOCALAPPDATA'] ??
-      Platform.environment['APPDATA'] ??
-      Directory.current.path;
-  return '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}downloads';
+  return PlatformStorageLayout.current().downloadsDirectory;
 }
 
 /// Harness 智能体工作台：开发智能体为主入口，OCR 为辅助能力。
@@ -736,14 +711,14 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                       smallSize: 7,
                       child: const Padding(
                         padding: EdgeInsets.only(right: 3),
-                        child: Text('Harness 智能体'),
+                        child: Text('智能体（Harness）'),
                       ),
                     ),
                   ),
                   const ButtonSegment<_ModelWorkspace>(
                     value: _ModelWorkspace.ocr,
                     icon: Icon(Icons.document_scanner_outlined, size: 17),
-                    label: Text('截图 OCR'),
+                    label: Text('截图识别（OCR）'),
                   ),
                 ],
                 selected: <_ModelWorkspace>{_workspace},

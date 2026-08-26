@@ -26,8 +26,10 @@ abstract final class ToolGroups {
   static const String time = '时间文本';
   static const String format = '格式处理';
   static const String network = '网络开发';
+  static const String virtualization = '虚拟化';
   static const String file = '文件工具';
   static const String audio = '音频调试';
+  static const String system = '系统诊断';
 }
 
 /// 一个开发工具的静态描述。
@@ -84,14 +86,27 @@ ToolSpec _plusTool({
 final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   const ToolSpec(
     id: 'programmer_calculator',
-    name: '程序员计算器',
+    name: '程序员计算器（HEX/DEC）',
     group: ToolGroups.calculate,
     description: '整数表达式、进制转换、位运算和有符号/无符号解释。',
     harnessToolIds: <String>['vibekits.calculator.programmer'],
   ),
   const ToolSpec(
+    id: 'system_resources',
+    name: '资源诊断（CPU/GPU）',
+    group: ToolGroups.system,
+    description: '采样 Windows、macOS、Android 的 CPU、内存、GPU、磁盘和 Top 进程，也可通过内置 ADB 分析 Android 设备。',
+    aiUseWhen: '用户说系统卡顿、发热、快死机、内存不足、CPU/GPU 占用高或想找异常进程时。',
+    aiAvoidWhen: '一次快照不能证明间歇性问题；不得据此直接结束进程或删除文件。',
+    aiExamples: <String>['帮我分析当前系统为什么卡', '检查这台 Android 设备的 CPU、内存和磁盘'],
+    harnessToolIds: <String>[
+      'vibekits.system.resources',
+      'vibekits.system.capability_check',
+    ],
+  ),
+  const ToolSpec(
     id: 'database_manager',
-    name: '数据库管理器',
+    name: '数据库管理（SQL）',
     group: ToolGroups.database,
     description: '拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。',
     harnessToolIds: <String>[
@@ -104,7 +119,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'remote_workspace',
-    name: 'SSH / SFTP',
+    name: '远程连接（SSH/SFTP）',
     group: ToolGroups.remote,
     description: '统一管理安全终端、双栏文件和本地/远程/SOCKS5 端口转发。',
     harnessToolIds: <String>[
@@ -127,7 +142,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'serial_port',
-    name: '串口调试',
+    name: '串口调试（Serial）',
     group: ToolGroups.remote,
     description: '打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。',
     harnessToolIds: <String>[
@@ -137,7 +152,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'adb_workspace',
-    name: 'ADB',
+    name: '安卓调试（ADB）',
     group: ToolGroups.remote,
     description: '管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。',
     offline: false,
@@ -155,15 +170,32 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'api_workspace',
-    name: 'API 调试',
+    name: '接口调试（API）',
     group: ToolGroups.network,
     description: '发送有界 HTTP 请求，查看状态、响应头、耗时和正文。',
     offline: false,
     harnessToolIds: <String>['vibekits.http.request'],
   ),
   const ToolSpec(
+    id: 'packet_capture',
+    name: '网络抓包（PCAP）',
+    group: ToolGroups.network,
+    description: '使用内置 WinDivert 实时抓取和过滤网络包，保存、读取并分析标准 PCAP 文件。',
+    offline: false,
+    aiUseWhen: '用户需要抓包、保存网络流量、读取 PCAP、定位协议或端点流量时。',
+    aiAvoidWhen: '不得抓取未获授权的第三方设备流量；实时抓包在 Windows 需要管理员权限。',
+    aiExamples: <String>['抓 30 秒 DNS 包并保存', '分析这个 PCAP 里流量最多的端点'],
+    harnessToolIds: <String>[
+      'vibekits.capture.status',
+      'vibekits.capture.start',
+      'vibekits.capture.stop',
+      'vibekits.capture.read',
+      'vibekits.capture.analyze',
+    ],
+  ),
+  const ToolSpec(
     id: 'git_workspace',
-    name: 'Git 工作区',
+    name: '版本控制（Git）',
     group: ToolGroups.sourceControl,
     description: '查看仓库、Diff 和提交；通过预览、秘密阻断及分离审批安全备份到已有远端。',
     harnessToolIds: <String>[
@@ -178,14 +210,14 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'file_diff',
-    name: '文件 Diff',
+    name: '文件比较（Diff）',
     group: ToolGroups.file,
     description: '选择任意两个文本或源码文件，自动识别编码并按行比较、复制或保存差异。',
     harnessToolIds: <String>['vibekits.file_diff'],
   ),
   const ToolSpec(
     id: 'github_diagnostics',
-    name: 'GitHub 网络诊断',
+    name: '网络诊断（GitHub）',
     group: ToolGroups.network,
     description: '分层检查 GitHub 凭据与网络，发现真实回环代理并可回滚地只修复 GitHub Git。',
     offline: false,
@@ -199,15 +231,25 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'network_virtualization',
-    name: 'Clash Verge / 虚拟机',
+    name: '网络代理（Clash Verge）',
     group: ToolGroups.network,
-    description: '使用内置 Mihomo 运行 Clash Verge 配置，并用内置 QEMU 启动轻量虚拟机。',
+    description: '使用内置 Mihomo 管理订阅、节点、测速、连接、规则、日志与系统代理。',
     harnessToolIds: <String>[
       'vibekits.runtime.inspect',
       'vibekits.proxy.start',
       'vibekits.proxy.stop',
       'vibekits.proxy.system_apply',
       'vibekits.proxy.system_restore',
+      'vibekits.runtime.status',
+    ],
+  ),
+  const ToolSpec(
+    id: 'virtual_machine',
+    name: '轻量虚拟机（QEMU）',
+    group: ToolGroups.virtualization,
+    description: '使用内置 QEMU 创建虚拟磁盘并运行 Windows、Linux 等本地虚拟机。',
+    harnessToolIds: <String>[
+      'vibekits.runtime.inspect',
       'vibekits.vm.start',
       'vibekits.vm.stop',
       'vibekits.vm.create_disk',
@@ -216,7 +258,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'audio_analyzer',
-    name: '音频调试',
+    name: '音频调试（PCM/WAV）',
     group: ToolGroups.audio,
     description:
         '打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。',
@@ -691,7 +733,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'file_hash',
-    name: '文件哈希',
+    name: '文件哈希（Hash）',
     group: ToolGroups.file,
     description: '计算文件哈希，参数为算法（md5/sha1/sha256/sha512），输入为路径。',
     paramLabel: '算法',
@@ -702,7 +744,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'code_statistics',
-    name: '代码统计',
+    name: '代码统计（LOC）',
     group: ToolGroups.file,
     description: '后台统计项目或单文件的语言、文件数、代码、注释和空白行，自动跳过依赖与构建目录。',
     paramLabel: '可选扩展名，如 dart,ts,rs',
@@ -714,7 +756,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'code_structure_search',
-    name: '代码结构搜索',
+    name: '代码结构搜索（Structure）',
     group: ToolGroups.file,
     description: '后台按声明结构查找类、类型和函数，返回文件、行号与声明；不修改源码。',
     paramLabel: '类型|符号，如 class|UserService',
@@ -726,7 +768,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'safe_benchmark',
-    name: '安全性能基准',
+    name: '安全性能基准（Benchmark）',
     group: ToolGroups.calculate,
     description: '对内置 SHA-256、JSON 解析或 Base64 做预热和多轮统计，不执行任意命令。',
     paramLabel: '操作|次数，如 json_parse|50',
@@ -738,7 +780,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   ToolSpec(
     id: 'batch_rename',
-    name: '批量重命名',
+    name: '批量重命名（Rename）',
     group: ToolGroups.file,
     description: '选择文件夹，预览并安全执行查找替换、前后缀、大小写和序号规则。',
     paramLabel: '查找|替换',
@@ -753,14 +795,14 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   ),
   const ToolSpec(
     id: 'duplicate_files',
-    name: '重复文件',
+    name: '重复文件（Duplicate）',
     group: ToolGroups.file,
     description: '按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。',
     harnessToolIds: <String>['vibekits.files.duplicate_scan'],
   ),
   const ToolSpec(
     id: 'file_search',
-    name: '文件搜索',
+    name: '文件搜索（Search）',
     group: ToolGroups.file,
     description: '按文件名或内容快速搜索，结果可定位、复制路径并继续计算哈希。',
     harnessToolIds: <String>['vibekits.files.search'],
@@ -769,15 +811,18 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
 
 const Set<String> _standaloneToolIds = <String>{
   'programmer_calculator',
+  'system_resources',
   'database_manager',
   'remote_workspace',
   'serial_port',
   'adb_workspace',
   'api_workspace',
+  'packet_capture',
   'git_workspace',
   'file_diff',
   'github_diagnostics',
   'network_virtualization',
+  'virtual_machine',
   'audio_analyzer',
   'file_hash',
   'file_search',
@@ -787,7 +832,7 @@ const Set<String> _standaloneToolIds = <String>{
 
 const ToolSpec utilityCollectionTool = ToolSpec(
   id: 'utility_collection',
-  name: '转换与检查',
+  name: '转换与检查（Convert）',
   group: ToolGroups.format,
   description: '编码、哈希、格式化、时间、正则和网络小工具集中在右侧 Tab。',
 );
@@ -813,13 +858,137 @@ final List<ToolSpec> devToolRegistry = <ToolSpec>[
   allDevToolRegistry.singleWhere(
     (ToolSpec tool) => tool.id == 'network_virtualization',
   ),
+  allDevToolRegistry.singleWhere(
+    (ToolSpec tool) => tool.id == 'virtual_machine',
+  ),
   for (final ToolSpec tool in allDevToolRegistry)
     if (_standaloneToolIds.contains(tool.id) &&
         tool.id != 'programmer_calculator' &&
-        tool.id != 'network_virtualization')
+        tool.id != 'network_virtualization' &&
+        tool.id != 'virtual_machine')
       tool,
   utilityCollectionTool,
 ];
+
+class ToolUsageContract {
+  const ToolUsageContract({
+    required this.repeatUse,
+    required this.multiTarget,
+    required this.secretHandling,
+  });
+
+  final String repeatUse;
+  final String multiTarget;
+  final String secretHandling;
+
+  Map<String, String> toJson() => <String, String>{
+    'repeatUse': repeatUse,
+    'multiTarget': multiTarget,
+    'secretHandling': secretHandling,
+  };
+}
+
+/// Real-work usage rules shared by UI acceptance and Harness planning.
+/// Every independent workspace must declare how repeat visits, multiple
+/// targets and credentials behave; adding only a button is not sufficient.
+const Map<String, ToolUsageContract> devToolUsageContracts =
+    <String, ToolUsageContract>{
+      'programmer_calculator': ToolUsageContract(
+        repeatUse: '保留当前表达式直到用户清空',
+        multiTarget: '单工作区连续计算，无目标账户',
+        secretHandling: '不处理凭据',
+      ),
+      'network_virtualization': ToolUsageContract(
+        repeatUse: '持久化订阅、活动配置和节点选择',
+        multiTarget: '多个订阅并存，可一键切换',
+        secretHandling: '订阅密钥进入系统凭据库',
+      ),
+      'virtual_machine': ToolUsageContract(
+        repeatUse: '复用已有磁盘与镜像路径',
+        multiTarget: '允许多个虚拟磁盘和运行实例',
+        secretHandling: '不保存客户机密码',
+      ),
+      'system_resources': ToolUsageContract(
+        repeatUse: '重新采样并保留本轮对比上下文',
+        multiTarget: '本机与多个 ADB 设备按序列号区分',
+        secretHandling: '不处理凭据',
+      ),
+      'database_manager': ToolUsageContract(
+        repeatUse: '保存本地最近文件和远程连接资料',
+        multiTarget: '多个数据库配置并存',
+        secretHandling: '密码只进入系统凭据库',
+      ),
+      'remote_workspace': ToolUsageContract(
+        repeatUse: '成功后自动记住主机、用户、端口和指纹',
+        multiTarget: '多设备、多终端标签并存，SSH 会话复用 SFTP',
+        secretHandling: '密码和私钥口令只进入系统凭据库',
+      ),
+      'serial_port': ToolUsageContract(
+        repeatUse: '恢复上次端口、波特率、帧格式和流控',
+        multiTarget: '按 USB 身份区分端口，重新枚举不串设备',
+        secretHandling: '不处理凭据',
+      ),
+      'adb_workspace': ToolUsageContract(
+        repeatUse: '重新发现设备并复用已授权无线目标',
+        multiTarget: '多个序列号并存，命令绑定明确设备',
+        secretHandling: '不保存 Android 解锁信息',
+      ),
+      'api_workspace': ToolUsageContract(
+        repeatUse: '保存最近 30 个方法、URL 和非敏感请求头',
+        multiTarget: '多个接口历史并存，可一键恢复',
+        secretHandling: '不保存正文、Authorization、Cookie、Token 或 API Key',
+      ),
+      'packet_capture': ToolUsageContract(
+        repeatUse: '保留 PCAP 文件，重新打开后可继续分析',
+        multiTarget: '不同网卡/过滤条件分别记录',
+        secretHandling: '抓包内容默认只留本地',
+      ),
+      'git_workspace': ToolUsageContract(
+        repeatUse: '复用最近仓库与远端',
+        multiTarget: '多个仓库互不共享分支和提交状态',
+        secretHandling: 'Git 凭据交给系统 Git 凭据管理器',
+      ),
+      'file_diff': ToolUsageContract(
+        repeatUse: '保留当前左右文件直到替换或关闭',
+        multiTarget: '每次比较显式绑定左右文件',
+        secretHandling: '文件正文不写 Harness 审计日志',
+      ),
+      'github_diagnostics': ToolUsageContract(
+        repeatUse: '复用已确认代理并支持一键回滚',
+        multiTarget: '仅作用于 GitHub Git 配置，不污染全局代理',
+        secretHandling: '诊断输出隐藏 Token',
+      ),
+      'audio_analyzer': ToolUsageContract(
+        repeatUse: '保留当前音频和分析参数直到替换',
+        multiTarget: '多个文件逐个形成独立分析结果',
+        secretHandling: '音频默认不上传',
+      ),
+      'file_hash': ToolUsageContract(
+        repeatUse: '同批文件可重复选择算法计算',
+        multiTarget: '一个列表容纳多个文件',
+        secretHandling: '只记录路径和摘要，不记录正文',
+      ),
+      'file_search': ToolUsageContract(
+        repeatUse: '保留当前目录和过滤条件直到修改',
+        multiTarget: '每次任务绑定一个明确根目录',
+        secretHandling: '搜索结果默认只留本地',
+      ),
+      'batch_rename': ToolUsageContract(
+        repeatUse: '预览规则后再执行，失败可定位到单个文件',
+        multiTarget: '一个任务可包含多个文件',
+        secretHandling: '不处理凭据',
+      ),
+      'duplicate_files': ToolUsageContract(
+        repeatUse: '扫描结果保留到重新扫描或关闭',
+        multiTarget: '一个任务可选择多个目录',
+        secretHandling: '不上传文件内容',
+      ),
+      'utility_collection': ToolUsageContract(
+        repeatUse: 'Tab 间保留输入输出直到用户清空',
+        multiTarget: '同一输入可连续交给多个转换工具',
+        secretHandling: '密码生成结果不进入普通历史',
+      ),
+    };
 
 /// 小而同构的输入/输出工具，不再占用左侧导航。
 final List<ToolSpec> utilityToolRegistry = <ToolSpec>[

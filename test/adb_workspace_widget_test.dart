@@ -68,7 +68,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.widgetWithText(ListTile, 'ADB'));
+    await tester.tap(find.widgetWithText(ListTile, '安卓调试（ADB）'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('ADB 设备'), findsOneWidget);
@@ -94,6 +94,7 @@ void main() {
     );
     String? executable;
     List<String>? arguments;
+    List<String>? commandHistory;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -108,6 +109,9 @@ void main() {
                 stdout: 'huanglong\r\n',
                 stderr: '',
               );
+            },
+            onCommandHistoryChanged: (List<String> values) async {
+              commandHistory = values;
             },
           ),
         ),
@@ -131,8 +135,55 @@ void main() {
       'getprop',
       'ro.product.model',
     ]);
+    expect(commandHistory, <String>['shell getprop ro.product.model']);
     expect(find.textContaining(r'$ adb -s 192.168.3.63:5555'), findsOneWidget);
     expect(find.textContaining('huanglong'), findsWidgets);
+  });
+
+  testWidgets('无线地址会复用且历史保存失败不影响连接', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1100, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    const AdbSnapshot snapshot = AdbSnapshot(
+      installation: AdbInstallation(
+        executable: r'D:\Android\platform-tools\adb.exe',
+        version: '1.0.41',
+      ),
+      devices: <AdbDevice>[],
+    );
+    String? connectedAddress;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdbWorkspace(
+            loadSnapshot: () async => snapshot,
+            initialRecentAddresses: const <String>['192.168.3.62:5555'],
+            connectDevice: (_, String address) async {
+              connectedAddress = address;
+              return 'connected to 192.168.3.63:5555';
+            },
+            onRecentAddressesChanged: (_) async {
+              throw StateError('settings unavailable');
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('adb-wireless-address')),
+      '192.168.3.63',
+    );
+    await tester.tap(find.byKey(const Key('adb-connect')));
+    await tester.pumpAndSettle();
+
+    expect(connectedAddress, '192.168.3.63');
+    expect(
+      find.textContaining('connected to 192.168.3.63:5555'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('adb-error')), findsNothing);
   });
 
   testWidgets('ADB 工作区展示 Harness 调用记录并支持删除和清空', (WidgetTester tester) async {

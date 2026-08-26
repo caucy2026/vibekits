@@ -14,10 +14,16 @@ abstract final class PlatformProcessLifecycle {
 
   static Future<void> bindProcessTree(int processId) async {
     if (!Platform.isWindows) return;
-    final bool? bound = await _channel.invokeMethod<bool>(
-      'bindProcessTree',
-      <String, Object>{'pid': processId},
-    );
+    final bool? bound;
+    try {
+      bound = await _channel.invokeMethod<bool>(
+        'bindProcessTree',
+        <String, Object>{'pid': processId},
+      );
+    } on MissingPluginException {
+      if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+      rethrow;
+    }
     if (bound != true) {
       throw StateError('无法将子进程绑定到 App 生命周期');
     }

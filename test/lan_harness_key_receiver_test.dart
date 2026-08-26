@@ -21,7 +21,7 @@ void main() {
     expect(pageResponse.statusCode, HttpStatus.ok);
     expect(
       await pageResponse.transform(utf8.decoder).join(),
-      contains('确认并发送'),
+      contains('确认授权并发送到 Pad'),
     );
 
     final HttpClientRequest submit = await client.postUrl(receiver.pageUri);
