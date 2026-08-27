@@ -148,6 +148,10 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     harnessToolIds: <String>[
       'vibekits.serial.list_ports',
       'vibekits.serial.transact',
+      'vibekits.serial.session_open',
+      'vibekits.serial.session_read',
+      'vibekits.serial.session_write',
+      'vibekits.serial.session_close',
     ],
   ),
   const ToolSpec(
@@ -166,6 +170,9 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
       'vibekits.adb.push_file',
       'vibekits.adb.pull_file',
       'vibekits.adb.screenshot',
+      'vibekits.adb.session_open',
+      'vibekits.adb.session_status',
+      'vibekits.adb.session_close',
     ],
   ),
   const ToolSpec(

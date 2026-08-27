@@ -24,12 +24,14 @@ import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
 import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
+import 'harness_connection_sessions.dart';
 import 'harness_work_status.dart';
 import 'network_virtualization_service.dart';
 import 'packet_capture_service.dart';
 import 'system_proxy_service.dart';
 import 'system_resource_service.dart';
 import 'programmer_calculator.dart';
+import 'project_iteration_service.dart';
 import 'platform_credential_store.dart';
 import 'remote_connection_record.dart';
 import 'remote_connection_status.dart';
@@ -232,8 +234,15 @@ class VibekitsHarnessToolBridge {
   static const String adbPushFileId = 'vibekits.adb.push_file';
   static const String adbPullFileId = 'vibekits.adb.pull_file';
   static const String adbScreenshotId = 'vibekits.adb.screenshot';
+  static const String adbSessionOpenId = 'vibekits.adb.session_open';
+  static const String adbSessionStatusId = 'vibekits.adb.session_status';
+  static const String adbSessionCloseId = 'vibekits.adb.session_close';
   static const String serialListPortsId = 'vibekits.serial.list_ports';
   static const String serialTransactId = 'vibekits.serial.transact';
+  static const String serialSessionOpenId = 'vibekits.serial.session_open';
+  static const String serialSessionReadId = 'vibekits.serial.session_read';
+  static const String serialSessionWriteId = 'vibekits.serial.session_write';
+  static const String serialSessionCloseId = 'vibekits.serial.session_close';
   static const String sqliteInspectId = 'vibekits.sqlite.inspect';
   static const String sqliteQueryId = 'vibekits.sqlite.query';
   static const String gitInspectId = 'vibekits.git.inspect';
@@ -303,6 +312,9 @@ class VibekitsHarnessToolBridge {
   static const String audioGenerateToneId = 'vibekits.audio.generate_tone';
   static const String systemResourcesId = 'vibekits.system.resources';
   static const String capabilityCheckId = 'vibekits.system.capability_check';
+  static const String projectIterationInspectId =
+      'vibekits.project.iteration_inspect';
+  static const String projectBuildId = 'vibekits.project.build';
   static const String captureStatusId = 'vibekits.capture.status';
   static const String captureStartId = 'vibekits.capture.start';
   static const String captureStopId = 'vibekits.capture.stop';
@@ -331,6 +343,10 @@ class VibekitsHarnessToolBridge {
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
   final PacketCaptureService _packetCaptureService =
       PacketCaptureService.instance;
+  final ProjectIterationService _projectIterationService =
+      ProjectIterationService();
+  late final HarnessConnectionSessions _connectionSessions =
+      HarnessConnectionSessions(checkAdb: _checkAdbHealth);
 
   String? get _mihomoRuntimeExecutable => _runtimeToolRoot == null
       ? null
@@ -374,6 +390,32 @@ class VibekitsHarnessToolBridge {
       name: '检查智能体工具链',
       description: '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
       properties: const <String, Object?>{},
+    ),
+    projectIterationInspectId: _definition(
+      id: projectIterationInspectId,
+      name: '检查 APP 自迭代工作区',
+      description:
+          '检查 Vibekits 源码、ToolSpec 单一注册表和 Harness 桥接位置，并返回新增工具必须遵循的自动发现流程。',
+      properties: <String, Object?>{
+        'workspace': _string('Vibekits Flutter 工作区绝对路径'),
+      },
+      required: <String>['workspace'],
+    ),
+    projectBuildId: _definition(
+      id: projectBuildId,
+      name: '验证并编译 Vibekits APP',
+      description: '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'workspace': _string('Vibekits Flutter 工作区绝对路径'),
+        'target': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['windows', 'android', 'macos'],
+        },
+        'flutterExecutable': _string('可选；Flutter 可执行文件绝对路径'),
+        'runTests': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['workspace', 'target'],
     ),
     captureStatusId: _definition(
       id: captureStatusId,
@@ -620,6 +662,36 @@ class VibekitsHarnessToolBridge {
       },
       required: <String>['serial', 'localPath'],
     ),
+    adbSessionOpenId: _definition(
+      id: adbSessionOpenId,
+      name: '保持 ADB 长连接',
+      description: '为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'serial': _string('设备序列号或 IP:端口'),
+        'heartbeatSeconds': <String, Object?>{
+          'type': 'integer',
+          'minimum': 3,
+          'maximum': 60,
+        },
+      },
+      required: <String>['serial'],
+    ),
+    adbSessionStatusId: _definition(
+      id: adbSessionStatusId,
+      name: '读取 ADB 长连接状态',
+      description: '返回真实心跳次数、最后检查时间和设备连接状态。',
+      properties: <String, Object?>{'sessionId': _string('ADB 长连接 ID')},
+      required: <String>['sessionId'],
+    ),
+    adbSessionCloseId: _definition(
+      id: adbSessionCloseId,
+      name: '关闭 ADB 长连接',
+      description: '停止指定设备的后台心跳；不杀死其他工具正在使用的 ADB server。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'sessionId': _string('ADB 长连接 ID')},
+      required: <String>['sessionId'],
+    ),
     serialListPortsId: _definition(
       id: serialListPortsId,
       name: '列出串口',
@@ -650,6 +722,87 @@ class VibekitsHarnessToolBridge {
         },
       },
       required: <String>['port'],
+    ),
+    serialSessionOpenId: _definition(
+      id: serialSessionOpenId,
+      name: '打开串口长连接',
+      description: '在独立 Isolate 中持续持有串口并缓存实时接收数据，直到显式关闭或 APP 退出。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'port': _string('串口名，例如 COM33'),
+        'baudRate': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 12000000,
+        },
+        'dataBits': <String, Object?>{
+          'type': 'integer',
+          'enum': <int>[5, 6, 7, 8],
+        },
+        'stopBits': <String, Object?>{
+          'type': 'integer',
+          'enum': <int>[1, 2],
+        },
+        'parity': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['none', 'even', 'odd', 'mark', 'space'],
+        },
+        'flowControl': <String, Object?>{
+          'type': 'string',
+          'enum': <String>[
+            'none',
+            'dtrDsr',
+            'rtsCts',
+            'xonXoff',
+            'dtrDsrRtsCts',
+            'dtrDsrXonXoff',
+            'rtsCtsXonXoff',
+            'all',
+          ],
+        },
+      },
+      required: <String>['port'],
+    ),
+    serialSessionReadId: _definition(
+      id: serialSessionReadId,
+      name: '读取串口长连接',
+      description: '读取长连接已缓存的实时数据，可选择文本或 HEX；默认读取后清空缓存。',
+      properties: <String, Object?>{
+        'sessionId': _string('串口长连接 ID'),
+        'mode': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['text', 'hex'],
+        },
+        'clear': <String, Object?>{'type': 'boolean'},
+      },
+      required: <String>['sessionId'],
+    ),
+    serialSessionWriteId: _definition(
+      id: serialSessionWriteId,
+      name: '写入串口长连接',
+      description: '通过已打开的串口句柄发送文本或 HEX，不重新打开端口。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'sessionId': _string('串口长连接 ID'),
+        'data': _string('待发送文本或 HEX'),
+        'mode': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['text', 'hex'],
+        },
+        'lineEnding': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['none', 'lf', 'crlf', 'cr'],
+        },
+      },
+      required: <String>['sessionId', 'data'],
+    ),
+    serialSessionCloseId: _definition(
+      id: serialSessionCloseId,
+      name: '关闭串口长连接',
+      description: '释放指定串口句柄和后台 Isolate。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'sessionId': _string('串口长连接 ID')},
+      required: <String>['sessionId'],
     ),
     sqliteInspectId: _definition(
       id: sqliteInspectId,
@@ -1357,6 +1510,7 @@ class VibekitsHarnessToolBridge {
       'vibekits.serial',
       'vibekits.git.',
       'vibekits.github',
+      'vibekits.project.',
     };
     return prefixes.any(toolId.startsWith);
   }
@@ -1438,8 +1592,15 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbPushFileId) return _pushAdbFile;
     if (toolId == adbPullFileId) return _pullAdbFile;
     if (toolId == adbScreenshotId) return _captureAdbScreenshot;
+    if (toolId == adbSessionOpenId) return _openAdbSession;
+    if (toolId == adbSessionStatusId) return _adbSessionStatus;
+    if (toolId == adbSessionCloseId) return _closeAdbSession;
     if (toolId == serialListPortsId) return _listSerialPorts;
     if (toolId == serialTransactId) return _serialTransact;
+    if (toolId == serialSessionOpenId) return _openSerialSession;
+    if (toolId == serialSessionReadId) return _readSerialSession;
+    if (toolId == serialSessionWriteId) return _writeSerialSession;
+    if (toolId == serialSessionCloseId) return _closeSerialSession;
     if (toolId == sqliteInspectId) return _inspectSqlite;
     if (toolId == sqliteQueryId) return _querySqlite;
     if (toolId == gitInspectId) return _inspectGit;
@@ -1497,6 +1658,8 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == systemResourcesId) return _inspectSystemResources;
     if (toolId == capabilityCheckId) return _checkHarnessCapabilities;
+    if (toolId == projectIterationInspectId) return _inspectProjectIteration;
+    if (toolId == projectBuildId) return _buildProjectIteration;
     if (toolId == captureStatusId) return _captureStatus;
     if (toolId == captureStartId) return _captureStart;
     if (toolId == captureStopId) return _captureStop;
@@ -1781,6 +1944,21 @@ class VibekitsHarnessToolBridge {
       'scope': '注册、公开状态与执行器接线；真实设备、网络、凭据和硬件另按环境门禁验收',
     };
   }
+
+  Future<Map<String, Object?>> _inspectProjectIteration(
+    Map<String, Object?> arguments,
+  ) => _projectIterationService.inspect(
+    (arguments['workspace'] ?? '').toString(),
+  );
+
+  Future<Map<String, Object?>> _buildProjectIteration(
+    Map<String, Object?> arguments,
+  ) => _projectIterationService.build(
+    workspace: (arguments['workspace'] ?? '').toString(),
+    target: (arguments['target'] ?? '').toString(),
+    flutterExecutable: (arguments['flutterExecutable'] ?? '').toString(),
+    runTests: arguments['runTests'] != false,
+  );
 
   Future<Map<String, Object?>> _runtimeStatus(
     Map<String, Object?> arguments,
@@ -2237,6 +2415,98 @@ class VibekitsHarnessToolBridge {
       await subscription.cancel();
     }
   }
+
+  Future<Map<String, Object?>> _openSerialSession(
+    Map<String, Object?> arguments,
+  ) => _connectionSessions.openSerial(
+    SerialConnectionSettings(
+      portName: (arguments['port'] ?? '').toString(),
+      baudRate: _integer(arguments['baudRate'], 115200),
+      dataBits: _integer(arguments['dataBits'], 8),
+      stopBits: _integer(arguments['stopBits'], 1),
+      parity: _enumValue(
+        SerialParity.values,
+        arguments['parity'],
+        SerialParity.none,
+      ),
+      flowControl: _enumValue(
+        SerialFlowControl.values,
+        arguments['flowControl'],
+        SerialFlowControl.none,
+      ),
+    ),
+  );
+
+  Future<Map<String, Object?>> _readSerialSession(
+    Map<String, Object?> arguments,
+  ) async => _connectionSessions.readSerial(
+    (arguments['sessionId'] ?? '').toString(),
+    clear: arguments['clear'] != false,
+    mode: arguments['mode'] == 'hex' ? SerialDataMode.hex : SerialDataMode.text,
+  );
+
+  Future<Map<String, Object?>> _writeSerialSession(
+    Map<String, Object?> arguments,
+  ) => _connectionSessions.writeSerial(
+    (arguments['sessionId'] ?? '').toString(),
+    (arguments['data'] ?? '').toString(),
+    mode: arguments['mode'] == 'hex' ? SerialDataMode.hex : SerialDataMode.text,
+    lineEnding: _enumValue(
+      SerialLineEnding.values,
+      arguments['lineEnding'],
+      SerialLineEnding.none,
+    ),
+  );
+
+  Future<Map<String, Object?>> _closeSerialSession(
+    Map<String, Object?> arguments,
+  ) => _connectionSessions.closeSerial(
+    (arguments['sessionId'] ?? '').toString(),
+  );
+
+  Future<AdbCommandResult> _checkAdbHealth(String serial) {
+    final String executable =
+        _adbExecutable ?? AdbService.bundledExecutablePath();
+    if (_adbRunner != null) {
+      return _adbRunner(executable, <String>['-s', serial, 'get-state']);
+    }
+    return AdbService.runCommand(
+      executable,
+      <String>['-s', serial, 'get-state'],
+      timeout: const Duration(seconds: 5),
+      audit: AdbCommandAudit(
+        toolId: adbSessionStatusId,
+        toolName: 'ADB 长连接心跳',
+        target: serial,
+        recorder: _activityRecorder,
+      ),
+    );
+  }
+
+  Future<Map<String, Object?>> _openAdbSession(
+    Map<String, Object?> arguments,
+  ) => _connectionSessions.openAdb(
+    (arguments['serial'] ?? '').toString(),
+    heartbeatSeconds: _integer(arguments['heartbeatSeconds'], 10),
+  );
+
+  Future<Map<String, Object?>> _adbSessionStatus(
+    Map<String, Object?> arguments,
+  ) =>
+      _connectionSessions.refreshAdb((arguments['sessionId'] ?? '').toString());
+
+  Future<Map<String, Object?>> _closeAdbSession(
+    Map<String, Object?> arguments,
+  ) async =>
+      _connectionSessions.closeAdb((arguments['sessionId'] ?? '').toString());
+
+  Future<void> dispose() => _connectionSessions.dispose();
+
+  static T _enumValue<T extends Enum>(
+    List<T> values,
+    Object? raw,
+    T fallback,
+  ) => values.where((T value) => value.name == '$raw').firstOrNull ?? fallback;
 
   Future<Map<String, Object?>> _inspectSqlite(
     Map<String, Object?> arguments,
@@ -3224,10 +3494,22 @@ class VibekitsHarnessToolBridge {
       adbPushFileId,
       adbPullFileId,
       adbScreenshotId,
+      adbSessionOpenId,
     }.contains(toolId)) {
       return (arguments['serial'] ?? '').toString();
     }
-    if (toolId == serialTransactId) return (arguments['port'] ?? '').toString();
+    if (<String>{serialTransactId, serialSessionOpenId}.contains(toolId)) {
+      return (arguments['port'] ?? '').toString();
+    }
+    if (<String>{
+      adbSessionStatusId,
+      adbSessionCloseId,
+      serialSessionReadId,
+      serialSessionWriteId,
+      serialSessionCloseId,
+    }.contains(toolId)) {
+      return (arguments['sessionId'] ?? '').toString();
+    }
     if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
     if (toolId == remoteOpenInteractiveId) {
       return (arguments['host'] ?? '').toString();

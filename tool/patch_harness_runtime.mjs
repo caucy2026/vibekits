@@ -37,6 +37,17 @@ async function replaceOneOf(relativePath, candidates, after) {
   await writeFile(filename, source.replace(before, after), 'utf8');
 }
 
+async function replaceRegexOnce(relativePath, pattern, after, marker = after) {
+  const filename = join(runtime, relativePath);
+  const source = await readFile(filename, 'utf8');
+  if (source.includes(marker)) return;
+  const matches = [...source.matchAll(pattern)];
+  if (matches.length !== 1) {
+    throw new Error(`Harness regex patch target count ${matches.length}: ${relativePath}`);
+  }
+  await writeFile(filename, source.replace(pattern, after), 'utf8');
+}
+
 await replaceOneOf(
   'node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js',
   [`\t\t\tconst onBlur = (event) => {
@@ -217,5 +228,44 @@ for (const [before, after] of [
   }
   await writeFile(filename, source.split(before).join(after), 'utf8');
 }
+
+// Official DSH heals its profile fallback by walking the complete transitive
+// dependency graph and checking one junction for every package. The bundled
+// Windows runtime contains tens of thousands of files, so Defender and a busy
+// system drive can turn that synchronous walk into a 30-50 second cold boot.
+// A single junction to the installation-owned node_modules directory provides
+// the exact same Node parent-directory fallback and is also correct on the
+// first launch. Profile-local plugins still take precedence in their own
+// node_modules directory.
+const appBootFile =
+  'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js';
+await replaceOnce(
+  appBootFile,
+  'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync',
+  'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync',
+  'readlinkSync, rmSync, symlinkSync',
+);
+await replaceRegexOnce(
+  appBootFile,
+  /function healProfilesModuleFallback\(installAnchor, home = resolveDshHome\(\)\) \{[\s\S]*?\n\}\n(?=\/\*\*\n\* Read a profile's manifest\.)/g,
+  `function healProfilesModuleFallback(installAnchor, home = resolveDshHome()) {
+	const modulesDir = join(join(home, PROFILES_DIR), "node_modules");
+	const runtimeModules = dirname(dirname(dirname(installAnchor)));
+	let stat;
+	try {
+		stat = lstatSync(modulesDir);
+	} catch {
+		stat = void 0;
+	}
+	if (stat?.isSymbolicLink() && readlinkSync(modulesDir) === runtimeModules) return;
+	if (stat !== void 0) {
+		if (stat.isSymbolicLink()) unlinkSync(modulesDir);
+		else rmSync(modulesDir, { recursive: true, force: true });
+	}
+	mkdirSync(dirname(modulesDir), { recursive: true });
+	symlinkSync(runtimeModules, modulesDir, "junction");
+}`,
+  'const runtimeModules = dirname(dirname(dirname(installAnchor)));',
+);
 
 console.log(`Patched Harness Web runtime: ${runtime}`);

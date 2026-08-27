@@ -126,6 +126,13 @@ abstract final class SevenZip {
         size = int.tryParse(trimmed.substring('Size = '.length)) ?? 0;
       } else if (trimmed.startsWith('Folder = ')) {
         isDir = trimmed.substring('Folder = '.length) == '+';
+      } else if (trimmed.startsWith('Attributes = ')) {
+        // Some 7-Zip builds omit `Folder = +` but still expose the standard
+        // DOS directory attribute. Treating that row as a file makes an
+        // extract-all plan pass the directory name as an explicit selection,
+        // which prevents its children from being extracted.
+        final String attributes = trimmed.substring('Attributes = '.length);
+        if (attributes.startsWith('D')) isDir = true;
       }
     }
     flush();

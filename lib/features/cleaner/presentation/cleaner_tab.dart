@@ -319,6 +319,7 @@ class _CleanerTabState extends State<CleanerTab> {
           PlatformStorageLayout.current().harnessDebugDirectory;
       final List<CleanupScanTarget> targets =
           await CleanupBackgroundRunner.discoverTargets(
+            appCacheDirectory: PlatformStorageLayout.current().cacheDirectory,
             harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
                 ? defaultDebugDirectory
                 : widget.harnessDebugDirectory.trim(),
@@ -856,6 +857,7 @@ class _CleanerTabState extends State<CleanerTab> {
               plan,
               cancellationToken: token,
               permanentFallback: permanentFallback,
+              appCacheDirectory: PlatformStorageLayout.current().cacheDirectory,
               onProgress: (CleanupDeleteProgress progress) {
                 if (mounted) setState(() => _deleteProgress = progress);
               },
@@ -3002,12 +3004,26 @@ class _CleanerTabState extends State<CleanerTab> {
     }
     if (_candidates.isEmpty) {
       return Center(
-        child: Text(
-          Platform.isAndroid || Platform.isIOS
-              ? '点击“扫描本应用缓存”检查 Vibekits 私有临时文件\n扫描只读；确认清理前不会删除任何内容'
-              : '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: context.vibe.muted),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              Platform.isAndroid || Platform.isIOS
+                  ? '检查 Vibekits 私有临时文件\n扫描只读；确认清理前不会删除任何内容'
+                  : '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: context.vibe.muted),
+            ),
+            if (Platform.isAndroid || Platform.isIOS) ...<Widget>[
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                key: const Key('mobile-cleaner-empty-scan'),
+                onPressed: _enabledTargetIds.isEmpty ? null : _scan,
+                icon: const Icon(Icons.search),
+                label: const Text('扫描本应用缓存'),
+              ),
+            ],
+          ],
         ),
       );
     }
@@ -3090,6 +3106,20 @@ class _CleanerTabState extends State<CleanerTab> {
                 : '“潜力”不是实际释放；顶部 10G 验收只按清理后的磁盘增量计算',
             style: TextStyle(fontSize: 11, color: context.vibe.muted),
           ),
+          if (Platform.isAndroid || Platform.isIOS) ...<Widget>[
+            OutlinedButton.icon(
+              key: const Key('mobile-cleaner-results-scan'),
+              onPressed: _scan,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('重新扫描'),
+            ),
+            FilledButton.icon(
+              key: const Key('mobile-cleaner-results-delete'),
+              onPressed: _selected.isEmpty ? null : _clean,
+              icon: const Icon(Icons.cleaning_services, size: 18),
+              label: Text('清理 ${_selected.length} 项'),
+            ),
+          ],
         ],
       ),
     );

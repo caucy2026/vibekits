@@ -60,6 +60,7 @@ abstract final class CleanupTargetDiscovery {
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
     int? windowsBuild,
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
     CleanupPlatform? platform,
   }) {
@@ -78,6 +79,7 @@ abstract final class CleanupTargetDiscovery {
       _addAndroidTargets(
         targets,
         env,
+        appCacheDirectory: appCacheDirectory,
         harnessDebugDirectory: harnessDebugDirectory,
       );
       return _deduplicate(targets);
@@ -441,10 +443,12 @@ abstract final class CleanupTargetDiscovery {
   static void _addAndroidTargets(
     List<CleanupScanTarget> targets,
     Map<String, String> environment, {
+    required String appCacheDirectory,
     required String harnessDebugDirectory,
   }) {
     final List<String> ownedRoots = CleanupPlatformPolicy.androidOwnedRoots(
       environment: environment,
+      appCacheDirectory: appCacheDirectory,
       harnessDebugDirectory: harnessDebugDirectory,
     );
     if (ownedRoots.isNotEmpty) {
@@ -466,6 +470,7 @@ abstract final class CleanupTargetDiscovery {
         CleanupPlatformPolicy.isAndroidOwnedPath(
           harnessDebugDirectory,
           environment: environment,
+          appCacheDirectory: appCacheDirectory,
           harnessDebugDirectory: harnessDebugDirectory,
         )) {
       _addHarnessDebugTargets(targets, harnessDebugDirectory);

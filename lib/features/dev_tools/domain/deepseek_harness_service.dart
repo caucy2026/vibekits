@@ -214,7 +214,7 @@ abstract final class DeepSeekHarnessService {
 
 产品一级页面：智能体（Harness）、解压缩、系统清理、文档阅读、开发工具。业务模块：计算调试、系统诊断、数据库、远程连接、网络开发、版本控制、文件工具、音频调试、编码转换、加密生成、时间文本、格式处理和虚拟化。
 
-常用链路：串口 `serial.list_ports → serial.transact`；ADB `adb.list_devices/connect → adb.*`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
+常用链路：串口短任务 `serial.list_ports → serial.transact`，持续调试 `serial.session_open → session_read/write → session_close`；ADB `adb.list_devices/connect → adb.*`，长连接用 `adb.session_open → session_status → session_close`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。修改 VibeKits 自身前先 `project.iteration_inspect`，完成后调用 `project.build` 执行分析、接口测试和 Release 构建门禁；构建产物不得自动覆盖正在运行的 APP，安装升级必须由用户确认。
 
 完整目录位于项目 `docs/37_HARNESS_CAPABILITY_CATALOG.md`；运行时以本轮 `capability_check` 和 MCP Schema 为准。
 <!-- VIBEKITS_CAPABILITIES_END -->''';
@@ -652,6 +652,29 @@ abstract final class DeepSeekHarnessService {
       }
     }
     return HarnessCredentialMigration.migrated;
+  }
+
+  /// Fast local check used before touching the platform credential vault.
+  ///
+  /// Once the legacy key has been migrated, the official DSH credentials file
+  /// is authoritative. Windows Credential Manager can take seconds to answer
+  /// on a full or busy system drive, so reading it again on every workspace
+  /// launch adds latency without changing the result.
+  static Future<bool> hasOfficialDeepSeekCredential() async {
+    final File credentials = File(
+      '${officialHarnessHomeDirectory().path}'
+      '${Platform.pathSeparator}.credentials.yaml',
+    );
+    if (!await credentials.exists()) return false;
+    try {
+      final String value = await credentials.readAsString();
+      return RegExp(
+        r'^DEEPSEEK_API_KEY\s*:\s*\S+',
+        multiLine: true,
+      ).hasMatch(value);
+    } on FileSystemException {
+      return false;
+    }
   }
 
   static Directory officialHarnessHomeDirectory() {

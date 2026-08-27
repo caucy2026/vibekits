@@ -20,6 +20,7 @@ abstract final class CleanupBackgroundRunner {
   static const int maxScanWorkers = 2;
 
   static Future<List<CleanupScanTarget>> discoverTargets({
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
     String bundledRuleDatabase = '',
     CleanupPlatform? platform,
@@ -28,6 +29,7 @@ abstract final class CleanupBackgroundRunner {
     final List<CleanupScanTarget> targets = List<CleanupScanTarget>.of(
       CleanupTargetDiscovery.discover(
         harnessDebugDirectory: harnessDebugDirectory,
+        appCacheDirectory: appCacheDirectory,
         platform: targetPlatform,
       ),
     );
@@ -155,6 +157,7 @@ abstract final class CleanupBackgroundRunner {
     required CleanupCancellationToken cancellationToken,
     required bool permanentFallback,
     required void Function(CleanupDeleteProgress progress) onProgress,
+    String appCacheDirectory = '',
   }) {
     return _runWorker<CleanupDeleteResult>(
       cancellationToken: cancellationToken,
@@ -167,6 +170,7 @@ abstract final class CleanupBackgroundRunner {
               resultPort: resultPort,
               candidates: candidates,
               permanentFallback: permanentFallback,
+              appCacheDirectory: appCacheDirectory,
             ),
             debugName: 'vibekits-cleanup-delete',
             onError: errorPort,
@@ -285,6 +289,7 @@ abstract final class CleanupBackgroundRunner {
         request.candidates,
         cancellationToken: token,
         permanentFallback: request.permanentFallback,
+        appCacheDirectory: request.appCacheDirectory,
         onProgress: (CleanupDeleteProgress progress) => request.resultPort.send(
           _WorkerMessage(_WorkerMessageKind.progress, progress),
         ),
@@ -324,9 +329,11 @@ class _DeleteRequest {
     required this.resultPort,
     required this.candidates,
     required this.permanentFallback,
+    required this.appCacheDirectory,
   });
 
   final SendPort resultPort;
   final List<CleanupCandidate> candidates;
   final bool permanentFallback;
+  final String appCacheDirectory;
 }

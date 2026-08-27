@@ -262,6 +262,7 @@ abstract final class CleanupDeleter {
     bool permanentFallback = false,
     CleanupPlatform? platform,
     Map<String, String>? environment,
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
   }) async {
     final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
@@ -278,6 +279,7 @@ abstract final class CleanupDeleter {
                 targetPlatform,
                 candidate.path,
                 environment: environment,
+                appCacheDirectory: appCacheDirectory,
                 harnessDebugDirectory: harnessDebugDirectory,
               ),
         )) {
@@ -312,6 +314,7 @@ abstract final class CleanupDeleter {
             targetPlatform,
             candidate.path,
             environment: environment,
+            appCacheDirectory: appCacheDirectory,
             harnessDebugDirectory: harnessDebugDirectory,
           )) {
         items.add(

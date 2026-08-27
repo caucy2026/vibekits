@@ -190,6 +190,34 @@ void main() {
     expect(result.skipped, 1);
   });
 
+  test('Android 使用平台提供的真实应用缓存路径，不依赖桌面环境变量', () {
+    final Directory sandbox = Directory.systemTemp.createTempSync(
+      'vk_android_cache_path_',
+    );
+    addTearDown(() => sandbox.deleteSync(recursive: true));
+    final Directory cache = Directory(
+      '${sandbox.path}${Platform.pathSeparator}app-cache',
+    )..createSync();
+
+    final CleanupScanTarget target = CleanupTargetDiscovery.discover(
+      environment: const <String, String>{},
+      platform: CleanupPlatform.android,
+      appCacheDirectory: cache.path,
+    ).single;
+
+    expect(target.id, 'android-vibekits-app-cache');
+    expect(target.path, cache.absolute.path);
+    expect(
+      CleanupPlatformPolicy.allowsDeletion(
+        CleanupPlatform.android,
+        '${cache.path}${Platform.pathSeparator}stale.tmp',
+        environment: const <String, String>{},
+        appCacheDirectory: cache.path,
+      ),
+      isTrue,
+    );
+  });
+
   test('Android 决策层把共享存储候选标记为受保护', () {
     const CleanupCandidate candidate = CleanupCandidate(
       path: '/storage/emulated/0/Download/project.zip',

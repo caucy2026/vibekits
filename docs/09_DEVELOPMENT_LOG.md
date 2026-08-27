@@ -1026,3 +1026,13 @@
 - 新增 `capture.status/start/stop/read/analyze` 5 个 Harness 接口，UI 与 Harness 共用任务状态并沿用可删除的工具调用日志。
 - 本机管理员模式真抓 5 包/1,911 B，真实文件再由 Harness 读取；专项 3/3、开发工具 UI 11/11、静态检查 0 问题、Windows Release 构建通过。
 - 普通权限驱动打开失败会在 4 秒内明确提示管理员运行，不再进入假启动或无限等待。
+
+# 2026-08-27 · v1.9.0-dev.123 Android 清理、长连接、自迭代与 DSH 首启
+
+- Android 清理显式使用平台返回的应用私有缓存路径，发现和删除采用同一边界；移动端空结果页增加居中扫描入口，扫描后可直接重新扫描和清理选中项，62 真机扫描完成且 APP 保持存活。
+- ADB 与串口增加真实会话型接口：`session_open/status/read/write/close` 跨多次 Harness 调用保持同一连接，ADB 心跳执行真实 `get-state`，关闭桥接或 APP 时统一释放。
+- Harness 增加 `project.iteration_inspect/project.build`：固定顺序执行工作区检查、Analyze、能力/桥接测试和目标 Release 构建；只生成候选产物，不自动覆盖、安装或发布自身。
+- 自动能力目录更新为 161 个定义接口、139 个可执行接口、0 个公开 handler 缺失；`AGENTS.md` 的常用链路同步长连接和自迭代协议。
+- 新增标准归档语料（ASCII、中文路径、空文件、0～255 二进制），ZIP/TAR/TAR.GZ/真实 7z/ZIP/RAR5 全部通过；修复部分 7-Zip 输出仅以 `Attributes = D` 标记目录时的提取计划错误。
+- DSH 首启根因定位为官方 profile fallback 每次同步遍历约 3.2 万文件并逐包修复链接；改为单个只读 `node_modules` Junction，现场从 47.852 秒降至 5.094 秒，不再出现 30～50 秒假死。系统盘 0 B 可用也被确认会放大该问题，已仅清理 1.22 GiB Flutter/Pub 临时构建缓存。
+- 定向回归 42/42 通过，Flutter Analyze 仅保留 1 条既有风格提示，Windows Release 构建通过。Android Debug 夹具构建因 Gradle 长时间无输出主动终止，不冒充真机删除实证。

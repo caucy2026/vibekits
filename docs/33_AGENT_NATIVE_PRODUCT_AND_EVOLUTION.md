@@ -65,3 +65,9 @@ Vibekits 客户端禁止直接安装 npm `latest`。Harness 处于开发预览�
 - 自动更新不得携带 API Key、会话、工作区或普通日志。
 - 无网络时继续使用最后验证通过的内置运行时，其他 APP 功能不受更新检查影响。
 - 更新失败必须原子回滚，不能留下半套 Node/npm 目录或后台进程。
+
+## 7. APP 自身迭代接口
+
+Harness 通过 `vibekits.project.iteration_inspect` 读取工作区、版本、Git 状态和目标平台，再通过 `vibekits.project.build` 执行固定参数的 Analyze、能力目录/桥接合同测试和目标平台 Release 构建。新增工具仍以 `ToolSpec + VibekitsHarnessToolBridge handler` 为唯一注册源，能力目录和 MCP `tools/list` 自动同步，不维护第二份手工接口表。
+
+自迭代只允许修改用户明确选择的工作区并生成候选产物。它不得自行覆盖正在运行的 APP、安装 APK、签名、推送远端或发布渠道；这些操作必须经过独立门禁与用户确认。构建失败返回具体阶段、退出码和有界输出，不能把“代码已生成”报告为升级成功。

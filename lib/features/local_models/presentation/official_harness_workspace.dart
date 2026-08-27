@@ -139,11 +139,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     );
     final Stopwatch startup = Stopwatch()..start();
     try {
-      final String key =
-          await (widget.credentialReader ?? PlatformCredentialStore.read)(
-            _credentialKey,
-          ) ??
-          '';
+      final bool officialCredentialReady =
+          await DeepSeekHarnessService.hasOfficialDeepSeekCredential();
+      final String key = officialCredentialReady
+          ? ''
+          : await (widget.credentialReader ?? PlatformCredentialStore.read)(
+                  _credentialKey,
+                ) ??
+                '';
       final HarnessCredentialMigration migration =
           await DeepSeekHarnessService.migrateLegacyCredentialToOfficialStore(
             key,
@@ -219,13 +222,13 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         if (!mounted || !identical(_session, session)) return;
         _webviewReady = true;
         _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
-        _loadingStateSubscription = _webview.loadingState.listen(
-          (LoadingState state) {
-            if (state == LoadingState.navigationCompleted) {
-              unawaited(_installCodexConversationUx());
-            }
-          },
-        );
+        _loadingStateSubscription = _webview.loadingState.listen((
+          LoadingState state,
+        ) {
+          if (state == LoadingState.navigationCompleted) {
+            unawaited(_installCodexConversationUx());
+          }
+        });
       }
       await _webview.loadUrl(session.url.toString());
       await _installCodexConversationUx();
@@ -745,10 +748,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         key: const Key('harness-remote-share'),
                         borderRadius: BorderRadius.circular(20),
                         onTap: _showRemoteShare,
-                      child: Tooltip(
-                        message: status.busy
-                            ? status.message
-                            : '通过中继网页查看和交互 Harness 工作状态（VibeKits 功能）',
+                        child: Tooltip(
+                          message: status.busy
+                              ? status.message
+                              : '通过中继网页查看和交互 Harness 工作状态（VibeKits 功能）',
                           child: SizedBox(
                             width: 112,
                             height: 36,

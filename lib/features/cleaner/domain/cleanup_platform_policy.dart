@@ -123,11 +123,14 @@ abstract final class CleanupPlatformPolicy {
   /// Android 只能永久删除本应用的私有缓存/临时目录，不能扫描其他应用。
   static List<String> androidOwnedRoots({
     Map<String, String>? environment,
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
     final List<String> roots = <String>[
-      env['VIBEKITS_APP_CACHE'] ?? Directory.systemTemp.path,
+      appCacheDirectory.trim().isNotEmpty
+          ? appCacheDirectory
+          : env['VIBEKITS_APP_CACHE'] ?? Directory.systemTemp.path,
       env['VIBEKITS_APP_TEMP'] ?? '',
       harnessDebugDirectory,
     ];
@@ -141,9 +144,11 @@ abstract final class CleanupPlatformPolicy {
   static bool isAndroidOwnedPath(
     String path, {
     Map<String, String>? environment,
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
   }) => androidOwnedRoots(
     environment: environment,
+    appCacheDirectory: appCacheDirectory,
     harnessDebugDirectory: harnessDebugDirectory,
   ).any((String root) => containsPath(root, path, windows: false));
 
@@ -152,6 +157,7 @@ abstract final class CleanupPlatformPolicy {
     CleanupPlatform platform,
     String path, {
     Map<String, String>? environment,
+    String appCacheDirectory = '',
     String harnessDebugDirectory = '',
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
@@ -192,6 +198,7 @@ abstract final class CleanupPlatformPolicy {
         return isAndroidOwnedPath(
           path,
           environment: env,
+          appCacheDirectory: appCacheDirectory,
           harnessDebugDirectory: harnessDebugDirectory,
         );
       case CleanupPlatform.linux:

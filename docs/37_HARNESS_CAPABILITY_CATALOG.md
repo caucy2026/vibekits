@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：152。
-- Harness 当前可执行接口：130。
+- Harness 定义接口：161。
+- Harness 当前可执行接口：139。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -28,7 +28,7 @@
 | 模块 | 可执行接口数 |
 | --- | ---: |
 | 文件工具 | 7 |
-| 系统诊断 | 5 |
+| 系统诊断 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
 | 计算调试 | 9 |
@@ -37,7 +37,7 @@
 | 时间文本 | 10 |
 | 智能开发 | 1 |
 | 音频调试 | 6 |
-| 远程连接 | 20 |
+| 远程连接 | 27 |
 | 数据库 | 5 |
 | 版本控制 | 7 |
 | 虚拟化 | 3 |
@@ -54,12 +54,14 @@
 | `vibekits.files.duplicate_scan` | 扫描重复文件 | `readOnly` | `root`*, `recursive`, `minimumSize` |
 | `vibekits.files.search` | 搜索文件 | `readOnly` | `root`*, `query`*, `mode`, `maxResults` |
 
-## 系统诊断（5）
+## 系统诊断（7）
 
 | 工具 ID | 名称 | 风险 | 参数 |
 | --- | --- | --- | --- |
 | `vibekits.audio_analyzer` | 音频调试（PCM/WAV） | `readOnly` | `input`*, `params` |
 | `vibekits.cleaner.analyze_drive` | 分析磁盘占用 | `readOnly` | `root`* |
+| `vibekits.project.build` | 验证并编译 Vibekits APP | `writesData` | `workspace`*, `target`*, `flutterExecutable`, `runTests` |
+| `vibekits.project.iteration_inspect` | 检查 APP 自迭代工作区 | `readOnly` | `workspace`* |
 | `vibekits.system.capability_check` | 检查智能体工具链 | `readOnly` | `{}` |
 | `vibekits.system.resources` | 检查系统资源 | `readOnly` | `adbSerial`, `samples`, `intervalMs` |
 | `vibekits.windows_node.helper_status` | 检查 Windows 节点 Helper | `readOnly` | `{}` |
@@ -187,7 +189,7 @@
 | `vibekits.audio.play` | 播放 PCM / WAV | `controlsDevice` | `path`*, `sampleRate`, `channels`, `bitsPerSample`, `signed`, `littleEndian` |
 | `vibekits.audio.stop` | 停止音频 | `controlsDevice` | `{}` |
 
-## 远程连接（20）
+## 远程连接（27）
 
 | 工具 ID | 名称 | 风险 | 参数 |
 | --- | --- | --- | --- |
@@ -199,6 +201,9 @@
 | `vibekits.adb.pull_file` | 从 Android 拉取文件 | `controlsDevice` | `serial`*, `remotePath`*, `localPath`*, `overwrite` |
 | `vibekits.adb.push_file` | 推送文件到 Android | `controlsDevice` | `serial`*, `localPath`*, `remotePath`* |
 | `vibekits.adb.screenshot` | 保存 Android 截图 | `controlsDevice` | `serial`*, `localPath`*, `overwrite` |
+| `vibekits.adb.session_close` | 关闭 ADB 长连接 | `controlsDevice` | `sessionId`* |
+| `vibekits.adb.session_open` | 保持 ADB 长连接 | `controlsDevice` | `serial`*, `heartbeatSeconds` |
+| `vibekits.adb.session_status` | 读取 ADB 长连接状态 | `readOnly` | `sessionId`* |
 | `vibekits.adb.shell` | 执行 Android Shell | `controlsDevice` | `serial`*, `arguments`* |
 | `vibekits.remote.list_profiles` | 列出远程会话 | `readOnly` | `{}` |
 | `vibekits.remote.sftp_download` | SFTP 下载文件 | `writesData` | `profileId`*, `remotePath`*, `localPath`*, `overwrite` |
@@ -206,6 +211,10 @@
 | `vibekits.remote.sftp_upload` | SFTP 上传文件 | `writesData` | `profileId`*, `localPath`*, `remotePath`*, `overwrite` |
 | `vibekits.remote.ssh_exec` | 执行 SSH 命令 | `controlsDevice` | `profileId`*, `command`* |
 | `vibekits.serial.list_ports` | 列出串口 | `readOnly` | `{}` |
+| `vibekits.serial.session_close` | 关闭串口长连接 | `controlsDevice` | `sessionId`* |
+| `vibekits.serial.session_open` | 打开串口长连接 | `controlsDevice` | `port`*, `baudRate`, `dataBits`, `stopBits`, `parity`, `flowControl` |
+| `vibekits.serial.session_read` | 读取串口长连接 | `readOnly` | `sessionId`*, `mode`, `clear` |
+| `vibekits.serial.session_write` | 写入串口长连接 | `controlsDevice` | `sessionId`*, `data`*, `mode`, `lineEnding` |
 | `vibekits.serial.transact` | 串口收发与监听 | `controlsDevice` | `port`*, `baudRate`, `data`, `mode`, `waitMs` |
 | `vibekits.windows_node.export_onboarding` | 导出节点 onboarding | `readOnly` | `host`*, `port`, `hostKeyFingerprint`*, `allowedCidr`* |
 | `vibekits.windows_node.inspect` | 体检 Windows 测试节点 | `readOnly` | `rootPath` |
@@ -244,10 +253,11 @@
 
 ## 典型闭环
 
-- 串口：`serial.list_ports → serial.transact`。
-- ADB：`adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`。
+- 串口：一次交互用 `serial.list_ports → serial.transact`；持续调试用 `serial.session_open → session_read/session_write → session_close`。
+- ADB：`adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`；持续任务用 `adb.session_open → session_status → session_close` 保持并核验连接。
 - SSH/SFTP：`remote.list_profiles/open_interactive → ssh_exec/sftp_*`。
 - Git 备份：`git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`。
 - 代理：`runtime.inspect → proxy.start → runtime.status → proxy.system_apply`；退出前恢复系统代理。
 - 虚拟机：`runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
+- APP 自迭代：`project.iteration_inspect → Harness 工作区写入 → project.build`；只生成 Release 产物，安装和发布仍需用户验收。
 - 能力自检：`system.capability_check`；它只证明注册与处理器接线，不替代真机/网络/凭据门禁。

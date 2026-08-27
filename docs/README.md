@@ -87,6 +87,7 @@
 81. [dev.120 多平台策略验收](acceptance/V1_9_0_DEV120_PLATFORM_POLICY_2026-08-27.md)——平台合同、设置迁移、Windows 真扫与 Android/macOS 环境门禁
 82. [dev.121 macOS 编译门禁](acceptance/V1_9_0_DEV121_MACOS_COMPILE_GATE_2026-08-27.md)——跨宿主路径仿真修复、macOS Analyze/测试及 unsigned Release 云端门禁
 83. [dev.122 客户端存储可写门禁](acceptance/V1_9_0_DEV122_STORAGE_WRITE_PROBE_2026-08-27.md)——官方目录 API、启动写探针、不可写自动降级与三端编译门禁
+84. [dev.123 Android 清理、长连接、自迭代与 DSH 首启验收](acceptance/V1_9_0_DEV123_ANDROID_HARNESS_ARCHIVE_SESSIONS_2026-08-27.md)——62 真机、161/139 接口、归档互操作、长连接和首启实测
 
 ## 完成定义
 

@@ -98,9 +98,11 @@ String buildHarnessCapabilityCatalog() {
     ..writeln()
     ..writeln('## 典型闭环')
     ..writeln()
-    ..writeln('- 串口：`serial.list_ports → serial.transact`。')
     ..writeln(
-      '- ADB：`adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`。',
+      '- 串口：一次交互用 `serial.list_ports → serial.transact`；持续调试用 `serial.session_open → session_read/session_write → session_close`。',
+    )
+    ..writeln(
+      '- ADB：`adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`；持续任务用 `adb.session_open → session_status → session_close` 保持并核验连接。',
     )
     ..writeln(
       '- SSH/SFTP：`remote.list_profiles/open_interactive → ssh_exec/sftp_*`。',
@@ -113,6 +115,9 @@ String buildHarnessCapabilityCatalog() {
     )
     ..writeln(
       '- 虚拟机：`runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。',
+    )
+    ..writeln(
+      '- APP 自迭代：`project.iteration_inspect → Harness 工作区写入 → project.build`；只生成 Release 产物，安装和发布仍需用户验收。',
     )
     ..writeln('- 能力自检：`system.capability_check`；它只证明注册与处理器接线，不替代真机/网络/凭据门禁。');
 

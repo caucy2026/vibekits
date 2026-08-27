@@ -86,6 +86,7 @@ class HarnessToolServer {
   Future<void> close() async {
     await _removePublishedConnection();
     await _server.close(force: true);
+    await _bridge.dispose();
   }
 
   Future<void> _publishConnection() async {
