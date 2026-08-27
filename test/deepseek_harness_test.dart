@@ -89,7 +89,7 @@ void main() {
     web.validate();
     agent.validate();
     officialWeb.validate();
-    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.0-rc.7');
+    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.1-rc.2');
     expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains('--yes')));
@@ -98,7 +98,12 @@ void main() {
     expect(agent.baseUrl, DeepSeekHarnessService.defaultBaseUrl);
     expect(agent.model, DeepSeekHarnessService.defaultModel);
     expect(agent.nativeSandboxMode, 'workspace-write');
-    expect(officialWeb.arguments, <String>['web', '--port', '31888']);
+    expect(officialWeb.arguments, <String>[
+      'web',
+      '--port',
+      '31888',
+      '--no-open',
+    ]);
     expect(officialWeb.url, Uri.parse('http://127.0.0.1:31888'));
     expect(
       HarnessAgentRequest(
@@ -165,6 +170,7 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-pick-workspace')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(savedWorkspace, workspace.path);
+    await tester.ensureVisible(find.byKey(const Key('agent-settings')));
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
@@ -307,6 +313,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('agent-settings')));
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),

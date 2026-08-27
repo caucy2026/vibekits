@@ -78,6 +78,7 @@
 72. [dev.114 SSH 密码认证验收](acceptance/V1_9_0_DEV114_SSH_PASSWORD_AUTH_2026-08-26.md)——密码/私钥模式、凭据安全映射、网络可达与 SFTP 复用
 73. [dev.115 SFTP 双栏导航验收](acceptance/V1_9_0_DEV115_SFTP_NAVIGATION_2026-08-26.md)——本地/远端独立后退、上一级、根目录边界与轻量闭环
 74. [dev.116 远程历史与多设备验收](acceptance/V1_9_0_DEV116_REMOTE_HISTORY_MULTI_DEVICE_2026-08-26.md)——成功后自动记住、系统凭据、多终端并行与 Harness 在线状态
+75. [dev.124 Harness rc.2 首启与 100 次完整重启验收](acceptance/V1_9_0_DEV124_HARNESS_RC2_100_RESTART_2026-08-27.md)——官方 rc.2、portable 编译缓存、100/100 完整退出重启与零残留进程
 75. [网络抓包（PCAP）与 Harness 接口](38_NETWORK_PACKET_CAPTURE_HARNESS_API.md)——内置 WinDivert、实时抓包、保存读取、协议分析和 5 个智能体接口
 76. [dev.117 网络抓包验收](acceptance/V1_9_0_DEV117_NETWORK_CAPTURE_2026-08-26.md)——Release 真抓、PCAP 解析、Harness 回读和权限失败边界
 77. [dev.118 Android 63 Harness/Pad 全接口验收](acceptance/V1_9_0_DEV118_ANDROID63_HARNESS_PAD_2026-08-26.md)——ARM64 真机构建、130 接口可发现、平台门禁、五入口触控与 118 项自动化

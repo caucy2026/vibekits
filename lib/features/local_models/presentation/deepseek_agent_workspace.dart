@@ -884,8 +884,13 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _showSettings() async {
+    // The settings dialog must appear immediately even when the activity
+    // settings file is on a slow/redirected profile. Logging defaults to on.
     final bool initialLoggingEnabled =
-        await HarnessToolActivityStore.loadLoggingEnabled();
+        await HarnessToolActivityStore.loadLoggingEnabled().timeout(
+          const Duration(milliseconds: 50),
+          onTimeout: () => true,
+        );
     if (!mounted) return;
     bool loggingEnabled = initialLoggingEnabled;
     String modelChoice = _builtinModels.contains(_model.text.trim())

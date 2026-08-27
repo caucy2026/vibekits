@@ -8,7 +8,7 @@
 
 - 上游仓库：<https://github.com/deepseek-ai/deepseek-harness>
 - 官方 Web 指南：<https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/index.md>
-- Windows 当前固定产物：`@deepseek-ai/dsh@0.1.0-rc.7`
+- Windows 当前固定产物：`@deepseek-ai/dsh@0.1.1-rc.2`
 - 精确行为以 Release 中该版本的 `@deepseek-ai/dsh-web-app` 及 Client UI 包为准；仓库 `master` 只用于跟踪后续变更。
 
 Harness 仍在 Developer Preview，上游明确会有破坏性变更。每次升级固定版本时，必须重跑本文档全部验收项。
@@ -80,7 +80,7 @@ Windows 运行器为每个 Harness 子进程创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB
 
 ## 7. 逐项差异审计
 
-| 检查项 | `@deepseek-ai/dsh@0.1.0-rc.7` 官方行为 | Vibekits 当前处理 |
+| 检查项 | `@deepseek-ai/dsh@0.1.1-rc.2` 官方行为 | Vibekits 当前处理 |
 |---|---|---|
 | API Key | Models 页写入官方可写凭据文件；环境提供时只读 | 已纠偏为官方链路；仅保留一次旧凭据迁移 |
 | API 地址/模型 | Models 页配置并热更新；内置 Flash/Pro 目录 | Web 启动不再用环境变量覆盖 |

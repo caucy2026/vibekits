@@ -18,6 +18,7 @@ class VibekitsApp extends StatefulWidget {
     this.settingsController,
     this.initialFilePath,
     this.initialFilePaths = const <String>[],
+    this.initialWorkspaceId,
     this.droppedFiles,
     this.dropClassifier,
   });
@@ -25,6 +26,7 @@ class VibekitsApp extends StatefulWidget {
   final AppSettingsController? settingsController;
   final String? initialFilePath;
   final List<String> initialFilePaths;
+  final String? initialWorkspaceId;
   final Stream<List<String>>? droppedFiles;
   final Future<DroppedFileRoute> Function(String path)? dropClassifier;
 
@@ -140,6 +142,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
         settingsController: _settings,
         initialFilePath: widget.initialFilePath,
         initialFilePaths: widget.initialFilePaths,
+        initialWorkspaceId: widget.initialWorkspaceId,
         droppedFiles: widget.droppedFiles,
         dropClassifier: widget.dropClassifier,
       ),

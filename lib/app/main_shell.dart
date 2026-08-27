@@ -29,6 +29,7 @@ class MainShell extends StatefulWidget {
     required this.settingsController,
     this.initialFilePath,
     this.initialFilePaths = const <String>[],
+    this.initialWorkspaceId,
     this.droppedFiles,
     this.dropClassifier,
   });
@@ -36,6 +37,7 @@ class MainShell extends StatefulWidget {
   final AppSettingsController settingsController;
   final String? initialFilePath;
   final List<String> initialFilePaths;
+  final String? initialWorkspaceId;
   final Stream<List<String>>? droppedFiles;
   final Future<DroppedFileRoute> Function(String path)? dropClassifier;
 
@@ -122,6 +124,13 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.unsupported =>
         settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
     };
+    final int requestedWorkspace = _workspaceIds.indexOf(
+      widget.initialWorkspaceId ?? '',
+    );
+    if (startupKind == VibekitsFileKind.unsupported &&
+        requestedWorkspace >= 0) {
+      _selectedIndex = requestedWorkspace;
+    }
     // Android starts with Harness. In dual-display mode this exact same widget
     // tree spans the full 1920x2560 canvas; no second route is created.
     if (Platform.isAndroid && startupKind == VibekitsFileKind.unsupported) {

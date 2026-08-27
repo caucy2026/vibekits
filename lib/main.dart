@@ -13,10 +13,18 @@ Future<void> main(List<String> arguments) async {
   final List<String> initialFilePaths = arguments
       .where((String argument) => File(argument).existsSync())
       .toList(growable: false);
+  final String? initialWorkspaceId = arguments.contains('--open-harness')
+      ? 'large-model'
+      : null;
   // File associations only exist on Windows. Avoid touching the executable
   // path and FFI-backed registration service during Android cold start.
   if (Platform.isWindows) {
     unawaited(WindowsFileAssociations.registerCurrentExecutable());
   }
-  runApp(VibekitsApp(initialFilePaths: initialFilePaths));
+  runApp(
+    VibekitsApp(
+      initialFilePaths: initialFilePaths,
+      initialWorkspaceId: initialWorkspaceId,
+    ),
+  );
 }

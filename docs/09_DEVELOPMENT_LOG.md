@@ -1036,3 +1036,12 @@
 - 新增标准归档语料（ASCII、中文路径、空文件、0～255 二进制），ZIP/TAR/TAR.GZ/真实 7z/ZIP/RAR5 全部通过；修复部分 7-Zip 输出仅以 `Attributes = D` 标记目录时的提取计划错误。
 - DSH 首启根因定位为官方 profile fallback 每次同步遍历约 3.2 万文件并逐包修复链接；改为单个只读 `node_modules` Junction，现场从 47.852 秒降至 5.094 秒，不再出现 30～50 秒假死。系统盘 0 B 可用也被确认会放大该问题，已仅清理 1.22 GiB Flutter/Pub 临时构建缓存。
 - 定向回归 42/42 通过，Flutter Analyze 仅保留 1 条既有风格提示，Windows Release 构建通过。Android Debug 夹具构建因 Gradle 长时间无输出主动终止，不冒充真机删除实证。
+
+# 2026-08-27 · v1.9.0-dev.124 Harness 官方 rc.2 与 100 次完整重启
+
+- 固定运行时从官方 `@deepseek-ai/dsh@0.1.0-rc.7` 更新到 `0.1.1-rc.2`，补齐候选版必需 peer，使用 `--no-open`，运行阶段不执行 npm/npx 或联网安装。
+- 将 portable Node 编译缓存前移到打包阶段；全新临时用户目录首次就绪 6.425 秒，消除现场 30～50 秒首启卡死，但未把当前 6～10 秒结果冒充为 3 秒达标。
+- Windows Runner 在退出末端只回收当前 APP 的后代进程树；确定性 `--open-harness` 压测入口取代依赖焦点的快捷键，门禁同时检查 DSH、WebView2 和全部子进程。
+- Release 完成 100/100 次“彻底退出→重新启动→HTTP 200→彻底退出”，残留进程 0；就绪中位数 6.869 秒、P95 8.005 秒、最大 9.698 秒。
+- Harness/UI 回归 14/14 通过；Flutter Analyze 无新增错误，保留 1 条既有 GitHub 代理风格提示。验收见 `acceptance/V1_9_0_DEV124_HARNESS_RC2_100_RESTART_2026-08-27.md`。
+- 最终重编产物追加 3/3 实启实退且零残留；构建后高负载现场为 12.088～12.610 秒，因此本版只承诺消除 30～50 秒卡死，不虚构稳定 3 秒或稳定低于 10 秒。

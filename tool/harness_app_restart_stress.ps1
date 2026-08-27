@@ -5,7 +5,8 @@ param(
   [int]$ReadyTimeoutSeconds = 90,
   [int]$CloseTimeoutSeconds = 15,
   [string]$Executable = '',
-  [string]$OutputPath = ''
+  [string]$OutputPath = '',
+  [switch]$StopOnFailure
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +50,7 @@ public static class VibeKitsRestartStressNative {
   }
 }
 '@
+Add-Type -AssemblyName System.Net.Http
 
 function Wait-MainWindow([System.Diagnostics.Process]$Process, [int]$TimeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -59,6 +61,63 @@ function Wait-MainWindow([System.Diagnostics.Process]$Process, [int]$TimeoutSeco
     Start-Sleep -Milliseconds 100
   }
   return [IntPtr]::Zero
+}
+
+function Get-DescendantProcessIds([int]$RootProcessId) {
+  $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop |
+    Select-Object ProcessId, ParentProcessId)
+  $childrenByParent = @{}
+  foreach ($process in $processes) {
+    $parentId = [int]$process.ParentProcessId
+    if (-not $childrenByParent.ContainsKey($parentId)) {
+      $childrenByParent[$parentId] = [System.Collections.Generic.List[int]]::new()
+    }
+    $childrenByParent[$parentId].Add([int]$process.ProcessId)
+  }
+  $descendants = [System.Collections.Generic.HashSet[int]]::new()
+  $pending = [System.Collections.Generic.Queue[int]]::new()
+  $pending.Enqueue($RootProcessId)
+  while ($pending.Count -gt 0) {
+    $parentId = $pending.Dequeue()
+    if (-not $childrenByParent.ContainsKey($parentId)) { continue }
+    foreach ($childId in $childrenByParent[$parentId]) {
+      if ($descendants.Add($childId)) { $pending.Enqueue($childId) }
+    }
+  }
+  return @($descendants | Sort-Object)
+}
+
+function Get-ProcessDetails([int[]]$ProcessIds) {
+  if ($ProcessIds.Count -eq 0) { return '' }
+  $wanted = [System.Collections.Generic.HashSet[int]]::new()
+  foreach ($processId in $ProcessIds) { $null = $wanted.Add($processId) }
+  return ((Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $wanted.Contains([int]$_.ProcessId) } |
+    Sort-Object ProcessId |
+    ForEach-Object {
+      $command = ([string]$_.CommandLine).Replace("`r", ' ').Replace("`n", ' ')
+      "pid=$($_.ProcessId) name=$($_.Name) parent=$($_.ParentProcessId) command=$command"
+    }) -join ' || ')
+}
+
+function Wait-ProcessesExited([int[]]$ProcessIds, [int]$TimeoutSeconds) {
+  if ($ProcessIds.Count -eq 0) { return @() }
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $remaining = @($ProcessIds | Where-Object {
+      Get-Process -Id $_ -ErrorAction SilentlyContinue
+    })
+    if ($remaining.Count -eq 0) { return @() }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $deadline)
+  return @($ProcessIds | Where-Object {
+    Get-Process -Id $_ -ErrorAction SilentlyContinue
+  })
+}
+
+function Stop-ProcessTree([int]$ProcessId) {
+  if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
+  & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null
 }
 
 function Get-HarnessLog([datetime]$StartedAt, [string[]]$ExistingPaths) {
@@ -126,7 +185,7 @@ Get-Process vibekits -ErrorAction SilentlyContinue | ForEach-Object {
   if ($_.MainWindowHandle -ne [IntPtr]::Zero) {
     [VibeKitsRestartStressNative]::ExitApp($_.MainWindowHandle)
   }
-  if (-not $_.WaitForExit(5000)) { $_.Kill($true) }
+  if (-not $_.WaitForExit(5000)) { Stop-ProcessTree $_.Id }
 }
 
 $results = [System.Collections.Generic.List[object]]::new()
@@ -142,31 +201,39 @@ for ($cycle = 1; $cycle -le $Count; $cycle++) {
   $harnessReady = $false
   $closeOk = $false
   $harnessExited = $false
+  $allChildrenExited = $false
   $readyMilliseconds = 0
   $closeMilliseconds = 0
   $harnessPid = 0
   $httpStatus = 0
   $harnessLog = ''
+  $trackedChildPids = @()
+  $residualChildPids = @()
+  $trackedChildDetails = ''
+  $residualChildDetails = ''
   $errorText = ''
   try {
-    $app = Start-Process -FilePath $Executable -PassThru
+    $app = Start-Process -FilePath $Executable -ArgumentList '--open-harness' -PassThru
     $window = Wait-MainWindow $app $WindowTimeoutSeconds
     if ($window -eq [IntPtr]::Zero) { throw 'Main window did not appear' }
     $windowReady = $true
-    [VibeKitsRestartStressNative]::OpenHarness($window)
     $ready = Wait-HarnessReady $startedAt $existingLogs $app $ReadyTimeoutSeconds
     $harnessReady = $true
     $readyMilliseconds = $cycleWatch.ElapsedMilliseconds
     $harnessPid = $ready.HarnessPid
     $httpStatus = $ready.StatusCode
     $harnessLog = $ready.Log
+    $trackedChildPids = @(Get-DescendantProcessIds $app.Id)
+    $trackedChildDetails = Get-ProcessDetails $trackedChildPids
 
     $closeWatch = [System.Diagnostics.Stopwatch]::StartNew()
     [VibeKitsRestartStressNative]::ExitApp($window)
+    $trackedChildPids = @($trackedChildPids + @(Get-DescendantProcessIds $app.Id) |
+      Sort-Object -Unique)
     $closeOk = $app.WaitForExit($CloseTimeoutSeconds * 1000)
     $closeMilliseconds = $closeWatch.ElapsedMilliseconds
     if (-not $closeOk) {
-      $app.Kill($true)
+      Stop-ProcessTree $app.Id
       $app.WaitForExit(5000) | Out-Null
       $errorText = 'APP required forced termination'
     }
@@ -182,18 +249,38 @@ for ($cycle = 1; $cycle -le $Count; $cycle++) {
     if (-not $harnessExited) {
       $errorText = (($errorText + '; Harness PID remained after APP exit').Trim('; '))
     }
+    $residualChildPids = @(Wait-ProcessesExited $trackedChildPids 8)
+    $residualChildDetails = Get-ProcessDetails $residualChildPids
+    $allChildrenExited = $residualChildPids.Count -eq 0
+    if (-not $allChildrenExited) {
+      $errorText = (($errorText + "; child PIDs remained after APP exit: $($residualChildPids -join ',')").Trim('; '))
+    }
   } catch {
     $errorText = $_.Exception.Message
     if ($app -and -not $app.HasExited) {
-      try { $app.Kill($true); $app.WaitForExit(5000) | Out-Null } catch {}
+      try { Stop-ProcessTree $app.Id; $app.WaitForExit(5000) | Out-Null } catch {}
     }
     if ($harnessPid -gt 0) {
       $harnessExited = -not [bool](Get-Process -Id $harnessPid -ErrorAction SilentlyContinue)
     }
+    if ($app) {
+      try {
+        $trackedChildPids = @($trackedChildPids + @(Get-DescendantProcessIds $app.Id) |
+          Sort-Object -Unique)
+      } catch {}
+    }
+    $residualChildPids = @(Wait-ProcessesExited $trackedChildPids 8)
+    $residualChildDetails = Get-ProcessDetails $residualChildPids
+    $allChildrenExited = $residualChildPids.Count -eq 0
   } finally {
     $cycleWatch.Stop()
   }
-  $passed = $windowReady -and $harnessReady -and $closeOk -and $harnessExited
+  if ($residualChildPids.Count -gt 0) {
+    foreach ($residualPid in $residualChildPids) {
+      try { Stop-Process -Id $residualPid -Force -ErrorAction Stop } catch {}
+    }
+  }
+  $passed = $windowReady -and $harnessReady -and $closeOk -and $harnessExited -and $allChildrenExited
   $result = [pscustomobject]@{
     Cycle = $cycle
     Passed = $passed
@@ -206,6 +293,12 @@ for ($cycle = 1; $cycle -le $Count; $cycle++) {
     HarnessReady = $harnessReady
     GracefulClose = $closeOk
     HarnessExited = $harnessExited
+    ChildProcessCount = $trackedChildPids.Count
+    TrackedChildPids = $trackedChildPids -join ','
+    TrackedChildDetails = $trackedChildDetails
+    AllChildrenExited = $allChildrenExited
+    ResidualChildPids = $residualChildPids -join ','
+    ResidualChildDetails = $residualChildDetails
     HarnessLog = $harnessLog
     Error = $errorText
   }
@@ -215,13 +308,14 @@ for ($cycle = 1; $cycle -le $Count; $cycle++) {
     $cycle, $Count, $state, $readyMilliseconds, $closeMilliseconds, $httpStatus,
     $result.AppPid, $harnessPid, $errorText)
   $results | Export-Csv -LiteralPath $OutputPath -NoTypeInformation -Encoding utf8
+  if (-not $passed -and $StopOnFailure) { break }
 }
 
 $passedCount = @($results | Where-Object Passed).Count
-$failedCount = $Count - $passedCount
+$failedCount = $results.Count - $passedCount
 $averageReady = [math]::Round((($results | Where-Object Passed | Measure-Object ReadyMs -Average).Average), 1)
 $maxReady = ($results | Measure-Object ReadyMs -Maximum).Maximum
 $averageClose = [math]::Round((($results | Where-Object GracefulClose | Measure-Object CloseMs -Average).Average), 1)
 Write-Host "RESULT passed=$passedCount failed=$failedCount avgReadyMs=$averageReady maxReadyMs=$maxReady avgCloseMs=$averageClose"
 Write-Host "REPORT $OutputPath"
-if ($failedCount -gt 0) { exit 1 }
+if ($failedCount -gt 0 -or $results.Count -ne $Count) { exit 1 }

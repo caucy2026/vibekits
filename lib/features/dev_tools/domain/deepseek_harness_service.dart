@@ -29,11 +29,11 @@ class HarnessEnvironmentReport {
 
 class HarnessLaunchSpec {
   const HarnessLaunchSpec({required this.workspace, this.port = 3080});
-  static const String packageSpec = '@deepseek-ai/dsh@0.1.0-rc.7';
+  static const String packageSpec = '@deepseek-ai/dsh@0.1.1-rc.2';
   final String workspace;
   final int port;
   Uri get url => Uri.parse('http://127.0.0.1:$port');
-  List<String> get arguments => <String>['web', '--port', '$port'];
+  List<String> get arguments => <String>['web', '--port', '$port', '--no-open'];
   void validate() {
     if (port < 1024 || port > 65535) {
       throw const FormatException('端口必须在 1024 到 65535 之间');
@@ -121,7 +121,7 @@ class HarnessWebRequest {
   final VibekitsHarnessToolBridge? toolBridge;
 
   Uri get url => Uri.parse('http://127.0.0.1:$port');
-  List<String> get arguments => <String>['web', '--port', '$port'];
+  List<String> get arguments => <String>['web', '--port', '$port', '--no-open'];
 
   void validate() {
     final Directory directory = Directory(workspace.trim());
@@ -446,6 +446,7 @@ abstract final class DeepSeekHarnessService {
       runtime.approvalPluginPath,
     );
     final Directory nodeCompileCache = await _prepareNodeCompileCache(
+      runtime,
       harnessHome,
     );
     try {
@@ -539,6 +540,7 @@ abstract final class DeepSeekHarnessService {
       includeApprovalBridge: false,
     );
     final Directory nodeCompileCache = await _prepareNodeCompileCache(
+      runtime,
       harnessHome,
     );
     await migrateLegacyCredentialToOfficialStore(
@@ -783,8 +785,19 @@ abstract final class DeepSeekHarnessService {
   }
 
   static Future<Directory> _prepareNodeCompileCache(
+    _HarnessRuntime runtime,
     Directory harnessHome,
   ) async {
+    final Directory bundledSeed = Directory(
+      '${File(runtime.nodeExecutable).parent.path}${Platform.pathSeparator}'
+      'profile${Platform.pathSeparator}node-compile-cache',
+    );
+    if (bundledSeed.existsSync()) {
+      // The cache is content-addressed and was generated with Node's portable
+      // mode during packaging. Reading it in place avoids copying ~2,000 tiny
+      // files (and making Defender rescan them) on a new user's first launch.
+      return bundledSeed;
+    }
     final Directory cache = Directory(
       '${harnessHome.path}${Platform.pathSeparator}node-compile-cache',
     );

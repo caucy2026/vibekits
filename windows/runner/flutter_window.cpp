@@ -2,8 +2,10 @@
 
 #include <flutter/standard_method_codec.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
 #include <optional>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -16,6 +18,51 @@ constexpr UINT kTrayCallbackMessage = WM_APP + 41;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayOpenCommand = 41001;
 constexpr UINT kTrayExitCommand = 41002;
+
+void TerminateDescendantProcesses(DWORD root_process_id) {
+  HANDLE snapshot =
+      ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) return;
+
+  std::vector<PROCESSENTRY32W> processes;
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  if (::Process32FirstW(snapshot, &entry)) {
+    do {
+      processes.push_back(entry);
+      entry.dwSize = sizeof(entry);
+    } while (::Process32NextW(snapshot, &entry));
+  }
+  ::CloseHandle(snapshot);
+
+  std::unordered_set<DWORD> family{root_process_id};
+  std::vector<DWORD> descendants;
+  bool added = true;
+  while (added) {
+    added = false;
+    for (const auto& process : processes) {
+      if (family.find(process.th32ProcessID) != family.end() ||
+          family.find(process.th32ParentProcessID) == family.end()) {
+        continue;
+      }
+      family.insert(process.th32ProcessID);
+      descendants.push_back(process.th32ProcessID);
+      added = true;
+    }
+  }
+
+  // Terminate leaves before their parents so helpers cannot be re-parented
+  // outside the APP lifetime while the tree is being dismantled.
+  for (auto current = descendants.rbegin(); current != descendants.rend();
+       ++current) {
+    HANDLE process = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE,
+                                   *current);
+    if (process == nullptr) continue;
+    ::TerminateProcess(process, 0);
+    ::WaitForSingleObject(process, 1000);
+    ::CloseHandle(process);
+  }
+}
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -193,6 +240,10 @@ void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
+  // WebView2 can opt into a process model that outlives COM teardown. A runner
+  // launched inside another restrictive Job cannot always create its own Job,
+  // so explicitly reap only this APP's descendants as the final fallback.
+  TerminateDescendantProcesses(::GetCurrentProcessId());
 
   Win32Window::OnDestroy();
 }
