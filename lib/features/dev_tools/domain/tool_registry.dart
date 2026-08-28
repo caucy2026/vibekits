@@ -204,9 +204,12 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     id: 'git_workspace',
     name: '版本控制（Git）',
     group: ToolGroups.sourceControl,
-    description: '查看仓库、Diff 和提交；通过预览、秘密阻断及分离审批安全备份到已有远端。',
+    description: '查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。',
     harnessToolIds: <String>[
       'vibekits.git.inspect',
+      'vibekits.git.list_remote_refs',
+      'vibekits.git.read_remote_file',
+      'vibekits.git.clone_minimal',
       'vibekits.git.compare_refs',
       'vibekits.git.create_local_branch',
       'vibekits.git.backup_preview',

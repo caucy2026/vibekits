@@ -98,6 +98,7 @@
 91. [dev.131 Harness 自动配置与串口技能验收](acceptance/V1_9_0_DEV131_HARNESS_AUTOCONFIG_SERIAL_SKILL_2026-08-28.md)——全工具精确参数查询、串口被动自动探测、技能注入和真实 Harness 问答闭环
 92. [dev.132 Harness 调试目录、清理建议与诊断日志验收](acceptance/V1_9_0_DEV132_HARNESS_DEBUG_CLEANUP_LOGS_2026-08-28.md)——调试目录占用、选择性清理、工作状态和脱敏诊断日志
 93. [dev.133/134 网络下载与 ADB 真机安装验收](acceptance/V1_9_0_DEV133_NETWORK_DOWNLOAD_ADB_2026-08-28.md)——Harness 下载、SHA-256、53 设备连接、显式降级参数与真实安装成功
+94. [dev.135 Harness 远端 Git 按需取码验收](acceptance/V1_9_0_DEV135_HIV730_REMOTE_GIT_2026-08-28.md)——实读项目指南、Gerrit refs、master manifest、103 个仓库解析与整包同步禁令
 
 ## 完成定义
 

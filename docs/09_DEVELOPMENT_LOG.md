@@ -1,5 +1,11 @@
 # Vibekits 开发日志
 
+## 2026-08-28 · v1.9.0-dev.135 Harness 远端 Git 按需取码
+
+- Harness 实读 HiV730 Android 项目指南后发现既有 Git 工具只面向本地仓库；新增 `git.list_remote_refs`、`git.read_remote_file` 和 `git.clone_minimal`，统一使用 APP 内置 Git，不回退到任意 Shell 或系统 Git。
+- 远端探测只执行有界 `ls-remote`；远端文件读取仅浅取指定 ref 并返回单个受限文本，临时对象随即删除；最小克隆要求目标目录不存在、明确单仓库和 ref，禁止无参数 `repo sync`。
+- Git 网络调用关闭隐藏凭据交互，拒绝 URL 明文密码、越界仓库路径和覆盖已有目录；仍复用用户已配置的 SSH 身份与已核验主机指纹，不读取或输出私钥。
+
 ## 2026-08-28 · v1.9.0-dev.134 APK 降级安装显式控制
 
 - 真实 Harness 使用 `network.download → adb.connect/list_devices → adb.install_apk` 下载并安装指定 KEMI-PAD APK；下载与设备连接成功，设备返回 `INSTALL_FAILED_VERSION_DOWNGRADE`。

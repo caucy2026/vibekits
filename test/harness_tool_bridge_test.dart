@@ -90,6 +90,9 @@ void main() {
       VibekitsHarnessToolBridge.sqliteInspectId,
       VibekitsHarnessToolBridge.sqliteQueryId,
       VibekitsHarnessToolBridge.gitInspectId,
+      VibekitsHarnessToolBridge.gitListRemoteRefsId,
+      VibekitsHarnessToolBridge.gitReadRemoteFileId,
+      VibekitsHarnessToolBridge.gitCloneMinimalId,
       VibekitsHarnessToolBridge.gitCompareRefsId,
       VibekitsHarnessToolBridge.gitCreateLocalBranchId,
       VibekitsHarnessToolBridge.gitBackupPreviewId,
@@ -559,14 +562,7 @@ void main() {
       'VIBE_TAG:D',
       '*:S',
     ]);
-    expect(calls[2], <String>[
-      '-s',
-      serial,
-      'install',
-      '-r',
-      '-d',
-      apk.path,
-    ]);
+    expect(calls[2], <String>['-s', serial, 'install', '-r', '-d', apk.path]);
     expect(calls[3], <String>[
       '-s',
       serial,

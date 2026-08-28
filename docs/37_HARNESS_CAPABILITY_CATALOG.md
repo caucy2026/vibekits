@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：165。
-- Harness 当前可执行接口：143。
+- Harness 定义接口：168。
+- Harness 当前可执行接口：146。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -79,7 +79,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 音频调试 | 6 |
 | 远程连接 | 33 |
 | 数据库 | 5 |
-| 版本控制 | 7 |
+| 版本控制 | 10 |
 | 虚拟化 | 3 |
 
 ## 系统诊断（定义 27）
@@ -93,7 +93,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.database_manager` | `database_manager` | 数据库管理（SQL） | 否（环境/接线门禁） | 拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。 适合：用户明确需要“数据库管理（SQL）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.duplicate_files` | `duplicate_files` | 重复文件（Duplicate） | 否（环境/接线门禁） | 按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。 适合：用户明确需要“重复文件（Duplicate）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `writesData` | `input`* (string), `params` (string) |
 | `vibekits.file_search` | `file_search` | 文件搜索（Search） | 否（环境/接线门禁） | 按文件名或内容快速搜索，结果可定位、复制路径并继续计算哈希。 适合：用户明确需要“文件搜索（Search）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.git_workspace` | `git_workspace` | 版本控制（Git） | 否（环境/接线门禁） | 查看仓库、Diff 和提交；通过预览、秘密阻断及分离审批安全备份到已有远端。 适合：用户明确需要“版本控制（Git）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.git_workspace` | `git_workspace` | 版本控制（Git） | 否（环境/接线门禁） | 查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。 适合：用户明确需要“版本控制（Git）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.github_diagnostics` | `github_diagnostics` | 网络诊断（GitHub） | 否（环境/接线门禁） | 分层检查 GitHub 凭据与网络，发现真实回环代理并可回滚地只修复 GitHub Git。 适合：用户明确需要“网络诊断（GitHub）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.harness.diagnostics` | `harness__diagnostics` | 查询 Harness 诊断日志 | 是 | 只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。 | `readOnly` | `limit` (integer；最小=1；最大=50), `includeLogTail` (boolean) |
 | `vibekits.network.download` | `network__download` | 下载网络文件 | 是 | 把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。 | `writesData` | `url`* (string), `fileName` (string), `outputDirectory` (string), `overwrite` (boolean；默认=false), `expectedSha256` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=1800), `maxBytes` (integer；默认=2147483648；最小=1；最大=8589934592) |
@@ -297,16 +297,19 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.sqlite.inspect` | `sqlite__inspect` | 检查 SQLite 数据库 | 是 | 只读列出本地 SQLite 数据库中的表、视图和建表语句。 | `readOnly` | `path`* (string) |
 | `vibekits.sqlite.query` | `sqlite__query` | 查询 SQLite 数据库 | 是 | 在隔离线程执行单条只读 SQL，最多返回 500 行。 | `readOnly` | `path`* (string), `sql`* (string), `maxRows` (integer；最小=1；最大=500) |
 
-## 版本控制（定义 7）
+## 版本控制（定义 10）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.git.backup_commit` | `git__backup_commit` | 提交 Git 备份 | 是 | 只暂存 preview 允许且用户确认的文件并创建本地提交；不会自动 push。 | `writesData` | `previewId`* (string), `includedPaths`* (array), `message`* (string) |
 | `vibekits.git.backup_preview` | `git__backup_preview` | 预览 GitHub 备份 | 是 | 只读检查已打开仓库的变更、已有 remote、大文件、构建产物和秘密阻断项，生成短期备份计划。 | `readOnly` | `path`* (string), `remoteId`* (string), `deviceLabel` (string) |
 | `vibekits.git.backup_push` | `git__backup_push` | 推送 Git 备份 | 是 | 独立审批后把 preview 生成的 commit 推送到 backup/ 分支，并读取远端 ref 核对 SHA；禁止 force。 | `controlsDevice` | `previewId`* (string), `commitSha`* (string) |
+| `vibekits.git.clone_minimal` | `git__clone_minimal` | 按需浅克隆 Git 仓库 | 是 | 将明确指定的单个仓库和分支浅克隆到不存在的独立目录；禁止覆盖目录，不执行无参数 repo sync。 | `writesData` | `remoteUrl`* (string), `destination`* (string), `ref` (string), `depth` (integer；默认=1；最小=1；最大=100), `timeoutSeconds` (integer；默认=300；最小=30；最大=1800) |
 | `vibekits.git.compare_refs` | `git__compare_refs` | 对比 Git 两个版本 | 是 | 只读校验两个提交、标签或分支，并返回文件列表、统计和文本差异。 | `readOnly` | `path`* (string), `baseRef`* (string), `targetRef`* (string) |
 | `vibekits.git.create_local_branch` | `git__create_local_branch` | 创建 Git 本地安全分支 | 是 | 从指定版本创建本地分支但不切换工作区；需要按当前权限模式批准。 | `writesData` | `path`* (string), `name`* (string), `startPoint` (string) |
 | `vibekits.git.inspect` | `git__inspect` | 检查 Git 工作区 | 是 | 只读返回分支、状态、diff 和最近提交。 | `readOnly` | `path`* (string) |
+| `vibekits.git.list_remote_refs` | `git__list_remote_refs` | 列出 Git 远端引用 | 是 | 使用 APP 内置 Git 只读执行 ls-remote，列出远端分支和提交；不克隆仓库、不输出凭据。 | `readOnly` | `remoteUrl`* (string), `pattern` (string), `timeoutSeconds` (integer；默认=30；最小=5；最大=120) |
+| `vibekits.git.read_remote_file` | `git__read_remote_file` | 读取 Git 远端文件 | 是 | 浅取指定 ref 到 APP 临时目录并只返回一个有界文本文件，适合读取 manifest；完成后自动删除临时对象，不同步整仓。 | `readOnly` | `remoteUrl`* (string), `ref`* (string), `path`* (string), `maxBytes` (integer；默认=1048576；最小=1；最大=2097152), `timeoutSeconds` (integer；默认=60；最小=5；最大=180) |
 | `vibekits.git.verify_remote_ref` | `git__verify_remote_ref` | 核验远端备份 SHA | 是 | 只读查询已有 remote 的 backup/ 分支并返回远端 commit SHA。 | `readOnly` | `path`* (string), `remoteId`* (string), `targetBranch`* (string) |
 
 ## 虚拟化（定义 3）
@@ -323,6 +326,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 - ADB：`adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`；持续任务用 `adb.session_open → session_status → session_close` 保持并核验连接。
 - SSH/SFTP：`remote.list_profiles/open_interactive → ssh_exec/sftp_*`。
 - Git 备份：`git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`。
+- 远端源码：`git.list_remote_refs → git.read_remote_file(manifest) → git.clone_minimal(明确单仓)`；禁止无参数 `repo sync`。
 - 代理：`runtime.inspect → proxy.start → runtime.status → proxy.system_apply`；退出前恢复系统代理。
 - 虚拟机：`runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
 - APP 自迭代：`project.iteration_inspect → Harness 工作区写入 → project.build`；只生成 Release 产物，安装和发布仍需用户验收。

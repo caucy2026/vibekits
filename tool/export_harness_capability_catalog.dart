@@ -187,6 +187,9 @@ String buildHarnessCapabilityCatalog() {
       '- Git 备份：`git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`。',
     )
     ..writeln(
+      '- 远端源码：`git.list_remote_refs → git.read_remote_file(manifest) → git.clone_minimal(明确单仓)`；禁止无参数 `repo sync`。',
+    )
+    ..writeln(
       '- 代理：`runtime.inspect → proxy.start → runtime.status → proxy.system_apply`；退出前恢复系统代理。',
     )
     ..writeln(

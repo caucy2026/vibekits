@@ -39,6 +39,7 @@
 - 网络文件/APK：必须使用 `vibekits.network.download` 流式下载并读取其 `outputPath/bytes/sha256/artifactType`；APK 随后执行 `adb.list_devices/connect → adb.install_apk → adb.shell` 验证安装结果。不得改用 curl、PowerShell 或系统浏览器下载，也不得把 HTTP 错误页交给 ADB。
 - SSH/SFTP：`vibekits.remote.list_profiles/open_interactive → ssh_exec/sftp_list/sftp_upload/sftp_download`，复用已保存凭据别名。
 - Git：`vibekits.git.inspect/compare_refs → backup_preview → backup_commit → backup_push → verify_remote_ref`。
+- Gerrit/远端源码按需取码：先 `vibekits.git.list_remote_refs`，再用 `vibekits.git.read_remote_file` 读取 manifest；只对 manifest 明确映射出的单仓库调用 `vibekits.git.clone_minimal`。禁止无参数 `repo sync` 和整包下载。
 - 代理：`vibekits.runtime.inspect → proxy.start → runtime.status → proxy.system_apply`；结束时 `proxy.system_restore → proxy.stop`。
 - 虚拟机：`vibekits.runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
 - 音频：`vibekits.audio.inspect` 分析 PCM/WAV；转换、播放或生成测试音使用对应 `audio.*` 接口。

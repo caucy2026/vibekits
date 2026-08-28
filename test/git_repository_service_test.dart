@@ -4,6 +4,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/git_repository_service.dart';
 
 void main() {
+  test('远端 Git 工具拒绝空地址、明文密码和越界文件路径', () async {
+    await expectLater(
+      GitRepositoryService.listRemoteReferences(''),
+      throwsA(isA<FormatException>()),
+    );
+    await expectLater(
+      GitRepositoryService.listRemoteReferences(
+        'https://user:secret@example.com/repo.git',
+      ),
+      throwsA(isA<FormatException>()),
+    );
+    await expectLater(
+      GitRepositoryService.readRemoteTextFile(
+        'ssh://example.com/repo.git',
+        ref: 'master',
+        path: '../private',
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('真实 Git 仓库返回根目录、分支、变更、Diff 和日志', () async {
     final Directory sandbox = Directory.systemTemp.createTempSync('vk_git_');
     addTearDown(() => sandbox.deleteSync(recursive: true));

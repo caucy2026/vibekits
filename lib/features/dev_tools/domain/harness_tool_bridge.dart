@@ -258,6 +258,9 @@ class VibekitsHarnessToolBridge {
   static const String sqliteInspectId = 'vibekits.sqlite.inspect';
   static const String sqliteQueryId = 'vibekits.sqlite.query';
   static const String gitInspectId = 'vibekits.git.inspect';
+  static const String gitListRemoteRefsId = 'vibekits.git.list_remote_refs';
+  static const String gitReadRemoteFileId = 'vibekits.git.read_remote_file';
+  static const String gitCloneMinimalId = 'vibekits.git.clone_minimal';
   static const String gitCompareRefsId = 'vibekits.git.compare_refs';
   static const String gitCreateLocalBranchId =
       'vibekits.git.create_local_branch';
@@ -660,7 +663,8 @@ class VibekitsHarnessToolBridge {
     adbInstallApkId: _definition(
       id: adbInstallApkId,
       name: '安装 APK',
-      description: '把明确的本地 APK 安装到选定设备；覆盖或尝试版本降级必须显式指定。降级仍受 Android 设备策略约束，失败时不得自动卸载应用。',
+      description:
+          '把明确的本地 APK 安装到选定设备；覆盖或尝试版本降级必须显式指定。降级仍受 Android 设备策略约束，失败时不得自动卸载应用。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -956,6 +960,70 @@ class VibekitsHarnessToolBridge {
       description: '只读返回分支、状态、diff 和最近提交。',
       properties: <String, Object?>{'path': _string('仓库或其子目录')},
       required: <String>['path'],
+    ),
+    gitListRemoteRefsId: _definition(
+      id: gitListRemoteRefsId,
+      name: '列出 Git 远端引用',
+      description: '使用 APP 内置 Git 只读执行 ls-remote，列出远端分支和提交；不克隆仓库、不输出凭据。',
+      properties: <String, Object?>{
+        'remoteUrl': _string('SSH、HTTP 或 HTTPS Git 远端地址；不得包含明文密码'),
+        'pattern': _string('可选 ref 匹配，例如 refs/heads/*'),
+        'timeoutSeconds': <String, Object?>{
+          'type': 'integer',
+          'minimum': 5,
+          'maximum': 120,
+          'default': 30,
+        },
+      },
+      required: <String>['remoteUrl'],
+    ),
+    gitReadRemoteFileId: _definition(
+      id: gitReadRemoteFileId,
+      name: '读取 Git 远端文件',
+      description:
+          '浅取指定 ref 到 APP 临时目录并只返回一个有界文本文件，适合读取 manifest；完成后自动删除临时对象，不同步整仓。',
+      properties: <String, Object?>{
+        'remoteUrl': _string('SSH、HTTP 或 HTTPS Git 远端地址；不得包含明文密码'),
+        'ref': _string('明确的分支、标签或提交，例如 master'),
+        'path': _string('仓库内安全相对路径，例如 default.xml'),
+        'maxBytes': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 2097152,
+          'default': 1048576,
+        },
+        'timeoutSeconds': <String, Object?>{
+          'type': 'integer',
+          'minimum': 5,
+          'maximum': 180,
+          'default': 60,
+        },
+      },
+      required: <String>['remoteUrl', 'ref', 'path'],
+    ),
+    gitCloneMinimalId: _definition(
+      id: gitCloneMinimalId,
+      name: '按需浅克隆 Git 仓库',
+      description: '将明确指定的单个仓库和分支浅克隆到不存在的独立目录；禁止覆盖目录，不执行无参数 repo sync。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'remoteUrl': _string('明确的单仓库 SSH、HTTP 或 HTTPS 地址'),
+        'destination': _string('必须不存在的独立目标目录'),
+        'ref': _string('分支或标签，默认 master'),
+        'depth': <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 100,
+          'default': 1,
+        },
+        'timeoutSeconds': <String, Object?>{
+          'type': 'integer',
+          'minimum': 30,
+          'maximum': 1800,
+          'default': 300,
+        },
+      },
+      required: <String>['remoteUrl', 'destination'],
     ),
     gitCompareRefsId: _definition(
       id: gitCompareRefsId,
@@ -1768,6 +1836,9 @@ class VibekitsHarnessToolBridge {
     if (toolId == sqliteInspectId) return _inspectSqlite;
     if (toolId == sqliteQueryId) return _querySqlite;
     if (toolId == gitInspectId) return _inspectGit;
+    if (toolId == gitListRemoteRefsId) return _listGitRemoteRefs;
+    if (toolId == gitReadRemoteFileId) return _readGitRemoteFile;
+    if (toolId == gitCloneMinimalId) return _cloneGitMinimal;
     if (toolId == gitCompareRefsId) return _compareGitRefs;
     if (toolId == gitCreateLocalBranchId) return _createGitLocalBranch;
     if (toolId == gitBackupPreviewId) return _previewGitBackup;
@@ -2902,6 +2973,66 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _listGitRemoteRefs(
+    Map<String, Object?> arguments,
+  ) async {
+    final int timeoutSeconds = _integer(
+      arguments['timeoutSeconds'],
+      30,
+    ).clamp(5, 120);
+    final List<GitRemoteReference> refs =
+        await GitRepositoryService.listRemoteReferences(
+          (arguments['remoteUrl'] ?? '').toString(),
+          pattern: (arguments['pattern'] ?? '').toString(),
+          timeout: Duration(seconds: timeoutSeconds),
+        );
+    return <String, Object?>{
+      'remoteUrl': _redactedGitRemote(arguments['remoteUrl']),
+      'refCount': refs.length,
+      'refs': <Map<String, Object?>>[
+        for (final GitRemoteReference ref in refs) ref.toJson(),
+      ],
+      'readOnly': true,
+      'evidenceSource': 'bundled-git-ls-remote',
+    };
+  }
+
+  Future<Map<String, Object?>> _readGitRemoteFile(
+    Map<String, Object?> arguments,
+  ) async => (await GitRepositoryService.readRemoteTextFile(
+    (arguments['remoteUrl'] ?? '').toString(),
+    ref: (arguments['ref'] ?? '').toString(),
+    path: (arguments['path'] ?? '').toString(),
+    maxBytes: _integer(
+      arguments['maxBytes'],
+      1024 * 1024,
+    ).clamp(1, 2 * 1024 * 1024),
+    timeout: Duration(
+      seconds: _integer(arguments['timeoutSeconds'], 60).clamp(5, 180),
+    ),
+  )).toJson();
+
+  Future<Map<String, Object?>> _cloneGitMinimal(
+    Map<String, Object?> arguments,
+  ) async => (await GitRepositoryService.cloneMinimal(
+    (arguments['remoteUrl'] ?? '').toString(),
+    destination: (arguments['destination'] ?? '').toString(),
+    ref: (arguments['ref'] ?? 'master').toString(),
+    depth: _integer(arguments['depth'], 1).clamp(1, 100),
+    timeout: Duration(
+      seconds: _integer(arguments['timeoutSeconds'], 300).clamp(30, 1800),
+    ),
+  )).toJson();
+
+  static String _redactedGitRemote(Object? raw) {
+    final String value = (raw ?? '').toString();
+    final Uri? uri = Uri.tryParse(value);
+    if (uri != null && uri.hasAuthority && uri.userInfo.isNotEmpty) {
+      return uri.replace(userInfo: uri.userInfo.split(':').first).toString();
+    }
+    return value;
+  }
+
   Future<Map<String, Object?>> _compareGitRefs(
     Map<String, Object?> arguments,
   ) async {
@@ -3930,6 +4061,13 @@ class VibekitsHarnessToolBridge {
         toolId == gitBackupPreviewId ||
         toolId == gitVerifyRemoteRefId) {
       return (arguments['path'] ?? '').toString();
+    }
+    if (toolId == gitListRemoteRefsId || toolId == gitReadRemoteFileId) {
+      return _redactedGitRemote(arguments['remoteUrl']);
+    }
+    if (toolId == gitCloneMinimalId) {
+      return '${_redactedGitRemote(arguments['remoteUrl'])} → '
+          '${arguments['destination'] ?? ''}';
     }
     if (toolId == gitBackupCommitId || toolId == gitBackupPushId) {
       return (arguments['previewId'] ?? '').toString();

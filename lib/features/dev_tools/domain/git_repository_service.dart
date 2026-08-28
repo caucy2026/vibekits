@@ -45,6 +45,69 @@ class GitReferenceComparison {
   final String diff;
 }
 
+class GitRemoteReference {
+  const GitRemoteReference({required this.sha, required this.ref});
+
+  final String sha;
+  final String ref;
+
+  Map<String, Object?> toJson() => <String, Object?>{'sha': sha, 'ref': ref};
+}
+
+class GitRemoteFileResult {
+  const GitRemoteFileResult({
+    required this.remoteUrl,
+    required this.ref,
+    required this.path,
+    required this.commitSha,
+    required this.content,
+    required this.byteLength,
+  });
+
+  final String remoteUrl;
+  final String ref;
+  final String path;
+  final String commitSha;
+  final String content;
+  final int byteLength;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'remoteUrl': remoteUrl,
+    'ref': ref,
+    'path': path,
+    'commitSha': commitSha,
+    'content': content,
+    'byteLength': byteLength,
+    'evidenceSource': 'bundled-git-fetch-show',
+  };
+}
+
+class GitMinimalCloneResult {
+  const GitMinimalCloneResult({
+    required this.remoteUrl,
+    required this.destination,
+    required this.ref,
+    required this.commitSha,
+    required this.depth,
+  });
+
+  final String remoteUrl;
+  final String destination;
+  final String ref;
+  final String commitSha;
+  final int depth;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'remoteUrl': remoteUrl,
+    'destination': destination,
+    'ref': ref,
+    'commitSha': commitSha,
+    'depth': depth,
+    'fullRepositorySync': false,
+    'evidenceSource': 'bundled-git-clone',
+  };
+}
+
 class GitBackupPreview {
   const GitBackupPreview({
     required this.id,
@@ -167,6 +230,126 @@ abstract final class GitRepositoryService {
       <String, _GitBackupPlanState>{};
 
   static String get bundledExecutable => _resolveGitExecutable();
+
+  static Future<List<GitRemoteReference>> listRemoteReferences(
+    String remoteUrl, {
+    String? pattern,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final String remote = _requiredRemoteUrl(remoteUrl);
+    final String refPattern = (pattern ?? '').trim();
+    if (refPattern.startsWith('-')) {
+      throw const FormatException('引用匹配不能以 - 开头');
+    }
+    final String output = await _git(Directory.systemTemp.path, <String>[
+      'ls-remote',
+      remote,
+      if (refPattern.isNotEmpty) refPattern,
+    ], timeout: timeout);
+    return <GitRemoteReference>[
+      for (final String line in output.split('\n'))
+        if (line.trim().isNotEmpty) _parseRemoteReference(line),
+    ];
+  }
+
+  static Future<GitRemoteFileResult> readRemoteTextFile(
+    String remoteUrl, {
+    required String ref,
+    required String path,
+    int maxBytes = 2 * 1024 * 1024,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    final String remote = _requiredRemoteUrl(remoteUrl);
+    final String remoteRef = _requiredRef(ref, '远端版本');
+    final String relativePath = _requiredRemotePath(path);
+    final int boundedMaxBytes = maxBytes.clamp(1, _maxOutputBytes);
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits-git-read-',
+    );
+    try {
+      await _git(temporary.path, <String>['init', '--bare']);
+      await _git(temporary.path, <String>[
+        'fetch',
+        '--depth=1',
+        '--no-tags',
+        remote,
+        remoteRef,
+      ], timeout: timeout);
+      final String commitSha = (await _git(temporary.path, <String>[
+        'rev-parse',
+        '--verify',
+        'FETCH_HEAD^{commit}',
+      ])).trim();
+      final String content = await _git(temporary.path, <String>[
+        'show',
+        'FETCH_HEAD:$relativePath',
+      ], maxOutputBytes: boundedMaxBytes);
+      return GitRemoteFileResult(
+        remoteUrl: _redactRemoteUrl(remote),
+        ref: remoteRef,
+        path: relativePath,
+        commitSha: commitSha,
+        content: content,
+        byteLength: utf8.encode(content).length,
+      );
+    } finally {
+      if (temporary.existsSync()) {
+        await temporary.delete(recursive: true);
+      }
+    }
+  }
+
+  static Future<GitMinimalCloneResult> cloneMinimal(
+    String remoteUrl, {
+    required String destination,
+    String ref = 'master',
+    int depth = 1,
+    Duration timeout = const Duration(minutes: 5),
+  }) async {
+    final String remote = _requiredRemoteUrl(remoteUrl);
+    final String remoteRef = _requiredRef(ref, '远端版本');
+    final int boundedDepth = depth.clamp(1, 100);
+    final Directory target = Directory(destination.trim()).absolute;
+    if (destination.trim().isEmpty) {
+      throw const FormatException('请输入独立目标目录');
+    }
+    final FileSystemEntityType existingType = FileSystemEntity.typeSync(
+      target.path,
+      followLinks: false,
+    );
+    if (existingType != FileSystemEntityType.notFound) {
+      throw const FormatException('目标目录必须不存在，避免覆盖已有文件');
+    }
+    final Directory parent = target.parent;
+    if (!parent.existsSync()) await parent.create(recursive: true);
+    try {
+      await _git(parent.path, <String>[
+        'clone',
+        '--depth=$boundedDepth',
+        '--no-tags',
+        '--single-branch',
+        '--branch',
+        remoteRef,
+        remote,
+        target.path,
+      ], timeout: timeout);
+      final String commitSha = (await _git(target.path, <String>[
+        'rev-parse',
+        '--verify',
+        'HEAD^{commit}',
+      ])).trim();
+      return GitMinimalCloneResult(
+        remoteUrl: _redactRemoteUrl(remote),
+        destination: target.path,
+        ref: remoteRef,
+        commitSha: commitSha,
+        depth: boundedDepth,
+      );
+    } catch (_) {
+      if (target.existsSync()) await target.delete(recursive: true);
+      rethrow;
+    }
+  }
 
   static Future<GitRepositorySnapshot> inspect(String directory) async {
     final String path = directory.trim();
@@ -932,41 +1115,102 @@ abstract final class GitRepositoryService {
     return result;
   }
 
+  static String _requiredRemoteUrl(String value) {
+    final String result = value.trim();
+    if (result.isEmpty) throw const FormatException('请输入 Git 远端地址');
+    if (result.startsWith('-') ||
+        result.contains('\n') ||
+        result.contains('\r')) {
+      throw const FormatException('Git 远端地址格式无效');
+    }
+    final Uri? uri = Uri.tryParse(result);
+    if (uri != null && uri.hasAuthority) {
+      if (!const <String>{'ssh', 'http', 'https'}.contains(uri.scheme)) {
+        throw const FormatException('只支持 SSH、HTTP 或 HTTPS Git 远端');
+      }
+      if (uri.userInfo.contains(':')) {
+        throw const FormatException('远端地址不得包含明文密码');
+      }
+    } else if (!RegExp(r'^[^\s@:]+@[^\s:]+:.+$').hasMatch(result)) {
+      throw const FormatException('Git 远端地址必须是 SSH、HTTP 或 HTTPS URL');
+    }
+    return result;
+  }
+
+  static String _requiredRemotePath(String value) {
+    final String result = value.trim().replaceAll('\\', '/');
+    if (result.isEmpty ||
+        result.startsWith('/') ||
+        result.startsWith('-') ||
+        result.split('/').contains('..')) {
+      throw const FormatException('远端文件必须是仓库内安全相对路径');
+    }
+    return result;
+  }
+
+  static GitRemoteReference _parseRemoteReference(String line) {
+    final List<String> fields = line.trim().split(RegExp(r'\s+'));
+    if (fields.length != 2 ||
+        !RegExp(r'^[0-9a-fA-F]{40,64}$').hasMatch(fields[0]) ||
+        fields[1].isEmpty) {
+      throw const FormatException('Git 远端引用输出格式无效');
+    }
+    return GitRemoteReference(sha: fields[0], ref: fields[1]);
+  }
+
   static Future<String> _git(
     String directory,
     List<String> arguments, {
     Duration timeout = const Duration(seconds: 10),
+    int maxOutputBytes = _maxOutputBytes,
   }) async {
     final Process process;
     final String executable = _resolveGitExecutable();
     final bool networkCommand = arguments.any(
-      const <String>{'ls-remote', 'push'}.contains,
+      const <String>{'ls-remote', 'fetch', 'clone', 'push'}.contains,
     );
     final String runtimeRoot = File(executable).parent.parent.path;
     try {
-      process = await Process.start(executable, <String>[
-        '--no-pager',
-        if (Platform.isWindows && networkCommand) ...<String>[
-          '--exec-path=$runtimeRoot${Platform.pathSeparator}mingw64'
-              '${Platform.pathSeparator}bin',
-          '-c',
-          'http.sslBackend=openssl',
+      process = await Process.start(
+        executable,
+        <String>[
+          '--no-pager',
+          if (Platform.isWindows && networkCommand) ...<String>[
+            '--exec-path=$runtimeRoot${Platform.pathSeparator}mingw64'
+                '${Platform.pathSeparator}bin',
+            '-c',
+            'http.sslBackend=openssl',
+          ],
+          '-C',
+          directory,
+          ...arguments,
         ],
-        '-C',
-        directory,
-        ...arguments,
-      ], runInShell: false);
+        runInShell: false,
+        environment: const <String, String>{
+          'GIT_TERMINAL_PROMPT': '0',
+          'GCM_INTERACTIVE': 'Never',
+        },
+        includeParentEnvironment: true,
+      );
     } on ProcessException catch (error) {
       throw StateError('内置 Git 无法启动：${error.message}');
     }
-    final Future<List<int>> stdout = _boundedBytes(process.stdout, process);
-    final Future<List<int>> stderr = _boundedBytes(process.stderr, process);
+    final Future<List<int>> stdout = _boundedBytes(
+      process.stdout,
+      process,
+      maxBytes: maxOutputBytes,
+    );
+    final Future<List<int>> stderr = _boundedBytes(
+      process.stderr,
+      process,
+      maxBytes: maxOutputBytes,
+    );
     final int exitCode;
     try {
       exitCode = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill();
-      throw const FormatException('Git 命令超过 10 秒，已停止');
+      throw FormatException('Git 命令超过 ${timeout.inSeconds} 秒，已停止');
     }
     final String output = utf8.decode(await stdout, allowMalformed: true);
     final String error = utf8.decode(await stderr, allowMalformed: true).trim();
@@ -1008,15 +1252,16 @@ abstract final class GitRepositoryService {
 
   static Future<List<int>> _boundedBytes(
     Stream<List<int>> source,
-    Process process,
-  ) async {
+    Process process, {
+    int maxBytes = _maxOutputBytes,
+  }) async {
     final BytesBuilder builder = BytesBuilder(copy: false);
     int length = 0;
     await for (final List<int> chunk in source) {
       length += chunk.length;
-      if (length > _maxOutputBytes) {
+      if (length > maxBytes) {
         process.kill();
-        throw const FormatException('Git 输出超过 2 MiB，已停止');
+        throw FormatException('Git 输出超过 ${_formatBytes(maxBytes)}，已停止');
       }
       builder.add(chunk);
     }
