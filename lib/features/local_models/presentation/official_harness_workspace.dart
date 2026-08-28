@@ -13,6 +13,7 @@ import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
+import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
 
 typedef OfficialHarnessCredentialReader = Future<String?> Function(String key);
@@ -824,16 +825,32 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             // "Session log" action at the far-right edge.
             right: 170,
             top: 10,
-            child: StreamBuilder<HarnessWorkSnapshot>(
-              stream: HarnessWorkStatusHub.changes,
-              initialData: HarnessWorkStatusHub.latest,
+            child: StreamBuilder<RustDeskHarnessLinkSnapshot>(
+              stream: RustDeskHarnessLinkStatusHub.changes,
+              initialData: RustDeskHarnessLinkStatusHub.latest,
               builder:
                   (
                     BuildContext context,
-                    AsyncSnapshot<HarnessWorkSnapshot> snapshot,
+                    AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
                   ) {
-                    final HarnessWorkSnapshot status =
-                        snapshot.data ?? HarnessWorkStatusHub.latest;
+                    final RustDeskHarnessLinkSnapshot link =
+                        snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                    final Color indicator = switch (link.phase) {
+                      RustDeskHarnessLinkPhase.connected => const Color(
+                        0xFF16845B,
+                      ),
+                      RustDeskHarnessLinkPhase.clientFound ||
+                      RustDeskHarnessLinkPhase.handshaking => const Color(
+                        0xFFE99A22,
+                      ),
+                      RustDeskHarnessLinkPhase.incompatible ||
+                      RustDeskHarnessLinkPhase.stale => Theme.of(
+                        context,
+                      ).colorScheme.error,
+                      RustDeskHarnessLinkPhase.disconnected => Theme.of(
+                        context,
+                      ).colorScheme.outline,
+                    };
                     return Material(
                       color: Theme.of(context).colorScheme.surface
                           .withValues(alpha: 0.94),
@@ -844,25 +861,28 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         borderRadius: BorderRadius.circular(20),
                         onTap: _showRemoteShare,
                         child: Tooltip(
-                          message: status.busy
-                              ? status.message
-                              : '通过中继网页查看和交互 Harness 工作状态（VibeKits 功能）',
+                          message: link.message,
                           child: SizedBox(
                             width: 112,
                             height: 36,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: <Widget>[
-                                Icon(
-                                  status.busy
-                                      ? Icons.sync_rounded
-                                      : Icons.screen_share_outlined,
-                                  size: 16,
-                                ),
+                                Icon(Icons.screen_share_outlined, size: 16),
                                 const SizedBox(width: 6),
                                 const Text(
                                   '远程分享',
                                   style: TextStyle(fontSize: 12),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  key: const Key('rustdesk-link-indicator'),
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                    color: indicator,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1088,10 +1108,7 @@ class _HarnessRemoteShareDialog extends StatefulWidget {
 }
 
 class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
-  late final Future<RustDeskHostInfo> _host =
-      RustDeskHarnessShareService.inspect(
-        configuredExecutable: widget.configuredExecutable,
-      );
+  late final Future<RustDeskHostInfo> _host = _inspectHost();
   String _message = '';
   String _resolvedWebClientUrl = '';
 
@@ -1099,6 +1116,18 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
   void initState() {
     super.initState();
     unawaited(_resolveWebClientUrl());
+  }
+
+  Future<RustDeskHostInfo> _inspectHost() async {
+    final RustDeskHostInfo host = await RustDeskHarnessShareService.inspect(
+      configuredExecutable: widget.configuredExecutable,
+    );
+    if (host.available &&
+        RustDeskHarnessLinkStatusHub.latest.phase ==
+            RustDeskHarnessLinkPhase.disconnected) {
+      RustDeskHarnessLinkStatusHub.clientFound();
+    }
+    return host;
   }
 
   Future<void> _resolveWebClientUrl() async {
@@ -1112,7 +1141,8 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
   Future<void> _launchHost(RustDeskHostInfo host) async {
     try {
       await RustDeskHarnessShareService.launchHost(host.executable);
-      if (mounted) setState(() => _message = 'RustDesk 已启动');
+      RustDeskHarnessLinkStatusHub.clientFound();
+      if (mounted) setState(() => _message = '科米远程办公已启动，等待状态协议连接');
     } on Object catch (error) {
       if (mounted) setState(() => _message = '启动失败：$error');
     }
@@ -1121,7 +1151,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
   Future<void> _openWeb() async {
     try {
       await RustDeskHarnessShareService.openWebClient(_resolvedWebClientUrl);
-      if (mounted) setState(() => _message = '已打开 RustDesk 网页端');
+      if (mounted) setState(() => _message = '已打开科米远程办公网页端');
     } on Object catch (error) {
       if (mounted) setState(() => _message = '打开失败：$error');
     }
@@ -1159,6 +1189,33 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
                 },
           ),
           const Divider(),
+          StreamBuilder<RustDeskHarnessLinkSnapshot>(
+            stream: RustDeskHarnessLinkStatusHub.changes,
+            initialData: RustDeskHarnessLinkStatusHub.latest,
+            builder:
+                (
+                  BuildContext context,
+                  AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
+                ) {
+                  final RustDeskHarnessLinkSnapshot link =
+                      snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Icon(
+                      link.connected
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      color: link.connected
+                          ? const Color(0xFF16845B)
+                          : Theme.of(context).colorScheme.outline,
+                    ),
+                    title: Text(link.message),
+                    subtitle: const Text('只有完成本机协议握手且心跳有效才显示已连接'),
+                  );
+                },
+          ),
+          const Divider(),
           FutureBuilder<RustDeskHostInfo>(
             future: _host,
             builder:
@@ -1184,7 +1241,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
                                 ? () => _launchHost(host)
                                 : null,
                             icon: const Icon(Icons.desktop_windows_outlined),
-                            label: const Text('启动 RustDesk'),
+                            label: const Text('启动科米远程办公'),
                           ),
                           OutlinedButton.icon(
                             onPressed: _resolvedWebClientUrl.isEmpty
@@ -1208,7 +1265,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'RustDesk 网页端通过 hbbs/hbbr 查看并操作本机 Vibekits。'
+            '科米远程办公底层兼容 RustDesk，通过 hbbs/hbbr 查看并操作本机 Vibekits。'
             'hbbr 不是通用 JSON 中继，因此不会把 API Key、提示词或文件正文发送给它。',
             style: TextStyle(fontSize: 12),
           ),

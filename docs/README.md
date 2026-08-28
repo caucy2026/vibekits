@@ -101,6 +101,7 @@
 94. [dev.135 Harness 远端 Git 按需取码验收](acceptance/V1_9_0_DEV135_HIV730_REMOTE_GIT_2026-08-28.md)——实读项目指南、Gerrit refs、master manifest、103 个仓库解析与整包同步禁令
 95. [Harness × RustDesk P2P 实时状态架构](38_HARNESS_RUSTDESK_P2P_STATUS_ARCHITECTURE.md)——多项目状态机、本机安全 IPC、端到端 P2P 心跳、隐私边界和跨仓实施顺序
 96. [RustDesk × Vibekits 可选集成合同](39_RUSTDESK_VIBEKITS_OPTIONAL_INTEGRATION_CONTRACT.md)——双方独立运行、发现握手、未连接 UI、协议兼容、失败隔离和 15 项联合验收
+97. [dev.136 科米远程办公连接标识验收](acceptance/V1_9_0_DEV136_KEMI_REMOTE_LINK_STATUS_2026-08-28.md)——自动科米办公 ID、真实握手/心跳标识、过期降级和首屏解耦
 
 ## 完成定义
 
