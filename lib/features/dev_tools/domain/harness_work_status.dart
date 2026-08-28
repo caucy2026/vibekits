@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'harness_runtime_log_store.dart';
+
 enum HarnessWorkPhase {
   idle,
   starting,
@@ -77,6 +79,7 @@ abstract final class HarnessWorkStatusHub {
       target: _redactTarget(_bounded(target, 300)),
     );
     _changes.add(_latest);
+    unawaited(HarnessRuntimeLogStore.appendWorkEvent(_latest.toJson()));
   }
 
   static String _redactTarget(String value) => value

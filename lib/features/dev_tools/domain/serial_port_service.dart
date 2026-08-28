@@ -268,6 +268,216 @@ abstract final class SerialPortService {
       _WorkerSerialPortSession.open(settings);
 }
 
+typedef SerialSessionOpener = Future<SerialPortSession> Function(
+  SerialConnectionSettings settings,
+);
+
+/// Passive serial configuration discovery used by Harness.
+///
+/// It never writes probe bytes. Candidates are tried in three bounded stages:
+/// common baud rates with 8-N-1, frame formats at the best baud, then flow
+/// control. This keeps the default run short while still returning auditable
+/// evidence for every attempted configuration.
+abstract final class SerialAutoDetector {
+  static const List<int> defaultBaudRates = <int>[
+    115200,
+    921600,
+    460800,
+    230400,
+    57600,
+    38400,
+    19200,
+    9600,
+  ];
+
+  static Future<Map<String, Object?>> detect({
+    required String portName,
+    List<int> baudRates = defaultBaudRates,
+    Duration listenDuration = const Duration(milliseconds: 300),
+    SerialSessionOpener open = SerialPortService.open,
+  }) async {
+    final List<Map<String, Object?>> attempts = <Map<String, Object?>>[];
+    final Set<String> seen = <String>{};
+
+    Future<_SerialProbe> trySettings(SerialConnectionSettings settings) async {
+      final String key = settings.encode();
+      if (!seen.add(key)) {
+        return const _SerialProbe.empty();
+      }
+      final BytesBuilder bytes = BytesBuilder(copy: false);
+      SerialPortSession? session;
+      StreamSubscription<SerialPortEvent>? subscription;
+      String? error;
+      try {
+        session = await open(settings);
+        subscription = session.events.listen((SerialPortEvent event) {
+          if (event.type == SerialPortEventType.received &&
+              event.bytes != null) {
+            bytes.add(event.bytes!);
+          }
+        });
+        await Future<void>.delayed(listenDuration);
+      } on Object catch (caught) {
+        error = '$caught';
+      } finally {
+        await session?.close();
+        await subscription?.cancel();
+      }
+      final Uint8List received = bytes.takeBytes();
+      final double score = _score(received);
+      final Map<String, Object?> evidence = <String, Object?>{
+        ...settings.toMap(),
+        'summary': settings.summary,
+        'receivedBytes': received.length,
+        'score': double.parse(score.toStringAsFixed(3)),
+        if (received.isNotEmpty)
+          'sampleText': SerialCodec.decode(
+            Uint8List.sublistView(received, 0, received.length.clamp(0, 256)),
+            SerialDataMode.text,
+          ),
+        if (received.isNotEmpty)
+          'sampleHex': SerialCodec.decode(
+            Uint8List.sublistView(received, 0, received.length.clamp(0, 64)),
+            SerialDataMode.hex,
+          ),
+        if (error != null) 'error': error,
+      };
+      attempts.add(evidence);
+      return _SerialProbe(settings, received, score, error);
+    }
+
+    _SerialProbe best = const _SerialProbe.empty();
+    for (final int baudRate in baudRates.toSet()) {
+      final _SerialProbe probe = await trySettings(
+        SerialConnectionSettings(portName: portName, baudRate: baudRate),
+      );
+      if (probe.isBetterThan(best)) best = probe;
+    }
+    if (best.bytes.isEmpty) {
+      for (final SerialFlowControl flow in const <SerialFlowControl>[
+        SerialFlowControl.rtsCts,
+        SerialFlowControl.dtrDsr,
+        SerialFlowControl.xonXoff,
+      ]) {
+        for (final int baudRate in baudRates.toSet()) {
+          final _SerialProbe probe = await trySettings(
+            SerialConnectionSettings(
+              portName: portName,
+              baudRate: baudRate,
+              flowControl: flow,
+            ),
+          );
+          if (probe.isBetterThan(best)) best = probe;
+        }
+        if (best.bytes.isNotEmpty && best.score >= 90) break;
+      }
+    }
+    final int bestBaud =
+        best.settings?.baudRate ??
+        (baudRates.isEmpty ? 115200 : baudRates.first);
+    for (final SerialConnectionSettings settings in <SerialConnectionSettings>[
+      SerialConnectionSettings(portName: portName, baudRate: bestBaud),
+      SerialConnectionSettings(
+        portName: portName,
+        baudRate: bestBaud,
+        parity: SerialParity.even,
+      ),
+      SerialConnectionSettings(
+        portName: portName,
+        baudRate: bestBaud,
+        dataBits: 7,
+        parity: SerialParity.even,
+      ),
+      SerialConnectionSettings(
+        portName: portName,
+        baudRate: bestBaud,
+        parity: SerialParity.odd,
+      ),
+      SerialConnectionSettings(
+        portName: portName,
+        baudRate: bestBaud,
+        stopBits: 2,
+      ),
+    ]) {
+      final _SerialProbe probe = await trySettings(settings);
+      if (probe.isBetterThan(best)) best = probe;
+    }
+    final SerialConnectionSettings frame =
+        best.settings ??
+        SerialConnectionSettings(portName: portName, baudRate: bestBaud);
+    for (final SerialFlowControl flow in SerialFlowControl.values) {
+      final _SerialProbe probe = await trySettings(
+        SerialConnectionSettings(
+          portName: portName,
+          baudRate: frame.baudRate,
+          dataBits: frame.dataBits,
+          parity: frame.parity,
+          stopBits: frame.stopBits,
+          flowControl: flow,
+        ),
+      );
+      if (probe.isBetterThan(best)) best = probe;
+    }
+    final SerialConnectionSettings selected =
+        best.settings ??
+        SerialConnectionSettings(portName: portName, baudRate: bestBaud);
+    final double confidence = best.bytes.isEmpty
+        ? 0
+        : (best.score / 120).clamp(0, 1);
+    return <String, Object?>{
+      'port': portName,
+      'selected': selected.toMap(),
+      'summary': selected.summary,
+      'confidence': double.parse(confidence.toStringAsFixed(3)),
+      'passiveOnly': true,
+      'receivedBytes': best.bytes.length,
+      'attemptCount': attempts.length,
+      'attempts': attempts,
+      'requiresUserInput': false,
+      'nextAction': best.bytes.isEmpty
+          ? '未捕获持续数据；可直接用 selected 打开监听，或扩大 listenMs 后重试。'
+          : '使用 selected 参数调用 serial.session_open，并用 session_read 持续读取。',
+    };
+  }
+
+  static double _score(Uint8List bytes) {
+    if (bytes.isEmpty) return 0;
+    int printable = 0;
+    int replacement = 0;
+    int lines = 0;
+    for (final int byte in bytes) {
+      if (byte == 10 || byte == 13 || byte == 9 || (byte >= 32 && byte < 127)) {
+        printable += 1;
+      }
+      if (byte == 0xEF) replacement += 1;
+      if (byte == 10) lines += 1;
+    }
+    return (printable / bytes.length) * 100 +
+        lines.clamp(0, 10) * 1.5 +
+        bytes.length.clamp(0, 512) / 64 -
+        replacement * 0.5;
+  }
+}
+
+class _SerialProbe {
+  const _SerialProbe(this.settings, this.bytes, this.score, this.error);
+  const _SerialProbe.empty()
+    : settings = null,
+      bytes = const <int>[],
+      score = -1,
+      error = null;
+
+  final SerialConnectionSettings? settings;
+  final List<int> bytes;
+  final double score;
+  final String? error;
+
+  bool isBetterThan(_SerialProbe other) =>
+      error == null &&
+      (score > other.score ||
+          (score == other.score && bytes.length > other.bytes.length));
+}
+
 List<Map<String, Object?>> _listSerialPorts() {
   final List<Map<String, Object?>> ports = <Map<String, Object?>>[];
   for (final String name in native.SerialPort.getAvailablePorts()) {

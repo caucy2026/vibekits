@@ -27,6 +27,7 @@ class MainShell extends StatefulWidget {
   const MainShell({
     super.key,
     required this.settingsController,
+    this.preapprovedHarnessToolIds = const <String>{},
     this.initialFilePath,
     this.initialFilePaths = const <String>[],
     this.initialWorkspaceId,
@@ -35,6 +36,7 @@ class MainShell extends StatefulWidget {
   });
 
   final AppSettingsController settingsController;
+  final Set<String> preapprovedHarnessToolIds;
   final String? initialFilePath;
   final List<String> initialFilePaths;
   final String? initialWorkspaceId;
@@ -463,6 +465,7 @@ class _MainShellState extends State<MainShell> {
         toolDownloadDirectory: settings.toolDownloadDirectory,
         rustDeskExecutable: settings.rustDeskExecutable,
         rustDeskWebClientUrl: settings.rustDeskWebClientUrl,
+        preapprovedHarnessToolIds: widget.preapprovedHarnessToolIds,
         initialImportPath:
             _modelDropPath ??
             (SupportedFileTypes.kindForPath(widget.initialFilePath ?? '') ==

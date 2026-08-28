@@ -166,6 +166,9 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-approval.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-android-stress-mcp.mjs"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   message(FATAL_ERROR
     "Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.")

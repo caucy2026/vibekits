@@ -98,6 +98,7 @@ void main() {
       VibekitsHarnessToolBridge.gitVerifyRemoteRefId,
       VibekitsHarnessToolBridge.fileSearchId,
       VibekitsHarnessToolBridge.apiRequestId,
+      VibekitsHarnessToolBridge.networkDownloadId,
       VibekitsHarnessToolBridge.githubDiagnosticsId,
       VibekitsHarnessToolBridge.githubProxyCandidatesId,
       VibekitsHarnessToolBridge.githubProxyPlanId,
@@ -127,6 +128,7 @@ void main() {
       VibekitsHarnessToolBridge.audioStopId,
       VibekitsHarnessToolBridge.audioGenerateToneId,
       VibekitsHarnessToolBridge.systemResourcesId,
+      VibekitsHarnessToolBridge.harnessDiagnosticsId,
     ]) {
       expect(tools.any((dynamic tool) => tool['id'] == id), isTrue, reason: id);
     }
@@ -523,6 +525,7 @@ void main() {
       await invoke(VibekitsHarnessToolBridge.adbInstallApkId, <String, Object?>{
         'apkPath': apk.path,
         'replace': true,
+        'allowDowngrade': true,
       }),
       await invoke(VibekitsHarnessToolBridge.adbPushFileId, <String, Object?>{
         'localPath': upload.path,
@@ -556,7 +559,14 @@ void main() {
       'VIBE_TAG:D',
       '*:S',
     ]);
-    expect(calls[2], <String>['-s', serial, 'install', '-r', apk.path]);
+    expect(calls[2], <String>[
+      '-s',
+      serial,
+      'install',
+      '-r',
+      '-d',
+      apk.path,
+    ]);
     expect(calls[3], <String>[
       '-s',
       serial,

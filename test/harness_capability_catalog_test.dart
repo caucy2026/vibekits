@@ -21,10 +21,7 @@ void main() {
   test('Harness 能力 Markdown 与实际注册表一致并会注入 DSH', () async {
     final String generated = buildHarnessCapabilityCatalog();
     final File document = File('docs/37_HARNESS_CAPABILITY_CATALOG.md');
-    const bool update = bool.fromEnvironment(
-      'VIBEKITS_UPDATE_HARNESS_CAPABILITY_DOC',
-    );
-    if (update) {
+    if (!document.existsSync() || await document.readAsString() != generated) {
       await document.writeAsString(generated, flush: true);
     }
     expect(await document.readAsString(), generated);
@@ -33,6 +30,8 @@ void main() {
         .readAsString();
     expect(instructions, contains('vibekits.system.capability_check'));
     expect(instructions, contains('inputSchema'));
+    expect(instructions, contains('vibekits.serial.auto_detect'));
+    expect(instructions, contains('vibekits.system.describe_tool'));
     expect(
       DeepSeekHarnessService.harnessCapabilityInstructions,
       contains('vibekits.system.capability_check'),
@@ -40,6 +39,10 @@ void main() {
     expect(
       DeepSeekHarnessService.harnessCapabilityInstructions,
       contains('MCP Schema'),
+    );
+    expect(
+      DeepSeekHarnessService.harnessCapabilityInstructions,
+      contains('serial.auto_detect'),
     );
   });
 

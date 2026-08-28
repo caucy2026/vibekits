@@ -35,6 +35,18 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 
 上游：PaddlePaddle/PaddleOCR；许可证：Apache-2.0；模型由用户主动安装，不随应用静默下载。
 
+### PP-OCRv6 精度档策略
+
+- 桌面高精度档：`PP-OCRv6_medium_det`（15.5M）+ `PP-OCRv6_medium_rec`（19M），合计 34.5M 参数，是 PP-OCRv6 当前最大参数组合。官方 ONNX 文件约 62 MB + 76.6 MB，必须显式安装、SHA-256 校验后使用，不能阻塞 APP/Harness 首屏。
+- Windows/macOS 自动档：已安装 Medium 时优先 Medium；未安装时立即使用内置 Tiny，不联网等待。
+- Android 自动档：默认 Tiny。Medium 只允许用户主动下载，不能塞入基础 APK，也不能在低内存设备上自动启用。
+- Harness 获得的 OCR 结果必须同时包含像素框、0..1 相对框、九宫格区域和阅读顺序；无多模态能力时以这些结构化字段理解截图，不伪称看到了 OCR 未识别的内容。
+
+官方模型与锁定文件：
+
+- 检测：`PaddlePaddle/PP-OCRv6_medium_det_onnx/inference.onnx`，62,032,837 bytes，SHA-256 `eb13b44b25bb36f89528b68720af8a61d9cf381176107f465db1757b65d086e1`。
+- 识别：`PaddlePaddle/PP-OCRv6_medium_rec_onnx/inference.onnx`，76,554,979 bytes，SHA-256 `9c09abf0957f7968c7586464b7397b84ad2387a0497a351af40e9acc71b673ba`。
+
 | 资产 | 字节 | SHA-256 |
 |---|---:|---|
 | `ppocrv6_tiny_det.onnx` | 1,780,590 | `193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8` |

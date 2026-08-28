@@ -36,6 +36,7 @@ $required = @(
   'tools\harness\vibekits-mcp-server.mjs',
   'tools\harness\vibekits-codex-mcp.mjs',
   'tools\harness\vibekits-approval.mjs',
+  'tools\harness\vibekits-android-stress-mcp.mjs',
   'tools\mihomo\mihomo.exe',
   'tools\mihomo\vibekits-mihomo-runtime.json',
   'tools\mihomo\Country.mmdb',

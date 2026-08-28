@@ -105,6 +105,19 @@ abstract final class CleanupDecisionEngine {
         explanation: '${platform.label} 平台安全边界之外，只展示信息，不允许清理',
       );
     }
+    final String source = candidate.sourceLabel?.toLowerCase() ?? '';
+    final bool harnessArtifact =
+        source.contains('harness') ||
+        (harnessDebugDirectory.trim().isNotEmpty &&
+            _containsPath(harnessDebugDirectory, candidate.path));
+    if (harnessArtifact) {
+      return CleanupDecision(
+        candidate: candidate,
+        tier: CleanupDecisionTier.review,
+        score: 60,
+        explanation: 'Harness 调试证据可能用于定位故障；已统计容量，但必须由用户选择后才清理',
+      );
+    }
     if (protectedRoots.any(
       (String root) => _containsPath(root, candidate.path),
     )) {
@@ -124,6 +137,8 @@ abstract final class CleanupDecisionEngine {
         score: 0,
         explanation: candidate.category == CleanupCategory.recycleBin
             ? '回收站可释放空间，但清空后无法恢复，必须单独确认'
+            : candidate.category == CleanupCategory.userProfileResidual
+            ? '用户配置可能包含文档、密钥和已加载注册表；只盘点容量，必须通过 Windows 账户/用户配置流程删除'
             : '由系统或安装器管理，不执行文件级删除',
       );
     }

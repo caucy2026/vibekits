@@ -264,6 +264,65 @@ void main() {
     expect(find.text('清理 2 项'), findsOneWidget);
   });
 
+  testWidgets('系统盘低于五个百分点时自动勾选十 GiB 可再生缓存', (WidgetTester tester) async {
+    const int gib = 1024 * 1024 * 1024;
+    final DateTime old = DateTime.now().subtract(const Duration(days: 2));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CleanerTab(
+            persistDriveAnalysisReport: false,
+            availableTargets: testTargets,
+            volumeLoader: () async => const <DiskVolumeInfo>[
+              DiskVolumeInfo(
+                rootPath: 'C:\\',
+                name: 'C:（系统盘）',
+                type: DiskVolumeType.fixed,
+                totalBytes: 80 * gib,
+                freeBytes: 2 * gib,
+                availableBytes: 2 * gib,
+                isSystemVolume: true,
+              ),
+            ],
+            scanRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(CleanupScanProgress progress)
+                  onProgress,
+                }) async => CleanupScanResult(
+                  candidates: <CleanupCandidate>[
+                    CleanupCandidate(
+                      path: r'C:\Users\me\.gradle\caches\8.14.3',
+                      size: 6 * gib,
+                      category: CleanupCategory.devCache,
+                      reason: 'Gradle 可重建构建缓存',
+                      modified: old,
+                      sourceLabel: 'Gradle 可重建构建缓存',
+                    ),
+                    CleanupCandidate(
+                      path: r'C:\Users\me\AppData\Local\Pub\Cache',
+                      size: 5 * gib,
+                      category: CleanupCategory.devCache,
+                      reason: 'Dart / Flutter Pub 下载缓存',
+                      modified: old,
+                      sourceLabel: 'Dart / Flutter Pub 下载缓存',
+                    ),
+                  ],
+                  cancelled: false,
+                  unreadablePaths: 0,
+                ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('扫描可清理项'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已按 10 GiB 目标自动勾选'), findsOneWidget);
+    expect(find.text('清理 2 项'), findsOneWidget);
+  });
+
   testWidgets('半年未使用软件显示证据、路径和直接卸载入口', (WidgetTester tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));

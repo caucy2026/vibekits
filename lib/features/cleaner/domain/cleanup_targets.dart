@@ -55,7 +55,7 @@ class CleanupScanTarget {
 }
 
 abstract final class CleanupTargetDiscovery {
-  static const int catalogVersion = 14;
+  static const int catalogVersion = 17;
 
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
@@ -208,22 +208,53 @@ abstract final class CleanupTargetDiscovery {
         strategy: CleanupTargetStrategy.staleChildDirectories,
         minimumAgeHours: 24 * 30,
         maxEntries: 100000,
-        riskLevel: CleanupRiskLevel.cautious,
+        riskLevel: CleanupRiskLevel.safe,
         safetyNote: '仅列出 30 天未更新的 Gradle 版本；旧项目再次构建时会重新下载',
       );
       _addExisting(
         targets,
         id: 'gradle-cache',
-        label: 'Gradle 旧版本构建缓存',
+        label: 'Gradle 可重建构建缓存',
         path: _join(userProfile, <String>['.gradle', 'caches']),
         category: CleanupCategory.devCache,
-        defaultEnabled: false,
+        defaultEnabled: true,
         strategy: CleanupTargetStrategy.staleChildDirectories,
-        minimumAgeHours: 24 * 30,
-        riskLevel: CleanupRiskLevel.cautious,
-        safetyNote: '只按 30 天未更新的完整版本目录列出；禁止逐文件清理，避免留下损坏的半套 Gradle 缓存',
+        minimumAgeHours: 24,
+        riskLevel: CleanupRiskLevel.safe,
+        safetyNote: '只按 24 小时未更新的完整顶层缓存目录列出；始终需人工确认，删除后下次构建会重新下载/生成',
         maxEntries: 100000,
       );
+      _addExisting(
+        targets,
+        id: 'gradle-temp',
+        label: 'Gradle 临时下载与构建残留',
+        path: _join(userProfile, <String>['.gradle', '.tmp']),
+        category: CleanupCategory.devCache,
+        defaultEnabled: true,
+        minimumAgeHours: 1,
+        riskLevel: CleanupRiskLevel.safe,
+        safetyNote: '只列出 1 小时前的 Gradle 临时文件；构建进程正在使用或文件已变化时删除层会跳过',
+        maxEntries: 100000,
+      );
+      for (final (String id, String label, List<String> parts)
+          in <(String, String, List<String>)>[
+            ('codex-temp', 'Codex 临时文件', <String>['.codex', '.tmp']),
+            ('codex-runtime-temp', 'Codex 运行时临时文件', <String>['.codex', 'tmp']),
+            ('codex-cache', 'Codex 可再生缓存', <String>['.codex', 'cache']),
+          ]) {
+        _addExisting(
+          targets,
+          id: id,
+          label: label,
+          path: _join(userProfile, parts),
+          category: CleanupCategory.devCache,
+          defaultEnabled: true,
+          minimumAgeHours: 24,
+          riskLevel: CleanupRiskLevel.safe,
+          safetyNote: 'Codex 可再生的临时/缓存数据；不扫描 sessions、plugins、skills、凭据或当前工作区',
+          maxEntries: 100000,
+        );
+      }
       for (final (String id, String label, List<String> parts)
           in <(String, String, List<String>)>[
             ('nuget-cache', 'NuGet 下载与包缓存', <String>['.nuget', 'packages']),
@@ -383,6 +414,11 @@ abstract final class CleanupTargetDiscovery {
     );
     final String? systemDrive = env['SYSTEMDRIVE'];
     if (systemDrive != null && systemDrive.trim().isNotEmpty) {
+      _addWindowsUserProfileInventory(
+        targets,
+        systemDrive.trim(),
+        currentProfile: userProfile ?? '',
+      );
       targets.add(
         CleanupScanTarget(
           id: 'system-recycle-bin',
@@ -559,6 +595,43 @@ abstract final class CleanupTargetDiscovery {
         );
       }
     }
+  }
+
+  /// Adds a read-only inventory of Windows profiles other than the current
+  /// user. A profile directory is not a cache: it may contain documents, SSH
+  /// keys and loaded NTUSER/UsrClass registry hives. Therefore this target is
+  /// opt-in and every result is system-managed/protected. It exists so a full
+  /// disk report no longer hides multi-gigabyte retired profiles or suggests
+  /// that the generic file deleter can safely remove them.
+  static void _addWindowsUserProfileInventory(
+    List<CleanupScanTarget> targets,
+    String systemDrive, {
+    required String currentProfile,
+  }) {
+    final String users = _join(systemDrive, <String>['Users']);
+    final String currentName = currentProfile.trim().isEmpty
+        ? ''
+        : _baseName(currentProfile).toLowerCase();
+    _addExisting(
+      targets,
+      id: 'windows-other-user-profiles',
+      label: '其他 Windows 用户配置容量盘点',
+      path: users,
+      category: CleanupCategory.userProfileResidual,
+      defaultEnabled: false,
+      strategy: CleanupTargetStrategy.staleChildDirectories,
+      maxEntries: 500000,
+      excludePatterns: <String>[
+        'public',
+        'default',
+        'default user',
+        'all users',
+        'defaultuser0',
+        if (currentName.isNotEmpty) currentName,
+      ],
+      riskLevel: CleanupRiskLevel.systemManaged,
+      safetyNote: '只读汇总非当前用户目录；不判定账户已废弃，不读文件正文，不提权、不卸载注册表、不进入 10 GiB 自动恢复计划；请先从 Windows 账户/用户配置删除',
+    );
   }
 
   static void _addHarnessDebugTargets(

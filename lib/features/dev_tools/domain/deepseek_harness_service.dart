@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import '../../../app/platform_process_lifecycle.dart';
 import '../../../app/platform_storage_layout.dart';
 import 'harness_session_store.dart';
+import 'harness_runtime_log_store.dart';
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
 import 'harness_agent_preferences.dart';
@@ -208,13 +209,15 @@ abstract final class DeepSeekHarnessService {
 
 你运行在 VibeKits 内部。询问 APP 功能时，先调用只读工具 `vibekits.system.capability_check`，并分别报告 5 个产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。
 
-从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
+从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
+
+统一采用“自动发现、自动配置、证据验证”原则：能由 `list/inspect/status`、保存会话、设备枚举或安全试探得到的参数不得询问用户。仅在没有保存记录时询问账号/登录身份；密码、API Key、Token、私钥口令等秘密必须由用户输入；破坏性操作仍需用户确认。失败时先尝试安全候选并返回证据，不把实现细节转嫁给用户。
 
 遵循 `list/inspect/status → plan/preview → apply/start/send → verify/status`：先只读发现并锁定目标，再执行写入或设备控制。写数据、控制设备和破坏性操作服从当前权限模式。工具结果必须形成证据；工具存在不等于真实设备已验收。
 
 产品一级页面：智能体（Harness）、解压缩、系统清理、文档阅读、开发工具。业务模块：计算调试、系统诊断、数据库、远程连接、网络开发、版本控制、文件工具、音频调试、编码转换、加密生成、时间文本、格式处理和虚拟化。
 
-常用链路：串口短任务 `serial.list_ports → serial.transact`，持续调试 `serial.session_open → session_read/write → session_close`；ADB `adb.list_devices/connect → adb.*`，长连接用 `adb.session_open → session_status → session_close`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。修改 VibeKits 自身前先 `project.iteration_inspect`，完成后调用 `project.build` 执行分析、接口测试和 Release 构建门禁；构建产物不得自动覆盖正在运行的 APP，安装升级必须由用户确认。
+常用链路：串口先 `serial.list_ports → serial.auto_detect`，直接采用返回的 `selected`（baudRate/dataBits/stopBits/parity/flowControl），短任务再 `serial.transact`，持续调试再 `serial.session_open → session_read/write → session_close`。自动探测只监听，协议未知时禁止发送探测字节；没有数据时扩大 listenMs 重试；即使存在多个串口也按 VID/PID、描述和传输类型自动排序选择，再以被动接收结果报告置信度，不询问用户猜端口或配置。ADB `adb.list_devices/connect → adb.*`，长连接用 `adb.session_open → session_status → session_close`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`，优先复用保存会话；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。修改 VibeKits 自身前先 `project.iteration_inspect`，完成后调用 `project.build` 执行分析、接口测试和 Release 构建门禁；构建产物不得自动覆盖正在运行的 APP，安装升级必须由用户确认。
 
 完整目录位于项目 `docs/37_HARNESS_CAPABILITY_CATALOG.md`；运行时以本轮 `capability_check` 和 MCP Schema 为准。
 <!-- VIBEKITS_CAPABILITIES_END -->''';
@@ -261,6 +264,7 @@ abstract final class DeepSeekHarnessService {
         screenshots.create(recursive: true),
         temp.create(recursive: true),
       ]);
+      HarnessRuntimeLogStore.configure(root.path);
     } on FileSystemException catch (error) {
       throw FileSystemException(
         '无法创建 Harness 调试目录，请在设置中选择可写目录',
@@ -475,6 +479,9 @@ abstract final class DeepSeekHarnessService {
           'TMPDIR': debug.temp.path,
           'VIBEKITS_NODE_EXECUTABLE': runtime.nodeExecutable,
           'VIBEKITS_MCP_SERVER': runtime.mcpServerPath,
+          'VIBEKITS_ANDROID_STRESS_MCP_SERVER': runtime.androidStressMcpPath,
+          'VIBEKITS_STRESS_REPORT_DIR':
+              '${debug.root.path}${Platform.pathSeparator}stress',
           'VIBEKITS_TOOL_BRIDGE_URL': toolServer.endpoint.toString(),
           'VIBEKITS_TOOL_BRIDGE_TOKEN': toolServer.token,
         },
@@ -567,6 +574,9 @@ abstract final class DeepSeekHarnessService {
           'TMPDIR': debug.temp.path,
           'VIBEKITS_NODE_EXECUTABLE': runtime.nodeExecutable,
           'VIBEKITS_MCP_SERVER': runtime.mcpServerPath,
+          'VIBEKITS_ANDROID_STRESS_MCP_SERVER': runtime.androidStressMcpPath,
+          'VIBEKITS_STRESS_REPORT_DIR':
+              '${debug.root.path}${Platform.pathSeparator}stress',
           'VIBEKITS_TOOL_BRIDGE_URL': toolServer.endpoint.toString(),
           'VIBEKITS_TOOL_BRIDGE_TOKEN': toolServer.token,
         },
@@ -722,7 +732,22 @@ abstract final class DeepSeekHarnessService {
         '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
         '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
         '        failOnStartupError: true\n'
-        '        toolCallTimeoutMs: 60000\n'
+        '        toolCallTimeoutMs: !!js Number(process.env.VIBEKITS_MCP_TOOL_TIMEOUT_MS || 60000)\n'
+        '- insert:\n'
+        '    - id: vibekits-android-stress-mcp\n'
+        "      name: '@deepseek-ai/dsh-mcp-client'\n"
+        '      config:\n'
+        '        serverName: vibekits-android-stress\n'
+        '        transport: stdio\n'
+        '        command: !!js process.env.VIBEKITS_NODE_EXECUTABLE\n'
+        '        args:\n'
+        '          - !!js process.env.VIBEKITS_ANDROID_STRESS_MCP_SERVER\n'
+        '        env:\n'
+        '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
+        '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
+        '          VIBEKITS_STRESS_REPORT_DIR: !!js process.env.VIBEKITS_STRESS_REPORT_DIR\n'
+        '        failOnStartupError: true\n'
+        '        toolCallTimeoutMs: 1800000\n'
         '$approvalPatch';
     // This file is read on every DSH boot. Rewriting and force-flushing an
     // identical patch invalidates filesystem caches and makes Defender scan it
@@ -840,6 +865,7 @@ class _HarnessRuntime {
     required this.cliPath,
     required this.version,
     required this.mcpServerPath,
+    required this.androidStressMcpPath,
     required this.approvalPluginPath,
   });
 
@@ -847,6 +873,7 @@ class _HarnessRuntime {
   final String cliPath;
   final String version;
   final String mcpServerPath;
+  final String androidStressMcpPath;
   final String approvalPluginPath;
 }
 
@@ -887,10 +914,21 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         '${root.parent.parent.path}${Platform.pathSeparator}vibekits-approval.mjs',
       ),
     ];
+    final List<File> androidStressCandidates = <File>[
+      File(
+        '${root.path}${Platform.pathSeparator}vibekits-android-stress-mcp.mjs',
+      ),
+      File(
+        '${root.parent.parent.path}${Platform.pathSeparator}vibekits-android-stress-mcp.mjs',
+      ),
+    ];
     final File? mcpServer = mcpCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
     final File? approvalPlugin = approvalCandidates
+        .where((File file) => file.existsSync())
+        .firstOrNull;
+    final File? androidStressMcp = androidStressCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
     if (cli.isEmpty ||
@@ -898,6 +936,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         !node.existsSync() ||
         !cliFile.existsSync() ||
         mcpServer == null ||
+        androidStressMcp == null ||
         approvalPlugin == null) {
       continue;
     }
@@ -906,6 +945,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       cliPath: cliFile.path,
       version: version,
       mcpServerPath: mcpServer.path,
+      androidStressMcpPath: androidStressMcp.path,
       approvalPluginPath: approvalPlugin.path,
     );
   }

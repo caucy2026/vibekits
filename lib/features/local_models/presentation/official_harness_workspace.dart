@@ -9,6 +9,7 @@ import 'package:webview_windows/webview_windows.dart';
 
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
+import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
@@ -30,6 +31,7 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     super.key,
     this.initialWorkspace = '',
     this.initialDebugDirectory = '',
+    this.initialDownloadDirectory = '',
     this.onRunningChanged,
     this.credentialReader,
     this.credentialDeleter,
@@ -41,10 +43,12 @@ class OfficialHarnessWorkspace extends StatefulWidget {
     this.findPort = DeepSeekHarnessService.findFreeLoopbackPort,
     this.rustDeskExecutable = '',
     this.rustDeskWebClientUrl = '',
+    this.preapprovedToolIds = const <String>{},
   });
 
   final String initialWorkspace;
   final String initialDebugDirectory;
+  final String initialDownloadDirectory;
   final ValueChanged<bool>? onRunningChanged;
   final OfficialHarnessCredentialReader? credentialReader;
   final OfficialHarnessCredentialDeleter? credentialDeleter;
@@ -56,6 +60,7 @@ class OfficialHarnessWorkspace extends StatefulWidget {
   final Future<int> Function() findPort;
   final String rustDeskExecutable;
   final String rustDeskWebClientUrl;
+  final Set<String> preapprovedToolIds;
 
   @override
   State<OfficialHarnessWorkspace> createState() =>
@@ -84,6 +89,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   @override
   void initState() {
     super.initState();
+    _sessionApprovedToolIds.addAll(widget.preapprovedToolIds);
     // Let the workspace frame paint before credential, port and DSH startup.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_initialize());
@@ -93,6 +99,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   @override
   void didUpdateWidget(covariant OfficialHarnessWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _sessionApprovedToolIds.addAll(widget.preapprovedToolIds);
     if (widget.externalPromptSerial != oldWidget.externalPromptSerial &&
         _webviewReady) {
       unawaited(_injectExternalPrompt());
@@ -126,6 +133,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         : Directory.current.absolute.path;
     setState(() {
       _sessionApprovedToolIds.clear();
+      _sessionApprovedToolIds.addAll(widget.preapprovedToolIds);
       _starting = true;
       _loading = true;
       _restartOverlay = preserveWebview;
@@ -175,6 +183,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           toolBridge: VibekitsHarnessToolBridge(
             remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
             screenshotOcrRunner: widget.screenshotOcrRunner,
+            downloadDirectory: widget.initialDownloadDirectory,
           ),
         ),
       );
@@ -450,29 +459,97 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     final String value = jsonEncode(text);
     await _webview.executeScript('''
 (() => {
-  const element = document.activeElement;
-  if (!(element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement) ||
-      element.disabled || element.readOnly) return false;
-  const start = element.selectionStart ?? element.value.length;
-  const end = element.selectionEnd ?? start;
+  const visible = (element) => {
+    if (!(element instanceof HTMLElement)) return false;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return rect.width > 40 && rect.height > 18 &&
+      style.display !== 'none' && style.visibility !== 'hidden';
+  };
+  const active = document.activeElement;
+  const activeEditor = active instanceof Element
+    ? active.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')
+    : null;
+  const fallback = Array.from(document.querySelectorAll(
+    'textarea:not([disabled]):not([readonly]), input:not([disabled]):not([readonly]), '
+      + '[contenteditable]:not([contenteditable="false"])'
+  )).filter(visible).at(-1);
+  const element = activeEditor || fallback;
+  if (!(element instanceof HTMLElement)) return false;
   const pasted = $value;
-  const next = element.value.slice(0, start) + pasted + element.value.slice(end);
-  const prototype = element instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-  if (setter) setter.call(element, next);
-  else element.value = next;
-  element.dispatchEvent(new InputEvent('input', {
-    bubbles: true,
-    inputType: 'insertFromPaste',
-    data: pasted,
-  }));
-  element.setSelectionRange(start + pasted.length, start + pasted.length);
+  element.focus();
+  if (element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement) {
+    if (element.disabled || element.readOnly) return false;
+    const start = element.selectionStart ?? element.value.length;
+    const end = element.selectionEnd ?? start;
+    const next = element.value.slice(0, start) + pasted + element.value.slice(end);
+    const prototype = element instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (setter) setter.call(element, next);
+    else element.value = next;
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertFromPaste',
+      data: pasted,
+    }));
+    element.setSelectionRange(start + pasted.length, start + pasted.length);
+    return true;
+  }
+
+  // DSH uses a contenteditable rich-text composer. execCommand is retained by
+  // WebView2 specifically for editing hosts and lets React/ProseMirror observe
+  // the same beforeinput/input sequence as a normal keyboard paste.
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 ||
+      !element.contains(selection.anchorNode)) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+  if (!document.execCommand('insertText', false, pasted)) {
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range) return false;
+    range.deleteContents();
+    const node = document.createTextNode(pasted);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertFromPaste',
+      data: pasted,
+    }));
+  }
   return true;
 })()
 ''');
+  }
+
+  Future<void> _copyFromFocusedWebSelection() async {
+    if (!_webviewReady) return;
+    final dynamic selected = await _webview.executeScript('''
+(() => {
+  const element = document.activeElement;
+  if (element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement) {
+    const start = element.selectionStart ?? 0;
+    const end = element.selectionEnd ?? start;
+    return start === end ? '' : element.value.slice(start, end);
+  }
+  return window.getSelection()?.toString() || '';
+})()
+''');
+    final String text = selected is String ? selected : '${selected ?? ''}';
+    if (text.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: text));
+    }
   }
 
   Future<void> _injectExternalPrompt() async {
@@ -717,9 +794,27 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       control: !Platform.isMacOS,
       meta: Platform.isMacOS,
     );
+    final ShortcutActivator pastePlain = SingleActivator(
+      LogicalKeyboardKey.keyV,
+      control: !Platform.isMacOS,
+      meta: Platform.isMacOS,
+      shift: true,
+    );
+    const ShortcutActivator pasteInsert = SingleActivator(
+      LogicalKeyboardKey.insert,
+      shift: true,
+    );
+    final ShortcutActivator copy = SingleActivator(
+      LogicalKeyboardKey.keyC,
+      control: !Platform.isMacOS,
+      meta: Platform.isMacOS,
+    );
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         paste: () => unawaited(_pasteIntoFocusedWebField()),
+        pastePlain: () => unawaited(_pasteIntoFocusedWebField()),
+        pasteInsert: () => unawaited(_pasteIntoFocusedWebField()),
+        copy: () => unawaited(_copyFromFocusedWebSelection()),
       },
       child: Stack(
         children: <Widget>[
@@ -778,10 +873,45 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                   },
             ),
           ),
+          Positioned(
+            right: 290,
+            top: 10,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface
+                  .withValues(alpha: 0.94),
+              elevation: 2,
+              borderRadius: BorderRadius.circular(20),
+              child: InkWell(
+                key: const Key('harness-runtime-logs'),
+                borderRadius: BorderRadius.circular(20),
+                onTap: _showRuntimeLogs,
+                child: const Tooltip(
+                  message: '查看 Harness 启动、运行、工具调用和错误日志',
+                  child: SizedBox(
+                    width: 104,
+                    height: 36,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Icon(Icons.receipt_long_outlined, size: 16),
+                        SizedBox(width: 6),
+                        Text('运行日志', style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+
+  Future<void> _showRuntimeLogs() => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
+  );
 
   Future<void> _showRemoteShare() => showDialog<void>(
     context: context,
@@ -790,6 +920,157 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       webClientUrl: widget.rustDeskWebClientUrl,
     ),
   );
+}
+
+class _HarnessRuntimeLogDialog extends StatefulWidget {
+  const _HarnessRuntimeLogDialog();
+
+  @override
+  State<_HarnessRuntimeLogDialog> createState() =>
+      _HarnessRuntimeLogDialogState();
+}
+
+class _HarnessRuntimeLogDialogState extends State<_HarnessRuntimeLogDialog> {
+  List<HarnessRuntimeLogEntry> _logs = const <HarnessRuntimeLogEntry>[];
+  HarnessRuntimeLogEntry? _selected;
+  String _content = '';
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_reload());
+  }
+
+  Future<void> _reload() async {
+    setState(() => _loading = true);
+    final List<HarnessRuntimeLogEntry> logs =
+        await HarnessRuntimeLogStore.listLogs();
+    HarnessRuntimeLogEntry? selected = _selected;
+    if (selected == null ||
+        !logs.any(
+          (HarnessRuntimeLogEntry item) => item.path == selected!.path,
+        )) {
+      selected = logs.isEmpty ? null : logs.first;
+    }
+    final String content = selected == null
+        ? ''
+        : await HarnessRuntimeLogStore.readTail(selected.path);
+    if (!mounted) return;
+    setState(() {
+      _logs = logs;
+      _selected = selected;
+      _content = content;
+      _loading = false;
+    });
+  }
+
+  Future<void> _select(HarnessRuntimeLogEntry entry) async {
+    setState(() {
+      _selected = entry;
+      _loading = true;
+    });
+    final String content = await HarnessRuntimeLogStore.readTail(entry.path);
+    if (!mounted || _selected?.path != entry.path) return;
+    setState(() {
+      _content = content;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+    child: SizedBox(
+      width: 1040,
+      height: 660,
+      child: Column(
+        children: <Widget>[
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('Harness 运行日志'),
+            subtitle: SelectableText(
+              HarnessRuntimeLogStore.rootPath,
+              style: const TextStyle(fontSize: 11),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                IconButton(
+                  tooltip: '刷新',
+                  onPressed: _reload,
+                  icon: const Icon(Icons.refresh),
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                SizedBox(
+                  width: 310,
+                  child: ListView.builder(
+                    itemCount: _logs.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final HarnessRuntimeLogEntry entry = _logs[index];
+                      return ListTile(
+                        dense: true,
+                        selected: entry.path == _selected?.path,
+                        onTap: () => _select(entry),
+                        title: Text(
+                          entry.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        subtitle: Text(
+                          '${entry.modified.toLocal()} · ${_logSize(entry.size)}',
+                          maxLines: 1,
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(
+                  child: _loading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _selected == null
+                      ? const Center(child: Text('还没有 Harness 运行日志'))
+                      : Scrollbar(
+                          thumbVisibility: true,
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(14),
+                            child: SelectableText(
+                              _content,
+                              style: const TextStyle(
+                                fontFamily: 'Cascadia Mono',
+                                fontSize: 11,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  static String _logSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KiB';
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MiB';
+  }
 }
 
 class _HarnessRemoteShareDialog extends StatefulWidget {

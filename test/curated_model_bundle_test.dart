@@ -30,4 +30,22 @@ void main() {
       );
     }
   });
+
+  test('PP-OCRv6 Medium 高精度包锁定官方最大参数 ONNX', () {
+    expect(ppOcrV6MediumBundle.artifacts, hasLength(3));
+    expect(ppOcrV6MediumBundle.downloadBytes, 138738396);
+    expect(
+      ppOcrV6MediumBundle.artifacts.map(
+        (CuratedModelArtifact artifact) => artifact.sha256,
+      ),
+      everyElement(matches(RegExp(r'^[0-9a-f]{64}$'))),
+    );
+    expect(
+      ppOcrV6MediumBundle.artifacts.every(
+        (CuratedModelArtifact artifact) => artifact.bundleAssetPath == null,
+      ),
+      isTrue,
+      reason: 'Medium 必须主动下载，不能增加基础 APK/桌面包和首启成本',
+    );
+  });
 }

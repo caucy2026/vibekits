@@ -67,6 +67,7 @@ class LocalModelsTab extends StatefulWidget {
     this.remoteWorkspaceLauncher,
     this.externalHarnessPrompt = '',
     this.externalHarnessPromptSerial = 0,
+    this.preapprovedHarnessToolIds = const <String>{},
   });
 
   final String directory;
@@ -99,6 +100,7 @@ class LocalModelsTab extends StatefulWidget {
   final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
   final String externalHarnessPrompt;
   final int externalHarnessPromptSerial;
+  final Set<String> preapprovedHarnessToolIds;
 
   @override
   State<LocalModelsTab> createState() => _LocalModelsTabState();
@@ -213,13 +215,26 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     }
   }
 
-  bool get _ocrBundleInstalled => ppOcrV6TinyBundle.artifacts.every(
+  bool _bundleInstalled(
+    CuratedModelBundle bundle, {
+    bool requirePinnedSha = false,
+  }) => bundle.artifacts.every(
     (CuratedModelArtifact artifact) => _models.any(
       (ModelInfo model) =>
           model.fileName == artifact.fileName &&
-          model.integrity == ModelIntegrity.verified,
+          model.integrity == ModelIntegrity.verified &&
+          (!requirePinnedSha || model.sha256 == artifact.sha256),
     ),
   );
+
+  bool get _ocrTinyInstalled => _bundleInstalled(ppOcrV6TinyBundle);
+
+  bool get _ocrMediumInstalled =>
+      !Platform.isAndroid &&
+      !Platform.isIOS &&
+      _bundleInstalled(ppOcrV6MediumBundle, requirePinnedSha: true);
+
+  bool get _ocrBundleInstalled => _ocrMediumInstalled || _ocrTinyInstalled;
 
   ModelInfo? get _runnableVadModel {
     for (final String preferred in <String>[
@@ -359,6 +374,100 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     }
   }
 
+  Future<void> _downloadOcrMediumBundle() async {
+    if (_downloadingId != null || Platform.isAndroid || Platform.isIOS) return;
+    final Directory downloads = Directory(
+      '$_downloadDirectory${Platform.pathSeparator}${ppOcrV6MediumBundle.id}',
+    );
+    await downloads.create(recursive: true);
+    final List<String> verifiedPaths = <String>[];
+    int completedBytes = 0;
+    setState(() {
+      _downloadingId = ppOcrV6MediumBundle.id;
+      _downloadProgress = 0;
+      _message = '正在下载 PP-OCRv6 Medium 高精度模型…';
+    });
+    try {
+      for (final CuratedModelArtifact artifact
+          in ppOcrV6MediumBundle.artifacts) {
+        final File target = File(
+          '${downloads.path}${Platform.pathSeparator}${artifact.fileName}',
+        );
+        if (await target.exists() &&
+            await ModelStore.sha256OfFile(target.path) == artifact.sha256) {
+          completedBytes += artifact.downloadBytes;
+          verifiedPaths.add(target.path);
+          if (mounted) {
+            setState(
+              () => _downloadProgress =
+                  completedBytes / ppOcrV6MediumBundle.downloadBytes,
+            );
+          }
+          continue;
+        }
+        final File partial = File('${target.path}.part');
+        if (await partial.exists()) await partial.delete();
+        final HttpClient client = HttpClient();
+        _downloadClient = client;
+        try {
+          final HttpClientRequest request = await client.getUrl(
+            Uri.parse(artifact.sourceUrl),
+          );
+          final HttpClientResponse response = await request.close();
+          if (response.statusCode != HttpStatus.ok) {
+            throw HttpException(
+              'HTTP ${response.statusCode}',
+              uri: Uri.parse(artifact.sourceUrl),
+            );
+          }
+          final IOSink sink = partial.openWrite();
+          int artifactBytes = 0;
+          try {
+            await for (final List<int> chunk in response) {
+              sink.add(chunk);
+              artifactBytes += chunk.length;
+              if (mounted) {
+                setState(
+                  () => _downloadProgress =
+                      (completedBytes + artifactBytes) /
+                      ppOcrV6MediumBundle.downloadBytes,
+                );
+              }
+            }
+          } finally {
+            await sink.close();
+          }
+        } finally {
+          client.close(force: true);
+          _downloadClient = null;
+        }
+        if (await ModelStore.sha256OfFile(partial.path) != artifact.sha256) {
+          await partial.delete();
+          throw FormatException('${artifact.fileName} SHA-256 校验失败');
+        }
+        if (await target.exists()) await target.delete();
+        await partial.rename(target.path);
+        verifiedPaths.add(target.path);
+        completedBytes += artifact.downloadBytes;
+      }
+      await ModelStore.importBundle(verifiedPaths, _directory);
+      if (!mounted) return;
+      setState(() => _message = 'PP-OCRv6 Medium 已安装，桌面 OCR 将优先使用高精度档');
+      await _refresh();
+    } catch (error) {
+      if (mounted) setState(() => _message = '高精度 OCR 安装失败：$error');
+    } finally {
+      _downloadClient?.close(force: true);
+      _downloadClient = null;
+      if (mounted) {
+        setState(() {
+          _downloadingId = null;
+          _downloadProgress = null;
+        });
+      }
+    }
+  }
+
   void _cancelDownload() {
     _downloadClient?.close(force: true);
     setState(() => _message = '已取消模型下载');
@@ -483,17 +592,37 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       'height': result.imageHeight,
       'elapsedMs': result.elapsed.inMilliseconds,
       'runtime': result.runtime,
-      'lines': <Map<String, Object?>>[
+      'coordinateSystem': <String, Object?>{
+        'origin': 'top-left',
+        'pixelUnit': 'px',
+        'relativeUnit': '0..1',
+        'imageWidth': result.imageWidth,
+        'imageHeight': result.imageHeight,
+        'readingOrder': 'top-to-bottom,left-to-right',
+      },
+      'spatialText': <String>[
         for (final OcrTextLine line in result.lines)
+          '[${line.bounds.regionLabel(result.imageWidth, result.imageHeight)}] '
+              '${line.text}',
+      ].join('\n'),
+      'lines': <Map<String, Object?>>[
+        for (final MapEntry<int, OcrTextLine> entry
+            in result.lines.asMap().entries)
           <String, Object?>{
-            'text': line.text,
-            'confidence': line.confidence,
-            'bounds': <String, int>{
-              'left': line.bounds.left,
-              'top': line.bounds.top,
-              'right': line.bounds.right,
-              'bottom': line.bounds.bottom,
-            },
+            'index': entry.key + 1,
+            'text': entry.value.text,
+            'confidence': entry.value.confidence,
+            // Keep the original field for older Harness sessions.
+            'bounds': entry.value.bounds.toPixelMap(),
+            'boundsPx': entry.value.bounds.toPixelMap(),
+            'boundsRelative': entry.value.bounds.toRelativeMap(
+              result.imageWidth,
+              result.imageHeight,
+            ),
+            'region': entry.value.bounds.regionLabel(
+              result.imageWidth,
+              result.imageHeight,
+            ),
           },
       ],
     };
@@ -509,12 +638,16 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     });
     try {
       final String separator = Platform.pathSeparator;
+      final bool highAccuracy = _ocrMediumInstalled;
+      final String modelPrefix = highAccuracy
+          ? 'ppocrv6_medium'
+          : 'ppocrv6_tiny';
       final PpOcrResult result = await widget.ocrRunner(
         PpOcrRequest(
           imagePath: imagePath,
-          detectionModelPath: '$_directory${separator}ppocrv6_tiny_det.onnx',
-          recognitionModelPath: '$_directory${separator}ppocrv6_tiny_rec.onnx',
-          recognitionConfigPath: '$_directory${separator}ppocrv6_tiny_rec.yml',
+          detectionModelPath: '$_directory$separator${modelPrefix}_det.onnx',
+          recognitionModelPath: '$_directory$separator${modelPrefix}_rec.onnx',
+          recognitionConfigPath: '$_directory$separator${modelPrefix}_rec.yml',
           nativeDirectory:
               widget.nativeDirectory ??
               File(Platform.resolvedExecutable).parent.path,
@@ -525,7 +658,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         _ocrResult = result;
         _message = result.lines.isEmpty
             ? '识别完成，没有发现清晰文字'
-            : '识别完成：${result.lines.length} 行文字';
+            : '识别完成：${result.lines.length} 行文字 · '
+                  '${highAccuracy ? 'Medium 高精度' : 'Tiny 快速'}';
       });
     } catch (error) {
       if (mounted) setState(() => _message = '文字识别失败：$error');
@@ -778,6 +912,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   OfficialHarnessWorkspace(
                     initialWorkspace: widget.initialHarnessWorkspace,
                     initialDebugDirectory: _harnessDebugDirectory,
+                    initialDownloadDirectory: _downloadDirectory,
                     onRunningChanged: (bool running) {
                       if (mounted) setState(() => _agentRunning = running);
                     },
@@ -788,6 +923,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                     externalPromptSerial: widget.externalHarnessPromptSerial,
                     rustDeskExecutable: widget.rustDeskExecutable,
                     rustDeskWebClientUrl: widget.rustDeskWebClientUrl,
+                    preapprovedToolIds: widget.preapprovedHarnessToolIds,
                   )
                 else
                   DeepSeekAgentWorkspace(
@@ -890,10 +1026,11 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         SizedBox(
           height: 190,
           child: ListView.builder(
-            itemCount: curatedModels.length + 1,
+            itemCount: curatedModels.length + 2,
             itemBuilder: (BuildContext context, int index) {
               if (index == 0) return _buildOcrBundleTile();
-              final CuratedModel model = curatedModels[index - 1];
+              if (index == 1) return _buildOcrMediumBundleTile();
+              final CuratedModel model = curatedModels[index - 2];
               final bool installed = _models.any(
                 (ModelInfo item) =>
                     item.fileName == model.fileName &&
@@ -971,6 +1108,44 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   ? null
                   : _downloadOcrBundle,
               child: Text(_ocrBundleInstalled ? '已安装' : '安装'),
+            ),
+    );
+  }
+
+  Widget _buildOcrMediumBundleTile() {
+    final bool downloading = _downloadingId == ppOcrV6MediumBundle.id;
+    return ListTile(
+      dense: true,
+      title: Text(
+        ppOcrV6MediumBundle.name,
+        style: const TextStyle(fontSize: 12),
+      ),
+      subtitle: Text(
+        '${_formatSize(ppOcrV6MediumBundle.downloadBytes)} · 34.5M 参数 · '
+        '主动下载，不影响离线启动',
+        style: TextStyle(fontSize: 10, color: context.vibe.muted),
+      ),
+      trailing: downloading
+          ? SizedBox(
+              width: 86,
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: LinearProgressIndicator(value: _downloadProgress),
+                  ),
+                  IconButton(
+                    tooltip: '取消下载',
+                    onPressed: _cancelDownload,
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
+                ],
+              ),
+            )
+          : TextButton(
+              onPressed: _ocrMediumInstalled || _downloadingId != null
+                  ? null
+                  : _downloadOcrMediumBundle,
+              child: Text(_ocrMediumInstalled ? '已启用' : '安装'),
             ),
     );
   }

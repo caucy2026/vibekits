@@ -19,6 +19,7 @@ class VibekitsApp extends StatefulWidget {
     this.initialFilePath,
     this.initialFilePaths = const <String>[],
     this.initialWorkspaceId,
+    this.preapprovedExternalToolIds = const <String>{},
     this.droppedFiles,
     this.dropClassifier,
   });
@@ -27,6 +28,7 @@ class VibekitsApp extends StatefulWidget {
   final String? initialFilePath;
   final List<String> initialFilePaths;
   final String? initialWorkspaceId;
+  final Set<String> preapprovedExternalToolIds;
   final Stream<List<String>>? droppedFiles;
   final Future<DroppedFileRoute> Function(String path)? dropClassifier;
 
@@ -43,12 +45,15 @@ class _VibekitsAppState extends State<VibekitsApp> {
       widget.settingsController ?? AppSettingsController();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   HarnessToolServer? _externalToolServer;
+  Future<void>? _settingsLoad;
 
   @override
   void initState() {
     super.initState();
     _settings.addListener(_refresh);
-    if (widget.settingsController == null) _settings.load();
+    if (widget.settingsController == null) {
+      _settingsLoad = _settings.load();
+    }
     // The external Harness/MCP endpoint is a desktop integration. Starting a
     // local socket server on Android adds cold-start work and keeps resources
     // alive without providing a usable mobile workflow.
@@ -59,9 +64,11 @@ class _VibekitsAppState extends State<VibekitsApp> {
 
   Future<void> _startExternalToolServer() async {
     try {
+      await _settingsLoad;
       final HarnessToolServer server = await HarnessToolServer.start(
         bridge: VibekitsHarnessToolBridge(
           activityRecorder: HarnessToolActivityStore.record,
+          downloadDirectory: _settings.value.toolDownloadDirectory,
         ),
         approve: _approveExternalTool,
         connectionFile: HarnessToolServer.defaultConnectionFile(),
@@ -78,7 +85,10 @@ class _VibekitsAppState extends State<VibekitsApp> {
   }
 
   Future<bool> _approveExternalTool(HarnessToolApprovalRequest request) async {
-    if (request.tool.risk == HarnessToolRisk.readOnly) return true;
+    if (request.tool.risk == HarnessToolRisk.readOnly ||
+        widget.preapprovedExternalToolIds.contains(request.tool.id)) {
+      return true;
+    }
     if (!mounted) return false;
     final BuildContext? navigatorContext = _navigatorKey.currentContext;
     if (navigatorContext == null) return false;
@@ -86,7 +96,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       context: navigatorContext,
       barrierDismissible: false,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: Text('允许外部 Codex 调用 ${request.tool.name}？'),
+        title: Text('允许外部智能体调用 ${request.tool.name}？'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
           child: Column(
@@ -140,6 +150,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       themeMode: _settings.value.themeMode,
       home: MainShell(
         settingsController: _settings,
+        preapprovedHarnessToolIds: widget.preapprovedExternalToolIds,
         initialFilePath: widget.initialFilePath,
         initialFilePaths: widget.initialFilePaths,
         initialWorkspaceId: widget.initialWorkspaceId,

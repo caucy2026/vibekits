@@ -70,7 +70,7 @@
 64. [dev.93 Android 连续跨屏画布验收](acceptance/V1_9_0_DEV93_ANDROID_CONTINUOUS_CANVAS_2026-08-24.md)——唯一 Activity/Engine/状态树，D2 上半区、D0 下半区、D2 触摸联动与双屏退出真机闭环
 65. [dev.97 Android Harness/清理/OCR 真机验收](acceptance/V1_9_0_DEV97_ANDROID_REAL_DEVICE_2026-08-24.md)——移动 Harness 原生链、Android 安全清理、PP-OCRv6 ONNX 真推理和双屏退出
 66. [dev.106 Harness 连续启停 100 次验收](acceptance/V1_9_0_DEV106_HARNESS_100_RESTART_2026-08-26.md)——真实 DSH HTTP、托盘退出、子进程回收与启动/退出分位数据
-67. [Harness 功能模块与工具接口目录](37_HARNESS_CAPABILITY_CATALOG.md)——从注册表生成的模块、130 个可执行接口、参数和统一调用协议
+67. [外部智能体 MCP 与 Harness 工具接口目录](37_HARNESS_CAPABILITY_CATALOG.md)——从注册表自动生成，包含任意 MCP 客户端接入、真实工具名映射、参数与安全边界
 68. [dev.107 Harness 能力认知闭环验收](acceptance/V1_9_0_DEV107_HARNESS_CAPABILITY_INVENTORY_2026-08-26.md)——真实模型主动调用能力检查的历史检查点；当前动态数字以能力目录为准
 69. [dev.108 Harness 冷启动修复验收](acceptance/V1_9_0_DEV108_HARNESS_COLD_START_2026-08-26.md)——现场 84.858 秒定位、可选插件裁剪及两轮 5～6 秒 Release 实测
 70. [dev.109 Harness 幽灵会话删除验收](acceptance/V1_9_0_DEV109_HARNESS_SESSION_DELETE_2026-08-26.md)——旧自测会话清理、内存投影刷新、真实工作区保护与 Release 实测
@@ -89,6 +89,15 @@
 82. [dev.121 macOS 编译门禁](acceptance/V1_9_0_DEV121_MACOS_COMPILE_GATE_2026-08-27.md)——跨宿主路径仿真修复、macOS Analyze/测试及 unsigned Release 云端门禁
 83. [dev.122 客户端存储可写门禁](acceptance/V1_9_0_DEV122_STORAGE_WRITE_PROBE_2026-08-27.md)——官方目录 API、启动写探针、不可写自动降级与三端编译门禁
 84. [dev.123 Android 清理、长连接、自迭代与 DSH 首启验收](acceptance/V1_9_0_DEV123_ANDROID_HARNESS_ARCHIVE_SESSIONS_2026-08-27.md)——62 真机、161/139 接口、归档互操作、长连接和首启实测
+85. [dev.125 Android 63 APK 连续安装与串口监听验收](acceptance/V1_9_0_DEV125_ANDROID63_APK_INSTALL_100_SERIAL_STRESS_2026-08-27.md)——Harness 发起、100/100 次安装、boot_id 重启判定与串口 0 B 未通过项
+86. [dev.126 Harness 剪贴板验收](acceptance/V1_9_0_DEV126_HARNESS_CLIPBOARD_2026-08-27.md)——真实 DSH 输入框、系统剪贴板、物理鼠标与 Ctrl+V/Ctrl+C 双向闭环
+87. [dev.127 Android 53 Harness ADB/串口联合压力验收](acceptance/V1_9_0_DEV127_ANDROID53_HARNESS_ADB_SERIAL_STRESS_2026-08-27.md)——真实 Harness 调用、100/100 次安装、boot_id 重启判定、长连接释放与串口 0 B 未通过项
+88. [dev.128 Android 53 ADB/串口/Logcat 100 轮验收](acceptance/V1_9_0_DEV128_ANDROID53_ADB_SERIAL_LOGCAT_100_2026-08-28.md)——COM33 真实回环、100/100 次安装、11 份系统日志与零重启闭环
+89. [dev.129 Android 53 全新安装/启动/串口并行监控 100 轮验收](acceptance/V1_9_0_DEV129_ANDROID53_FRESH_INSTALL_LAUNCH_SERIAL_100_2026-08-28.md)——100 次卸载、全新安装、启动和新 PID 校验，串口独立监听与重启现场采集
+90. [dev.130 外部智能体 MCP 与 OCR 空间理解验收](acceptance/V1_9_0_DEV130_EXTERNAL_MCP_OCR_SPATIAL_2026-08-28.md)——通用 MCP 接入、自动接口目录、归一化位置和真实 OCR 推理
+91. [dev.131 Harness 自动配置与串口技能验收](acceptance/V1_9_0_DEV131_HARNESS_AUTOCONFIG_SERIAL_SKILL_2026-08-28.md)——全工具精确参数查询、串口被动自动探测、技能注入和真实 Harness 问答闭环
+92. [dev.132 Harness 调试目录、清理建议与诊断日志验收](acceptance/V1_9_0_DEV132_HARNESS_DEBUG_CLEANUP_LOGS_2026-08-28.md)——调试目录占用、选择性清理、工作状态和脱敏诊断日志
+93. [dev.133/134 网络下载与 ADB 真机安装验收](acceptance/V1_9_0_DEV133_NETWORK_DOWNLOAD_ADB_2026-08-28.md)——Harness 下载、SHA-256、53 设备连接、显式降级参数与真实安装成功
 
 ## 完成定义
 

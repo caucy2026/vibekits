@@ -662,11 +662,23 @@ void main() {
       '.cursor',
       'extensions',
     ].join(Platform.pathSeparator);
+    final String codexTemp = <String>[
+      profile,
+      '.codex',
+      '.tmp',
+    ].join(Platform.pathSeparator);
+    final String codexCache = <String>[
+      profile,
+      '.codex',
+      'cache',
+    ].join(Platform.pathSeparator);
     for (final String path in <String>[
       pnpmStore,
       visualStudioCache,
       jetBrainsCache,
       cursorExtensions,
+      codexTemp,
+      codexCache,
     ]) {
       Directory(path).createSync(recursive: true);
     }
@@ -688,7 +700,23 @@ void main() {
     );
     expect(
       targets.map((target) => target.path),
-      containsAll(<String>[visualStudioCache, jetBrainsCache]),
+      containsAll(<String>[
+        visualStudioCache,
+        jetBrainsCache,
+        codexTemp,
+        codexCache,
+      ]),
+    );
+    expect(
+      targets
+          .where((target) => target.id.startsWith('codex-'))
+          .every(
+            (target) =>
+                target.defaultEnabled &&
+                target.riskLevel == CleanupRiskLevel.safe &&
+                !target.path.contains('${Platform.pathSeparator}sessions'),
+          ),
+      isTrue,
     );
     expect(
       targets.every(
@@ -896,6 +924,57 @@ void main() {
     expect(result.candidates, hasLength(1));
     expect(result.candidates.single.path, stale.path);
     expect(result.candidates.single.size, 4096);
+    expect(result.candidates.single.defaultSelected, isFalse);
+  });
+
+  test('Windows 其他用户配置只读汇总且排除当前与系统模板', () async {
+    final Directory drive = Directory.systemTemp.createTempSync(
+      'vk_windows_profiles_',
+    );
+    addTearDown(() => drive.deleteSync(recursive: true));
+    final Directory users = Directory(
+      '${drive.path}${Platform.pathSeparator}Users',
+    )..createSync();
+    final Directory current = Directory(
+      '${users.path}${Platform.pathSeparator}caucy',
+    )..createSync();
+    final Directory retired = Directory(
+      '${users.path}${Platform.pathSeparator}kemi-test',
+    )..createSync();
+    final Directory public = Directory(
+      '${users.path}${Platform.pathSeparator}Public',
+    )..createSync();
+    File('${current.path}${Platform.pathSeparator}keep.bin')
+        .writeAsBytesSync(List<int>.filled(11, 1));
+    File('${retired.path}${Platform.pathSeparator}NTUSER.DAT')
+        .writeAsBytesSync(List<int>.filled(37, 2));
+    File('${public.path}${Platform.pathSeparator}shared.bin')
+        .writeAsBytesSync(List<int>.filled(19, 3));
+
+    final CleanupScanTarget target =
+        CleanupTargetDiscovery.discover(
+          environment: <String, String>{
+            'SYSTEMDRIVE': drive.path,
+            'USERPROFILE': current.path,
+          },
+          platform: CleanupPlatform.windows,
+        ).singleWhere(
+          (CleanupScanTarget item) => item.id == 'windows-other-user-profiles',
+        );
+
+    expect(target.defaultEnabled, isFalse);
+    expect(target.riskLevel, CleanupRiskLevel.systemManaged);
+    expect(target.excludePatterns, containsAll(<String>['caucy', 'public']));
+    final CleanupScanResult result = await CleanupScanner.scanTargets(
+      <CleanupScanTarget>[target],
+    );
+    expect(result.candidates, hasLength(1));
+    expect(result.candidates.single.path, retired.path);
+    expect(result.candidates.single.size, 37);
+    expect(
+      result.candidates.single.category,
+      CleanupCategory.userProfileResidual,
+    );
     expect(result.candidates.single.defaultSelected, isFalse);
   });
 }

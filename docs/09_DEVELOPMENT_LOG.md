@@ -1,5 +1,34 @@
 # Vibekits 开发日志
 
+## 2026-08-28 · v1.9.0-dev.134 APK 降级安装显式控制
+
+- 真实 Harness 使用 `network.download → adb.connect/list_devices → adb.install_apk` 下载并安装指定 KEMI-PAD APK；下载与设备连接成功，设备返回 `INSTALL_FAILED_VERSION_DOWNGRADE`。
+- `adb.install_apk` 补齐标准 `allowDowngrade` 参数，显式为 true 时使用 `adb install -r -d`；Android 仍拒绝时只报告设备策略，不会擅自卸载应用或清除数据。
+- 重写仓库首页项目介绍，以“智能体理解工具、自动配置、受控调用、证据闭环”为主线，集中说明统一能力注册表、机器可读 Schema、风险权限、模块原始日志和跨工具工作流，并按实际能力目录整理当前工具集合与三端状态。
+
+## 2026-08-28 · v1.9.0-dev.133 Harness 网络下载与 ADB 安装链
+
+- 新增 `vibekits.network.download` 通用网络文件工具，流式写入 APP 配置的工具下载目录，返回绝对路径、HTTP 状态、最终 URL、字节数、SHA-256、耗时和证据来源。
+- 下载采用 `.part` 临时文件并只在完整接收和校验后原子完成；失败自动清理半截文件，默认不覆盖同名文件。`.apk` 会验证 ZIP/APK 文件头，避免 CDN 错误页被交给 ADB。
+- Harness 使用准则增加“网络下载 → 内置 ADB 安装 → 设备侧验证”标准链路，禁止绕过 APP 使用 curl、PowerShell 或系统 ADB。
+- 定向下载服务、失败清理、Harness 目录/调用合同与既有桥接回归共 27 项通过。
+
+## 2026-08-28 · v1.9.0-dev.130 外部智能体 MCP 与 OCR 空间理解
+
+- 将既有环回 HTTP 工具桥和 stdio MCP 从 Codex 专用措辞升级为任意 MCP 智能体接入；生成目录补齐通用 JSON、Codex TOML、工具名映射、安全边界和调用链说明。
+- 接口目录一致性测试会从真实注册表自动重写并核对文档，发布质量门禁必须运行；新增工具无需手工维护第二份接口清单，也不把原生 Hook 的成本和失败风险塞进 APP 构建路径。
+- 截图 OCR 在兼容旧 `bounds` 的同时返回 `boundsPx`、0..1 `boundsRelative`、九宫格 `region`、`spatialText`、坐标原点和阅读顺序，使无视觉模型的 Harness 能按位置理解页面。
+- OCR 档位实现为桌面高精度 `PP-OCRv6_medium`（34.5M 参数）与移动/离线快速 `PP-OCRv6_tiny`；Medium 三文件按官方大小和 SHA-256 主动下载、事务导入，安装后桌面自动优先使用，高精度模型不进入基础 APK、也不拖慢首屏。
+
+## 2026-08-27 · Windows 满盘实机清理与算法回填
+
+- 80 GiB C 盘仅剩 0.90 GiB 时实机定位 `.gradle` 7.92 GiB；清理 Gradle/Pub/临时缓存并运行 Windows 组件清理后，关闭已启用的 Windows 保留存储，最终物理可用空间稳定为 14.52 GiB。
+- Gradle 构建缓存由“30 天才显示”改为“24 小时未更新的完整顶层目录”，新增 `.gradle/.tmp` 1 小时残留规则；`devCache` 分类保持最终人工确认，确认后则允许强力永久删除可再生缓存，修复只移入回收站而不增加可用空间的缺口。
+- Windows `Users` 深度范围新增非当前用户配置容量盘点：排除 Public/Default/当前用户，其他配置固定为系统管理且受保护，不因容量大或盘空间低进入 10 GiB 自动计划。
+- 实机证明 JSONL/压缩或稀疏文件的逻辑长度不等于 NTFS 物理释放量；完成标准继续以卷 API 清理前后可用字节差为准，不以候选 `File.length` 之和宣称达标。
+- 系统盘可用空间低于 5% 时，快速扫描现在会按 10 GiB 实际释放目标自动勾选已验证的可再生缓存，但执行前仍保留一次永久删除确认；回收站、下载、未知目录和用户配置不会自动凑数。
+- 新增 Codex `.tmp` / `tmp` / `cache` 24 小时规则，明确排除 `sessions` / `plugins` / `skills` / 凭据与当前工作区；目标发现、平台边界和低空间自动选择回归 40 项全部通过。
+
 ## 2026-08-27 · v1.9.0-dev.122+132
 
 - 存储路径从静态规则升级为运行时能力：启动时验证设置、模型、下载、缓存和 Harness 调试目录真实可写。
@@ -1045,3 +1074,62 @@
 - Release 完成 100/100 次“彻底退出→重新启动→HTTP 200→彻底退出”，残留进程 0；就绪中位数 6.869 秒、P95 8.005 秒、最大 9.698 秒。
 - Harness/UI 回归 14/14 通过；Flutter Analyze 无新增错误，保留 1 条既有 GitHub 代理风格提示。验收见 `acceptance/V1_9_0_DEV124_HARNESS_RC2_100_RESTART_2026-08-27.md`。
 - 最终重编产物追加 3/3 实启实退且零残留；构建后高负载现场为 12.088～12.610 秒，因此本版只承诺消除 30～50 秒卡死，不虚构稳定 3 秒或稳定低于 10 秒。
+
+# 2026-08-27 · v1.9.0-dev.125 Android 63 APK 安装暴力测试
+
+- 新增 Harness 本地聚合压力入口：由智能体单次发起，100 轮 ADB 安装、boot_id 判定和串口增量监听在本机执行，原始串口与异常 Logcat 不上传模型。
+- 专用启动参数仅临时预批准明确的 ADB/串口接口；正常启动仍沿用逐次/会话权限，不写入永久完全访问。
+- 设备 `192.168.3.63:5555` 实测 100/100 次覆盖安装成功，失败 0，boot_id 变化 0，未检测到系统重启；会话均已关闭。
+- COM33（CH340，115200、8N1、RTS/CTS）全程打开但累计 0 B，串口“实际收到日志”子项明确未通过，未用 boot_id 结果冒充串口通过。
+- Windows Release、Node 语法检查与定向 Analyze 通过；Android dev.125 构建受 Gradle 分发下载超时阻塞，压力段使用当天已有 Release APK并记录 SHA-256。
+- 验收见 `acceptance/V1_9_0_DEV125_ANDROID63_APK_INSTALL_100_SERIAL_STRESS_2026-08-27.md`。
+
+# 2026-08-27 · v1.9.0-dev.126 Harness 剪贴板修复
+
+- 修复外层 Ctrl+V 已截获、但官方 DSH `contenteditable` 富文本输入框未被旧粘贴逻辑识别，导致快捷键无响应的问题。
+- 粘贴同时支持普通 input/textarea 与官方富文本编辑器，新增 Ctrl+Shift+V、Shift+Insert；Ctrl+C 可复制输入框选区或会话正文选区。
+- 增加仅显式测试参数启用的 WebView2 本机调试端口，以及可重复的物理输入验收脚本；正常启动不会开放调试端口。
+- 剪贴板专项合同 1/1、WebView2 内核复制/粘贴 2/2、Windows 真实窗口鼠标点击与物理 Ctrl+V/Ctrl+C 2/2、定向 Analyze 和 Windows Release 构建通过。
+- 验收见 `acceptance/V1_9_0_DEV126_HARNESS_CLIPBOARD_2026-08-27.md`。
+
+# 2026-08-27 · v1.9.0-dev.127 Android 53 Harness ADB/串口联合压力闭环
+
+- 修复压力测试预批准只到外部 MCP、未进入内嵌官方 Harness 工具桥的问题；授权集合现在贯穿 APP 到官方 Harness，并在会话重启后保留本次明确预批准，消除隐藏授权等待导致的 5 分钟 `fetch failed`。
+- Android 压力 MCP 正式纳入运行时准备、Windows Bundle、Bundle 校验和 DSH MCP 注册；COM33 对齐 SecureCRT 的 115200/8N1/无流控配置。
+- 真实 Harness 调用 `android__apk_install_stress_100`，向 `192.168.3.53:5555` 连续覆盖安装 APK 100 次：100 成功、0 失败、boot_id 变化 0、未检测到重启，ADB/串口长连接均成功关闭，测试后 APP 正常响应。
+- COM33 全程成功打开并逐轮读取，但累计 0 B；串口接收子项明确未通过，不用 ADB 结果冒充串口日志。
+- Windows Release、Bundle 校验、Node 语法和目标静态检查通过；验收见 `acceptance/V1_9_0_DEV127_ANDROID53_HARNESS_ADB_SERIAL_STRESS_2026-08-27.md`。
+
+# 2026-08-28 · v1.9.0-dev.128 Android 53 串口与系统信息完整闭环
+
+- 针对 dev.127 串口 0 B 未通过项，增加一次无副作用 Android 控制台 echo 回环；COM33 实收 79 B，包含回环标记和 `console:/ $`，确认端口、115200/8N1/无流控和收发线路均正确。
+- 回环后 100 轮保持串口被动监听，同时在首轮和每 10 轮保存有界 Logcat；最终 11 份、256,361 B，串口读取失败 0。
+- 修复测试权限集合遗漏 `serial.session_write` 导致回环隐藏等待授权的问题；正常启动权限不变。
+- 官方 Harness 单次真实调用在 `192.168.3.53:5555` 完成 100/100 次 APK 安装，失败 0，boot_id 变化 0，无崩溃/看门狗/重启关键字；ADB 与串口会话均成功关闭，APP 仍正常响应。
+- Windows Release、29 项 Bundle 校验和 Node 语法通过；验收见 `acceptance/V1_9_0_DEV128_ANDROID53_ADB_SERIAL_LOGCAT_100_2026-08-28.md`。
+
+# 2026-08-28 · v1.9.0-dev.129 Android 53 全新安装、启动与串口并行监控
+
+- 修正旧压力流程只执行 `adb install -r` 的验收偏差；每轮现在强制执行卸载旧包、无 `-r` 全新安装、`am start -W` 启动和 `pidof` 存活校验。
+- COM33 串口由独立 worker 贯穿卸载、安装和启动，三个阶段分别排空增量；发现 boot_id 变化或串口重启标记会立即保存串口尾部、2000 行 Logcat、`ps -A -T` 最后线程及 Activity/Window/Package/pstore/dmesg 后停止。
+- 官方 Harness 在 `192.168.3.53:5555` 真实调用一次聚合工具完成 100 轮：卸载 100/100、全新安装 100/100、启动 100/100、PID 100/100 且 100 个 PID 均不同。
+- 总耗时 21 分 9 秒，单轮 10.645～16.102 秒；boot_id 唯一值 1、串口读取失败 0、11 份 Logcat 共 268,068 B，无重启、Watchdog、Fatal signal、VibeKits ANR。
+- Node 语法、Windows Release 和 29 项 Bundle 门禁通过；验收见 `acceptance/V1_9_0_DEV129_ANDROID53_FRESH_INSTALL_LAUNCH_SERIAL_100_2026-08-28.md`。
+
+# 2026-08-28 · v1.9.0-dev.131 Harness 全工具自动配置与串口技能
+
+- 新增 `vibekits.serial.auto_detect`：不发送未知协议字节，自动选择 USB 串口并分阶段探测常用波特率、数据位、停止位、奇偶校验和 8 种流控组合；返回逐次尝试、字节样本、评分、置信度和可直接传给长连接的 `selected`。
+- `serial.transact` 补齐完整帧格式和流控参数，不再只接受波特率；短任务与长连接使用同一配置语义。
+- 新增 `vibekits.system.describe_tool`，运行时精确返回任意公开工具的类型、必填项、默认值、枚举、范围、风险及自动配置原则。163 个定义接口、143 个当前可执行接口均可查询，逐项合同测试通过。
+- 新增 `assets/harness/SERIAL_SKILL.md` 并注入官方 DSH `AGENTS.md`：可枚举、可检查、可复用或可安全试探的配置由 Harness 自动完成；只在缺少账号/身份、密码/API Key/Token/私钥口令、业务目标或破坏性确认时询问用户。
+- 模拟串口验证自动选出 115200、8-N-1、RTS/CTS 且发送次数为 0；Harness 工具桥与能力目录回归全部通过，Windows Release 构建通过。
+- 最终真实 Harness 会话调用 `capability_check` 和 4 次 `describe_tool`，精确列出串口参数并明确不要求用户选择串口、波特率、帧格式或流控。验收见 `acceptance/V1_9_0_DEV131_HARNESS_AUTOCONFIG_SERIAL_SKILL_2026-08-28.md`。
+
+# 2026-08-28 · v1.9.0-dev.132 Harness 调试空间与可追溯诊断
+
+- 清理扫描新增 Harness 调试目录独立汇总：显示配置路径、logs/screenshots/temp 分项占用、总文件数、总占用和 24 小时前可释放容量。
+- Harness 调试证据即使在系统盘低于 5% 或 10 GiB 恢复计划中也不再自动勾选；默认只推荐展示，由用户统一选择可清理项。
+- `harness-work.jsonl` 持久化记录启动、就绪、等待授权、工具执行、成功和失败阶段；`harness-web-*.log` 继续保存脱敏 stdout/stderr，工具审计继续记录目标、参数摘要、结果与耗时。
+- 官方 Harness 界面新增独立“运行日志”入口，可刷新、选择文件并滚动查看有界尾部；新增 `vibekits.harness.diagnostics` 只读接口，供 Harness 自查最近运行日志和工具调用记录。
+- 目录容量、24 小时保留策略、低磁盘不自动选择、日志可读取与敏感字段脱敏等针对性回归 34/34 通过；本次改动文件静态检查无问题。
+- Windows Release 构建与 29 项随包运行时检查通过；最新 APP 实启后 9.2 秒进入 Harness ready，`harness-work.jsonl` 真实写入 starting/ready，现场调试目录识别 469 个日志文件、47,226 B 总量、24,214 B 达到可清理保留期。

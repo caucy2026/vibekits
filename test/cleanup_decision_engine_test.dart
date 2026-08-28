@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_decision_engine.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
@@ -161,5 +163,49 @@ void main() {
 
     expect(plan.decisions, hasLength(50000));
     expect(clock.elapsed, lessThan(const Duration(seconds: 3)));
+  });
+
+  test('Windows 用户配置容量始终受保护且不进入恢复计划', () {
+    final CleanupDecisionPlan plan = CleanupDecisionEngine.buildPlan(
+      <CleanupCandidate>[
+        candidate(
+          path: r'C:\Users\kemi-test',
+          category: CleanupCategory.userProfileResidual,
+          modified: now.subtract(const Duration(days: 500)),
+          risk: CleanupRiskLevel.systemManaged,
+          size: 12 * 1024 * 1024 * 1024,
+          source: '其他 Windows 用户配置容量盘点',
+        ),
+      ],
+      now: now,
+      freeSpaceRatio: 0.001,
+    );
+
+    expect(plan.candidatesFor(CleanupDecisionTier.protected), hasLength(1));
+    expect(plan.candidatesFor(CleanupDecisionTier.automatic), isEmpty);
+    expect(plan.candidatesFor(CleanupDecisionTier.recommended), isEmpty);
+    expect(plan.decisions.single.explanation, contains('Windows'));
+  });
+
+  test('Harness 调试证据只推荐展示且永不自动勾选', () {
+    final String root = '${Directory.systemTemp.path}\\vibekits-harness-debug';
+    final CleanupDecisionPlan plan = CleanupDecisionEngine.buildPlan(
+      <CleanupCandidate>[
+        candidate(
+          path: '$root\\logs\\harness-old.log',
+          category: CleanupCategory.logs,
+          modified: now.subtract(const Duration(days: 60)),
+          source: 'Harness 大模型调试日志',
+          size: 5 * 1024 * 1024 * 1024,
+        ),
+      ],
+      now: now,
+      freeSpaceRatio: 0.001,
+      harnessDebugDirectory: root,
+    );
+
+    expect(plan.candidatesFor(CleanupDecisionTier.review), hasLength(1));
+    expect(plan.candidatesFor(CleanupDecisionTier.automatic), isEmpty);
+    expect(plan.decisions.single.explanation, contains('用户选择'));
   });
 }

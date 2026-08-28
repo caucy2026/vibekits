@@ -22,6 +22,53 @@ class OcrRect {
 
   int get width => right - left;
   int get height => bottom - top;
+
+  Map<String, int> toPixelMap() => <String, int>{
+    'left': left,
+    'top': top,
+    'right': right,
+    'bottom': bottom,
+    'width': width,
+    'height': height,
+  };
+
+  /// Returns a resolution-independent box in the closed interval 0..1.
+  /// The origin is the top-left corner of the source image.
+  Map<String, double> toRelativeMap(int imageWidth, int imageHeight) {
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      throw ArgumentError('imageWidth and imageHeight must be positive');
+    }
+    double x(int value) => (value / imageWidth).clamp(0.0, 1.0);
+    double y(int value) => (value / imageHeight).clamp(0.0, 1.0);
+    return <String, double>{
+      'left': x(left),
+      'top': y(top),
+      'right': x(right),
+      'bottom': y(bottom),
+      'width': (width / imageWidth).clamp(0.0, 1.0),
+      'height': (height / imageHeight).clamp(0.0, 1.0),
+      'centerX': x(left + width ~/ 2),
+      'centerY': y(top + height ~/ 2),
+    };
+  }
+
+  /// Human-readable 3x3 region for text-only agents reasoning about a screen.
+  String regionLabel(int imageWidth, int imageHeight) {
+    final Map<String, double> relative = toRelativeMap(imageWidth, imageHeight);
+    final double centerX = relative['centerX']!;
+    final double centerY = relative['centerY']!;
+    final String vertical = centerY < 1 / 3
+        ? 'top'
+        : centerY < 2 / 3
+        ? 'middle'
+        : 'bottom';
+    final String horizontal = centerX < 1 / 3
+        ? 'left'
+        : centerX < 2 / 3
+        ? 'center'
+        : 'right';
+    return '$vertical-$horizontal';
+  }
 }
 
 class OcrTextLine {
@@ -157,12 +204,16 @@ PpOcrResult runPpOcrSync(PpOcrRequest request) {
       }
     }
     stopwatch.stop();
+    final String modelTier =
+        request.detectionModelPath.toLowerCase().contains('medium')
+        ? 'medium'
+        : 'tiny';
     return PpOcrResult(
       lines: lines,
       imageWidth: source.width,
       imageHeight: source.height,
       elapsed: stopwatch.elapsed,
-      runtime: 'PP-OCRv6_tiny / ONNX Runtime 1.27.1 CPU',
+      runtime: 'PP-OCRv6_$modelTier / ONNX Runtime 1.27.1 CPU',
     );
   } finally {
     recognition.close();

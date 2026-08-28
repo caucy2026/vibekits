@@ -136,23 +136,44 @@ void main() {
     );
   });
 
-  test('Windows Gradle 缓存按完整旧版本目录复核且默认不选', () {
+  test('Windows Gradle 缓存按完整目录复核且确认后可真正释放', () async {
     final Directory home = Directory.systemTemp.createTempSync(
       'vk_gradle_policy_',
     );
     addTearDown(() => home.deleteSync(recursive: true));
-    Directory(
+    final Directory cache = Directory(
       '${home.path}${Platform.pathSeparator}.gradle${Platform.pathSeparator}caches',
-    ).createSync(recursive: true);
-    final CleanupScanTarget target = CleanupTargetDiscovery.discover(
+    )..createSync(recursive: true);
+    final Directory oldVersion = Directory(
+      '${cache.path}${Platform.pathSeparator}8.14.3',
+    )..createSync();
+    final File payload = File(
+      '${oldVersion.path}${Platform.pathSeparator}payload.bin',
+    )..writeAsBytesSync(List<int>.filled(4096, 1));
+    final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{'USERPROFILE': home.path},
       platform: CleanupPlatform.windows,
-    ).singleWhere((CleanupScanTarget item) => item.id == 'gradle-cache');
+    );
+    final CleanupScanTarget target = targets.singleWhere(
+      (CleanupScanTarget item) => item.id == 'gradle-cache',
+    );
 
     expect(target.strategy, CleanupTargetStrategy.staleChildDirectories);
-    expect(target.minimumAgeHours, 24 * 30);
-    expect(target.defaultEnabled, isFalse);
-    expect(target.riskLevel, CleanupRiskLevel.cautious);
+    expect(target.minimumAgeHours, 24);
+    expect(target.defaultEnabled, isTrue);
+    expect(target.riskLevel, CleanupRiskLevel.safe);
+    final CleanupCandidate candidate = CleanupCandidate(
+      path: oldVersion.path,
+      size: payload.lengthSync(),
+      category: target.category,
+      reason: target.label,
+      modified: DateTime.now().subtract(const Duration(days: 2)),
+      sourceLabel: target.label,
+      riskLevel: target.riskLevel,
+      impactNote: target.safetyNote,
+    );
+    expect(candidate.defaultSelected, isFalse);
+    expect(candidate.allowsPermanentFallback, isTrue);
   });
 
   test('Android 删除器只允许应用私有缓存，越界文件保持不变', () async {

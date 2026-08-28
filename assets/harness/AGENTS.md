@@ -17,6 +17,15 @@
 4. 先执行只读发现/检查，再锁定目标，然后才执行写入或设备控制。例如：`list/inspect/status → plan/preview → apply/start/send → verify/status`。
 5. 写数据、控制设备和破坏性操作遵循当前权限模式；批准只覆盖明确工具、目标和参数，不扩大权限。
 6. 工具结果和失败必须原样形成证据；不得把“工具存在”写成“真实设备已通过”。默认审计记录可在对应 VibeKits 工具页面查看和删除。
+7. 需要回答某个工具的精确参数时，必须先调用 `vibekits.system.describe_tool`，逐项列出类型、是否必填、默认值、枚举和范围，不凭记忆回答。
+8. Harness 启动超时、异常退出或工具失败时，先调用 `vibekits.harness.diagnostics` 查询脱敏的运行日志和工具调用记录，再根据证据定位；不得让用户凭现象猜原因。
+
+## 自动配置最高准则
+
+- 能通过设备枚举、`list/inspect/status`、保存会话或安全试探得到的参数，由 Harness 自动发现并填写，不让用户手工试错。
+- 只有保存记录不存在时才询问账号或登录身份；密码、API Key、Token、私钥口令等秘密由用户输入。已保存的 SSH、数据库和模型凭据只复用别名，永不回显。
+- 破坏性目标和授权仍需明确确认；这与“参数自动配置”不是一回事。
+- 串口必须执行 `serial.list_ports → serial.auto_detect`。直接采用 `selected` 中的 `baudRate/dataBits/stopBits/parity/flowControl`；协议未知时只监听，不发送探测字节。未收到数据时扩大 `listenMs` 后重试；即使存在多个端口也按 VID/PID、描述和传输类型自动排序选择，再以被动接收结果报告置信度，不询问用户猜端口或配置。
 
 ## 业务模块
 
@@ -25,8 +34,9 @@
 常用调用链：
 
 - 系统卡顿：`vibekits.system.resources`，必要时多次采样；不得直接结束进程。
-- 串口：`vibekits.serial.list_ports → vibekits.serial.transact`，先识别物理端口及 VID/PID，再按用户参数打开。
+- 串口：`vibekits.serial.list_ports → vibekits.serial.auto_detect → vibekits.serial.session_open → session_read/write → session_close`；自动识别物理端口、波特率、数据位、停止位、校验和三种流控及组合。
 - ADB：`vibekits.adb.list_devices/connect → shell/logcat/screenshot/push/pull/install_apk`。
+- 网络文件/APK：必须使用 `vibekits.network.download` 流式下载并读取其 `outputPath/bytes/sha256/artifactType`；APK 随后执行 `adb.list_devices/connect → adb.install_apk → adb.shell` 验证安装结果。不得改用 curl、PowerShell 或系统浏览器下载，也不得把 HTTP 错误页交给 ADB。
 - SSH/SFTP：`vibekits.remote.list_profiles/open_interactive → ssh_exec/sftp_list/sftp_upload/sftp_download`，复用已保存凭据别名。
 - Git：`vibekits.git.inspect/compare_refs → backup_preview → backup_commit → backup_push → verify_remote_ref`。
 - 代理：`vibekits.runtime.inspect → proxy.start → runtime.status → proxy.system_apply`；结束时 `proxy.system_restore → proxy.stop`。

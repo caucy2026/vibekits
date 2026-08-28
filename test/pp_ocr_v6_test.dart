@@ -5,6 +5,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/local_models/domain/pp_ocr_v6.dart';
 
 void main() {
+  test('OCR boxes expose pixel and normalized relative positions', () {
+    const OcrRect rect = OcrRect(left: 100, top: 50, right: 300, bottom: 150);
+    expect(rect.toPixelMap(), <String, int>{
+      'left': 100,
+      'top': 50,
+      'right': 300,
+      'bottom': 150,
+      'width': 200,
+      'height': 100,
+    });
+    expect(rect.toRelativeMap(1000, 500), <String, double>{
+      'left': 0.1,
+      'top': 0.1,
+      'right': 0.3,
+      'bottom': 0.3,
+      'width': 0.2,
+      'height': 0.2,
+      'centerX': 0.2,
+      'centerY': 0.2,
+    });
+    expect(rect.regionLabel(1000, 500), 'top-left');
+  });
+
+  test('OCR relative positions clamp boxes at image boundaries', () {
+    const OcrRect rect = OcrRect(left: -20, top: 80, right: 120, bottom: 240);
+    final Map<String, double> relative = rect.toRelativeMap(100, 200);
+    expect(relative['left'], 0);
+    expect(relative['right'], 1);
+    expect(relative['bottom'], 1);
+    expect(rect.regionLabel(100, 200), 'bottom-center');
+  });
+
   test('parses PP-OCRv6 multilingual character dictionary', () {
     final String config = File(
       'test_data${Platform.pathSeparator}models${Platform.pathSeparator}'

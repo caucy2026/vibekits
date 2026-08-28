@@ -29,6 +29,7 @@ enum CleanupCategory {
   debugArtifacts('调试临时文件', false),
   logs('日志/崩溃转储', false),
   discoveredTransient('智能发现的缓存/日志', true),
+  userProfileResidual('Windows 用户配置盘点', true),
   emptyDirs('空目录', true),
   downloads('下载建议', true),
   duplicateFiles('重复文件', true),

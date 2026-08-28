@@ -24,9 +24,11 @@ import 'git_repository_service.dart';
 import 'github_diagnostics.dart';
 import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
+import 'harness_runtime_log_store.dart';
 import 'harness_connection_sessions.dart';
 import 'harness_work_status.dart';
 import 'network_virtualization_service.dart';
+import 'network_download_service.dart';
 import 'packet_capture_service.dart';
 import 'system_proxy_service.dart';
 import 'system_resource_service.dart';
@@ -153,6 +155,9 @@ typedef HarnessRemoteWorkspaceLauncher = Future<void> Function(
   RemoteWorkspaceIntent intent,
 );
 typedef HarnessScreenshotOcrRunner = Future<Map<String, Object?>> Function();
+typedef HarnessSerialOpener = Future<SerialPortSession> Function(
+  SerialConnectionSettings settings,
+);
 
 /// Harness 只能通过此桥接调用 Vibekits 能力。
 ///
@@ -174,10 +179,12 @@ class VibekitsHarnessToolBridge {
     HarnessRemoteDatabaseQuerier? remoteDatabaseQuerier,
     HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher,
     HarnessScreenshotOcrRunner? screenshotOcrRunner,
+    HarnessSerialOpener? serialOpener,
     GithubProxyService? githubProxyService,
     WindowsTestNodeService? windowsTestNodeService,
     WindowsNodeDeviceService? windowsNodeDeviceService,
     String? runtimeToolRoot,
+    String? downloadDirectory,
     Future<void> Function(int processId)? runtimeBindProcessTree,
     Future<void> Function(int processId)? runtimeReleaseProcessTree,
   }) => VibekitsHarnessToolBridge._(
@@ -194,10 +201,12 @@ class VibekitsHarnessToolBridge {
     remoteDatabaseQuerier,
     remoteWorkspaceLauncher,
     screenshotOcrRunner,
+    serialOpener,
     githubProxyService ?? GithubProxyService(),
     windowsTestNodeService ?? WindowsTestNodeService(),
     windowsNodeDeviceService ?? WindowsNodeDeviceService(),
     runtimeToolRoot,
+    downloadDirectory,
     runtimeBindProcessTree,
     runtimeReleaseProcessTree,
   );
@@ -216,10 +225,12 @@ class VibekitsHarnessToolBridge {
     this._remoteDatabaseQuerier,
     this._remoteWorkspaceLauncher,
     this._screenshotOcrRunner,
+    this._serialOpener,
     this._githubProxyService,
     this._windowsTestNodeService,
     this._windowsNodeDeviceService,
     this._runtimeToolRoot,
+    this._downloadDirectory,
     this._runtimeBindProcessTree,
     this._runtimeReleaseProcessTree,
   );
@@ -238,6 +249,7 @@ class VibekitsHarnessToolBridge {
   static const String adbSessionStatusId = 'vibekits.adb.session_status';
   static const String adbSessionCloseId = 'vibekits.adb.session_close';
   static const String serialListPortsId = 'vibekits.serial.list_ports';
+  static const String serialAutoDetectId = 'vibekits.serial.auto_detect';
   static const String serialTransactId = 'vibekits.serial.transact';
   static const String serialSessionOpenId = 'vibekits.serial.session_open';
   static const String serialSessionReadId = 'vibekits.serial.session_read';
@@ -255,6 +267,7 @@ class VibekitsHarnessToolBridge {
   static const String gitVerifyRemoteRefId = 'vibekits.git.verify_remote_ref';
   static const String fileSearchId = 'vibekits.files.search';
   static const String apiRequestId = 'vibekits.http.request';
+  static const String networkDownloadId = 'vibekits.network.download';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
   static const String githubProxyCandidatesId =
       'vibekits.github.proxy_candidates';
@@ -312,6 +325,8 @@ class VibekitsHarnessToolBridge {
   static const String audioGenerateToneId = 'vibekits.audio.generate_tone';
   static const String systemResourcesId = 'vibekits.system.resources';
   static const String capabilityCheckId = 'vibekits.system.capability_check';
+  static const String describeToolId = 'vibekits.system.describe_tool';
+  static const String harnessDiagnosticsId = 'vibekits.harness.diagnostics';
   static const String projectIterationInspectId =
       'vibekits.project.iteration_inspect';
   static const String projectBuildId = 'vibekits.project.build';
@@ -334,10 +349,12 @@ class VibekitsHarnessToolBridge {
   final HarnessRemoteDatabaseQuerier? _remoteDatabaseQuerier;
   final HarnessRemoteWorkspaceLauncher? _remoteWorkspaceLauncher;
   final HarnessScreenshotOcrRunner? _screenshotOcrRunner;
+  final HarnessSerialOpener? _serialOpener;
   final GithubProxyService _githubProxyService;
   final WindowsTestNodeService _windowsTestNodeService;
   final WindowsNodeDeviceService _windowsNodeDeviceService;
   final String? _runtimeToolRoot;
+  final String? _downloadDirectory;
   final Future<void> Function(int processId)? _runtimeBindProcessTree;
   final Future<void> Function(int processId)? _runtimeReleaseProcessTree;
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
@@ -390,6 +407,33 @@ class VibekitsHarnessToolBridge {
       name: '检查智能体工具链',
       description: '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
       properties: const <String, Object?>{},
+    ),
+    describeToolId: _definition(
+      id: describeToolId,
+      name: '精确说明工具参数',
+      description:
+          '按工具 ID 返回当前运行版本的完整 inputSchema、必填项、枚举、默认值、风险和自动配置原则。回答参数配置问题前必须调用。',
+      properties: <String, Object?>{
+        'toolId': _string('完整工具 ID，例如 vibekits.serial.session_open'),
+      },
+      required: <String>['toolId'],
+    ),
+    harnessDiagnosticsId: _definition(
+      id: harnessDiagnosticsId,
+      name: '查询 Harness 诊断日志',
+      description: '只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。',
+      properties: <String, Object?>{
+        'limit': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 50,
+          'description': '返回最近记录数，默认 20',
+        },
+        'includeLogTail': const <String, Object?>{
+          'type': 'boolean',
+          'description': '是否附带最新运行日志尾部，默认 true',
+        },
+      },
     ),
     projectIterationInspectId: _definition(
       id: projectIterationInspectId,
@@ -616,12 +660,17 @@ class VibekitsHarnessToolBridge {
     adbInstallApkId: _definition(
       id: adbInstallApkId,
       name: '安装 APK',
-      description: '把明确的本地 APK 安装到选定设备；覆盖安装必须显式指定。',
+      description: '把明确的本地 APK 安装到选定设备；覆盖或尝试版本降级必须显式指定。降级仍受 Android 设备策略约束，失败时不得自动卸载应用。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
         'apkPath': _string('本地 APK 绝对路径'),
         'replace': <String, Object?>{'type': 'boolean'},
+        'allowDowngrade': <String, Object?>{
+          'type': 'boolean',
+          'description': '显式传入 true 时追加 adb install -d；不会自动卸载或清除应用数据',
+          'default': false,
+        },
       },
       required: <String>['serial', 'apkPath'],
     ),
@@ -698,6 +747,32 @@ class VibekitsHarnessToolBridge {
       description: '在后台线程读取 Windows/macOS 可用串口及 USB 描述。',
       properties: const <String, Object?>{},
     ),
+    serialAutoDetectId: _definition(
+      id: serialAutoDetectId,
+      name: '自动探测串口配置',
+      description: '自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'port': _string('可选串口名；留空时按 USB VID/PID、描述和端口名自动选择'),
+        'baudRates': <String, Object?>{
+          'type': 'array',
+          'description': '可选候选波特率；默认依次尝试 115200、921600、460800、230400、57600、38400、19200、9600',
+          'items': <String, Object?>{
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 12000000,
+          },
+          'maxItems': 16,
+        },
+        'listenMs': <String, Object?>{
+          'type': 'integer',
+          'description': '每个候选只监听的毫秒数；默认 300，范围 100-3000',
+          'minimum': 100,
+          'maximum': 3000,
+          'default': 300,
+        },
+      },
+    ),
     serialTransactId: _definition(
       id: serialTransactId,
       name: '串口收发与监听',
@@ -707,18 +782,57 @@ class VibekitsHarnessToolBridge {
         'port': _string('串口名，例如 COM3'),
         'baudRate': <String, Object?>{
           'type': 'integer',
+          'description': '默认 115200；建议先采用 serial.auto_detect 返回值',
           'minimum': 1,
           'maximum': 12000000,
+          'default': 115200,
+        },
+        'dataBits': <String, Object?>{
+          'type': 'integer',
+          'description': '数据位，默认 8',
+          'enum': <int>[5, 6, 7, 8],
+          'default': 8,
+        },
+        'stopBits': <String, Object?>{
+          'type': 'integer',
+          'description': '停止位，默认 1',
+          'enum': <int>[1, 2],
+          'default': 1,
+        },
+        'parity': <String, Object?>{
+          'type': 'string',
+          'description': '奇偶校验，默认 none',
+          'enum': <String>['none', 'even', 'odd', 'mark', 'space'],
+          'default': 'none',
+        },
+        'flowControl': <String, Object?>{
+          'type': 'string',
+          'description': '流控/波控，默认 none；支持三种基础流控及其组合',
+          'enum': <String>[
+            'none',
+            'dtrDsr',
+            'rtsCts',
+            'xonXoff',
+            'dtrDsrRtsCts',
+            'dtrDsrXonXoff',
+            'rtsCtsXonXoff',
+            'all',
+          ],
+          'default': 'none',
         },
         'data': _string('待发送文本或 HEX 字节'),
         'mode': <String, Object?>{
           'type': 'string',
+          'description': '数据解释模式，默认 text',
           'enum': <String>['text', 'hex'],
+          'default': 'text',
         },
         'waitMs': <String, Object?>{
           'type': 'integer',
+          'description': '发送后或纯监听等待时间，默认 3000 ms',
           'minimum': 50,
           'maximum': 30000,
+          'default': 3000,
         },
       },
       required: <String>['port'],
@@ -732,23 +846,32 @@ class VibekitsHarnessToolBridge {
         'port': _string('串口名，例如 COM33'),
         'baudRate': <String, Object?>{
           'type': 'integer',
+          'description': '默认 115200；优先使用 serial.auto_detect 推荐值',
           'minimum': 1,
           'maximum': 12000000,
+          'default': 115200,
         },
         'dataBits': <String, Object?>{
           'type': 'integer',
+          'description': '数据位，默认 8',
           'enum': <int>[5, 6, 7, 8],
+          'default': 8,
         },
         'stopBits': <String, Object?>{
           'type': 'integer',
+          'description': '停止位，默认 1',
           'enum': <int>[1, 2],
+          'default': 1,
         },
         'parity': <String, Object?>{
           'type': 'string',
+          'description': '奇偶校验，默认 none',
           'enum': <String>['none', 'even', 'odd', 'mark', 'space'],
+          'default': 'none',
         },
         'flowControl': <String, Object?>{
           'type': 'string',
+          'description': '流控/波控，默认 none；自动探测会覆盖 DTR/DSR、RTS/CTS、XON/XOFF 及组合',
           'enum': <String>[
             'none',
             'dtrDsr',
@@ -759,6 +882,7 @@ class VibekitsHarnessToolBridge {
             'rtsCtsXonXoff',
             'all',
           ],
+          'default': 'none',
         },
       },
       required: <String>['port'],
@@ -952,6 +1076,35 @@ class VibekitsHarnessToolBridge {
         'body': <String, Object?>{'type': 'string'},
       },
       required: <String>['method', 'url'],
+    ),
+    networkDownloadId: _definition(
+      id: networkDownloadId,
+      name: '下载网络文件',
+      description: '把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'url': _string('完整 HTTP/HTTPS URL'),
+        'fileName': _string('可选目标文件名；只能是文件名，不能含目录'),
+        'outputDirectory': _string('可选绝对下载目录；默认使用 APP 设置的工具下载目录'),
+        'overwrite': const <String, Object?>{
+          'type': 'boolean',
+          'default': false,
+        },
+        'expectedSha256': _string('可选 64 位 SHA-256，用于强校验'),
+        'timeoutSeconds': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 5,
+          'maximum': 1800,
+          'default': 300,
+        },
+        'maxBytes': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 8589934592,
+          'default': 2147483648,
+        },
+      },
+      required: <String>['url'],
     ),
     githubDiagnosticsId: _definition(
       id: githubDiagnosticsId,
@@ -1215,7 +1368,9 @@ class VibekitsHarnessToolBridge {
     screenshotOcrId: HarnessToolDefinition(
       id: screenshotOcrId,
       name: '截图并 OCR 分析',
-      description: '让用户框选屏幕区域，使用 App 内置 PP-OCRv6 tiny 在本机识别，并把文字返回智能体。',
+      description:
+          '让用户框选屏幕区域并在本机 OCR。返回原图尺寸、文字、像素框 boundsPx、0..1 '
+          '归一化框 boundsRelative、九宫格 region 和 spatialText；没有多模态视觉的智能体应依据这些字段理解控件位置、阅读顺序和空间关系。',
       risk: HarnessToolRisk.controlsDevice,
       inputSchema: <String, Object?>{
         'type': 'object',
@@ -1567,8 +1722,14 @@ class VibekitsHarnessToolBridge {
       inputSchema: <String, Object?>{
         'type': 'object',
         'properties': <String, Object?>{
-          'input': <String, Object?>{'type': 'string'},
-          'params': <String, Object?>{'type': 'string'},
+          'input': <String, Object?>{
+            'type': 'string',
+            'description': '用户任务的主要输入；能从当前文件或拖入对象获得时自动采用',
+          },
+          'params': <String, Object?>{
+            'type': 'string',
+            'description': '可选附加参数；无明确需要时使用工具默认值',
+          },
         },
         'required': <String>['input'],
         'additionalProperties': false,
@@ -1596,11 +1757,14 @@ class VibekitsHarnessToolBridge {
     if (toolId == adbSessionStatusId) return _adbSessionStatus;
     if (toolId == adbSessionCloseId) return _closeAdbSession;
     if (toolId == serialListPortsId) return _listSerialPorts;
+    if (toolId == serialAutoDetectId) return _autoDetectSerial;
     if (toolId == serialTransactId) return _serialTransact;
     if (toolId == serialSessionOpenId) return _openSerialSession;
     if (toolId == serialSessionReadId) return _readSerialSession;
     if (toolId == serialSessionWriteId) return _writeSerialSession;
     if (toolId == serialSessionCloseId) return _closeSerialSession;
+    if (toolId == describeToolId) return _describeTool;
+    if (toolId == harnessDiagnosticsId) return _readHarnessDiagnostics;
     if (toolId == sqliteInspectId) return _inspectSqlite;
     if (toolId == sqliteQueryId) return _querySqlite;
     if (toolId == gitInspectId) return _inspectGit;
@@ -1612,6 +1776,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == gitVerifyRemoteRefId) return _verifyGitRemoteRef;
     if (toolId == fileSearchId) return _searchFiles;
     if (toolId == apiRequestId) return _requestHttp;
+    if (toolId == networkDownloadId) return _downloadNetworkFile;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
     if (toolId == githubProxyCandidatesId) return _githubProxyCandidates;
     if (toolId == githubProxyPlanId) return _githubProxyPlan;
@@ -1924,6 +2089,37 @@ class VibekitsHarnessToolBridge {
       'missingHandlers': missingHandlers,
       'unavailableTools': unavailable,
       'riskCounts': riskCounts,
+      'autoConfigurationPolicy': <String, Object?>{
+        'rule': '自动发现和安全试探优先；不向用户询问机器可推导的配置',
+        'askUserOnlyFor': const <String>[
+          '未保存的账号或登录身份',
+          '密码、API Key、Token、私钥口令等秘密',
+          '业务任务本身缺少的目标或内容',
+          '破坏性操作确认',
+        ],
+        'discoveryFlows': const <String>[
+          '串口 list_ports → auto_detect → session_open',
+          'ADB list_devices/connect → session_open',
+          'SSH/SFTP list_profiles → 复用保存会话',
+          '数据库 remote_list_profiles → 复用保存会话',
+          '代理/虚拟机 runtime.inspect → start → status',
+          'Git inspect → preview → apply → verify',
+          '文件和系统工具从拖入对象、当前工作区或 inspect 结果取得路径',
+        ],
+        'exactSchemaTool': describeToolId,
+        'serialSkill': <String, Object?>{
+          'tool': serialAutoDetectId,
+          'parameters': const <String>[
+            'port',
+            'baudRate',
+            'dataBits',
+            'stopBits',
+            'parity',
+            'flowControl',
+          ],
+          'passiveProbe': true,
+        },
+      },
       'platform': <String, Object?>{
         'name': Platform.operatingSystem,
         'storageLocations': PlatformStorageLayout.current().toJson(),
@@ -2194,6 +2390,7 @@ class VibekitsHarnessToolBridge {
     return _executeSemanticAdb(arguments, <String>[
       'install',
       if (arguments['replace'] == true) '-r',
+      if (arguments['allowDowngrade'] == true) '-d',
       apkPath,
     ]);
   }
@@ -2377,18 +2574,93 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _autoDetectSerial(
+    Map<String, Object?> arguments,
+  ) async {
+    final List<SerialPortDescriptor> ports =
+        await SerialPortService.listPorts();
+    if (ports.isEmpty) throw StateError('未检测到可用串口');
+    String portName = (arguments['port'] ?? '').toString().trim();
+    String selectionReason = '使用调用方指定端口';
+    if (portName.isEmpty) {
+      final List<SerialPortDescriptor> ranked =
+          List<SerialPortDescriptor>.of(ports)
+            ..sort((SerialPortDescriptor left, SerialPortDescriptor right) {
+              int score(SerialPortDescriptor port) {
+                final String text = '${port.description} ${port.transport}'
+                    .toLowerCase();
+                return (port.vendorId != null ? 100 : 0) +
+                    (port.productId != null ? 50 : 0) +
+                    (text.contains('usb') ? 25 : 0) +
+                    (text.contains('serial') || text.contains('uart') ? 10 : 0);
+              }
+
+              return score(right).compareTo(score(left));
+            });
+      portName = ranked.first.name;
+      selectionReason =
+          '未要求用户输入：按 USB VID/PID、USB/Serial 描述自动选择 ${ranked.first.label}';
+    }
+    final Object? rawBaudRates = arguments['baudRates'];
+    final List<int> baudRates = rawBaudRates is List
+        ? rawBaudRates
+              .map((Object? value) => int.tryParse('$value'))
+              .whereType<int>()
+              .where((int value) => value >= 1 && value <= 12000000)
+              .take(16)
+              .toList(growable: false)
+        : SerialAutoDetector.defaultBaudRates;
+    final Map<String, Object?> result = await SerialAutoDetector.detect(
+      portName: portName,
+      baudRates: baudRates.isEmpty
+          ? SerialAutoDetector.defaultBaudRates
+          : baudRates,
+      listenDuration: Duration(
+        milliseconds: _integer(arguments['listenMs'], 300).clamp(100, 3000),
+      ),
+      open: _serialOpener ?? SerialPortService.open,
+    );
+    return <String, Object?>{
+      ...result,
+      'selectionReason': selectionReason,
+      'detectedPorts': <Map<String, Object?>>[
+        for (final SerialPortDescriptor port in ports)
+          <String, Object?>{
+            'name': port.name,
+            'description': port.description,
+            'transport': port.transport,
+            if (port.vendorId != null) 'vendorId': port.vendorId,
+            if (port.productId != null) 'productId': port.productId,
+          },
+      ],
+    };
+  }
+
   Future<Map<String, Object?>> _serialTransact(
     Map<String, Object?> arguments,
   ) async {
     final SerialConnectionSettings settings = SerialConnectionSettings(
       portName: (arguments['port'] ?? '').toString(),
       baudRate: _integer(arguments['baudRate'], 115200),
+      dataBits: _integer(arguments['dataBits'], 8),
+      stopBits: _integer(arguments['stopBits'], 1),
+      parity: _enumValue(
+        SerialParity.values,
+        arguments['parity'],
+        SerialParity.none,
+      ),
+      flowControl: _enumValue(
+        SerialFlowControl.values,
+        arguments['flowControl'],
+        SerialFlowControl.none,
+      ),
     );
     final SerialDataMode mode = arguments['mode'] == 'hex'
         ? SerialDataMode.hex
         : SerialDataMode.text;
     final int waitMs = _integer(arguments['waitMs'], 3000).clamp(50, 30000);
-    final SerialPortSession session = await SerialPortService.open(settings);
+    final SerialPortSession session =
+        await (_serialOpener ?? SerialPortService.open)(settings);
     final BytesBuilder received = BytesBuilder(copy: false);
     final StreamSubscription<SerialPortEvent> subscription = session.events
         .listen((SerialPortEvent event) {
@@ -2436,6 +2708,82 @@ class VibekitsHarnessToolBridge {
       ),
     ),
   );
+
+  Future<Map<String, Object?>> _describeTool(
+    Map<String, Object?> arguments,
+  ) async {
+    final String toolId = (arguments['toolId'] ?? '').toString().trim();
+    final HarnessToolDefinition? tool = _definitions[toolId];
+    if (tool == null) throw FormatException('未知工具 ID：$toolId');
+    final Map<String, Object?> schema = tool.inputSchema;
+    final Map<String, Object?> properties =
+        (schema['properties'] as Map?)?.cast<String, Object?>() ??
+        const <String, Object?>{};
+    final Set<String> required =
+        ((schema['required'] as List?) ?? const <Object?>[])
+            .map((Object? value) => '$value')
+            .toSet();
+    return <String, Object?>{
+      ...tool.toJson(),
+      'parameters': <Map<String, Object?>>[
+        for (final MapEntry<String, Object?> entry in properties.entries)
+          <String, Object?>{
+            'name': entry.key,
+            'required': required.contains(entry.key),
+            if (entry.value is Map)
+              ...(entry.value as Map).cast<String, Object?>(),
+          },
+      ],
+      'configurationPolicy': <String, Object?>{
+        'automaticFirst': true,
+        'askUserOnlyFor': const <String>[
+          '账号或登录身份无法从保存记录推断时',
+          '密码、API Key、Token、私钥口令等秘密',
+          '破坏性操作的明确目标与确认',
+        ],
+        'doNotAskFor': const <String>[
+          '可枚举的设备、端口和路径',
+          '可通过 inspect/list/status 得到的运行参数',
+          '可安全试探的串口波特率、帧格式和流控',
+        ],
+      },
+    };
+  }
+
+  Future<Map<String, Object?>> _readHarnessDiagnostics(
+    Map<String, Object?> arguments,
+  ) async {
+    final int limit = _integer(arguments['limit'], 20).clamp(1, 50);
+    final bool includeTail = arguments['includeLogTail'] != false;
+    final List<HarnessRuntimeLogEntry> logs =
+        await HarnessRuntimeLogStore.listLogs();
+    final List<HarnessToolActivity> activities =
+        await HarnessToolActivityStore.load(const <String>{});
+    final HarnessRuntimeLogEntry? latest = logs.firstOrNull;
+    return <String, Object?>{
+      'debugDirectory': HarnessRuntimeLogStore.rootPath,
+      'runtimeLogs': <Map<String, Object?>>[
+        for (final HarnessRuntimeLogEntry entry in logs.take(limit))
+          <String, Object?>{
+            'name': entry.name,
+            'path': entry.path,
+            'size': entry.size,
+            'modified': entry.modified.toUtc().toIso8601String(),
+          },
+      ],
+      if (includeTail && latest != null)
+        'latestLogTail': await HarnessRuntimeLogStore.readTail(
+          latest.path,
+          maxBytes: 16 * 1024,
+        ),
+      'toolCalls': <Map<String, Object?>>[
+        for (final HarnessToolActivity activity in activities.take(limit))
+          activity.toJson(),
+      ],
+      'loggingEnabledByDefault': true,
+      'privacy': 'API Key、密码、Token、Authorization 等敏感字段不会原样返回',
+    };
+  }
 
   Future<Map<String, Object?>> _readSerialSession(
     Map<String, Object?> arguments,
@@ -2685,6 +3033,39 @@ class VibekitsHarnessToolBridge {
       'elapsedMs': response.elapsed.inMilliseconds,
       'finalUrl': response.finalUrl.toString(),
     };
+  }
+
+  Future<Map<String, Object?>> _downloadNetworkFile(
+    Map<String, Object?> arguments,
+  ) async {
+    final Uri? url = Uri.tryParse((arguments['url'] ?? '').toString().trim());
+    if (url == null) throw const FormatException('URL 格式无效');
+    final String requestedDirectory = (arguments['outputDirectory'] ?? '')
+        .toString()
+        .trim();
+    final String directory = requestedDirectory.isNotEmpty
+        ? Directory(requestedDirectory).absolute.path
+        : (_downloadDirectory?.trim().isNotEmpty == true
+              ? Directory(_downloadDirectory!).absolute.path
+              : PlatformStorageLayout.current().downloadsDirectory);
+    final int timeoutSeconds =
+        (arguments['timeoutSeconds'] as num?)?.toInt().clamp(5, 1800) ?? 300;
+    final int maxBytes =
+        (arguments['maxBytes'] as num?)?.toInt().clamp(1, 8589934592) ??
+        2147483648;
+    final NetworkDownloadResult result = await const NetworkDownloadService()
+        .download(
+          NetworkDownloadRequest(
+            url: url,
+            outputDirectory: directory,
+            fileName: (arguments['fileName'] ?? '').toString(),
+            overwrite: arguments['overwrite'] == true,
+            expectedSha256: (arguments['expectedSha256'] ?? '').toString(),
+            timeout: Duration(seconds: timeoutSeconds),
+            maxBytes: maxBytes,
+          ),
+        );
+    return result.toJson();
   }
 
   Future<Map<String, Object?>> _diagnoseGithub(
@@ -3443,7 +3824,16 @@ class VibekitsHarnessToolBridge {
     risk: risk,
     inputSchema: <String, Object?>{
       'type': 'object',
-      'properties': properties,
+      'properties': <String, Object?>{
+        for (final MapEntry<String, Object?> entry in properties.entries)
+          entry.key: entry.value is Map
+              ? <String, Object?>{
+                  ...(entry.value as Map).cast<String, Object?>(),
+                  if (!(entry.value as Map).containsKey('description'))
+                    'description': '由用户任务、保存记录或前置发现工具获得；无值时采用工具默认行为',
+                }
+              : entry.value,
+      },
       if (required.isNotEmpty) 'required': required,
       'additionalProperties': false,
     },
@@ -3510,7 +3900,9 @@ class VibekitsHarnessToolBridge {
     }.contains(toolId)) {
       return (arguments['sessionId'] ?? '').toString();
     }
-    if (toolId == apiRequestId) return (arguments['url'] ?? '').toString();
+    if (toolId == apiRequestId || toolId == networkDownloadId) {
+      return (arguments['url'] ?? '').toString();
+    }
     if (toolId == remoteOpenInteractiveId) {
       return (arguments['host'] ?? '').toString();
     }

@@ -21,6 +21,7 @@ import '../domain/cleanup_recovery_planner.dart';
 import '../domain/cleanup_whitelist.dart';
 import '../domain/disk_volume_discovery.dart';
 import '../domain/installed_application_service.dart';
+import '../domain/harness_debug_storage_service.dart';
 import '../domain/software_storage_analyzer.dart';
 import '../domain/system_drive_analysis_runner.dart';
 import '../domain/system_drive_analysis_report.dart';
@@ -183,6 +184,7 @@ class _CleanerTabState extends State<CleanerTab> {
   late int _completedRuns = widget.initialCompletedRuns;
   String _message = '';
   final Map<CleanupCategory, int> _visibleItemLimits = <CleanupCategory, int>{};
+  HarnessDebugStorageSummary? _harnessDebugSummary;
 
   bool get _acceptancePassed => _totalReleasedBytes >= _acceptanceTargetBytes;
   bool get _supportsSystemWideAnalysis =>
@@ -413,6 +415,12 @@ class _CleanerTabState extends State<CleanerTab> {
     final CleanupCancellationToken token = CleanupCancellationToken();
     _taskToken = token;
     try {
+      final String harnessRoot = widget.harnessDebugDirectory.trim().isEmpty
+          ? PlatformStorageLayout.current().harnessDebugDirectory
+          : widget.harnessDebugDirectory.trim();
+      final Future<HarnessDebugStorageSummary> harnessSummaryFuture =
+          HarnessDebugStorageService.inspect(harnessRoot)
+              .catchError((_) => HarnessDebugStorageSummary.empty(harnessRoot));
       void onProgress(CleanupScanProgress progress) {
         if (mounted) setState(() => _scanProgress = progress);
       }
@@ -439,6 +447,8 @@ class _CleanerTabState extends State<CleanerTab> {
             ),
           )
           .toList();
+      final HarnessDebugStorageSummary harnessSummary =
+          await harnessSummaryFuture;
       filtered.sort((CleanupCandidate left, CleanupCandidate right) {
         final int category = left.category.index.compareTo(
           right.category.index,
@@ -447,17 +457,43 @@ class _CleanerTabState extends State<CleanerTab> {
       });
       if (mounted) {
         final CleanupDecisionPlan decisionPlan = _decisionPlanFor(filtered);
+        final bool criticalDiskPressure = _selectedVolumeFreeRatio() < 0.05;
+        final CleanupRecoveryPlan? pressurePlan =
+            criticalDiskPressure && _acceptanceRemainingBytes > 0
+            ? CleanupRecoveryPlanner.build(
+                decisionPlan,
+                releaseGoalBytes: _acceptanceRemainingBytes,
+              )
+            : null;
         setState(() {
           _candidates = filtered;
+          _harnessDebugSummary = harnessSummary;
           _visibleItemLimits.clear();
           _selected.addAll(
             decisionPlan
                 .candidatesFor(CleanupDecisionTier.automatic)
                 .map((CleanupCandidate candidate) => candidate.path),
           );
+          if (pressurePlan != null) {
+            _selected.addAll(
+              pressurePlan.recommendedToGoal.map(
+                (CleanupDecision decision) => decision.candidate.path,
+              ),
+            );
+          }
+          // Diagnostic evidence is never preselected, even under disk
+          // pressure. The dedicated card lets the user opt in explicitly.
+          _selected.removeWhere(
+            (String path) => filtered.any(
+              (CleanupCandidate candidate) =>
+                  candidate.path == path && _isHarnessDebugCandidate(candidate),
+            ),
+          );
           _scanning = false;
           _message = result.cancelled
               ? '扫描已取消；保留取消前发现的 ${filtered.length} 项，扫描未删除任何内容'
+              : criticalDiskPressure && pressurePlan != null
+              ? '扫描完成：${filtered.length} 项；系统盘低于 5%，已按 10 GiB 目标自动勾选可再生缓存，执行前仍需确认'
               : '扫描完成：${filtered.length} 项；无法读取 ${result.unreadablePaths} 个位置';
         });
       }
@@ -537,6 +573,20 @@ class _CleanerTabState extends State<CleanerTab> {
           .fold<int>(0, (int sum, CleanupCandidate item) => sum + item.size);
 
   CleanupDecisionPlan _decisionPlanFor(Iterable<CleanupCandidate> candidates) {
+    final double freeRatio = _selectedVolumeFreeRatio();
+    return CleanupDecisionEngine.buildPlan(
+      candidates,
+      freeSpaceRatio: freeRatio,
+      harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
+          ? PlatformStorageLayout.current().harnessDebugDirectory
+          : widget.harnessDebugDirectory.trim(),
+    );
+  }
+
+  bool _isHarnessDebugCandidate(CleanupCandidate candidate) =>
+      (candidate.sourceLabel ?? '').toLowerCase().contains('harness');
+
+  double _selectedVolumeFreeRatio() {
     DiskVolumeInfo? volume;
     if (_selectedVolumeRoots.isNotEmpty) {
       final String selected = _selectedVolumeRoots.first.toLowerCase();
@@ -547,13 +597,9 @@ class _CleanerTabState extends State<CleanerTab> {
         }
       }
     }
-    final double freeRatio = volume == null || volume.totalBytes <= 0
+    return volume == null || volume.totalBytes <= 0
         ? 1
         : volume.freeBytes / volume.totalBytes;
-    return CleanupDecisionEngine.buildPlan(
-      candidates,
-      freeSpaceRatio: freeRatio,
-    );
   }
 
   Future<void> _smartSelect() async {
@@ -3003,28 +3049,36 @@ class _CleanerTabState extends State<CleanerTab> {
       );
     }
     if (_candidates.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              Platform.isAndroid || Platform.isIOS
-                  ? '检查 Vibekits 私有临时文件\n扫描只读；确认清理前不会删除任何内容'
-                  : '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: context.vibe.muted),
-            ),
-            if (Platform.isAndroid || Platform.isIOS) ...<Widget>[
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                key: const Key('mobile-cleaner-empty-scan'),
-                onPressed: _enabledTargetIds.isEmpty ? null : _scan,
-                icon: const Icon(Icons.search),
-                label: const Text('扫描本应用缓存'),
+      final bool hasHarnessUsage = (_harnessDebugSummary?.totalBytes ?? 0) > 0;
+      return Column(
+        children: <Widget>[
+          if (hasHarnessUsage) _buildHarnessDebugSummary(),
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    Platform.isAndroid || Platform.isIOS
+                        ? '检查 Vibekits 私有临时文件\n扫描只读；确认清理前不会删除任何内容'
+                        : '“扫描可清理项”查找缓存和临时文件；“分析全部占用”说明空间被谁使用\n两项操作都只读，不会自动删除内容',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.vibe.muted),
+                  ),
+                  if (Platform.isAndroid || Platform.isIOS) ...<Widget>[
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      key: const Key('mobile-cleaner-empty-scan'),
+                      onPressed: _enabledTargetIds.isEmpty ? null : _scan,
+                      icon: const Icon(Icons.search),
+                      label: const Text('扫描本应用缓存'),
+                    ),
+                  ],
+                ],
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       );
     }
     final List<CleanupCandidate> visible = _candidatesForView(
@@ -3048,6 +3102,8 @@ class _CleanerTabState extends State<CleanerTab> {
                 )
               : ListView(
                   children: <Widget>[
+                    if (_harnessDebugSummary != null)
+                      _buildHarnessDebugSummary(),
                     for (final MapEntry<CleanupCategory, List<CleanupCandidate>>
                         entry
                         in grouped.entries)
@@ -3056,6 +3112,112 @@ class _CleanerTabState extends State<CleanerTab> {
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildHarnessDebugSummary() {
+    final HarnessDebugStorageSummary summary =
+        _harnessDebugSummary ??
+        HarnessDebugStorageSummary.empty(widget.harnessDebugDirectory);
+    final List<CleanupCandidate> eligible = _candidates
+        .where(_isHarnessDebugCandidate)
+        .toList(growable: false);
+    final bool allSelected =
+        eligible.isNotEmpty &&
+        eligible.every(
+          (CleanupCandidate item) => _selected.contains(item.path),
+        );
+    const Map<String, String> labels = <String, String>{
+      'logs': '运行日志',
+      'screenshots': '调试截图',
+      'temp': '临时文件',
+    };
+    return Container(
+      key: const ValueKey<String>('harness-debug-cleanup-summary'),
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.vibe.panel,
+        border: Border.all(color: context.vibe.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.bug_report_outlined, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Harness 调试目录',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text('总占用 ${_formatSize(summary.totalBytes)}'),
+              const SizedBox(width: 14),
+              Text(
+                '24 小时前可清理 ${_formatSize(summary.reclaimableBytes)}',
+                style: const TextStyle(color: VibekitsColors.warning),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            summary.rootPath,
+            style: TextStyle(fontSize: 11, color: context.vibe.muted),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              for (final HarnessDebugAreaUsage area in summary.areas)
+                Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    '${labels[area.name] ?? area.name} '
+                    '${_formatSize(area.totalBytes)} / '
+                    '可清理 ${_formatSize(area.reclaimableBytes)}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              Text(
+                '${summary.fileCount} 个文件'
+                '${summary.unreadablePaths == 0 ? '' : ' · ${summary.unreadablePaths} 个不可读位置'}',
+                style: TextStyle(fontSize: 11, color: context.vibe.muted),
+              ),
+              Checkbox(
+                value: allSelected,
+                onChanged: eligible.isEmpty
+                    ? null
+                    : (bool? value) {
+                        setState(() {
+                          if (value == true) {
+                            _selected.addAll(
+                              eligible.map(
+                                (CleanupCandidate item) => item.path,
+                              ),
+                            );
+                          } else {
+                            _selected.removeAll(
+                              eligible.map(
+                                (CleanupCandidate item) => item.path,
+                              ),
+                            );
+                          }
+                        });
+                      },
+              ),
+              Text(
+                eligible.isEmpty ? '没有达到保留期的项目' : '由用户选择是否清理',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
