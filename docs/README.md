@@ -99,6 +99,7 @@
 92. [dev.132 Harness 调试目录、清理建议与诊断日志验收](acceptance/V1_9_0_DEV132_HARNESS_DEBUG_CLEANUP_LOGS_2026-08-28.md)——调试目录占用、选择性清理、工作状态和脱敏诊断日志
 93. [dev.133/134 网络下载与 ADB 真机安装验收](acceptance/V1_9_0_DEV133_NETWORK_DOWNLOAD_ADB_2026-08-28.md)——Harness 下载、SHA-256、53 设备连接、显式降级参数与真实安装成功
 94. [dev.135 Harness 远端 Git 按需取码验收](acceptance/V1_9_0_DEV135_HIV730_REMOTE_GIT_2026-08-28.md)——实读项目指南、Gerrit refs、master manifest、103 个仓库解析与整包同步禁令
+95. [Harness × RustDesk P2P 实时状态架构](38_HARNESS_RUSTDESK_P2P_STATUS_ARCHITECTURE.md)——多项目状态机、本机安全 IPC、端到端 P2P 心跳、隐私边界和跨仓实施顺序
 
 ## 完成定义
 

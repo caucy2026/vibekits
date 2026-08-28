@@ -160,6 +160,7 @@ void vk_string_free(char* value);
 - `vibekits.next_action_recommendation` 由 `ToolSpec` 自动进入 Harness 及模块审计，不新增左侧工具孤岛。
 - `HarnessWorkStatusHub` 投影有界脱敏快照；工具桥在审批前、执行中和完成后更新状态。
 - `RustDeskHarnessShareService` 只调用官方 RustDesk 客户端，自动发现可执行文件、读取 ID 并打开 Web Client。它不实现 RustDesk 密码学，不直接处理远程密码，不将 `hbbr` 曲解为通用数据通道。
+- 下一阶段采用多项目 `HarnessTaskStateRegistry`：状态经本机安全 IPC 交给 RustDesk Host，再通过已认证的端到端加密 P2P 会话传到 Desktop/Web；HBBC 在线心跳、hbbs 注册心跳和 Harness 状态心跳三者严格分离。协议和状态转换见 `38_HARNESS_RUSTDESK_P2P_STATUS_ARCHITECTURE.md`。
 
 ## 7. 数据和目录
 

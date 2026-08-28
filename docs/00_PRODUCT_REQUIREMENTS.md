@@ -267,6 +267,7 @@ ADB 作为开发工具页的独立高频工作区，调用用户已安装的 And
 - RustDesk 官方客户端作为本机主机，经自建 `hbbs/hbbr` 与 RustDesk Web Client 查看并操作 Vibekits。`hbbr` 是 RustDesk 会话中继，禁止将其伪装成任意 JSON/WebSocket 网关。
 - App 自动发现已安装 RustDesk、通过官方 `--get-id` 读取本机 ID，并仅从 RustDesk 配置读取 rendezvous 地址推导 `/web`；不读取或保存远程控制密码。
 - 远程用户操作真实 Vibekits/Harness 界面，工具写入、设备控制和删除操作不因远程连接而绕过原有审批。
+- 所有 Harness 工作区、会话和任务必须有独立状态机。RustDesk 已认证远端可订阅脱敏状态快照；状态通过本机安全 IPC 进入 RustDesk Host，再走现有端到端加密 P2P 会话。状态链路失败不得阻塞 Harness 或远控，具体协议见 `38_HARNESS_RUSTDESK_P2P_STATUS_ARCHITECTURE.md`。
 
 ### 8.9 跨工具任务链
 
