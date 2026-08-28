@@ -68,10 +68,19 @@ void main() {
       expect(described.ok, isTrue, reason: tool.id);
       expect(described.data!['inputSchema'], tool.inputSchema, reason: tool.id);
       for (final dynamic raw in described.data!['parameters']! as List) {
-        final Map<String, Object?> parameter = (raw as Map).cast<String, Object?>();
+        final Map<String, Object?> parameter = (raw as Map)
+            .cast<String, Object?>();
         expect(parameter['name'], isNotEmpty, reason: tool.id);
-        expect(parameter['type'], isNotNull, reason: '${tool.id}.${parameter['name']}');
-        expect(parameter['description'], isNotEmpty, reason: '${tool.id}.${parameter['name']}');
+        expect(
+          parameter['type'],
+          isNotNull,
+          reason: '${tool.id}.${parameter['name']}',
+        );
+        expect(
+          parameter['description'],
+          isNotEmpty,
+          reason: '${tool.id}.${parameter['name']}',
+        );
       }
     }
   });

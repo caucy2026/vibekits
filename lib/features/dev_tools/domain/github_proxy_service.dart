@@ -133,13 +133,12 @@ class GithubProxyApplyResult {
 class GithubProxyService {
   GithubProxyService({
     GithubProxyProcessRunner? processRunner,
-    String? gitExecutable,
+    this._gitExecutable,
     DateTime Function()? clock,
     Random? random,
     this.candidateProbe,
   }) : _processRunner = processRunner ?? _runProcess,
        _usesBundledRunner = processRunner == null,
-       _gitExecutable = gitExecutable,
        _clock = clock ?? DateTime.now,
        _random = random ?? Random.secure();
 

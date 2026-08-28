@@ -851,14 +851,9 @@ Future<void> _openRemoteToolIfNeeded(WidgetTester tester) async {
     const ValueKey<String>('dev-tool-nav-remote_workspace'),
   );
   if (entry.evaluate().isEmpty) {
-    await tester.enterText(
-      find.byKey(const Key('dev-tool-search')),
-      '远程连接',
-    );
+    await tester.enterText(find.byKey(const Key('dev-tool-search')), '远程连接');
     await tester.pump();
-    entry = find.byKey(
-      const ValueKey<String>('dev-tool-nav-remote_workspace'),
-    );
+    entry = find.byKey(const ValueKey<String>('dev-tool-nav-remote_workspace'));
   }
   expect(entry, findsOneWidget);
   await tester.ensureVisible(entry);

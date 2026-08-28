@@ -340,7 +340,7 @@ abstract final class SerialAutoDetector {
             Uint8List.sublistView(received, 0, received.length.clamp(0, 64)),
             SerialDataMode.hex,
           ),
-        if (error != null) 'error': error,
+        'error': ?error,
       };
       attempts.add(evidence);
       return _SerialProbe(settings, received, score, error);
