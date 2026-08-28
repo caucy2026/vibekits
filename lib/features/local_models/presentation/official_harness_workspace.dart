@@ -1142,7 +1142,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
     try {
       await RustDeskHarnessShareService.launchHost(host.executable);
       RustDeskHarnessLinkStatusHub.clientFound();
-      if (mounted) setState(() => _message = '科米远程办公已启动，等待状态协议连接');
+      if (mounted) setState(() => _message = 'KEMI远程办公已启动，等待状态协议连接');
     } on Object catch (error) {
       if (mounted) setState(() => _message = '启动失败：$error');
     }
@@ -1151,7 +1151,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
   Future<void> _openWeb() async {
     try {
       await RustDeskHarnessShareService.openWebClient(_resolvedWebClientUrl);
-      if (mounted) setState(() => _message = '已打开科米远程办公网页端');
+      if (mounted) setState(() => _message = '已打开KEMI远程办公网页端');
     } on Object catch (error) {
       if (mounted) setState(() => _message = '打开失败：$error');
     }
@@ -1241,7 +1241,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
                                 ? () => _launchHost(host)
                                 : null,
                             icon: const Icon(Icons.desktop_windows_outlined),
-                            label: const Text('启动科米远程办公'),
+                            label: const Text('启动KEMI远程办公'),
                           ),
                           OutlinedButton.icon(
                             onPressed: _resolvedWebClientUrl.isEmpty
@@ -1265,7 +1265,7 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
           ),
           const SizedBox(height: 12),
           const Text(
-            '科米远程办公底层兼容 RustDesk，通过 hbbs/hbbr 查看并操作本机 Vibekits。'
+            'KEMI远程办公底层兼容 RustDesk，通过 hbbs/hbbr 查看并操作本机 Vibekits。'
             'hbbr 不是通用 JSON 中继，因此不会把 API Key、提示词或文件正文发送给它。',
             style: TextStyle(fontSize: 12),
           ),

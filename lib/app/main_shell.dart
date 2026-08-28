@@ -1265,7 +1265,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Future<void> _pickRustDeskExecutable() async {
     final XFile? selected = await openFile(
       acceptedTypeGroups: const <XTypeGroup>[
-        XTypeGroup(label: '科米远程办公客户端', extensions: <String>['exe']),
+        XTypeGroup(label: 'KEMI远程办公客户端', extensions: <String>['exe']),
       ],
     );
     if (selected != null && mounted) {
@@ -1407,10 +1407,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 key: const Key('rustdesk-executable'),
                 controller: _rustDeskExecutable,
                 decoration: InputDecoration(
-                  labelText: '科米远程办公客户端路径',
-                  helperText: '留空时自动查找兼容的科米远程办公客户端',
+                  labelText: 'KEMI远程办公客户端路径',
+                  helperText: '留空时自动查找兼容的KEMI远程办公客户端',
                   suffixIcon: IconButton(
-                    tooltip: '选择科米远程办公程序',
+                    tooltip: '选择KEMI远程办公程序',
                     onPressed: _pickRustDeskExecutable,
                     icon: const Icon(Icons.folder_open_outlined),
                   ),
@@ -1422,7 +1422,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 controller: _rustDeskWebClientUrl,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                  labelText: '科米远程办公网页端地址',
+                  labelText: 'KEMI远程办公网页端地址',
                   helperText: '留空自动从兼容配置推导 /web；不保存远程控制密码',
                 ),
               ),

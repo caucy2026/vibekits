@@ -105,7 +105,7 @@ abstract final class RustDeskHarnessShareService {
         executable: '',
         id: '',
         available: false,
-        message: '未找到科米远程办公客户端，请在设置中指定路径',
+        message: '未找到KEMI远程办公客户端，请在设置中指定路径',
       );
     }
     try {
@@ -123,14 +123,14 @@ abstract final class RustDeskHarnessShareService {
         executable: executable,
         id: id,
         available: true,
-        message: id.isEmpty ? '科米远程办公可用，请在客户端中查看科米办公 ID' : '科米办公 ID：$id',
+        message: id.isEmpty ? 'KEMI远程办公可用，请在客户端中查看KEMI办公 ID' : 'KEMI办公 ID：$id',
       );
     } on Object catch (error) {
       return RustDeskHostInfo(
         executable: executable,
         id: '',
         available: true,
-        message: '科米远程办公可用，但读取科米办公 ID 失败：$error',
+        message: 'KEMI远程办公可用，但读取KEMI办公 ID 失败：$error',
       );
     }
   }
@@ -140,7 +140,7 @@ abstract final class RustDeskHarnessShareService {
     RustDeskProcessLauncher? launcher,
   }) async {
     if (executable.trim().isEmpty || !File(executable).existsSync()) {
-      throw StateError('科米远程办公客户端不存在');
+      throw StateError('KEMI远程办公客户端不存在');
     }
     await (launcher ?? _launchDetached)(executable, const <String>[]);
   }
@@ -151,7 +151,7 @@ abstract final class RustDeskHarnessShareService {
         (uri.scheme != 'https' && uri.scheme != 'http') ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty) {
-      throw const FormatException('科米远程办公网页端地址必须是不含账号信息的 HTTP/HTTPS URL');
+      throw const FormatException('KEMI远程办公网页端地址必须是不含账号信息的 HTTP/HTTPS URL');
     }
     return uri;
   }

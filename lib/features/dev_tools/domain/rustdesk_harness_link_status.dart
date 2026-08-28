@@ -21,7 +21,7 @@ class RustDeskHarnessLinkSnapshot {
   factory RustDeskHarnessLinkSnapshot.disconnected() =>
       RustDeskHarnessLinkSnapshot(
         phase: RustDeskHarnessLinkPhase.disconnected,
-        message: '未连接科米远程办公',
+        message: '未连接KEMI远程办公',
         updatedAt: DateTime.now(),
       );
 
@@ -59,10 +59,10 @@ abstract final class RustDeskHarnessLinkStatusHub {
   static Stream<RustDeskHarnessLinkSnapshot> get changes => _changes.stream;
 
   static void clientFound() =>
-      _publish(RustDeskHarnessLinkPhase.clientFound, '已找到科米远程办公，等待状态协议连接');
+      _publish(RustDeskHarnessLinkPhase.clientFound, '已找到KEMI远程办公，等待状态协议连接');
 
   static void handshaking() =>
-      _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验科米远程办公状态协议');
+      _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验KEMI远程办公状态协议');
 
   static bool acceptHandshake(Map<String, Object?> hello) {
     handshaking();
@@ -76,7 +76,7 @@ abstract final class RustDeskHarnessLinkStatusHub {
     };
     if (remoteProtocol != protocol || !versions.contains(supportedVersion)) {
       _activePeerId = '';
-      _publish(RustDeskHarnessLinkPhase.incompatible, '科米远程办公状态协议版本不兼容');
+      _publish(RustDeskHarnessLinkPhase.incompatible, 'KEMI远程办公状态协议版本不兼容');
       return false;
     }
     _activePeerId = peer;
@@ -99,14 +99,14 @@ abstract final class RustDeskHarnessLinkStatusHub {
     _activePeerId = '';
     _publish(
       RustDeskHarnessLinkPhase.disconnected,
-      reason.trim().isEmpty ? '未连接科米远程办公' : _bounded(reason, 160),
+      reason.trim().isEmpty ? '未连接KEMI远程办公' : _bounded(reason, 160),
     );
   }
 
   static void _markConnected() {
     _publish(
       RustDeskHarnessLinkPhase.connected,
-      '科米远程办公已连接',
+      'KEMI远程办公已连接',
       protocolVersion: supportedVersion,
       peerId: _activePeerId,
     );
@@ -115,7 +115,7 @@ abstract final class RustDeskHarnessLinkStatusHub {
       if (_latest.phase != RustDeskHarnessLinkPhase.connected) return;
       _publish(
         RustDeskHarnessLinkPhase.stale,
-        '科米远程办公心跳已超时',
+        'KEMI远程办公心跳已超时',
         protocolVersion: supportedVersion,
         peerId: _activePeerId,
       );

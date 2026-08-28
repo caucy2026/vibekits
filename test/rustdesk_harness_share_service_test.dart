@@ -63,7 +63,7 @@ void main() {
     );
     expect(info.available, isTrue);
     expect(info.id, '123456789');
-    expect(info.message, '科米办公 ID：123456789');
+    expect(info.message, 'KEMI办公 ID：123456789');
   });
 
   test('启动 RustDesk 使用参数数组且不经过 shell', () async {
