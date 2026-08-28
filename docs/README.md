@@ -100,6 +100,7 @@
 93. [dev.133/134 网络下载与 ADB 真机安装验收](acceptance/V1_9_0_DEV133_NETWORK_DOWNLOAD_ADB_2026-08-28.md)——Harness 下载、SHA-256、53 设备连接、显式降级参数与真实安装成功
 94. [dev.135 Harness 远端 Git 按需取码验收](acceptance/V1_9_0_DEV135_HIV730_REMOTE_GIT_2026-08-28.md)——实读项目指南、Gerrit refs、master manifest、103 个仓库解析与整包同步禁令
 95. [Harness × RustDesk P2P 实时状态架构](38_HARNESS_RUSTDESK_P2P_STATUS_ARCHITECTURE.md)——多项目状态机、本机安全 IPC、端到端 P2P 心跳、隐私边界和跨仓实施顺序
+96. [RustDesk × Vibekits 可选集成合同](39_RUSTDESK_VIBEKITS_OPTIONAL_INTEGRATION_CONTRACT.md)——双方独立运行、发现握手、未连接 UI、协议兼容、失败隔离和 15 项联合验收
 
 ## 完成定义
 

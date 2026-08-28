@@ -163,3 +163,4 @@ RustDesk Desktop/Web 增加独立“智能体状态”抽屉：
 - 断开状态通道后 Harness、视频、键盘、文件传输无可感知变化。
 - 抓包和服务端日志中不存在提示词、模型正文、凭据、完整路径；hbbs/hbbr 无需理解 Harness 消息。
 
+RustDesk 端可直接执行的可选依赖、发现握手、UI 状态和联合验收合同见 `39_RUSTDESK_VIBEKITS_OPTIONAL_INTEGRATION_CONTRACT.md`。
