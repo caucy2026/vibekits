@@ -107,6 +107,7 @@
 100. [Android APK 长时间压力任务设计](42_ANDROID_APK_STRESS_AGENT_REQUIREMENTS.md)——APK下载、ADB/串口自动发现、100轮长任务、异常取证、Git关联和报告闭环
 101. [飞书官方 CLI 移植与 Harness MCP 接口](43_FEISHU_OFFICIAL_CLI_HARNESS_API.md)——官方 larksuite/cli、D盘构建、四个 MCP 工具、凭据隔离与验收边界
 102. [局域网 Harness MCP 跨设备调用](44_LAN_HARNESS_MCP_ACCESS.md)——SSH stdio、设备公钥授权、APP控制审批、审计与私网门禁
+103. [VibeKits 局域网发现与协同](45_LAN_PEER_DISCOVERY_AND_COLLABORATION.md)——私网组播发现、协同节点界面、配对边界与任务分派流程
 
 ## 完成定义
 

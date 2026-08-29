@@ -14,6 +14,7 @@ import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
+import '../../dev_tools/domain/lan_peer_discovery_service.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -113,6 +114,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
+      await LanPeerDiscoveryService.instance.start(
+        instanceId: '${Platform.localHostname}-$pid',
+        name: Platform.localHostname,
+        capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+      );
       _permissionMode = await HarnessAgentPreferencesStore.loadPermissionMode();
       final Future<void> webviewInitialization = _webview.initialize();
       await _start(webviewInitialization: webviewInitialization);
@@ -850,6 +856,52 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         children: <Widget>[
           _buildHarnessWebview(),
           Positioned(
+            right: 538,
+            top: 10,
+            child: StreamBuilder<List<VibekitsLanPeer>>(
+              stream: LanPeerDiscoveryService.instance.changes,
+              initialData: LanPeerDiscoveryService.instance.peers,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<List<VibekitsLanPeer>> snapshot,
+                  ) {
+                    final int count = snapshot.data?.length ?? 0;
+                    return Material(
+                      color: Theme.of(context).colorScheme.surface
+                          .withValues(alpha: 0.94),
+                      elevation: 2,
+                      borderRadius: BorderRadius.circular(20),
+                      child: InkWell(
+                        key: const Key('harness-lan-peers'),
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _showLanPeers,
+                        child: SizedBox(
+                          width: 128,
+                          height: 36,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: <Widget>[
+                              const Icon(Icons.hub_outlined, size: 16),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '协同节点',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                '$count',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+            ),
+          ),
+          Positioned(
             right: 402,
             top: 10,
             child: Material(
@@ -1000,6 +1052,54 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Future<void> _showRuntimeLogs() => showDialog<void>(
     context: context,
     builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
+  );
+
+  Future<void> _showLanPeers() => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: const Text('局域网协同节点'),
+      content: SizedBox(
+        width: 520,
+        child: StreamBuilder<List<VibekitsLanPeer>>(
+          stream: LanPeerDiscoveryService.instance.changes,
+          initialData: LanPeerDiscoveryService.instance.peers,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<List<VibekitsLanPeer>> snapshot,
+              ) {
+                final List<VibekitsLanPeer> peers =
+                    snapshot.data ?? const <VibekitsLanPeer>[];
+                if (peers.isEmpty) {
+                  return const Text('尚未发现其他 VibeKits。请确认位于同一私网，且系统防火墙允许发现广播。');
+                }
+                return ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: peers.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (BuildContext context, int index) {
+                    final VibekitsLanPeer peer = peers[index];
+                    return ListTile(
+                      leading: const Icon(Icons.computer_outlined),
+                      title: Text(peer.name),
+                      subtitle: Text('${peer.address}:${peer.sshPort} · 未授权'),
+                      trailing: const Tooltip(
+                        message: '需在对方主机批准本设备公钥',
+                        child: Icon(Icons.lock_outline),
+                      ),
+                    );
+                  },
+                );
+              },
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    ),
   );
 
   Future<void> _showRemoteShare() => showDialog<void>(

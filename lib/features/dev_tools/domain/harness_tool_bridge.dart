@@ -28,6 +28,7 @@ import 'harness_runtime_log_store.dart';
 import 'harness_connection_sessions.dart';
 import 'harness_work_status.dart';
 import 'lark_cli_service.dart';
+import 'lan_peer_discovery_service.dart';
 import 'network_virtualization_service.dart';
 import 'network_download_service.dart';
 import 'packet_capture_service.dart';
@@ -276,6 +277,7 @@ class VibekitsHarnessToolBridge {
   static const String larkCliAuthStatusId = 'vibekits.feishu.auth_status';
   static const String larkCliSchemaId = 'vibekits.feishu.schema';
   static const String larkCliExecuteId = 'vibekits.feishu.execute';
+  static const String lanPeersListId = 'vibekits.peers.list';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
   static const String githubProxyCandidatesId =
       'vibekits.github.proxy_candidates';
@@ -1236,6 +1238,13 @@ class VibekitsHarnessToolBridge {
       },
       required: <String>['arguments'],
     ),
+    lanPeersListId: _definition(
+      id: lanPeersListId,
+      name: '发现局域网VibeKits节点',
+      description:
+          '列出同一私网内正在广播的VibeKits实例及SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。',
+      properties: const <String, Object?>{},
+    ),
     githubDiagnosticsId: _definition(
       id: githubDiagnosticsId,
       name: 'GitHub 网络诊断',
@@ -1964,6 +1973,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == larkCliAuthStatusId) return _larkCliAuthStatus;
     if (toolId == larkCliSchemaId) return _larkCliSchema;
     if (toolId == larkCliExecuteId) return _executeLarkCli;
+    if (toolId == lanPeersListId) return _listLanPeers;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
     if (toolId == githubProxyCandidatesId) return _githubProxyCandidates;
     if (toolId == githubProxyPlanId) return _githubProxyPlan;
@@ -3369,6 +3379,17 @@ class VibekitsHarnessToolBridge {
       timeout: Duration(seconds: timeoutSeconds),
     );
   }
+
+  Future<Map<String, Object?>> _listLanPeers(
+    Map<String, Object?> arguments,
+  ) async => <String, Object?>{
+    'running': LanPeerDiscoveryService.instance.running,
+    'peers': <Map<String, Object?>>[
+      for (final VibekitsLanPeer peer in LanPeerDiscoveryService.instance.peers)
+        peer.toJson(),
+    ],
+    'security': '发现不授予控制权；配对需主机批准Ed25519公钥，控制工具仍需APP审批',
+  };
 
   Future<Map<String, Object?>> _diagnoseGithub(
     Map<String, Object?> arguments,
