@@ -47,6 +47,7 @@
 - 清理：先分析和预览，只对高置信缓存执行删除；软件卸载和不确定系统项必须由用户明确选择。
 - 长时间磁盘分析：盘符根目录和大型目录必须调用 `vibekits.cleaner.analyze_drive_start`，保存返回的 `taskId`，然后以 `waitSeconds=20` 调用 `vibekits.cleaner.analyze_drive_status` 长轮询。若 `phase=running`，继续查询同一 `taskId`；不得重试 start、不得并发扫描同一根目录。`phase=completed` 时读取 `result`；`failed/cancelled` 时报告状态和错误。用户要求停止时调用 `vibekits.cleaner.analyze_drive_cancel`。同步 `analyze_drive` 只用于已知较小目录。
 - Android APK 长时间压力任务：使用 `android__apk_install_stress_start` 启动并保存 `taskId`，再以 `waitSeconds=20` 查询 `android__apk_install_stress_status`；不得重复启动同一设备任务。正式100轮前先执行1轮门禁。用户停止时调用 `android__apk_install_stress_cancel`。APK必须由Vibekits网络下载接口保存到D盘，ADB尾号和串口参数应自动发现，原始串口与Logcat只保存在D盘证据文件中。
+- 飞书开放平台：固定执行 `vibekits.feishu.inspect → vibekits.feishu.auth_status → vibekits.feishu.schema → vibekits.feishu.execute`。先用 `schema` 查询精确命令参数，`execute.arguments` 必须是逐项 JSON 字符串数组，不得拼接 shell 命令。写操作先传官方命令支持的 `--dry-run` 验证，再经当前权限流程执行。App Secret、Access Token、Refresh Token 等秘密禁止放入 MCP 参数、日志或回答；只能使用官方 CLI 的配置/OAuth 流程。CLI 返回非零退出码或 typed error 时保留 `exitCode/envelope/stderr`，不得把失败解释成成功。
 
 ## 清理任务的职责边界（强制）
 

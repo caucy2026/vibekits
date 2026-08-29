@@ -46,6 +46,7 @@ migrate_working_dir/
 # Prepared official MinGit runtime. The pinned, hash-verified recipe is kept in
 # Git while the extracted redistributable is supplied to Windows packaging.
 /native/git/windows/runtime/
+/native/lark_cli/windows/runtime/
 
 # Local verification output
 /_build*.txt

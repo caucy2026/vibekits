@@ -27,6 +27,7 @@ import 'harness_tool_activity_store.dart';
 import 'harness_runtime_log_store.dart';
 import 'harness_connection_sessions.dart';
 import 'harness_work_status.dart';
+import 'lark_cli_service.dart';
 import 'network_virtualization_service.dart';
 import 'network_download_service.dart';
 import 'packet_capture_service.dart';
@@ -271,6 +272,10 @@ class VibekitsHarnessToolBridge {
   static const String fileSearchId = 'vibekits.files.search';
   static const String apiRequestId = 'vibekits.http.request';
   static const String networkDownloadId = 'vibekits.network.download';
+  static const String larkCliInspectId = 'vibekits.feishu.inspect';
+  static const String larkCliAuthStatusId = 'vibekits.feishu.auth_status';
+  static const String larkCliSchemaId = 'vibekits.feishu.schema';
+  static const String larkCliExecuteId = 'vibekits.feishu.execute';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
   static const String githubProxyCandidatesId =
       'vibekits.github.proxy_candidates';
@@ -371,6 +376,12 @@ class VibekitsHarnessToolBridge {
       PacketCaptureService.instance;
   final ProjectIterationService _projectIterationService =
       ProjectIterationService();
+  late final LarkCliService _larkCliService = LarkCliService(
+    executable: _runtimeToolRoot == null
+        ? null
+        : '$_runtimeToolRoot${Platform.pathSeparator}lark-cli'
+              '${Platform.pathSeparator}${Platform.isWindows ? 'lark-cli.exe' : 'lark-cli'}',
+  );
   final Map<String, _DriveAnalysisTask> _driveAnalysisTasks =
       <String, _DriveAnalysisTask>{};
   late final HarnessConnectionSessions _connectionSessions =
@@ -1182,6 +1193,49 @@ class VibekitsHarnessToolBridge {
       },
       required: <String>['url'],
     ),
+    larkCliInspectId: _definition(
+      id: larkCliInspectId,
+      name: '检查官方飞书CLI运行时',
+      description: '只读检查Vibekits内置的官方larksuite/cli版本、路径、许可证和JSON输出契约，不读取或回显凭证。',
+      properties: const <String, Object?>{},
+    ),
+    larkCliAuthStatusId: _definition(
+      id: larkCliAuthStatusId,
+      name: '检查飞书授权状态',
+      description: '调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。',
+      properties: const <String, Object?>{},
+    ),
+    larkCliSchemaId: _definition(
+      id: larkCliSchemaId,
+      name: '读取飞书命令Schema',
+      description:
+          '从官方CLI读取指定命令的参数、类型、必填项、身份、scope和风险元数据；Harness必须先调用本接口再执行陌生命令。',
+      properties: <String, Object?>{
+        'command': _string('命令路径，例如 calendar.events.get；留空返回Schema目录'),
+      },
+    ),
+    larkCliExecuteId: _definition(
+      id: larkCliExecuteId,
+      name: '执行官方飞书CLI命令',
+      description: '以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'arguments': const <String, Object?>{
+          'type': 'array',
+          'description': '逐项参数数组，例如 ["calendar","events","get","--calendar-id","...","--event-id","..."]；不得拼成shell字符串',
+          'items': <String, Object?>{'type': 'string'},
+          'minItems': 1,
+          'maxItems': 64,
+        },
+        'timeoutSeconds': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 5,
+          'maximum': 1800,
+          'default': 300,
+        },
+      },
+      required: <String>['arguments'],
+    ),
     githubDiagnosticsId: _definition(
       id: githubDiagnosticsId,
       name: 'GitHub 网络诊断',
@@ -1906,6 +1960,10 @@ class VibekitsHarnessToolBridge {
     if (toolId == fileSearchId) return _searchFiles;
     if (toolId == apiRequestId) return _requestHttp;
     if (toolId == networkDownloadId) return _downloadNetworkFile;
+    if (toolId == larkCliInspectId) return _inspectLarkCli;
+    if (toolId == larkCliAuthStatusId) return _larkCliAuthStatus;
+    if (toolId == larkCliSchemaId) return _larkCliSchema;
+    if (toolId == larkCliExecuteId) return _executeLarkCli;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
     if (toolId == githubProxyCandidatesId) return _githubProxyCandidates;
     if (toolId == githubProxyPlanId) return _githubProxyPlan;
@@ -3283,6 +3341,33 @@ class VibekitsHarnessToolBridge {
           ),
         );
     return result.toJson();
+  }
+
+  Future<Map<String, Object?>> _inspectLarkCli(
+    Map<String, Object?> arguments,
+  ) => _larkCliService.inspect();
+
+  Future<Map<String, Object?>> _larkCliAuthStatus(
+    Map<String, Object?> arguments,
+  ) => _larkCliService.authStatus();
+
+  Future<Map<String, Object?>> _larkCliSchema(Map<String, Object?> arguments) =>
+      _larkCliService.schema((arguments['command'] ?? '').toString());
+
+  Future<Map<String, Object?>> _executeLarkCli(Map<String, Object?> arguments) {
+    final Object? rawArguments = arguments['arguments'];
+    if (rawArguments is! List) {
+      throw const FormatException('arguments 必须是字符串数组');
+    }
+    final List<String> cliArguments = rawArguments
+        .map((Object? value) => value is String ? value : '')
+        .toList(growable: false);
+    final int timeoutSeconds =
+        (arguments['timeoutSeconds'] as num?)?.toInt().clamp(5, 1800) ?? 300;
+    return _larkCliService.execute(
+      cliArguments,
+      timeout: Duration(seconds: timeoutSeconds),
+    );
   }
 
   Future<Map<String, Object?>> _diagnoseGithub(

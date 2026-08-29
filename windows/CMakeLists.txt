@@ -169,6 +169,11 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-android-stress-mcp.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  if(EXISTS "${CMAKE_SOURCE_DIR}/../native/lark_cli/windows/runtime/lark-cli.exe")
+    install(FILES "${CMAKE_SOURCE_DIR}/../native/lark_cli/windows/runtime/lark-cli.exe"
+      DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/lark-cli"
+      COMPONENT Runtime)
+  endif()
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
   message(FATAL_ERROR
     "Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.")

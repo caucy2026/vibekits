@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：168。
-- Harness 当前可执行接口：146。
+- Harness 定义接口：175。
+- Harness 当前可执行接口：153。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -67,7 +67,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 
 | 模块 | 定义接口数 |
 | --- | ---: |
-| 系统诊断 | 27 |
+| 系统诊断 | 34 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
@@ -82,16 +82,23 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 版本控制 | 10 |
 | 虚拟化 | 3 |
 
-## 系统诊断（定义 27）
+## 系统诊断（定义 34）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.cleaner.analyze_drive` | `cleaner__analyze_drive` | 分析磁盘占用 | 是 | 在独立后台线程分析指定磁盘根目录，按系统、软件和用户数据解释占用是否合理并给出安全建议；不删除任何文件。 | `readOnly` | `root`* (string) |
+| `vibekits.cleaner.analyze_drive` | `cleaner__analyze_drive` | 分析磁盘占用 | 是 | 同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。 | `readOnly` | `root`* (string), `maxResults` (integer；默认=50；最小=10；最大=200) |
+| `vibekits.cleaner.analyze_drive_cancel` | `cleaner__analyze_drive_cancel` | 取消磁盘占用分析 | 是 | 取消指定只读分析任务；不会删除或修改任何文件。 | `readOnly` | `taskId`* (string) |
+| `vibekits.cleaner.analyze_drive_start` | `cleaner__analyze_drive_start` | 启动磁盘占用分析 | 是 | 启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。 | `readOnly` | `root`* (string), `maxResults` (integer；默认=50；最小=10；最大=200) |
+| `vibekits.cleaner.analyze_drive_status` | `cleaner__analyze_drive_status` | 查询磁盘分析状态 | 是 | 按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。 | `readOnly` | `taskId`* (string), `waitSeconds` (integer；默认=20；最小=0；最大=45) |
 | `vibekits.database_manager` | `database_manager` | 数据库管理（SQL） | 否（环境/接线门禁） | 拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。 适合：用户明确需要“数据库管理（SQL）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.duplicate_files` | `duplicate_files` | 重复文件（Duplicate） | 否（环境/接线门禁） | 按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。 适合：用户明确需要“重复文件（Duplicate）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `writesData` | `input`* (string), `params` (string) |
+| `vibekits.feishu.auth_status` | `feishu__auth_status` | 检查飞书授权状态 | 是 | 调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。 | `readOnly` | `{}` |
+| `vibekits.feishu.execute` | `feishu__execute` | 执行官方飞书CLI命令 | 是 | 以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。 | `controlsDevice` | `arguments`* (array), `timeoutSeconds` (integer；默认=300；最小=5；最大=1800) |
+| `vibekits.feishu.inspect` | `feishu__inspect` | 检查官方飞书CLI运行时 | 是 | 只读检查Vibekits内置的官方larksuite/cli版本、路径、许可证和JSON输出契约，不读取或回显凭证。 | `readOnly` | `{}` |
+| `vibekits.feishu.schema` | `feishu__schema` | 读取飞书命令Schema | 是 | 从官方CLI读取指定命令的参数、类型、必填项、身份、scope和风险元数据；Harness必须先调用本接口再执行陌生命令。 | `readOnly` | `command` (string) |
 | `vibekits.file_search` | `file_search` | 文件搜索（Search） | 否（环境/接线门禁） | 按文件名或内容快速搜索，结果可定位、复制路径并继续计算哈希。 适合：用户明确需要“文件搜索（Search）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.git_workspace` | `git_workspace` | 版本控制（Git） | 否（环境/接线门禁） | 查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。 适合：用户明确需要“版本控制（Git）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.github_diagnostics` | `github_diagnostics` | 网络诊断（GitHub） | 否（环境/接线门禁） | 分层检查 GitHub 凭据与网络，发现真实回环代理并可回滚地只修复 GitHub Git。 适合：用户明确需要“网络诊断（GitHub）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
@@ -254,7 +261,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb.command` | `adb__command` | 执行 ADB 命令 | 是 | 对明确设备执行受限 ADB 参数；禁止 start-server、kill-server 和任意本机程序。 | `controlsDevice` | `serial`* (string), `arguments`* (array) |
-| `vibekits.adb.connect` | `adb__connect` | 连接 ADB 设备 | 是 | 连接用户明确指定的 Android 无线调试地址。 | `controlsDevice` | `address`* (string) |
+| `vibekits.adb.connect` | `adb__connect` | 连接 ADB 设备 | 是 | 连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。 | `controlsDevice` | `address`* (string) |
 | `vibekits.adb.install_apk` | `adb__install_apk` | 安装 APK | 是 | 把明确的本地 APK 安装到选定设备；覆盖或尝试版本降级必须显式指定。降级仍受 Android 设备策略约束，失败时不得自动卸载应用。 | `controlsDevice` | `serial`* (string), `apkPath`* (string), `replace` (boolean), `allowDowngrade` (boolean；默认=false) |
 | `vibekits.adb.list_devices` | `adb__list_devices` | 列出 ADB 设备 | 是 | 读取已连接的 Android USB/无线调试设备及授权状态。 | `readOnly` | `{}` |
 | `vibekits.adb.logcat` | `adb__logcat` | 读取 Android Logcat | 是 | 读取选定设备最近的有界 Logcat；可按 tag 过滤，不启动无限流。 | `controlsDevice` | `serial`* (string), `lines` (integer；最小=1；最大=2000), `tag` (string) |
