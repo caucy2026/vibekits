@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
@@ -562,11 +563,15 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   }
 
   Future<void> _injectExternalPrompt() async {
-    final String prompt = widget.externalPrompt.trim();
-    if (prompt.isEmpty || !_webviewReady) return;
+    await _injectPrompt(widget.externalPrompt);
+  }
+
+  Future<bool> _injectPrompt(String rawPrompt) async {
+    final String prompt = rawPrompt.trim();
+    if (prompt.isEmpty || !_webviewReady) return false;
     final String value = jsonEncode(prompt);
     for (int attempt = 0; attempt < 30; attempt++) {
-      if (!mounted || !_webviewReady) return;
+      if (!mounted || !_webviewReady) return false;
       try {
         final dynamic inserted = await _webview.executeScript('''
 (() => {
@@ -603,13 +608,29 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 })()
 ''');
         if (inserted == true || inserted.toString().toLowerCase() == 'true') {
-          return;
+          return true;
         }
       } on Object {
         // The official app may still be replacing its initial loading DOM.
       }
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
+    return false;
+  }
+
+  Future<void> _selectFeishuTask(FeishuHarnessTask task) async {
+    final bool inserted = await _injectPrompt(task.prompt);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          inserted
+              ? '已把“${task.label}”放入 Harness，请确认后发送'
+              : 'Harness 输入框尚未就绪，请稍后重试',
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   Future<WebviewPermissionDecision> _handleWebPermission(
@@ -828,6 +849,46 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       child: Stack(
         children: <Widget>[
           _buildHarnessWebview(),
+          Positioned(
+            right: 402,
+            top: 10,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface
+                  .withValues(alpha: 0.94),
+              elevation: 2,
+              borderRadius: BorderRadius.circular(20),
+              child: PopupMenuButton<FeishuHarnessTask>(
+                key: const Key('harness-feishu-tasks'),
+                tooltip: '把飞书只读任务交给 Harness',
+                onSelected: (FeishuHarnessTask task) =>
+                    unawaited(_selectFeishuTask(task)),
+                itemBuilder: (BuildContext context) =>
+                    <PopupMenuEntry<FeishuHarnessTask>>[
+                      for (final FeishuHarnessTask task
+                          in FeishuHarnessTasks.quickTasks)
+                        PopupMenuItem<FeishuHarnessTask>(
+                          key: Key('harness-feishu-${task.id}'),
+                          value: task,
+                          child: Text(task.label),
+                        ),
+                    ],
+                child: const SizedBox(
+                  width: 128,
+                  height: 36,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      Icon(Icons.forum_outlined, size: 16),
+                      SizedBox(width: 6),
+                      Text('飞书任务', style: TextStyle(fontSize: 12)),
+                      SizedBox(width: 4),
+                      Icon(Icons.arrow_drop_down, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           Positioned(
             // Keep this VibeKits extension separate from DSH's native
             // "Session log" action at the far-right edge.
