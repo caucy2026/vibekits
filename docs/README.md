@@ -111,6 +111,7 @@
 104. [LMCP/1 局域网 MCP 开放协议](46_LAN_MCP_DISCOVERY_PROTOCOL_V1.md)——供未来应用实现的发现报文、身份配对、传输协商、长任务和兼容性规范
 105. [LMCP/1 第三方程序接入包](47_LMCP_THIRD_PARTY_INTEGRATION_KIT.md)——应用清单、Sidecar、合规检查、旧程序接入与共同完成标准
 106. [LMCP/1 应用广播与协同接入实施指南](48_LMCP_APP_BROADCAST_IMPLEMENTATION_GUIDE.md)——交付其他APP团队的单一入口架构、报文、授权、工具、长任务、路由和验收规范
+107. [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)——本APP、本机、局域网三个动态列表、无感目录配对、实时能力图和自动任务路由
 
 ## 完成定义
 
