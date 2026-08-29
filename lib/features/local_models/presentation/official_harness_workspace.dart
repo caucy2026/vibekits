@@ -1082,7 +1082,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                     return ListTile(
                       leading: const Icon(Icons.computer_outlined),
                       title: Text(peer.name),
-                      subtitle: Text('${peer.address}:${peer.sshPort} · 未授权'),
+                      subtitle: Text(
+                        '${peer.appId} ${peer.appVersion} · '
+                        '${peer.address}:${peer.sshPort} · 未授权',
+                      ),
                       trailing: const Tooltip(
                         message: '需在对方主机批准本设备公钥',
                         child: Icon(Icons.lock_outline),

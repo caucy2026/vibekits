@@ -1240,9 +1240,8 @@ class VibekitsHarnessToolBridge {
     ),
     lanPeersListId: _definition(
       id: lanPeersListId,
-      name: '发现局域网VibeKits节点',
-      description:
-          '列出同一私网内正在广播的VibeKits实例及SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。',
+      name: '发现局域网MCP协同节点',
+      description: '按LMCP/1列出同一私网内VibeKits或第三方应用主动上报的SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。',
       properties: const <String, Object?>{},
     ),
     githubDiagnosticsId: _definition(

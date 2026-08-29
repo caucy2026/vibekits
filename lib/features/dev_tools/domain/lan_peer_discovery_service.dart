@@ -6,8 +6,11 @@ class VibekitsLanPeer {
   const VibekitsLanPeer({
     required this.instanceId,
     required this.name,
+    required this.appId,
+    required this.appVersion,
     required this.address,
     required this.sshPort,
+    required this.transport,
     required this.protocolVersion,
     required this.capabilityDigest,
     required this.lastSeen,
@@ -15,8 +18,11 @@ class VibekitsLanPeer {
 
   final String instanceId;
   final String name;
+  final String appId;
+  final String appVersion;
   final String address;
   final int sshPort;
+  final String transport;
   final int protocolVersion;
   final String capabilityDigest;
   final DateTime lastSeen;
@@ -24,8 +30,11 @@ class VibekitsLanPeer {
   Map<String, Object?> toJson() => <String, Object?>{
     'instanceId': instanceId,
     'name': name,
+    'appId': appId,
+    'appVersion': appVersion,
     'address': address,
     'sshPort': sshPort,
+    'transport': transport,
     'protocolVersion': protocolVersion,
     'capabilityDigest': capabilityDigest,
     'lastSeen': lastSeen.toUtc().toIso8601String(),
@@ -43,6 +52,7 @@ class LanPeerDiscoveryService {
        peerTtl = peerTtl ?? const Duration(seconds: 12);
 
   static final LanPeerDiscoveryService instance = LanPeerDiscoveryService();
+  static const String discoveryProtocol = 'lmcp-discovery';
   static const int protocolVersion = 1;
 
   final int port;
@@ -56,6 +66,8 @@ class LanPeerDiscoveryService {
   Timer? _pruneTimer;
   String _instanceId = '';
   String _name = '';
+  String _appId = '';
+  String _appVersion = '';
   String _capabilityDigest = '';
   int _sshPort = 22;
 
@@ -74,14 +86,20 @@ class LanPeerDiscoveryService {
     required String instanceId,
     required String name,
     required String capabilityDigest,
+    String appId = 'com.vibekits.desktop',
+    String appVersion = '1.9.0',
     int sshPort = 22,
   }) async {
     if (_socket != null) return;
     _instanceId = _safe(instanceId, 80);
     _name = _safe(name, 80);
+    _appId = _safe(appId, 120);
+    _appVersion = _safe(appVersion, 40);
     _capabilityDigest = _safe(capabilityDigest, 128);
     if (_instanceId.isEmpty ||
         _name.isEmpty ||
+        _appId.isEmpty ||
+        _appVersion.isEmpty ||
         sshPort < 1 ||
         sshPort > 65535) {
       throw const FormatException('局域网节点发现参数无效');
@@ -119,12 +137,29 @@ class LanPeerDiscoveryService {
     if (socket == null) return;
     final List<int> payload = utf8.encode(
       jsonEncode(<String, Object?>{
-        'kind': 'vibekits.mcp.peer',
-        'version': protocolVersion,
+        'protocol': discoveryProtocol,
+        'protocolVersion': '1.0',
+        'messageType': 'announce',
         'instanceId': _instanceId,
-        'name': _name,
-        'sshPort': _sshPort,
-        'capabilityDigest': _capabilityDigest,
+        'app': <String, Object?>{
+          'id': _appId,
+          'name': _name,
+          'version': _appVersion,
+        },
+        'endpoint': <String, Object?>{
+          'transport': 'ssh-stdio',
+          'port': _sshPort,
+        },
+        'mcp': <String, Object?>{
+          'protocolVersions': <String>['2025-06-18'],
+          'capabilityDigest': _capabilityDigest,
+        },
+        'security': <String, Object?>{
+          'pairingRequired': true,
+          'authMethods': <String>['ssh-ed25519'],
+          'controlApproval': 'per-tool',
+        },
+        'ttlSeconds': peerTtl.inSeconds,
         'sentAt': DateTime.now().toUtc().toIso8601String(),
       }),
     );
@@ -140,26 +175,62 @@ class LanPeerDiscoveryService {
         continue;
       try {
         final Object? decoded = jsonDecode(utf8.decode(packet.data));
-        if (decoded is! Map || decoded['kind'] != 'vibekits.mcp.peer') continue;
+        if (decoded is! Map) continue;
+        final bool legacy = decoded['kind'] == 'vibekits.mcp.peer';
+        if (!legacy &&
+            (decoded['protocol'] != discoveryProtocol ||
+                decoded['messageType'] != 'announce')) {
+          continue;
+        }
+        final Map<Object?, Object?> app = decoded['app'] is Map
+            ? decoded['app'] as Map<Object?, Object?>
+            : const <Object?, Object?>{};
+        final Map<Object?, Object?> endpoint = decoded['endpoint'] is Map
+            ? decoded['endpoint'] as Map<Object?, Object?>
+            : const <Object?, Object?>{};
+        final Map<Object?, Object?> mcp = decoded['mcp'] is Map
+            ? decoded['mcp'] as Map<Object?, Object?>
+            : const <Object?, Object?>{};
         final String id = _safe('${decoded['instanceId'] ?? ''}', 80);
-        final String name = _safe('${decoded['name'] ?? ''}', 80);
+        final String name = _safe(
+          '${legacy ? decoded['name'] : app['name'] ?? ''}',
+          80,
+        );
         final String digest = _safe(
-          '${decoded['capabilityDigest'] ?? ''}',
+          '${legacy ? decoded['capabilityDigest'] : mcp['capabilityDigest'] ?? ''}',
           128,
         );
-        final int remotePort = (decoded['sshPort'] as num?)?.toInt() ?? 0;
+        final int remotePort = legacy
+            ? (decoded['sshPort'] as num?)?.toInt() ?? 0
+            : (endpoint['port'] as num?)?.toInt() ?? 0;
+        final String transport = _safe(
+          '${legacy ? 'ssh-stdio' : endpoint['transport'] ?? ''}',
+          32,
+        );
         if (id.isEmpty ||
             id == _instanceId ||
             name.isEmpty ||
+            transport != 'ssh-stdio' ||
             remotePort < 1 ||
             remotePort > 65535)
           continue;
         _peers[id] = VibekitsLanPeer(
           instanceId: id,
           name: name,
+          appId: _safe(
+            '${legacy ? 'com.vibekits.desktop' : app['id'] ?? ''}',
+            120,
+          ),
+          appVersion: _safe('${legacy ? '' : app['version'] ?? ''}', 40),
           address: packet.address.address,
           sshPort: remotePort,
-          protocolVersion: (decoded['version'] as num?)?.toInt() ?? 0,
+          transport: transport,
+          protocolVersion: legacy
+              ? (decoded['version'] as num?)?.toInt() ?? 0
+              : int.tryParse(
+                      '${decoded['protocolVersion']}'.split('.').first,
+                    ) ??
+                    0,
           capabilityDigest: digest,
           lastSeen: DateTime.now(),
         );
