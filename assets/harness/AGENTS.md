@@ -49,6 +49,7 @@
 - Android APK 长时间压力任务：使用 `android__apk_install_stress_start` 启动并保存 `taskId`，再以 `waitSeconds=20` 查询 `android__apk_install_stress_status`；不得重复启动同一设备任务。正式100轮前先执行1轮门禁。用户停止时调用 `android__apk_install_stress_cancel`。APK必须由Vibekits网络下载接口保存到D盘，ADB尾号和串口参数应自动发现，原始串口与Logcat只保存在D盘证据文件中。
 - 飞书开放平台：固定执行 `vibekits.feishu.inspect → vibekits.feishu.auth_status → vibekits.feishu.schema → vibekits.feishu.execute`。先用 `schema` 查询精确命令参数，`execute.arguments` 必须是逐项 JSON 字符串数组，不得拼接 shell 命令。写操作先传官方命令支持的 `--dry-run` 验证，再经当前权限流程执行。App Secret、Access Token、Refresh Token 等秘密禁止放入 MCP 参数、日志或回答；只能使用官方 CLI 的配置/OAuth 流程。CLI 返回非零退出码或 typed error 时保留 `exitCode/envelope/stderr`，不得把失败解释成成功。
 - 用户问“飞书上谁在找我”时，只汇总可证明来源的最近消息事件。官方 Schema 没有全量历史收件箱读取能力且本地没有事件归档时，明确要求配置飞书消息事件订阅；不得用联系人、群成员或猜测代替消息证据。默认只读，未经用户明确要求不得回复消息、修改日程或变更任务。
+- 局域网其他智能体必须通过受限 SSH stdio MCP 调用 Harness：主机 IP、固定 host key、每设备独立 Ed25519 授权缺一不可。禁止把 `tool-bridge.json`、回环 Bearer Token 或 HTTP 端口发到局域网。远端连接授权不等于控制授权，写入、设备控制和破坏性工具仍走 APP 审批与审计。
 
 ## 清理任务的职责边界（强制）
 

@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeCandidates = @(
+  $PSScriptRoot,
   (Join-Path $projectRoot 'build\windows\x64\runner\Release\tools\harness'),
   (Join-Path $projectRoot 'native\harness\windows\runtime')
 )
@@ -40,7 +41,11 @@ if (-not (Test-VibekitsBridge)) {
   if (Test-Path -LiteralPath $connectionFile) {
     Remove-Item -LiteralPath $connectionFile -Force
   }
-  $app = Join-Path $projectRoot 'build\windows\x64\runner\Release\vibekits.exe'
+  $appCandidates = @(
+    (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'vibekits.exe'),
+    (Join-Path $projectRoot 'build\windows\x64\runner\Release\vibekits.exe')
+  )
+  $app = $appCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
   if (-not (Test-Path -LiteralPath $app)) {
     [Console]::Error.WriteLine('VibeKits is not running and the Release executable is missing.')
     exit 3

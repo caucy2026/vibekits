@@ -166,6 +166,11 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-approval.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES
+    "${CMAKE_SOURCE_DIR}/../tool/start_vibekits_mcp.ps1"
+    "${CMAKE_SOURCE_DIR}/../tool/start_vibekits_mcp_ssh.ps1"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-android-stress-mcp.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
