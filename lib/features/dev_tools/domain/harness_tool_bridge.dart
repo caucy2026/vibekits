@@ -310,6 +310,12 @@ class VibekitsHarnessToolBridge {
   static const String duplicateScanId = 'vibekits.files.duplicate_scan';
   static const String fileDiffId = 'vibekits.file_diff';
   static const String systemDriveAnalyzeId = 'vibekits.cleaner.analyze_drive';
+  static const String systemDriveAnalyzeStartId =
+      'vibekits.cleaner.analyze_drive_start';
+  static const String systemDriveAnalyzeStatusId =
+      'vibekits.cleaner.analyze_drive_status';
+  static const String systemDriveAnalyzeCancelId =
+      'vibekits.cleaner.analyze_drive_cancel';
   static const String screenshotOcrId = 'vibekits.ocr.capture_screen';
   static const String runtimeInspectId = 'vibekits.runtime.inspect';
   static const String runtimeStatusId = 'vibekits.runtime.status';
@@ -365,6 +371,8 @@ class VibekitsHarnessToolBridge {
       PacketCaptureService.instance;
   final ProjectIterationService _projectIterationService =
       ProjectIterationService();
+  final Map<String, _DriveAnalysisTask> _driveAnalysisTasks =
+      <String, _DriveAnalysisTask>{};
   late final HarnessConnectionSessions _connectionSessions =
       HarnessConnectionSessions(checkAdb: _checkAdbHealth);
 
@@ -597,14 +605,14 @@ class VibekitsHarnessToolBridge {
     adbConnectId: const HarnessToolDefinition(
       id: adbConnectId,
       name: '连接 ADB 设备',
-      description: '连接用户明确指定的 Android 无线调试地址。',
+      description: '连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。',
       risk: HarnessToolRisk.controlsDevice,
       inputSchema: <String, Object?>{
         'type': 'object',
         'properties': <String, Object?>{
           'address': <String, Object?>{
             'type': 'string',
-            'description': 'IP 或 IP:端口，例如 192.168.3.63:5555',
+            'description': 'IP、IP:端口或主机别名，例如 53 自动解析为 192.168.3.53:5555',
           },
         },
         'required': <String>['address'],
@@ -1429,9 +1437,59 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeId: _definition(
       id: systemDriveAnalyzeId,
       name: '分析磁盘占用',
-      description: '在独立后台线程分析指定磁盘根目录，按系统、软件和用户数据解释占用是否合理并给出安全建议；不删除任何文件。',
-      properties: <String, Object?>{'root': _string('磁盘或待分析目录')},
+      description: '同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。',
+      properties: <String, Object?>{
+        'root': _string('磁盘或待分析目录的绝对路径'),
+        'maxResults': <String, Object?>{
+          'type': 'integer',
+          'description': '每类最多返回多少条，默认 50，范围 10..200',
+          'minimum': 10,
+          'maximum': 200,
+          'default': 50,
+        },
+      },
       required: <String>['root'],
+    ),
+    systemDriveAnalyzeStartId: _definition(
+      id: systemDriveAnalyzeStartId,
+      name: '启动磁盘占用分析',
+      description: '启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。',
+      properties: <String, Object?>{
+        'root': _string('磁盘或待分析目录的绝对路径'),
+        'maxResults': <String, Object?>{
+          'type': 'integer',
+          'description': '完成后每类最多返回多少条，默认 50，范围 10..200',
+          'minimum': 10,
+          'maximum': 200,
+          'default': 50,
+        },
+      },
+      required: <String>['root'],
+    ),
+    systemDriveAnalyzeStatusId: _definition(
+      id: systemDriveAnalyzeStatusId,
+      name: '查询磁盘分析状态',
+      description: '按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。',
+      properties: <String, Object?>{
+        'taskId': _string('analyze_drive_start 返回的任务 ID'),
+        'waitSeconds': const <String, Object?>{
+          'type': 'integer',
+          'description': '长轮询等待秒数，默认 20，范围 0..45；必须小于 MCP 工具超时',
+          'minimum': 0,
+          'maximum': 45,
+          'default': 20,
+        },
+      },
+      required: <String>['taskId'],
+    ),
+    systemDriveAnalyzeCancelId: _definition(
+      id: systemDriveAnalyzeCancelId,
+      name: '取消磁盘占用分析',
+      description: '取消指定只读分析任务；不会删除或修改任何文件。',
+      properties: <String, Object?>{
+        'taskId': _string('analyze_drive_start 返回的任务 ID'),
+      },
+      required: <String>['taskId'],
     ),
     screenshotOcrId: HarnessToolDefinition(
       id: screenshotOcrId,
@@ -1874,6 +1932,15 @@ class VibekitsHarnessToolBridge {
     if (toolId == duplicateScanId) return _scanDuplicateFiles;
     if (toolId == fileDiffId) return _diffFiles;
     if (toolId == systemDriveAnalyzeId) return _analyzeSystemDrive;
+    if (toolId == systemDriveAnalyzeStartId) {
+      return _startSystemDriveAnalysis;
+    }
+    if (toolId == systemDriveAnalyzeStatusId) {
+      return _systemDriveAnalysisStatus;
+    }
+    if (toolId == systemDriveAnalyzeCancelId) {
+      return _cancelSystemDriveAnalysis;
+    }
     if (toolId == screenshotOcrId) return _captureScreenAndOcr;
     if (toolId == runtimeInspectId) return _inspectBundledRuntimes;
     if (toolId == runtimeStatusId) return _runtimeStatus;
@@ -2373,9 +2440,28 @@ class VibekitsHarnessToolBridge {
         recorder: _activityRecorder,
       ),
     );
+    final String target = AdbService.normalizeWirelessAddress(address);
+    final List<AdbDevice> devices = await AdbService.listDevices(
+      executable,
+      runner: _adbRunner,
+    );
+    final AdbDevice? connected = devices
+        .where((AdbDevice device) => device.serial == target)
+        .firstOrNull;
     return <String, Object?>{
-      'address': AdbService.normalizeWirelessAddress(address),
+      'address': target,
       'output': output,
+      'verified': connected?.ready ?? false,
+      if (connected != null)
+        'device': <String, Object?>{
+          'serial': connected.serial,
+          'state': connected.state.name,
+          if (connected.model != null) 'model': connected.model,
+          if (connected.product != null) 'product': connected.product,
+          if (connected.device != null) 'device': connected.device,
+          if (connected.transportId != null)
+            'transportId': connected.transportId,
+        },
     };
   }
 
@@ -3749,13 +3835,162 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _analyzeSystemDrive(
     Map<String, Object?> arguments,
   ) async {
-    final String root = (arguments['root'] ?? '').toString().trim();
+    final String root = _validatedAnalysisRoot(arguments);
+    final int maxResults = _analysisMaxResults(arguments);
     final SystemDriveAnalysis analysis =
         await SystemDriveAnalysisRunner.analyze(
           root,
           cancellationToken: CleanupCancellationToken(),
           onProgress: (_) {},
         );
+    return _serializeSystemDriveAnalysis(analysis, maxResults: maxResults);
+  }
+
+  Future<Map<String, Object?>> _startSystemDriveAnalysis(
+    Map<String, Object?> arguments,
+  ) async {
+    final String root = _validatedAnalysisRoot(arguments);
+    final int maxResults = _analysisMaxResults(arguments);
+    final String rootKey = _normalizedAnalysisRoot(root);
+    final _DriveAnalysisTask? existing = _driveAnalysisTasks.values
+        .where(
+          (_DriveAnalysisTask task) =>
+              task.rootKey == rootKey &&
+              task.phase == _DriveAnalysisPhase.running,
+        )
+        .firstOrNull;
+    if (existing != null) {
+      return <String, Object?>{
+        ...existing.statusJson(),
+        'reused': true,
+        'instruction': '相同根目录正在分析；请轮询 analyze_drive_status，禁止重复启动。',
+      };
+    }
+    final String taskId =
+        'drive-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+    final _DriveAnalysisTask task = _DriveAnalysisTask(
+      id: taskId,
+      root: root,
+      rootKey: rootKey,
+      maxResults: maxResults,
+      token: CleanupCancellationToken(),
+      startedAt: DateTime.now(),
+    );
+    _driveAnalysisTasks[taskId] = task;
+    unawaited(_runDriveAnalysisTask(task));
+    return <String, Object?>{
+      ...task.statusJson(),
+      'reused': false,
+      'instruction': '分析在后台运行；请轮询 analyze_drive_status，禁止重复启动。',
+    };
+  }
+
+  Future<void> _runDriveAnalysisTask(_DriveAnalysisTask task) async {
+    try {
+      final SystemDriveAnalysis analysis =
+          await SystemDriveAnalysisRunner.analyze(
+            task.root,
+            cancellationToken: task.token,
+            onProgress: (SystemDriveAnalysisProgress progress) {
+              task
+                ..currentPath = progress.currentPath
+                ..visitedEntries = progress.visitedEntries
+                ..measuredBytes = progress.measuredBytes
+                ..completedRootEntries = progress.completedRootEntries
+                ..totalRootEntries = progress.totalRootEntries
+                ..updatedAt = DateTime.now();
+            },
+          );
+      final Map<String, Object?> result = await _serializeSystemDriveAnalysis(
+        analysis,
+        maxResults: task.maxResults,
+      );
+      task
+        ..result = result
+        ..phase = analysis.cancelled
+            ? _DriveAnalysisPhase.cancelled
+            : _DriveAnalysisPhase.completed
+        ..updatedAt = DateTime.now();
+    } on Object catch (error) {
+      task
+        ..phase = _DriveAnalysisPhase.failed
+        ..error = _safeErrorText(error)
+        ..updatedAt = DateTime.now();
+    }
+  }
+
+  Future<Map<String, Object?>> _systemDriveAnalysisStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final String taskId = (arguments['taskId'] ?? '').toString().trim();
+    final _DriveAnalysisTask? task = _driveAnalysisTasks[taskId];
+    if (task == null) throw StateError('磁盘分析任务不存在或 App 已重启');
+    final int waitSeconds = switch (arguments['waitSeconds']) {
+      final int number => number,
+      final num number => number.toInt(),
+      final Object value => int.tryParse(value.toString()) ?? 20,
+      null => 20,
+    };
+    if (waitSeconds < 0 || waitSeconds > 45) {
+      throw const FormatException('waitSeconds 必须在 0..45');
+    }
+    final DateTime deadline = DateTime.now().add(
+      Duration(seconds: waitSeconds),
+    );
+    while (task.phase == _DriveAnalysisPhase.running &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    return task.statusJson(includeResult: true);
+  }
+
+  Future<Map<String, Object?>> _cancelSystemDriveAnalysis(
+    Map<String, Object?> arguments,
+  ) async {
+    final String taskId = (arguments['taskId'] ?? '').toString().trim();
+    final _DriveAnalysisTask? task = _driveAnalysisTasks[taskId];
+    if (task == null) throw StateError('磁盘分析任务不存在或 App 已重启');
+    if (task.phase == _DriveAnalysisPhase.running) task.token.cancel();
+    return <String, Object?>{
+      ...task.statusJson(),
+      'cancellationRequested': task.phase == _DriveAnalysisPhase.running,
+    };
+  }
+
+  String _validatedAnalysisRoot(Map<String, Object?> arguments) {
+    final String root = (arguments['root'] ?? '').toString().trim();
+    if (root.isEmpty || !Directory(root).isAbsolute) {
+      throw const FormatException('root 必须是磁盘或目录的绝对路径');
+    }
+    if (!Directory(root).existsSync()) {
+      throw const FormatException('root 指向的目录不存在');
+    }
+    return Directory(root).absolute.path;
+  }
+
+  int _analysisMaxResults(Map<String, Object?> arguments) {
+    final int value = switch (arguments['maxResults']) {
+      final int number => number,
+      final num number => number.toInt(),
+      final Object value => int.tryParse(value.toString()) ?? 50,
+      null => 50,
+    };
+    if (value < 10 || value > 200) {
+      throw const FormatException('maxResults 必须在 10..200');
+    }
+    return value;
+  }
+
+  String _normalizedAnalysisRoot(String root) =>
+      Directory(root).absolute.path
+          .replaceAll('/', Platform.pathSeparator)
+          .replaceAll(RegExp(r'[\\/]+$'), '')
+          .toLowerCase();
+
+  Future<Map<String, Object?>> _serializeSystemDriveAnalysis(
+    SystemDriveAnalysis analysis, {
+    required int maxResults,
+  }) async {
     final SystemDriveInsights insights = SystemDriveInsights.from(analysis);
     final List<InstalledApplication> installed =
         await InstalledApplicationService.load();
@@ -3798,15 +4033,15 @@ class VibekitsHarnessToolBridge {
           item.key.name: item.value,
       },
       'priorities': insights.priorities
-          .take(100)
+          .take(maxResults)
           .map((SystemDriveEntryAssessment item) => item.toJson())
           .toList(growable: false),
       'softwareOwners': insights.softwareOwners
-          .take(100)
+          .take(maxResults)
           .map((SystemDriveEntryAssessment item) => item.toJson())
           .toList(growable: false),
       'softwareStorage': software
-          .take(300)
+          .take(maxResults)
           .map(
             (SoftwareStorageSummary item) => <String, Object?>{
               'name': item.name,
@@ -3828,14 +4063,19 @@ class VibekitsHarnessToolBridge {
             },
           )
           .toList(growable: false),
-      'entries': analysis.entries.take(500).map(entry).toList(growable: false),
+      'entries': analysis.entries
+          .take(maxResults)
+          .map(entry)
+          .toList(growable: false),
       'breakdownEntries': analysis.breakdownEntries
-          .take(500)
+          .take(maxResults)
           .map(entry)
           .toList(growable: false),
       'truncated':
-          analysis.entries.length > 500 ||
-          analysis.breakdownEntries.length > 500,
+          analysis.entries.length > maxResults ||
+          analysis.breakdownEntries.length > maxResults ||
+          insights.priorities.length > maxResults ||
+          software.length > maxResults,
     };
   }
 
@@ -4097,4 +4337,57 @@ class VibekitsHarnessToolBridge {
     }
     return (arguments['input'] ?? toolId).toString();
   }
+}
+
+enum _DriveAnalysisPhase { running, completed, failed, cancelled }
+
+class _DriveAnalysisTask {
+  _DriveAnalysisTask({
+    required this.id,
+    required this.root,
+    required this.rootKey,
+    required this.maxResults,
+    required this.token,
+    required this.startedAt,
+  }) : updatedAt = startedAt;
+
+  final String id;
+  final String root;
+  final String rootKey;
+  final int maxResults;
+  final CleanupCancellationToken token;
+  final DateTime startedAt;
+  DateTime updatedAt;
+  _DriveAnalysisPhase phase = _DriveAnalysisPhase.running;
+  String currentPath = '';
+  int visitedEntries = 0;
+  int measuredBytes = 0;
+  int completedRootEntries = 0;
+  int totalRootEntries = 0;
+  Map<String, Object?>? result;
+  String? error;
+
+  Map<String, Object?> statusJson({bool includeResult = false}) =>
+      <String, Object?>{
+        'taskId': id,
+        'root': root,
+        'phase': phase.name,
+        'running': phase == _DriveAnalysisPhase.running,
+        'startedAt': startedAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'progress': <String, Object?>{
+          'currentPath': currentPath,
+          'visitedEntries': visitedEntries,
+          'measuredBytes': measuredBytes,
+          'completedRootEntries': completedRootEntries,
+          'totalRootEntries': totalRootEntries,
+        },
+        if (error != null) 'error': error,
+        if (includeResult && result != null) 'result': result,
+      };
+}
+
+String _safeErrorText(Object error) {
+  final String text = error.toString().replaceAll(RegExp(r'[\r\n]+'), ' ');
+  return text.length <= 300 ? text : '${text.substring(0, 300)}…';
 }

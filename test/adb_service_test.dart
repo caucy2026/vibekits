@@ -5,6 +5,10 @@ import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
 
 void main() {
+  test('局域网主机别名自动解析为 192.168.3.x:5555', () {
+    expect(AdbService.normalizeWirelessAddress('53'), '192.168.3.53:5555');
+  });
+
   test('解析官方版本和 device/unauthorized/offline 三种设备', () async {
     final Directory sandbox = Directory.systemTemp.createTempSync('vk_adb_');
     addTearDown(() => sandbox.deleteSync(recursive: true));

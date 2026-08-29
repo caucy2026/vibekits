@@ -52,6 +52,8 @@ migrate_working_dir/
 /_doctor*.txt
 /_test_out.txt
 /.tmp/
+/tmp/
+/.cache/
 /dev*.png
 
 # Symbolication related

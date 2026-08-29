@@ -9,6 +9,7 @@ import 'package:webview_windows/webview_windows.dart';
 
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
+import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
@@ -85,6 +86,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   final StringBuffer _pendingDiagnostics = StringBuffer();
   Timer? _diagnosticsTimer;
   final Set<String> _sessionApprovedToolIds = <String>{};
+  HarnessAgentPermissionMode _permissionMode =
+      HarnessAgentPermissionMode.assisted;
   final Set<String> _deletingSessionIds = <String>{};
 
   @override
@@ -109,6 +112,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
+      _permissionMode = await HarnessAgentPreferencesStore.loadPermissionMode();
       final Future<void> webviewInitialization = _webview.initialize();
       await _start(webviewInitialization: webviewInitialization);
     } on Object catch (error) {
@@ -180,6 +184,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           apiKey: '',
           port: port,
           debugDirectory: widget.initialDebugDirectory,
+          permissionMode: _permissionMode,
           approveTool: _approveVibekitsTool,
           toolBridge: VibekitsHarnessToolBridge(
             remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
@@ -347,7 +352,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<bool> _approveVibekitsTool(HarnessToolApprovalRequest request) async {
     if (request.tool.risk == HarnessToolRisk.readOnly ||
-        _sessionApprovedToolIds.contains(request.tool.id)) {
+        _sessionApprovedToolIds.contains(request.tool.id) ||
+        _permissionMode == HarnessAgentPermissionMode.fullAccess ||
+        (_permissionMode == HarnessAgentPermissionMode.assisted &&
+            request.tool.risk != HarnessToolRisk.destructive)) {
       return true;
     }
     if (!mounted) return false;

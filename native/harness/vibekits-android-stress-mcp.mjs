@@ -35,8 +35,42 @@ const invoke = async (toolId, args) => {
 const textOf = (value) => `${value || ''}`.trim();
 const bootIdFrom = (result) => textOf(result.stdout).split(/\r?\n/)[0] || '';
 const rebootPattern = /Booting Linux|Linux version|Restarting system|sys\.powerctl|coldboot|watchdog.*reboot/i;
-const packageName = 'com.vibekits.vibekits';
-const mainActivity = `${packageName}/.MainActivity`;
+const defaultPackageName = 'com.vibekits.vibekits';
+const tasks = new Map();
+
+const sleep = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds));
+const publicTask = (task) => ({
+  taskId: task.taskId,
+  phase: task.phase,
+  createdAt: task.createdAt,
+  startedAt: task.startedAt || null,
+  completedAt: task.completedAt || null,
+  progress: task.progress,
+  result: task.result || null,
+  error: task.error || null,
+});
+const mcpResult = (value) => ({
+  content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+  structuredContent: value,
+});
+
+const normalizeAdbSerial = (value) => {
+  const raw = textOf(value);
+  if (/^\d{1,3}$/.test(raw)) return `192.168.3.${raw}:5555`;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(raw)) return `${raw}:5555`;
+  return raw;
+};
+const requireSafeArtifactDirectory = (value, label) => {
+  const directory = resolve(value);
+  if (process.platform === 'win32' && !/^D:\\/i.test(directory)) {
+    throw new Error(`${label} must be on D: on this Windows workstation`);
+  }
+  return directory;
+};
+const normalizeSerialPortName = (value) => {
+  const port = textOf(value);
+  return process.platform === 'win32' ? port.toUpperCase() : port;
+};
 
 const server = new Server(
   { name: 'vibekits-android-install-stress', version: '1.0.0' },
@@ -49,6 +83,53 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
+    {
+      name: 'android__apk_install_stress_start',
+      description:
+        '启动可恢复的Android APK压力长任务并立即返回taskId。任务由VibeKits在本地完成APK下载校验、ADB连接、串口监控、逐轮卸载/安装/启动和异常证据采集。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          serial: { type: 'string', description: 'ADB序列号、IP，或局域网设备尾号（例如53）' },
+          apkPath: { type: 'string', description: 'D盘本地APK绝对路径；与apkUrl二选一' },
+          apkUrl: { type: 'string', description: 'HTTP/HTTPS APK地址；与apkPath二选一' },
+          downloadDirectory: { type: 'string', description: 'APK下载目录；当前Windows工作站必须在D盘，macOS使用绝对工作区目录' },
+          serialPort: { type: 'string', description: '可选串口（如COM33或/dev/cu.usbserial-*）；省略时自动发现' },
+          rounds: { type: 'integer', minimum: 1, maximum: 100, default: 100 },
+          sourceRoot: { type: 'string', description: '可选D盘Git源码根目录，用于异常时记录Git状态' },
+          packageName: { type: 'string', description: '待卸载和验证的Android应用包名' },
+          mainActivity: { type: 'string', description: '可选完整组件；省略时安装后由Package Manager解析' },
+        },
+        required: ['serial', 'packageName'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    },
+    {
+      name: 'android__apk_install_stress_status',
+      description: '查询压力长任务；waitSeconds可长轮询，返回有界进度、结果路径和异常摘要。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          taskId: { type: 'string' },
+          waitSeconds: { type: 'integer', minimum: 0, maximum: 45, default: 20 },
+        },
+        required: ['taskId'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: 'android__apk_install_stress_cancel',
+      description: '请求在当前原子步骤结束后安全取消压力长任务，并保留已完成轮次和本地证据。',
+      inputSchema: {
+        type: 'object',
+        properties: { taskId: { type: 'string' } },
+        required: ['taskId'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
     {
       name: 'android__apk_install_stress_100',
       description:
@@ -74,20 +155,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-  if (params.name !== 'android__apk_install_stress_100') {
-    throw new Error(`Unknown tool: ${params.name}`);
+const executeStress = async (argumentsValue, task = null) => {
+  const serial = normalizeAdbSerial(argumentsValue?.serial);
+  const packageName = textOf(argumentsValue?.packageName || defaultPackageName);
+  let mainActivity = textOf(argumentsValue?.mainActivity);
+  let apkPath = textOf(argumentsValue?.apkPath);
+  const apkUrl = textOf(argumentsValue?.apkUrl);
+  let serialPort = normalizeSerialPortName(argumentsValue?.serialPort);
+  if (!apkPath && apkUrl) {
+    const downloadDirectory = requireSafeArtifactDirectory(
+      textOf(argumentsValue?.downloadDirectory || join(process.cwd(), 'tmp', 'downloads')),
+      'downloadDirectory',
+    );
+    const downloaded = await invoke('vibekits.network.download', {
+      url: apkUrl,
+      outputDirectory: downloadDirectory,
+      overwrite: true,
+      timeoutSeconds: 1800,
+    });
+    apkPath = textOf(downloaded.outputPath);
+    if (textOf(downloaded.artifactType).toLowerCase() !== 'apk') throw new Error('Downloaded artifact is not a valid APK');
   }
-  const serial = textOf(params.arguments?.serial);
-  const apkPath = resolve(textOf(params.arguments?.apkPath));
-  const serialPort = textOf(params.arguments?.serialPort).toUpperCase();
-  const rounds = Math.min(100, Math.max(1, Number(params.arguments?.rounds || 100)));
-  if (!serial || !apkPath.toLowerCase().endsWith('.apk') || !/^COM\d+$/.test(serialPort)) {
+  apkPath = resolve(apkPath);
+  const rounds = Math.min(100, Math.max(1, Number(argumentsValue?.rounds || 100)));
+  if (!serial || !/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(packageName) || !apkPath.toLowerCase().endsWith('.apk')) {
     throw new Error('Invalid stress-test target, APK, or serial port');
   }
 
-  const reportRoot = process.env.VIBEKITS_STRESS_REPORT_DIR
-    || join(process.env.LOCALAPPDATA || process.cwd(), 'Vibekits', 'Harness', 'stress');
+  const reportRoot = requireSafeArtifactDirectory(
+    process.env.VIBEKITS_STRESS_REPORT_DIR || join(process.cwd(), 'tmp', 'stress'),
+    'Stress report directory',
+  );
   await mkdir(reportRoot, { recursive: true });
   const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
   const detailPath = join(reportRoot, `android-install-stress-${stamp}.jsonl`);
@@ -110,6 +208,24 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
   let serialReadFailures = 0;
   let logcatSamples = 0;
   let logcatBytes = 0;
+  const anomalyCounts = { crash: 0, anr: 0, watchdog: 0, reboot: 0, decoder: 0, wifiHal: 0, selinux: 0 };
+  let gitEvidence = null;
+
+  const classify = (data) => {
+    const value = `${data || ''}`;
+    const patterns = {
+      crash: /FATAL EXCEPTION|Fatal signal/gi,
+      anr: /ANR in |am_anr/gi,
+      watchdog: /WATCHDOG KILLING SYSTEM PROCESS/gi,
+      reboot: /Booting Linux|Restarting system|sys\.powerctl/gi,
+      decoder: /OMXVDEC|decoder error|fill_buffer_done_set_speed/gi,
+      wifiHal: /WifiVendorHal.*ERROR_UNKNOWN/gi,
+      selinux: /avc:\s+denied/gi,
+    };
+    for (const [kind, pattern] of Object.entries(patterns)) {
+      anomalyCounts[kind] += value.match(pattern)?.length || 0;
+    }
+  };
 
   const save = async (entry) => {
     await appendFile(detailPath, `${JSON.stringify(entry)}\n`, 'utf8');
@@ -131,6 +247,7 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
       const bytes = Buffer.byteLength(data);
       serialBytesReceived += bytes;
       if (bytes > 0) {
+        classify(data);
         await save({ type: 'serial-stage', round, stage, at: new Date().toISOString(), bytes, data });
       }
       return data;
@@ -176,21 +293,27 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
   try {
     await invoke('vibekits.adb.connect', { address: serial });
     const ports = await invoke('vibekits.serial.list_ports', {});
+    let serialSettings = { baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' };
+    if (!serialPort) {
+      const detected = await invoke('vibekits.serial.auto_detect', { listenMs: 3000 });
+      serialPort = normalizeSerialPortName(detected.port || detected.selected?.portName);
+      serialSettings = { ...serialSettings, ...(detected.selected || {}) };
+    }
     const descriptor = (ports.ports || []).find(
-      (port) => textOf(port.name).toUpperCase() === serialPort,
+      (port) => normalizeSerialPortName(port.name) === serialPort,
     );
     if (!descriptor) throw new Error(`${serialPort} is not enumerated`);
     await save({ type: 'serial-port', descriptor });
 
     const serialSession = await invoke('vibekits.serial.session_open', {
       port: serialPort,
-      baudRate: 115200,
-      dataBits: 8,
-      stopBits: 1,
-      parity: 'none',
+      baudRate: Number(serialSettings.baudRate || 115200),
+      dataBits: Number(serialSettings.dataBits || 8),
+      stopBits: Number(serialSettings.stopBits || 1),
+      parity: textOf(serialSettings.parity || 'none'),
       // Match the verified SecureCRT profile used by the attached COM33
       // console: 115200/8N1 with DTR/DSR, RTS/CTS and XON/XOFF all disabled.
-      flowControl: 'none',
+      flowControl: textOf(serialSettings.flowControl || 'none'),
     });
     serialSessionId = textOf(serialSession.sessionId);
     const adbSession = await invoke('vibekits.adb.session_open', {
@@ -233,6 +356,11 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     await save({ type: 'baseline', at: new Date().toISOString(), initialBootId });
 
     for (let round = 1; round <= rounds; round += 1) {
+      if (task?.cancelRequested) {
+        rebootReason = 'cancelled by request';
+        break;
+      }
+      if (task) task.progress = { completedRounds: completed, requestedRounds: rounds, currentRound: round };
       const roundStarted = Date.now();
       let installOk = false;
       let installError = '';
@@ -273,6 +401,11 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
       serialData += await drainSerial(round, 'after-install');
       if (installOk) {
         try {
+          if (!mainActivity) {
+            const resolvedActivity = await shell(['cmd', 'package', 'resolve-activity', '--brief', packageName]);
+            mainActivity = textOf(resolvedActivity.stdout).split(/\r?\n/).find((line) => line.includes('/')) || '';
+            if (!mainActivity) throw new Error(`No launchable activity resolved for ${packageName}`);
+          }
           const launch = await shell(['am', 'start', '-W', '-n', mainActivity]);
           const launchText = `${launch.stdout || ''}\n${launch.stderr || ''}`;
           launchOk = /Status:\s*ok/i.test(launchText) || /Activity:/i.test(launchText);
@@ -310,6 +443,7 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
           const logcatText = `${logcat.stdout || ''}${logcat.stderr || ''}`;
           logcatSamples += 1;
           logcatBytes += Buffer.byteLength(logcatText);
+          classify(logcatText);
           await save({
             type: 'system-logcat',
             round,
@@ -380,12 +514,26 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     }
   }
 
+  const sourceRoot = textOf(argumentsValue?.sourceRoot);
+  const anomalyTotal = Object.values(anomalyCounts).reduce((sum, value) => sum + value, 0);
+  if (sourceRoot && (rebootDetected || anomalyTotal > 0 || completed !== rounds)) {
+    try {
+      gitEvidence = await invoke('vibekits.git.inspect', { path: sourceRoot });
+      await save({ type: 'git-evidence', at: new Date().toISOString(), sourceRoot, result: gitEvidence });
+    } catch (error) {
+      gitEvidence = { error: `${error}` };
+      await save({ type: 'git-evidence-error', at: new Date().toISOString(), sourceRoot, error: `${error}` });
+    }
+  }
+
   const summary = {
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
     serial,
     apkPath,
     serialPort,
+    packageName,
+    mainActivity,
     requestedRounds: rounds,
     completed,
     installsPassed,
@@ -400,6 +548,16 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     serialReadFailures,
     logcatSamples,
     logcatBytes,
+    anomalyCounts,
+    gitEvidenceCaptured: gitEvidence !== null,
+    gitSourceRoot: sourceRoot || null,
+    recommendations: [
+      ...(anomalyCounts.decoder > 0 ? ['检查设备硬件视频解码缓冲区长度校验、空帧处理和解码器重建时序'] : []),
+      ...(anomalyCounts.wifiHal > 0 ? ['检查Wi-Fi Vendor HAL返回值处理及ADB断线后的退避重连'] : []),
+      ...(anomalyCounts.selinux > 0 ? ['为/proc性能采样补充最小SELinux策略，或在拒绝时降级为公开系统指标'] : []),
+      ...(anomalyCounts.crash > 0 || anomalyCounts.anr > 0 ? ['使用本地failure-logcat和activity-exit-info定位首个应用崩溃或ANR调用栈'] : []),
+      ...(rebootDetected ? ['结合boot_id、pstore、dmesg和串口尾部定位内核重启原因'] : []),
+    ],
     conclusion: rebootDetected
       ? `Stopped at round ${completed}: ${rebootReason}; serial, Logcat and final thread state saved locally`
       : completed === rounds
@@ -413,6 +571,66 @@ server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     content: [{ type: 'text', text: JSON.stringify({ ...summary, summaryPath }, null, 2) }],
     structuredContent: { ...summary, summaryPath },
   };
+};
+
+server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+  if (params.name === 'android__apk_install_stress_100') return executeStress(params.arguments);
+  if (params.name === 'android__apk_install_stress_start') {
+    const normalizedSerial = normalizeAdbSerial(params.arguments?.serial);
+    const existing = [...tasks.values()].find(
+      (candidate) => candidate.serial === normalizedSerial
+        && (candidate.phase === 'queued' || candidate.phase === 'running'),
+    );
+    if (existing) return mcpResult({ ...publicTask(existing), reused: true });
+    const taskId = `android-stress-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const task = {
+      taskId,
+      serial: normalizedSerial,
+      phase: 'queued',
+      createdAt: new Date().toISOString(),
+      progress: { completedRounds: 0, requestedRounds: Number(params.arguments?.rounds || 100), currentRound: 0 },
+      cancelRequested: false,
+    };
+    tasks.set(taskId, task);
+    void (async () => {
+      task.phase = 'running';
+      task.startedAt = new Date().toISOString();
+      try {
+        task.result = await executeStress(params.arguments, task);
+        const summary = task.result?.structuredContent || {};
+        task.progress = {
+          completedRounds: Number(summary.completed || task.progress.completedRounds || 0),
+          requestedRounds: Number(summary.requestedRounds || task.progress.requestedRounds || 0),
+          currentRound: Number(summary.completed || task.progress.currentRound || 0),
+        };
+        task.phase = task.cancelRequested ? 'cancelled' : (task.result?.isError ? 'failed' : 'completed');
+      } catch (error) {
+        task.error = `${error}`;
+        task.phase = task.cancelRequested ? 'cancelled' : 'failed';
+      } finally {
+        task.completedAt = new Date().toISOString();
+      }
+    })();
+    return mcpResult(publicTask(task));
+  }
+  if (params.name === 'android__apk_install_stress_status') {
+    const task = tasks.get(textOf(params.arguments?.taskId));
+    if (!task) throw new Error('Unknown stress taskId');
+    const waitSeconds = Math.min(45, Math.max(0, Number(params.arguments?.waitSeconds || 20)));
+    const deadline = Date.now() + waitSeconds * 1000;
+    while (task.phase === 'queued' || task.phase === 'running') {
+      if (Date.now() >= deadline) break;
+      await sleep(250);
+    }
+    return mcpResult(publicTask(task));
+  }
+  if (params.name === 'android__apk_install_stress_cancel') {
+    const task = tasks.get(textOf(params.arguments?.taskId));
+    if (!task) throw new Error('Unknown stress taskId');
+    task.cancelRequested = true;
+    return mcpResult(publicTask(task));
+  }
+  throw new Error(`Unknown tool: ${params.name}`);
 });
 
 await server.connect(new StdioServerTransport());

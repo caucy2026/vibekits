@@ -19,6 +19,7 @@
 6. 工具结果和失败必须原样形成证据；不得把“工具存在”写成“真实设备已通过”。默认审计记录可在对应 VibeKits 工具页面查看和删除。
 7. 需要回答某个工具的精确参数时，必须先调用 `vibekits.system.describe_tool`，逐项列出类型、是否必填、默认值、枚举和范围，不凭记忆回答。
 8. Harness 启动超时、异常退出或工具失败时，先调用 `vibekits.harness.diagnostics` 查询脱敏的运行日志和工具调用记录，再根据证据定位；不得让用户凭现象猜原因。
+9. 写入或设备控制工具在等待用户审批时不得按执行失败处理。若客户端报告超时，必须先调用对应 `list/status/inspect` 核验目标状态；确认操作未发生后才能重试，禁止盲目重复连接、安装、推送或删除。
 
 ## 自动配置最高准则
 
@@ -44,6 +45,16 @@
 - 虚拟机：`vibekits.runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。
 - 音频：`vibekits.audio.inspect` 分析 PCM/WAV；转换、播放或生成测试音使用对应 `audio.*` 接口。
 - 清理：先分析和预览，只对高置信缓存执行删除；软件卸载和不确定系统项必须由用户明确选择。
+- 长时间磁盘分析：盘符根目录和大型目录必须调用 `vibekits.cleaner.analyze_drive_start`，保存返回的 `taskId`，然后以 `waitSeconds=20` 调用 `vibekits.cleaner.analyze_drive_status` 长轮询。若 `phase=running`，继续查询同一 `taskId`；不得重试 start、不得并发扫描同一根目录。`phase=completed` 时读取 `result`；`failed/cancelled` 时报告状态和错误。用户要求停止时调用 `vibekits.cleaner.analyze_drive_cancel`。同步 `analyze_drive` 只用于已知较小目录。
+- Android APK 长时间压力任务：使用 `android__apk_install_stress_start` 启动并保存 `taskId`，再以 `waitSeconds=20` 查询 `android__apk_install_stress_status`；不得重复启动同一设备任务。正式100轮前先执行1轮门禁。用户停止时调用 `android__apk_install_stress_cancel`。APK必须由Vibekits网络下载接口保存到D盘，ADB尾号和串口参数应自动发现，原始串口与Logcat只保存在D盘证据文件中。
+
+## 清理任务的职责边界（强制）
+
+- Harness 只负责理解自然语言、生成结构化清理策略、调用系统清理 MCP、解释结果和请求用户确认；系统清理模块负责实际扫描、候选分类、建议列表、预览、回收站/删除、进度、取消、审计和清理后复核。
+- 任何清理需求（缓存、旧安装包、重复文件、长期未使用文件、指定类型文档、下载目录或磁盘空间回收）都必须调用 `vibekits.cleaner.*` 接口。不得用 PowerShell、shell、任意文件工具或模型自行遍历来替代系统清理模块。
+- 策略必须显式包含扫描根目录、时间阈值、文件类型、最小大小、排除目录、排序、结果上限和风险规则。Harness 不得把“最后修改时间”表述成可靠的“最后访问时间”；系统不支持可靠访问时间时必须标明证据口径。
+- 扫描结果必须进入系统清理页面的建议列表，至少展示路径、大小、文件类型、时间证据、建议理由、风险级别和默认是否选中。源码、版本库、邮件、数据库、虚拟机、备份和程序目录默认不选中。
+- 删除必须走 `scan/start → status → preview → 用户确认 → execute → verify`。策略生成或扫描授权不等于删除授权；没有 preview ID 和本次明确确认不得执行。
 
 完整的人类可读目录位于项目 `docs/37_HARNESS_CAPABILITY_CATALOG.md`；运行时始终以本轮 `capability_check` 返回和 MCP 工具 Schema 为准。
 <!-- VIBEKITS_CAPABILITIES_END -->

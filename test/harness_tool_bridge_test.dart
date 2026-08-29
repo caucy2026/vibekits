@@ -124,6 +124,9 @@ void main() {
       VibekitsHarnessToolBridge.duplicateScanId,
       VibekitsHarnessToolBridge.fileDiffId,
       VibekitsHarnessToolBridge.systemDriveAnalyzeId,
+      VibekitsHarnessToolBridge.systemDriveAnalyzeStartId,
+      VibekitsHarnessToolBridge.systemDriveAnalyzeStatusId,
+      VibekitsHarnessToolBridge.systemDriveAnalyzeCancelId,
       VibekitsHarnessToolBridge.audioInspectId,
       VibekitsHarnessToolBridge.audioPcmToWavId,
       VibekitsHarnessToolBridge.audioPlayId,
@@ -402,6 +405,15 @@ void main() {
       adbExecutable: 'C:\\tools\\adb.exe',
       adbRunner: (String executable, List<String> arguments) async {
         calls.add(arguments);
+        if (arguments.first == 'devices') {
+          return const AdbCommandResult(
+            exitCode: 0,
+            stdout:
+                'List of devices attached\n'
+                '192.168.3.63:5555 device product:p model:m device:d transport_id:1\n',
+            stderr: '',
+          );
+        }
         return const AdbCommandResult(
           exitCode: 0,
           stdout: 'connected to 192.168.3.63:5555',
@@ -420,8 +432,12 @@ void main() {
     );
     expect(approval?.tool.risk, HarnessToolRisk.controlsDevice);
     expect(approval?.target, '192.168.3.63:5555');
-    expect(calls.single, <String>['connect', '192.168.3.63:5555']);
+    expect(calls, <List<String>>[
+      <String>['connect', '192.168.3.63:5555'],
+      <String>['devices', '-l'],
+    ]);
     expect(result.ok, isTrue);
+    expect(result.data?['verified'], isTrue);
   });
 
   test('拒绝高风险工具后不执行处理器', () async {
@@ -1074,6 +1090,43 @@ void main() {
     expect(drive.data?['systemBaseline'].toString(), contains('20–40 GiB'));
     expect(drive.data?['priorities'], isA<List<Object?>>());
     expect(approvals, 0);
+  });
+
+  test('Harness 通过任务 ID 等待长时间磁盘分析且不会重复启动', () async {
+    final Directory sandbox = await Directory.systemTemp.createTemp(
+      'vibekits_harness_drive_task_',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    await File('${sandbox.path}${Platform.pathSeparator}sample.bin')
+        .writeAsBytes(List<int>.filled(4096, 7));
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    Future<bool> approve(HarnessToolApprovalRequest request) async => true;
+
+    final HarnessToolCallResult started = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.systemDriveAnalyzeStartId,
+      arguments: <String, Object?>{'root': sandbox.path, 'maxResults': 20},
+      approve: approve,
+    );
+    expect(started.ok, isTrue);
+    final String taskId = started.data!['taskId']! as String;
+    expect(taskId, startsWith('drive-'));
+
+    Map<String, Object?> status = <String, Object?>{};
+    for (int attempt = 0; attempt < 100; attempt += 1) {
+      final HarnessToolCallResult polled = await bridge.invoke(
+        toolId: VibekitsHarnessToolBridge.systemDriveAnalyzeStatusId,
+        arguments: <String, Object?>{'taskId': taskId},
+        approve: approve,
+      );
+      expect(polled.ok, isTrue);
+      status = polled.data!;
+      if (status['running'] == false) break;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(status['phase'], 'completed');
+    expect(status['result'], isA<Map<String, Object?>>());
+    expect(status['result'].toString(), contains('sample.bin'));
   });
 }
 

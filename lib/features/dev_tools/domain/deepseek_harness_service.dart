@@ -108,6 +108,7 @@ class HarnessWebRequest {
     this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
     this.model = DeepSeekHarnessService.defaultModel,
     this.debugDirectory = '',
+    this.permissionMode = HarnessAgentPermissionMode.assisted,
     this.approveTool,
     this.toolBridge,
   });
@@ -118,6 +119,7 @@ class HarnessWebRequest {
   final String baseUrl;
   final String model;
   final String debugDirectory;
+  final HarnessAgentPermissionMode permissionMode;
   final HarnessToolApproval? approveTool;
   final VibekitsHarnessToolBridge? toolBridge;
 
@@ -566,6 +568,11 @@ abstract final class DeepSeekHarnessService {
           'DSH_TELEMETRY_MODE': 'DISABLED',
           'DSH_TELEMETRY_DISABLED': '1',
           'DSH_TOOLS_MODE': 'native',
+          'DSH_PERMISSION_MODE': switch (request.permissionMode) {
+            HarnessAgentPermissionMode.requestApproval => 'workspace-write',
+            HarnessAgentPermissionMode.assisted => 'workspace-write',
+            HarnessAgentPermissionMode.fullAccess => 'danger-full-access',
+          },
           'DSH_LOG_DIR': debug.logs.path,
           'VIBEKITS_DEBUG_DIR': debug.root.path,
           'VIBEKITS_SCREENSHOT_DIR': debug.screenshots.path,
@@ -732,7 +739,10 @@ abstract final class DeepSeekHarnessService {
         '          VIBEKITS_TOOL_BRIDGE_URL: !!js process.env.VIBEKITS_TOOL_BRIDGE_URL\n'
         '          VIBEKITS_TOOL_BRIDGE_TOKEN: !!js process.env.VIBEKITS_TOOL_BRIDGE_TOKEN\n'
         '        failOnStartupError: true\n'
-        '        toolCallTimeoutMs: !!js Number(process.env.VIBEKITS_MCP_TOOL_TIMEOUT_MS || 60000)\n'
+        // Tool approval is intentionally part of the same MCP request. Keep
+        // the transport alive while a human reviews the target; deterministic
+        // long-running work still uses start/status/cancel tools.
+        '        toolCallTimeoutMs: !!js Number(process.env.VIBEKITS_MCP_TOOL_TIMEOUT_MS || 600000)\n'
         '- insert:\n'
         '    - id: vibekits-android-stress-mcp\n'
         "      name: '@deepseek-ai/dsh-mcp-client'\n"

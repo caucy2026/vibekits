@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../features/dev_tools/domain/harness_tool_activity_store.dart';
 import '../features/dev_tools/domain/harness_tool_bridge.dart';
+import '../features/dev_tools/domain/harness_agent_preferences.dart';
 import '../features/dev_tools/domain/harness_tool_server.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
@@ -85,13 +86,18 @@ class _VibekitsAppState extends State<VibekitsApp> {
   }
 
   Future<bool> _approveExternalTool(HarnessToolApprovalRequest request) async {
+    final HarnessAgentPermissionMode permissionMode =
+        await HarnessAgentPreferencesStore.loadPermissionMode();
     if (request.tool.risk == HarnessToolRisk.readOnly ||
-        widget.preapprovedExternalToolIds.contains(request.tool.id)) {
+        widget.preapprovedExternalToolIds.contains(request.tool.id) ||
+        permissionMode == HarnessAgentPermissionMode.fullAccess ||
+        (permissionMode == HarnessAgentPermissionMode.assisted &&
+            request.tool.risk != HarnessToolRisk.destructive)) {
       return true;
     }
     if (!mounted) return false;
     final BuildContext? navigatorContext = _navigatorKey.currentContext;
-    if (navigatorContext == null) return false;
+    if (navigatorContext == null || !navigatorContext.mounted) return false;
     final bool? approved = await showDialog<bool>(
       context: navigatorContext,
       barrierDismissible: false,

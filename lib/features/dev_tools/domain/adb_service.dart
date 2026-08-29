@@ -169,9 +169,13 @@ abstract final class AdbService {
   }
 
   static String normalizeWirelessAddress(String value) {
-    final String address = value.trim();
+    String address = value.trim();
     if (address.isEmpty || address.contains(RegExp(r'[\s/\\]'))) {
       throw const FormatException('请输入设备 IP，例如 192.168.3.63');
+    }
+    final int? hostAlias = int.tryParse(address);
+    if (hostAlias != null && hostAlias >= 1 && hostAlias <= 254) {
+      address = '192.168.3.$hostAlias';
     }
     final int colonCount = ':'.allMatches(address).length;
     final String target = colonCount == 0 ? '$address:5555' : address;

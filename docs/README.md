@@ -103,6 +103,8 @@
 96. [RustDesk × Vibekits 可选集成合同](39_RUSTDESK_VIBEKITS_OPTIONAL_INTEGRATION_CONTRACT.md)——双方独立运行、发现握手、未连接 UI、协议兼容、失败隔离和 15 项联合验收
 97. [dev.136 KEMI远程办公连接标识验收](acceptance/V1_9_0_DEV136_KEMI_REMOTE_LINK_STATUS_2026-08-28.md)——自动KEMI办公 ID、真实握手/心跳标识、过期降级和首屏解耦
 98. [dev.137 KEMI 品牌文案验收](acceptance/V1_9_0_DEV137_KEMI_BRAND_TEXT_2026-08-28.md)——`KEMI` 不翻译、启动按钮和自动办公 ID 统一
+99. [KEMI远程办公 × Vibekits 智能体状态集成需求](41_KEMI_RUSTDESK_STATUS_INTEGRATION_REQUIREMENTS.md)——交付 KEMI/RustDesk 团队设计的连接方向、协议、安全边界、交付物和联合验收基线
+100. [Android APK 长时间压力任务设计](42_ANDROID_APK_STRESS_AGENT_REQUIREMENTS.md)——APK下载、ADB/串口自动发现、100轮长任务、异常取证、Git关联和报告闭环
 
 ## 完成定义
 
