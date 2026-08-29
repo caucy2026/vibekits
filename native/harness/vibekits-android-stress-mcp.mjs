@@ -161,6 +161,7 @@ const executeStress = async (argumentsValue, task = null) => {
   let mainActivity = textOf(argumentsValue?.mainActivity);
   let apkPath = textOf(argumentsValue?.apkPath);
   const apkUrl = textOf(argumentsValue?.apkUrl);
+  let downloadEvidence = null;
   let serialPort = normalizeSerialPortName(argumentsValue?.serialPort);
   if (!apkPath && apkUrl) {
     const downloadDirectory = requireSafeArtifactDirectory(
@@ -174,7 +175,17 @@ const executeStress = async (argumentsValue, task = null) => {
       timeoutSeconds: 1800,
     });
     apkPath = textOf(downloaded.outputPath);
-    if (textOf(downloaded.artifactType).toLowerCase() !== 'apk') throw new Error('Downloaded artifact is not a valid APK');
+    if (textOf(downloaded.artifactType).toLowerCase() !== 'android-apk') {
+      throw new Error(`Downloaded artifact type is ${textOf(downloaded.artifactType) || 'unknown'}, expected android-apk`);
+    }
+    downloadEvidence = {
+      outputPath: apkPath,
+      bytes: Number(downloaded.bytes || 0),
+      sha256: textOf(downloaded.sha256),
+      statusCode: Number(downloaded.statusCode || 0),
+      finalUrl: textOf(downloaded.finalUrl),
+      artifactType: textOf(downloaded.artifactType),
+    };
   }
   apkPath = resolve(apkPath);
   const rounds = Math.min(100, Math.max(1, Number(argumentsValue?.rounds || 100)));
@@ -531,6 +542,7 @@ const executeStress = async (argumentsValue, task = null) => {
     completedAt: new Date().toISOString(),
     serial,
     apkPath,
+    downloadEvidence,
     serialPort,
     packageName,
     mainActivity,
