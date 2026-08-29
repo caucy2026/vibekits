@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'mcp_capability_models.dart';
+
 class VibekitsLanPeer {
   const VibekitsLanPeer({
     required this.instanceId,
@@ -14,6 +16,7 @@ class VibekitsLanPeer {
     required this.protocolVersion,
     required this.capabilityDigest,
     required this.lastSeen,
+    this.tools = const <McpToolInterface>[],
   });
 
   final String instanceId;
@@ -26,6 +29,7 @@ class VibekitsLanPeer {
   final int protocolVersion;
   final String capabilityDigest;
   final DateTime lastSeen;
+  final List<McpToolInterface> tools;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'instanceId': instanceId,
@@ -38,6 +42,9 @@ class VibekitsLanPeer {
     'protocolVersion': protocolVersion,
     'capabilityDigest': capabilityDigest,
     'lastSeen': lastSeen.toUtc().toIso8601String(),
+    'tools': <Map<String, Object?>>[
+      for (final McpToolInterface tool in tools) tool.toJson(),
+    ],
     'authorized': false,
     'nextAction': '在主机端核对SSH host key并批准该设备公钥后才能调用',
   };
@@ -171,8 +178,9 @@ class LanPeerDiscoveryService {
     Datagram? datagram;
     while ((datagram = _socket?.receive()) != null) {
       final Datagram packet = datagram!;
-      if (!_privateIpv4(packet.address.address) || packet.data.length > 1024)
+      if (!_privateIpv4(packet.address.address) || packet.data.length > 1024) {
         continue;
+      }
       try {
         final Object? decoded = jsonDecode(utf8.decode(packet.data));
         if (decoded is! Map) continue;
@@ -191,6 +199,14 @@ class LanPeerDiscoveryService {
         final Map<Object?, Object?> mcp = decoded['mcp'] is Map
             ? decoded['mcp'] as Map<Object?, Object?>
             : const <Object?, Object?>{};
+        final Object? rawTools = mcp['tools'];
+        final List<McpToolInterface> tools = rawTools is List
+            ? <McpToolInterface>[
+                for (final Object? item in rawTools)
+                  if (item is Map)
+                    McpToolInterface.fromJson(Map<Object?, Object?>.from(item)),
+              ].where((McpToolInterface tool) => tool.name.isNotEmpty).toList()
+            : const <McpToolInterface>[];
         final String id = _safe('${decoded['instanceId'] ?? ''}', 80);
         final String name = _safe(
           '${legacy ? decoded['name'] : app['name'] ?? ''}',
@@ -212,8 +228,9 @@ class LanPeerDiscoveryService {
             name.isEmpty ||
             transport != 'ssh-stdio' ||
             remotePort < 1 ||
-            remotePort > 65535)
+            remotePort > 65535) {
           continue;
+        }
         _peers[id] = VibekitsLanPeer(
           instanceId: id,
           name: name,
@@ -233,6 +250,7 @@ class LanPeerDiscoveryService {
                     0,
           capabilityDigest: digest,
           lastSeen: DateTime.now(),
+          tools: tools,
         );
         _emit();
       } on Object {

@@ -182,6 +182,66 @@ sourceTier / hostId / instanceId / toolName
 
 ## 7. Harness 接收任务后的行为
 
+### 7.1 每个新任务读取实时目录
+
+Harness 不在启动时缓存一份永久工具列表。每个新任务先判断是否需要工具；需要时调用后台目录的 `snapshotForTask()` 取得带 `catalogVersion` 的不可变快照，并依次查看：
+
+```text
+本 APP MCP → 本机其他进程 MCP → 本局域网 MCP
+```
+
+这个顺序表示先查看，不表示无条件选择第一个工具。Harness 比较工具描述、JSON Schema、在线状态、数据位置和任务风险后选择最匹配接口。执行前若版本已经改变则重新取快照；长任务每个新阶段也检查版本。后台负责发现和更新，智能体只读取最新快照，不维护另一份目录缓存。
+
+### 7.2 对方怎样描述 MCP 接口
+
+每个提供者必须返回标准 MCP `tools/list` 条目，至少包含：
+
+```json
+{
+  "name": "serial.session_open",
+  "title": "打开串口长会话",
+  "description": "打开持续串口会话。先调用 serial.list_ports；成功后返回 sessionId。",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "port": {"type": "string", "description": "串口名，例如 COM3"},
+      "baudRate": {"type": "integer", "default": 115200, "minimum": 300}
+    },
+    "required": ["port"],
+    "additionalProperties": false
+  }
+}
+```
+
+- `name` 是稳定、唯一、可调用的机器标识。
+- `title` 是用户可读短名称。
+- `description` 必须说明用途、前置调用、返回结果、重要副作用和失败条件。
+- `inputSchema` 是参数唯一权威来源，必须明确类型、必填项、默认值、枚举、范围和字段说明。
+- 广播和 Schema 不得包含 Token、密码或私钥。
+- 接口变化后更新 `catalogRevision`，VibeKits 随即重新读取 `tools/list`。
+
+本机其他进程也可向 `.runtime-cache/mcp/registrations/<instanceId>.json` 原子发布注册文件：
+
+```json
+{
+  "instanceId": "vendor-app-01",
+  "name": "Vendor App",
+  "appId": "com.vendor.app",
+  "appVersion": "2.1.0",
+  "transport": "stdio",
+  "endpoint": "D:\\\\apps\\\\vendor-mcp.exe",
+  "catalogRevision": "sha256:...",
+  "updatedAt": "2026-08-30T08:00:00Z",
+  "tools": []
+}
+```
+
+写入方先写临时文件再原子改名，退出时删除自己的注册文件。当前实现每秒复核本机注册目录；局域网目录随 LMCP 心跳、上下线和能力摘要变化更新。
+
+### 7.3 Harness 界面
+
+Harness 顶部提供 `本机 MCP`、`局域网 MCP` 两个独立按钮和实时设备数。点击按钮显示设备列表；点击设备弹出接口详情，展示实例、应用版本、传输、端点、目录版本，以及每个工具的 `name`、标题、用途说明和格式化 `inputSchema`。设备已发现但尚未取得 `tools/list` 时必须明确显示“尚未返回接口目录”，不能把设备在线误报为接口可用。
+
 Harness 不先选择机器，而是先把任务拆成所需能力：
 
 ```text

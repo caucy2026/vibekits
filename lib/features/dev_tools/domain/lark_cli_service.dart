@@ -138,7 +138,7 @@ class LarkCliService {
       'exitCode': result.exitCode,
       'ok': result.exitCode == 0,
       'arguments': arguments,
-      if (envelope != null) 'envelope': envelope,
+      'envelope': ?envelope,
       if (stdout.trim().isNotEmpty) 'stdout': _bounded(stdout),
       if (stderr.trim().isNotEmpty) 'stderr': _bounded(stderr),
       'configDirectory': config,

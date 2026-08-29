@@ -15,6 +15,8 @@ import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/lan_peer_discovery_service.dart';
+import '../../dev_tools/domain/mcp_capability_directory.dart';
+import '../../dev_tools/domain/mcp_capability_models.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -185,6 +187,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       if (mounted) {
         setState(() => _status = '正在启动本地 DSH…');
       }
+      final VibekitsHarnessToolBridge toolBridge = VibekitsHarnessToolBridge(
+        remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
+        screenshotOcrRunner: widget.screenshotOcrRunner,
+        downloadDirectory: widget.initialDownloadDirectory,
+      );
+      await McpCapabilityDirectory.instance.start(appBridge: toolBridge);
       final HarnessSessionHandle session = await widget.startWeb(
         HarnessWebRequest(
           workspace: workspace,
@@ -193,11 +201,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           debugDirectory: widget.initialDebugDirectory,
           permissionMode: _permissionMode,
           approveTool: _approveVibekitsTool,
-          toolBridge: VibekitsHarnessToolBridge(
-            remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
-            screenshotOcrRunner: widget.screenshotOcrRunner,
-            downloadDirectory: widget.initialDownloadDirectory,
-          ),
+          toolBridge: toolBridge,
         ),
       );
       if (!mounted) {
@@ -856,47 +860,45 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         children: <Widget>[
           _buildHarnessWebview(),
           Positioned(
-            right: 538,
+            right: 674,
             top: 10,
-            child: StreamBuilder<List<VibekitsLanPeer>>(
-              stream: LanPeerDiscoveryService.instance.changes,
-              initialData: LanPeerDiscoveryService.instance.peers,
+            child: StreamBuilder<McpCapabilitySnapshot>(
+              stream: McpCapabilityDirectory.instance.changes,
+              initialData: McpCapabilityDirectory.instance.snapshot,
               builder:
                   (
                     BuildContext context,
-                    AsyncSnapshot<List<VibekitsLanPeer>> snapshot,
+                    AsyncSnapshot<McpCapabilitySnapshot> snapshot,
                   ) {
-                    final int count = snapshot.data?.length ?? 0;
-                    return Material(
-                      color: Theme.of(context).colorScheme.surface
-                          .withValues(alpha: 0.94),
-                      elevation: 2,
-                      borderRadius: BorderRadius.circular(20),
-                      child: InkWell(
-                        key: const Key('harness-lan-peers'),
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: _showLanPeers,
-                        child: SizedBox(
-                          width: 128,
-                          height: 36,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: <Widget>[
-                              const Icon(Icons.hub_outlined, size: 16),
-                              const SizedBox(width: 6),
-                              const Text(
-                                '协同节点',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '$count',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    final int count = snapshot.data?.local.length ?? 0;
+                    return _mcpDeviceButton(
+                      key: const Key('harness-local-mcp-devices'),
+                      icon: Icons.memory_outlined,
+                      label: '本机 MCP',
+                      count: count,
+                      onTap: () => _showMcpDevices(McpCapabilityTier.local),
+                    );
+                  },
+            ),
+          ),
+          Positioned(
+            right: 538,
+            top: 10,
+            child: StreamBuilder<McpCapabilitySnapshot>(
+              stream: McpCapabilityDirectory.instance.changes,
+              initialData: McpCapabilityDirectory.instance.snapshot,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+                  ) {
+                    final int count = snapshot.data?.lan.length ?? 0;
+                    return _mcpDeviceButton(
+                      key: const Key('harness-lan-mcp-devices'),
+                      icon: Icons.hub_outlined,
+                      label: '局域网 MCP',
+                      count: count,
+                      onTap: () => _showMcpDevices(McpCapabilityTier.lan),
                     );
                   },
             ),
@@ -1054,55 +1056,40 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
   );
 
-  Future<void> _showLanPeers() => showDialog<void>(
-    context: context,
-    builder: (BuildContext context) => AlertDialog(
-      title: const Text('局域网协同节点'),
-      content: SizedBox(
-        width: 520,
-        child: StreamBuilder<List<VibekitsLanPeer>>(
-          stream: LanPeerDiscoveryService.instance.changes,
-          initialData: LanPeerDiscoveryService.instance.peers,
-          builder:
-              (
-                BuildContext context,
-                AsyncSnapshot<List<VibekitsLanPeer>> snapshot,
-              ) {
-                final List<VibekitsLanPeer> peers =
-                    snapshot.data ?? const <VibekitsLanPeer>[];
-                if (peers.isEmpty) {
-                  return const Text('尚未发现其他 VibeKits。请确认位于同一私网，且系统防火墙允许发现广播。');
-                }
-                return ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: peers.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (BuildContext context, int index) {
-                    final VibekitsLanPeer peer = peers[index];
-                    return ListTile(
-                      leading: const Icon(Icons.computer_outlined),
-                      title: Text(peer.name),
-                      subtitle: Text(
-                        '${peer.appId} ${peer.appVersion} · '
-                        '${peer.address}:${peer.sshPort} · 未授权',
-                      ),
-                      trailing: const Tooltip(
-                        message: '需在对方主机批准本设备公钥',
-                        child: Icon(Icons.lock_outline),
-                      ),
-                    );
-                  },
-                );
-              },
+  Widget _mcpDeviceButton({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required int count,
+    required VoidCallback onTap,
+  }) => Material(
+    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.94),
+    elevation: 2,
+    borderRadius: BorderRadius.circular(20),
+    child: InkWell(
+      key: key,
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: SizedBox(
+        width: 128,
+        height: 36,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Icon(icon, size: 16),
+            const SizedBox(width: 6),
+            Text(label, style: const TextStyle(fontSize: 12)),
+            const SizedBox(width: 6),
+            Text('$count', style: const TextStyle(fontSize: 12)),
+          ],
         ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
     ),
+  );
+
+  Future<void> _showMcpDevices(McpCapabilityTier tier) => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => _McpDeviceListDialog(tier: tier),
   );
 
   Future<void> _showRemoteShare() => showDialog<void>(
@@ -1111,6 +1098,163 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       configuredExecutable: widget.rustDeskExecutable,
       webClientUrl: widget.rustDeskWebClientUrl,
     ),
+  );
+}
+
+class _McpDeviceListDialog extends StatelessWidget {
+  const _McpDeviceListDialog({required this.tier});
+
+  final McpCapabilityTier tier;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tier == McpCapabilityTier.local ? '本机 MCP 设备' : '局域网 MCP 设备'),
+    content: SizedBox(
+      width: 680,
+      height: 440,
+      child: StreamBuilder<McpCapabilitySnapshot>(
+        stream: McpCapabilityDirectory.instance.changes,
+        initialData: McpCapabilityDirectory.instance.snapshot,
+        builder:
+            (
+              BuildContext context,
+              AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+            ) {
+              final McpCapabilitySnapshot catalog =
+                  snapshot.data ?? McpCapabilityDirectory.instance.snapshot;
+              final List<McpDeviceCapability> devices =
+                  tier == McpCapabilityTier.local ? catalog.local : catalog.lan;
+              if (devices.isEmpty) {
+                return Center(
+                  child: Text(
+                    tier == McpCapabilityTier.local
+                        ? '尚未发现本机其他 MCP 进程。提供者上线并发布注册文件后会自动出现。'
+                        : '尚未发现局域网 MCP 设备。设备上线、离线和接口变化会实时更新。',
+                    textAlign: TextAlign.center,
+                  ),
+                );
+              }
+              return ListView.separated(
+                itemCount: devices.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (BuildContext context, int index) {
+                  final McpDeviceCapability device = devices[index];
+                  return ListTile(
+                    key: Key('mcp-device-${device.id}'),
+                    leading: Icon(
+                      tier == McpCapabilityTier.local
+                          ? Icons.memory_outlined
+                          : Icons.computer_outlined,
+                    ),
+                    title: Text(device.name),
+                    subtitle: Text(
+                      '${device.appId} ${device.appVersion} · ${device.transport} · '
+                      '${device.tools.length} 个接口',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => showDialog<void>(
+                      context: context,
+                      builder: (BuildContext context) =>
+                          _McpDeviceDetailsDialog(device: device),
+                    ),
+                  );
+                },
+              );
+            },
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('关闭'),
+      ),
+    ],
+  );
+}
+
+class _McpDeviceDetailsDialog extends StatelessWidget {
+  const _McpDeviceDetailsDialog({required this.device});
+
+  final McpDeviceCapability device;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${device.name} · MCP 接口详情'),
+    content: SizedBox(
+      width: 760,
+      height: 560,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SelectableText(
+            '实例：${device.id}\n应用：${device.appId} ${device.appVersion}\n'
+            '连接：${device.transport} · ${device.endpoint}\n'
+            '目录版本：${device.catalogRevision.isEmpty ? '未提供' : device.catalogRevision}',
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '工具接口（${device.tools.length}）',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const Divider(),
+          Expanded(
+            child: device.tools.isEmpty
+                ? const Center(child: Text('设备已发现，但尚未返回 tools/list 接口目录。'))
+                : ListView.builder(
+                    itemCount: device.tools.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final McpToolInterface tool = device.tools[index];
+                      return ExpansionTile(
+                        key: Key('mcp-tool-${device.id}-${tool.name}'),
+                        title: SelectableText(tool.name),
+                        subtitle: Text(
+                          tool.title.isEmpty ? tool.description : tool.title,
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          16,
+                        ),
+                        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SelectableText(
+                            tool.description.isEmpty
+                                ? '提供者未填写用途说明'
+                                : tool.description,
+                          ),
+                          const SizedBox(height: 10),
+                          const Text('inputSchema（调用参数的唯一依据）'),
+                          const SizedBox(height: 6),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            child: SelectableText(
+                              const JsonEncoder.withIndent('  ')
+                                  .convert(tool.inputSchema),
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('关闭'),
+      ),
+    ],
   );
 }
 
