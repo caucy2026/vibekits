@@ -171,6 +171,13 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
     "${CMAKE_SOURCE_DIR}/../tool/start_vibekits_mcp_ssh.ps1"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES
+    "${CMAKE_SOURCE_DIR}/../tool/lmcp_reference_peer.mjs"
+    "${CMAKE_SOURCE_DIR}/../docs/schemas/lmcp-discovery-1.0.schema.json"
+    "${CMAKE_SOURCE_DIR}/../docs/schemas/lmcp-app-manifest-1.0.schema.json"
+    "${CMAKE_SOURCE_DIR}/../examples/lmcp/future-app.manifest.json"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/lmcp"
+    COMPONENT Runtime)
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-android-stress-mcp.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)

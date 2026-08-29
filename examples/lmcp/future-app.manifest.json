@@ -1,0 +1,22 @@
+{
+  "instanceId": "future-app-dev-01",
+  "app": {
+    "id": "com.example.future-app",
+    "name": "Future App",
+    "version": "0.1.0"
+  },
+  "endpoint": {
+    "transport": "ssh-stdio",
+    "port": 22
+  },
+  "mcp": {
+    "protocolVersions": ["2025-06-18"],
+    "capabilityDigest": "sha256:replace-with-canonical-tools-list-digest"
+  },
+  "security": {
+    "pairingRequired": true,
+    "authMethods": ["ssh-ed25519"],
+    "controlApproval": "per-tool"
+  },
+  "ttlSeconds": 12
+}
