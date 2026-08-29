@@ -110,6 +110,7 @@
 103. [VibeKits 局域网发现与协同](45_LAN_PEER_DISCOVERY_AND_COLLABORATION.md)——私网组播发现、协同节点界面、配对边界与任务分派流程
 104. [LMCP/1 局域网 MCP 开放协议](46_LAN_MCP_DISCOVERY_PROTOCOL_V1.md)——供未来应用实现的发现报文、身份配对、传输协商、长任务和兼容性规范
 105. [LMCP/1 第三方程序接入包](47_LMCP_THIRD_PARTY_INTEGRATION_KIT.md)——应用清单、Sidecar、合规检查、旧程序接入与共同完成标准
+106. [LMCP/1 应用广播与协同接入实施指南](48_LMCP_APP_BROADCAST_IMPLEMENTATION_GUIDE.md)——交付其他APP团队的单一入口架构、报文、授权、工具、长任务、路由和验收规范
 
 ## 完成定义
 
