@@ -765,7 +765,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       return Stack(
         children: <Widget>[
           _buildHarnessWebview(),
-          Positioned(right: 442, top: 54, child: _buildMcpExposureControl()),
+          Positioned(right: 370, top: 54, child: _buildMcpExposureControl()),
           const Positioned(
             left: 0,
             right: 0,
@@ -869,9 +869,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       child: Stack(
         children: <Widget>[
           _buildHarnessWebview(),
-          Positioned(right: 442, top: 54, child: _buildMcpExposureControl()),
+          Positioned(right: 370, top: 54, child: _buildMcpExposureControl()),
           Positioned(
-            right: 306,
+            right: 270,
             top: 56,
             child: StreamBuilder<McpCapabilitySnapshot>(
               stream: McpCapabilityDirectory.instance.changes,
@@ -885,7 +885,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                     return _mcpDeviceButton(
                       key: const Key('harness-local-mcp-devices'),
                       icon: Icons.memory_outlined,
-                      label: '本机 MCP',
+                      label: '本机',
+                      tooltip: '本机 MCP：查看同一台电脑上其他进程提供的接口',
                       count: count,
                       onTap: () => _showMcpDevices(McpCapabilityTier.local),
                     );
@@ -907,7 +908,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                     return _mcpDeviceButton(
                       key: const Key('harness-lan-mcp-devices'),
                       icon: Icons.hub_outlined,
-                      label: '局域网 MCP',
+                      label: '局域网',
+                      tooltip: '局域网 MCP：查看同一网络内其他设备提供的接口',
                       count: count,
                       onTap: () => _showMcpDevices(McpCapabilityTier.lan),
                     );
@@ -915,7 +917,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             ),
           ),
           Positioned(
-            right: 402,
+            right: 370,
             top: 10,
             child: Material(
               color: Theme.of(context).colorScheme.surface
@@ -938,14 +940,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         ),
                     ],
                 child: const SizedBox(
-                  width: 128,
+                  width: 92,
                   height: 36,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: <Widget>[
                       Icon(Icons.forum_outlined, size: 16),
                       SizedBox(width: 6),
-                      Text('飞书任务', style: TextStyle(fontSize: 12)),
+                      Text('飞书', style: TextStyle(fontSize: 12)),
                       SizedBox(width: 4),
                       Icon(Icons.arrow_drop_down, size: 18),
                     ],
@@ -997,7 +999,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         child: Tooltip(
                           message: link.message,
                           child: SizedBox(
-                            width: 112,
+                            width: 92,
                             height: 36,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -1005,7 +1007,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                                 Icon(Icons.screen_share_outlined, size: 16),
                                 const SizedBox(width: 6),
                                 const Text(
-                                  '远程分享',
+                                  '远程',
                                   style: TextStyle(fontSize: 12),
                                 ),
                                 const SizedBox(width: 6),
@@ -1028,7 +1030,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             ),
           ),
           Positioned(
-            right: 290,
+            right: 270,
             top: 10,
             child: Material(
               color: Theme.of(context).colorScheme.surface
@@ -1042,14 +1044,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                 child: const Tooltip(
                   message: '查看 Harness 启动、运行、工具调用和错误日志',
                   child: SizedBox(
-                    width: 104,
+                    width: 92,
                     height: 36,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: <Widget>[
                         Icon(Icons.receipt_long_outlined, size: 16),
                         SizedBox(width: 6),
-                        Text('运行日志', style: TextStyle(fontSize: 12)),
+                        Text('日志', style: TextStyle(fontSize: 12)),
                       ],
                     ),
                   ),
@@ -1075,26 +1077,29 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       message:
           '${_mcpIdentity.displayName}\n${_mcpExposureEnabled ? '已发布 MCP；关闭后其他 VibeKits 会立即移除本设备' : 'MCP 发布已关闭；本机仍继续发现其他设备'}',
       child: SizedBox(
-        width: 260,
+        width: 92,
         height: 40,
         child: Row(
           children: <Widget>[
-            const SizedBox(width: 12),
-            const Icon(Icons.api_outlined, size: 17),
             const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                _mcpIdentity.displayName,
-                key: const Key('harness-mcp-device-name'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
+            const Icon(Icons.api_outlined, size: 17),
+            const SizedBox(width: 4),
+            Text(
+              'MCP',
+              key: const Key('harness-mcp-device-name'),
+              style: const TextStyle(fontSize: 11),
             ),
-            Switch(
-              key: const Key('harness-mcp-exposure-switch'),
-              value: _mcpExposureEnabled,
-              onChanged: (bool enabled) => unawaited(_setMcpExposure(enabled)),
+            SizedBox(
+              width: 38,
+              child: Transform.scale(
+                scale: 0.72,
+                child: Switch(
+                  key: const Key('harness-mcp-exposure-switch'),
+                  value: _mcpExposureEnabled,
+                  onChanged: (bool enabled) =>
+                      unawaited(_setMcpExposure(enabled)),
+                ),
+              ),
             ),
           ],
         ),
@@ -1121,6 +1126,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     required Key key,
     required IconData icon,
     required String label,
+    required String tooltip,
     required int count,
     required VoidCallback onTap,
   }) => Material(
@@ -1131,18 +1137,21 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       key: key,
       borderRadius: BorderRadius.circular(20),
       onTap: onTap,
-      child: SizedBox(
-        width: 128,
-        height: 36,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(icon, size: 16),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(fontSize: 12)),
-            const SizedBox(width: 6),
-            Text('$count', style: const TextStyle(fontSize: 12)),
-          ],
+      child: Tooltip(
+        message: tooltip,
+        child: SizedBox(
+          width: 92,
+          height: 36,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(icon, size: 16),
+              const SizedBox(width: 5),
+              Text(label, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 5),
+              Text('$count', style: const TextStyle(fontSize: 12)),
+            ],
+          ),
         ),
       ),
     ),
