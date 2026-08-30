@@ -1229,6 +1229,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           icon: _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
           tooltip:
               '${_mcpIdentity.displayName}\nMCP ${_mcpExposureEnabled ? '已开启' : '已关闭'}，点击切换',
+          caption: 'MCP',
           active: _mcpExposureEnabled,
           onPressed: _toggleMcpExposure,
         ),
@@ -1315,6 +1316,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     required VoidCallback onPressed,
     int badge = 0,
     bool active = false,
+    String? caption,
   }) => Tooltip(
     message: tooltip,
     child: SizedBox(
@@ -1323,14 +1325,31 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       child: Stack(
         alignment: Alignment.center,
         children: <Widget>[
-          IconButton(
-            onPressed: onPressed,
-            icon: Icon(
-              icon,
-              size: 20,
-              color: active ? Theme.of(context).colorScheme.primary : null,
+          Semantics(
+            label: tooltip,
+            button: true,
+            child: IconButton(
+              onPressed: onPressed,
+              padding: EdgeInsets.only(bottom: caption == null ? 0 : 8),
+              icon: Icon(
+                icon,
+                size: 20,
+                color: active ? Theme.of(context).colorScheme.primary : null,
+              ),
             ),
           ),
+          if (caption != null)
+            Positioned(
+              bottom: 2,
+              child: Text(
+                caption,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: active ? Theme.of(context).colorScheme.primary : null,
+                ),
+              ),
+            ),
           if (badge > 0)
             Positioned(
               right: 4,

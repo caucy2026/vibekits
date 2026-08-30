@@ -47,6 +47,8 @@ class McpDeviceIdentity {
 }
 
 class McpExposurePreferences {
+  static const int currentConsentVersion = 1;
+
   McpExposurePreferences({File? file})
     : file =
           file ??
@@ -60,13 +62,13 @@ class McpExposurePreferences {
 
   Future<bool> loadEnabled() async {
     try {
-      if (!await file.exists()) return true;
+      if (!await file.exists()) return false;
       final Object? decoded = jsonDecode(await file.readAsString());
-      return decoded is Map && decoded['enabled'] is bool
-          ? decoded['enabled']! as bool
-          : true;
+      return decoded is Map &&
+          decoded['enabled'] == true &&
+          decoded['consentVersion'] == currentConsentVersion;
     } on Object {
-      return true;
+      return false;
     }
   }
 
@@ -77,6 +79,7 @@ class McpExposurePreferences {
       jsonEncode(<String, Object?>{
         'version': 1,
         'enabled': enabled,
+        'consentVersion': enabled ? currentConsentVersion : 0,
         'updatedAt': DateTime.now().toUtc().toIso8601String(),
       }),
       flush: true,

@@ -1141,6 +1141,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           icon: _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
           tooltip:
               '${_mcpIdentity.displayName}\nMCP ${_mcpExposureEnabled ? '已开启' : '已关闭'}，点击切换',
+          caption: 'MCP',
           active: _mcpExposureEnabled,
           onPressed: () => unawaited(_setMcpExposure(!_mcpExposureEnabled)),
         ),
@@ -1244,6 +1245,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     required VoidCallback onPressed,
     int badge = 0,
     bool active = false,
+    String? caption,
   }) => Tooltip(
     message: tooltip,
     child: SizedBox(
@@ -1252,15 +1254,32 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       child: Stack(
         alignment: Alignment.center,
         children: <Widget>[
-          IconButton(
-            key: key,
-            onPressed: onPressed,
-            icon: Icon(
-              icon,
-              size: 20,
-              color: active ? Theme.of(context).colorScheme.primary : null,
+          Semantics(
+            label: tooltip,
+            button: true,
+            child: IconButton(
+              key: key,
+              onPressed: onPressed,
+              padding: EdgeInsets.only(bottom: caption == null ? 0 : 8),
+              icon: Icon(
+                icon,
+                size: 20,
+                color: active ? Theme.of(context).colorScheme.primary : null,
+              ),
             ),
           ),
+          if (caption != null)
+            Positioned(
+              bottom: 2,
+              child: Text(
+                caption,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: active ? Theme.of(context).colorScheme.primary : null,
+                ),
+              ),
+            ),
           if (badge > 0)
             Positioned(
               right: 5,

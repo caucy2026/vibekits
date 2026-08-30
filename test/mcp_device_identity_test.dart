@@ -26,10 +26,25 @@ void main() {
       file: File('${root.path}${Platform.pathSeparator}exposure.json'),
     );
 
-    expect(await preferences.loadEnabled(), isTrue);
+    expect(await preferences.loadEnabled(), isFalse);
     await preferences.saveEnabled(false);
     expect(await preferences.loadEnabled(), isFalse);
     await preferences.saveEnabled(true);
     expect(await preferences.loadEnabled(), isTrue);
+  });
+
+  test('旧版已开启状态在未确认新风险说明前不恢复', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits-mcp-legacy-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final File file = File(
+      '${root.path}${Platform.pathSeparator}exposure.json',
+    );
+    await file.writeAsString('{"version":1,"enabled":true}');
+
+    expect(await McpExposurePreferences(file: file).loadEnabled(), isFalse);
   });
 }
