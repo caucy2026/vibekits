@@ -1295,6 +1295,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             );
           },
         ),
+        _macRailAction(
+          icon: Icons.settings_outlined,
+          tooltip: 'MCP 与协同设置',
+          onPressed: _showMacMcpSettings,
+        ),
         const Spacer(),
         const Padding(
           padding: EdgeInsets.only(bottom: 12),
@@ -1443,6 +1448,65 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ),
     );
   }
+
+  Future<void> _showMacMcpSettings() => showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => StatefulBuilder(
+      builder: (BuildContext context, StateSetter setDialogState) {
+        final McpCapabilitySnapshot snapshot =
+            McpCapabilityDirectory.instance.snapshot;
+        return AlertDialog(
+          title: const Text('MCP 与协同设置'),
+          content: SizedBox(
+            width: 560,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SelectableText(
+                  '设备名称：${_mcpIdentity.displayName}\n'
+                  '硬件识别码：${_mcpIdentity.hardwareCode}\n'
+                  '实例 ID：${_mcpIdentity.instanceId}\n'
+                  '发现地址：239.255.42.99:47831/UDP',
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('允许发布本 APP 的 MCP 能力'),
+                  subtitle: const Text('关闭后发送 goodbye；本机仍继续发现其他 MCP 设备'),
+                  value: _mcpExposureEnabled,
+                  onChanged: (bool enabled) async {
+                    await _toggleMcpExposure();
+                    setDialogState(() {});
+                  },
+                ),
+                const Divider(),
+                Text(
+                  '本 APP ${snapshot.app.length} 台 · '
+                  '本机 ${snapshot.local.length} 台 · '
+                  '局域网 ${snapshot.lan.length} 台 · '
+                  '目录版本 ${snapshot.version}',
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () async {
+                await McpCapabilityDirectory.instance.refreshLocal();
+                setDialogState(() {});
+              },
+              child: const Text('重新读取目录'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('完成'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
 
   Widget _buildChatWorkbench(HarnessEnvironmentReport? environment) {
     return Column(

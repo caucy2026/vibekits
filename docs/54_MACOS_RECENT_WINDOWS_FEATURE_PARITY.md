@@ -4,7 +4,7 @@
 
 ## 1. 本次进入 macOS 的能力
 
-- Harness 右侧 60px 纵向工具轨。
+- Harness 右侧 60px 纵向工具轨；所有能力和设置入口统一为小图标，悬浮显示全名。
 - VibeKits 设备名称、10 位硬件识别码和 MCP 开关持久化。
 - 本 APP、本机进程、局域网三个实时 MCP 目录。
 - `SO_REUSEADDR + SO_REUSEPORT` 多 APP 同端口 LMCP 发现。
