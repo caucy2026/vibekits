@@ -356,6 +356,6 @@ lmcp://<instanceId>/<tool.name>
 - 实时三层目录：`McpCapabilityDirectory`
 - 界面：Harness 顶部设备名称、MCP 开关、本机 MCP 和局域网 MCP 列表
 
-VibeKits 将这些扩展控件按右上角两行分组：第一行是任务、日志和远程操作，第二行是设备名称/MCP 开关、本机 MCP、局域网 MCP。设备名称使用固定宽度和省略显示，完整名称由悬浮提示展示，不能因主机名过长把按钮挤入主界面左侧。
+VibeKits 不再把六个扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；工具轨纵向放置 MCP 开关、本机 MCP、局域网 MCP、飞书、日志和远程操作，只显示图标，悬浮后展示完整设备名、接口范围和当前状态。本机/局域网设备数量使用角标，轨道底部为后续功能保留位置。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
 本文是第三方 APP 的实现入口；总体能力图、权限和任务路由见 [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)。

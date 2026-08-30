@@ -98,6 +98,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   final McpExposurePreferences _mcpExposurePreferences =
       McpExposurePreferences();
   bool _mcpExposureEnabled = true;
+  bool _quickActionsExpanded = false;
 
   @override
   void initState() {
@@ -765,7 +766,6 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       return Stack(
         children: <Widget>[
           _buildHarnessWebview(),
-          Positioned(right: 370, top: 54, child: _buildMcpExposureControl()),
           const Positioned(
             left: 0,
             right: 0,
@@ -866,199 +866,260 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         pasteInsert: () => unawaited(_pasteIntoFocusedWebField()),
         copy: () => unawaited(_copyFromFocusedWebSelection()),
       },
-      child: Stack(
+      child: Row(
         children: <Widget>[
-          _buildHarnessWebview(),
-          Positioned(right: 370, top: 54, child: _buildMcpExposureControl()),
-          Positioned(
-            right: 270,
-            top: 56,
-            child: StreamBuilder<McpCapabilitySnapshot>(
-              stream: McpCapabilityDirectory.instance.changes,
-              initialData: McpCapabilityDirectory.instance.snapshot,
-              builder:
-                  (
-                    BuildContext context,
-                    AsyncSnapshot<McpCapabilitySnapshot> snapshot,
-                  ) {
-                    final int count = snapshot.data?.local.length ?? 0;
-                    return _mcpDeviceButton(
-                      key: const Key('harness-local-mcp-devices'),
-                      icon: Icons.memory_outlined,
-                      label: '本机',
-                      tooltip: '本机 MCP：查看同一台电脑上其他进程提供的接口',
-                      count: count,
-                      onTap: () => _showMcpDevices(McpCapabilityTier.local),
-                    );
-                  },
-            ),
-          ),
-          Positioned(
-            right: 170,
-            top: 56,
-            child: StreamBuilder<McpCapabilitySnapshot>(
-              stream: McpCapabilityDirectory.instance.changes,
-              initialData: McpCapabilityDirectory.instance.snapshot,
-              builder:
-                  (
-                    BuildContext context,
-                    AsyncSnapshot<McpCapabilitySnapshot> snapshot,
-                  ) {
-                    final int count = snapshot.data?.lan.length ?? 0;
-                    return _mcpDeviceButton(
-                      key: const Key('harness-lan-mcp-devices'),
-                      icon: Icons.hub_outlined,
-                      label: '局域网',
-                      tooltip: '局域网 MCP：查看同一网络内其他设备提供的接口',
-                      count: count,
-                      onTap: () => _showMcpDevices(McpCapabilityTier.lan),
-                    );
-                  },
-            ),
-          ),
-          Positioned(
-            right: 370,
-            top: 10,
-            child: Material(
-              color: Theme.of(context).colorScheme.surface
-                  .withValues(alpha: 0.94),
-              elevation: 2,
-              borderRadius: BorderRadius.circular(20),
-              child: PopupMenuButton<FeishuHarnessTask>(
-                key: const Key('harness-feishu-tasks'),
-                tooltip: '把飞书只读任务交给 Harness',
-                onSelected: (FeishuHarnessTask task) =>
-                    unawaited(_selectFeishuTask(task)),
-                itemBuilder: (BuildContext context) =>
-                    <PopupMenuEntry<FeishuHarnessTask>>[
-                      for (final FeishuHarnessTask task
-                          in FeishuHarnessTasks.quickTasks)
-                        PopupMenuItem<FeishuHarnessTask>(
-                          key: Key('harness-feishu-${task.id}'),
-                          value: task,
-                          child: Text(task.label),
-                        ),
-                    ],
-                child: const SizedBox(
-                  width: 92,
-                  height: 36,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: <Widget>[
-                      Icon(Icons.forum_outlined, size: 16),
-                      SizedBox(width: 6),
-                      Text('飞书', style: TextStyle(fontSize: 12)),
-                      SizedBox(width: 4),
-                      Icon(Icons.arrow_drop_down, size: 18),
-                    ],
+          Expanded(
+            child: Stack(
+              children: <Widget>[
+                _buildHarnessWebview(),
+                if (_quickActionsExpanded)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: () =>
+                          setState(() => _quickActionsExpanded = false),
+                    ),
                   ),
+                if (_quickActionsExpanded)
+                  Positioned(
+                    right: 8,
+                    top: 50,
+                    child: IgnorePointer(
+                      child: Container(
+                        width: 104,
+                        height: 264,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface
+                              .withValues(alpha: 0.90),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant
+                                .withValues(alpha: 0.55),
+                          ),
+                          boxShadow: const <BoxShadow>[
+                            BoxShadow(
+                              color: Color(0x24000000),
+                              blurRadius: 18,
+                              offset: Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  right: 12,
+                  top: 10,
+                  child: _buildQuickActionsToggle(),
                 ),
-              ),
-            ),
-          ),
-          Positioned(
-            // Keep this VibeKits extension separate from DSH's native
-            // "Session log" action at the far-right edge.
-            right: 170,
-            top: 10,
-            child: StreamBuilder<RustDeskHarnessLinkSnapshot>(
-              stream: RustDeskHarnessLinkStatusHub.changes,
-              initialData: RustDeskHarnessLinkStatusHub.latest,
-              builder:
-                  (
-                    BuildContext context,
-                    AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
-                  ) {
-                    final RustDeskHarnessLinkSnapshot link =
-                        snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
-                    final Color indicator = switch (link.phase) {
-                      RustDeskHarnessLinkPhase.connected => const Color(
-                        0xFF16845B,
+                if (_quickActionsExpanded) ...<Widget>[
+                  Positioned(
+                    right: 12,
+                    top: 54,
+                    child: _buildMcpExposureControl(),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 98,
+                    child: StreamBuilder<McpCapabilitySnapshot>(
+                      stream: McpCapabilityDirectory.instance.changes,
+                      initialData: McpCapabilityDirectory.instance.snapshot,
+                      builder:
+                          (
+                            BuildContext context,
+                            AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+                          ) {
+                            final int count = snapshot.data?.local.length ?? 0;
+                            return _mcpDeviceButton(
+                              key: const Key('harness-local-mcp-devices'),
+                              icon: Icons.memory_outlined,
+                              label: '本机',
+                              tooltip: '本机 MCP：查看同一台电脑上其他进程提供的接口',
+                              count: count,
+                              onTap: () =>
+                                  _showMcpDevices(McpCapabilityTier.local),
+                            );
+                          },
+                    ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 142,
+                    child: StreamBuilder<McpCapabilitySnapshot>(
+                      stream: McpCapabilityDirectory.instance.changes,
+                      initialData: McpCapabilityDirectory.instance.snapshot,
+                      builder:
+                          (
+                            BuildContext context,
+                            AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+                          ) {
+                            final int count = snapshot.data?.lan.length ?? 0;
+                            return _mcpDeviceButton(
+                              key: const Key('harness-lan-mcp-devices'),
+                              icon: Icons.hub_outlined,
+                              label: '局域网',
+                              tooltip: '局域网 MCP：查看同一网络内其他设备提供的接口',
+                              count: count,
+                              onTap: () =>
+                                  _showMcpDevices(McpCapabilityTier.lan),
+                            );
+                          },
+                    ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 186,
+                    child: Material(
+                      color: Theme.of(context).colorScheme.surface
+                          .withValues(alpha: 0.94),
+                      elevation: 2,
+                      borderRadius: BorderRadius.circular(20),
+                      child: PopupMenuButton<FeishuHarnessTask>(
+                        key: const Key('harness-feishu-tasks'),
+                        tooltip: '把飞书只读任务交给 Harness',
+                        onSelected: (FeishuHarnessTask task) =>
+                            unawaited(_selectFeishuTask(task)),
+                        itemBuilder: (BuildContext context) =>
+                            <PopupMenuEntry<FeishuHarnessTask>>[
+                              for (final FeishuHarnessTask task
+                                  in FeishuHarnessTasks.quickTasks)
+                                PopupMenuItem<FeishuHarnessTask>(
+                                  key: Key('harness-feishu-${task.id}'),
+                                  value: task,
+                                  child: Text(task.label),
+                                ),
+                            ],
+                        child: const SizedBox(
+                          width: 92,
+                          height: 36,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: <Widget>[
+                              Icon(Icons.forum_outlined, size: 16),
+                              SizedBox(width: 6),
+                              Text('飞书', style: TextStyle(fontSize: 12)),
+                              SizedBox(width: 4),
+                              Icon(Icons.arrow_drop_down, size: 18),
+                            ],
+                          ),
+                        ),
                       ),
-                      RustDeskHarnessLinkPhase.clientFound ||
-                      RustDeskHarnessLinkPhase.handshaking => const Color(
-                        0xFFE99A22,
-                      ),
-                      RustDeskHarnessLinkPhase.incompatible ||
-                      RustDeskHarnessLinkPhase.stale => Theme.of(
-                        context,
-                      ).colorScheme.error,
-                      RustDeskHarnessLinkPhase.disconnected => Theme.of(
-                        context,
-                      ).colorScheme.outline,
-                    };
-                    return Material(
+                    ),
+                  ),
+                  Positioned(
+                    // Keep this VibeKits extension separate from DSH's native
+                    // "Session log" action at the far-right edge.
+                    right: 12,
+                    top: 274,
+                    child: StreamBuilder<RustDeskHarnessLinkSnapshot>(
+                      stream: RustDeskHarnessLinkStatusHub.changes,
+                      initialData: RustDeskHarnessLinkStatusHub.latest,
+                      builder:
+                          (
+                            BuildContext context,
+                            AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
+                          ) {
+                            final RustDeskHarnessLinkSnapshot link =
+                                snapshot.data ??
+                                RustDeskHarnessLinkStatusHub.latest;
+                            final Color indicator = switch (link.phase) {
+                              RustDeskHarnessLinkPhase.connected => const Color(
+                                0xFF16845B,
+                              ),
+                              RustDeskHarnessLinkPhase.clientFound ||
+                              RustDeskHarnessLinkPhase.handshaking =>
+                                const Color(0xFFE99A22),
+                              RustDeskHarnessLinkPhase.incompatible ||
+                              RustDeskHarnessLinkPhase.stale => Theme.of(
+                                context,
+                              ).colorScheme.error,
+                              RustDeskHarnessLinkPhase.disconnected => Theme.of(
+                                context,
+                              ).colorScheme.outline,
+                            };
+                            return Material(
+                              color: Theme.of(context).colorScheme.surface
+                                  .withValues(alpha: 0.94),
+                              elevation: 2,
+                              borderRadius: BorderRadius.circular(20),
+                              child: InkWell(
+                                key: const Key('harness-remote-share'),
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: _showRemoteShare,
+                                child: Tooltip(
+                                  message: link.message,
+                                  child: SizedBox(
+                                    width: 92,
+                                    height: 36,
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: <Widget>[
+                                        Icon(
+                                          Icons.screen_share_outlined,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        const Text(
+                                          '远程',
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          key: const Key(
+                                            'rustdesk-link-indicator',
+                                          ),
+                                          width: 7,
+                                          height: 7,
+                                          decoration: BoxDecoration(
+                                            color: indicator,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                    ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 230,
+                    child: Material(
                       color: Theme.of(context).colorScheme.surface
                           .withValues(alpha: 0.94),
                       elevation: 2,
                       borderRadius: BorderRadius.circular(20),
                       child: InkWell(
-                        key: const Key('harness-remote-share'),
+                        key: const Key('harness-runtime-logs'),
                         borderRadius: BorderRadius.circular(20),
-                        onTap: _showRemoteShare,
-                        child: Tooltip(
-                          message: link.message,
+                        onTap: _showRuntimeLogs,
+                        child: const Tooltip(
+                          message: '查看 Harness 启动、运行、工具调用和错误日志',
                           child: SizedBox(
                             width: 92,
                             height: 36,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: <Widget>[
-                                Icon(Icons.screen_share_outlined, size: 16),
-                                const SizedBox(width: 6),
-                                const Text(
-                                  '远程',
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                                const SizedBox(width: 6),
-                                Container(
-                                  key: const Key('rustdesk-link-indicator'),
-                                  width: 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: indicator,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
+                                Icon(Icons.receipt_long_outlined, size: 16),
+                                SizedBox(width: 6),
+                                Text('日志', style: TextStyle(fontSize: 12)),
                               ],
                             ),
                           ),
                         ),
                       ),
-                    );
-                  },
-            ),
-          ),
-          Positioned(
-            right: 270,
-            top: 10,
-            child: Material(
-              color: Theme.of(context).colorScheme.surface
-                  .withValues(alpha: 0.94),
-              elevation: 2,
-              borderRadius: BorderRadius.circular(20),
-              child: InkWell(
-                key: const Key('harness-runtime-logs'),
-                borderRadius: BorderRadius.circular(20),
-                onTap: _showRuntimeLogs,
-                child: const Tooltip(
-                  message: '查看 Harness 启动、运行、工具调用和错误日志',
-                  child: SizedBox(
-                    width: 92,
-                    height: 36,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Icon(Icons.receipt_long_outlined, size: 16),
-                        SizedBox(width: 6),
-                        Text('日志', style: TextStyle(fontSize: 12)),
-                      ],
                     ),
                   ),
-                ),
-              ),
+                ],
+              ],
             ),
           ),
+          _buildQuickActionsRail(),
         ],
       ),
     );
@@ -1067,6 +1128,198 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Future<void> _showRuntimeLogs() => showDialog<void>(
     context: context,
     builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
+  );
+
+  Widget _buildQuickActionsRail() => Container(
+    width: 60,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      border: Border(
+        left: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+    ),
+    child: Column(
+      children: <Widget>[
+        const SizedBox(height: 10),
+        _railAction(
+          key: const Key('rail-mcp-exposure'),
+          icon: _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
+          tooltip:
+              '${_mcpIdentity.displayName}\nMCP ${_mcpExposureEnabled ? '已开启' : '已关闭'}，点击切换',
+          active: _mcpExposureEnabled,
+          onPressed: () => unawaited(_setMcpExposure(!_mcpExposureEnabled)),
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+              ) => _railAction(
+                key: const Key('rail-local-mcp'),
+                icon: Icons.memory_outlined,
+                badge: snapshot.data?.local.length ?? 0,
+                tooltip: '本机 MCP 设备：点击查看接口详情',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.local),
+              ),
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+              ) => _railAction(
+                key: const Key('rail-lan-mcp'),
+                icon: Icons.hub_outlined,
+                badge: snapshot.data?.lan.length ?? 0,
+                tooltip: '局域网 MCP 设备：点击查看接口详情',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.lan),
+              ),
+        ),
+        PopupMenuButton<FeishuHarnessTask>(
+          key: const Key('rail-feishu'),
+          tooltip: '飞书任务：查看谁在找我等只读任务',
+          onSelected: (FeishuHarnessTask task) =>
+              unawaited(_selectFeishuTask(task)),
+          itemBuilder: (BuildContext context) =>
+              <PopupMenuEntry<FeishuHarnessTask>>[
+                for (final FeishuHarnessTask task
+                    in FeishuHarnessTasks.quickTasks)
+                  PopupMenuItem<FeishuHarnessTask>(
+                    value: task,
+                    child: Text(task.label),
+                  ),
+              ],
+          child: const SizedBox(
+            width: 52,
+            height: 46,
+            child: Icon(Icons.forum_outlined, size: 20),
+          ),
+        ),
+        _railAction(
+          key: const Key('rail-runtime-logs'),
+          icon: Icons.receipt_long_outlined,
+          tooltip: 'Harness 运行日志：查看启动、工具调用和错误',
+          onPressed: _showRuntimeLogs,
+        ),
+        StreamBuilder<RustDeskHarnessLinkSnapshot>(
+          stream: RustDeskHarnessLinkStatusHub.changes,
+          initialData: RustDeskHarnessLinkStatusHub.latest,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
+              ) {
+                final RustDeskHarnessLinkSnapshot link =
+                    snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                return _railAction(
+                  key: const Key('rail-remote-share'),
+                  icon: Icons.screen_share_outlined,
+                  tooltip: '远程分享：${link.message}',
+                  active: link.phase == RustDeskHarnessLinkPhase.connected,
+                  onPressed: _showRemoteShare,
+                );
+              },
+        ),
+        const Spacer(),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: Tooltip(
+            message: '预留给后续快捷功能',
+            child: Icon(Icons.more_horiz_rounded, size: 18),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _railAction({
+    required Key key,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    int badge = 0,
+    bool active = false,
+  }) => Tooltip(
+    message: tooltip,
+    child: SizedBox(
+      width: 52,
+      height: 46,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          IconButton(
+            key: key,
+            onPressed: onPressed,
+            icon: Icon(
+              icon,
+              size: 20,
+              color: active ? Theme.of(context).colorScheme.primary : null,
+            ),
+          ),
+          if (badge > 0)
+            Positioned(
+              right: 5,
+              top: 4,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  badge > 99 ? '99+' : '$badge',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 9,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildQuickActionsToggle() => Material(
+    color: Theme.of(context).colorScheme.primaryContainer
+        .withValues(alpha: 0.97),
+    elevation: 3,
+    borderRadius: BorderRadius.circular(20),
+    child: InkWell(
+      key: const Key('harness-quick-actions-toggle'),
+      borderRadius: BorderRadius.circular(20),
+      onTap: () =>
+          setState(() => _quickActionsExpanded = !_quickActionsExpanded),
+      child: Tooltip(
+        message: _quickActionsExpanded ? '收起快捷工具' : '展开飞书、日志、远程和 MCP 工具',
+        child: SizedBox(
+          width: 92,
+          height: 36,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(
+                _quickActionsExpanded
+                    ? Icons.close_rounded
+                    : Icons.apps_rounded,
+                size: 18,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _quickActionsExpanded ? '收起' : '工具',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
   );
 
   Widget _buildMcpExposureControl() => Material(
