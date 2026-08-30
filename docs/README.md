@@ -116,6 +116,7 @@
 109. [RustDesk 远程 ADB 隧道开发与验收要求](51_RUSTDESK_REMOTE_ADB_TUNNEL_REQUIREMENTS.md)——复用已认证 P2P/hbbr 会话、固定远端 5037、动态本地端口、lease/heartbeat 与真机验收门禁
 110. [Harness 实时状态 IPC 与 RustDesk 远端交付要求](52_HARNESS_RUNTIME_STATUS_IPC_AND_RUSTDESK_DELIVERY.md)——安全本机 IPC、脱敏快照、订阅/心跳/resync、P2P 只读面板与权限边界
 111. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
+112. [macOS 最近 Windows 功能对齐与实机验收](54_MACOS_RECENT_WINDOWS_FEATURE_PARITY.md)——MCP工具轨、设备身份、三层目录、组播复用、沙箱权限和Mac Release验收步骤
 
 ## 完成定义
 

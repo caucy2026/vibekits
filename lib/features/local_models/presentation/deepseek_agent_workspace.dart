@@ -9,12 +9,18 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
+import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/lan_harness_key_receiver.dart';
+import '../../dev_tools/domain/lan_peer_discovery_service.dart';
+import '../../dev_tools/domain/mcp_capability_directory.dart';
+import '../../dev_tools/domain/mcp_capability_models.dart';
+import '../../dev_tools/domain/mcp_device_identity.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
+import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
 typedef AgentCredentialReader = Future<String?> Function(String key);
@@ -133,6 +139,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _progressExpanded = true;
   int _progressSequence = 0;
   int _conversationEpoch = 0;
+  final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
+  final McpExposurePreferences _mcpExposurePreferences =
+      McpExposurePreferences();
+  bool _mcpExposureEnabled = true;
 
   @override
   void initState() {
@@ -140,7 +150,28 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _adoptExternalPrompt();
     unawaited(_loadSettings());
     unawaited(_restoreConversation(widget.initialWorkspace));
+    unawaited(_initializeMcp());
     _checkEnvironment();
+  }
+
+  Future<void> _initializeMcp() async {
+    try {
+      _mcpExposureEnabled = await _mcpExposurePreferences.loadEnabled();
+      await LanPeerDiscoveryService.instance.start(
+        instanceId: _mcpIdentity.instanceId,
+        name: _mcpIdentity.displayName,
+        hardwareCode: _mcpIdentity.hardwareCode,
+        appId: _mcpIdentity.appId,
+        capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+        exposureEnabled: _mcpExposureEnabled,
+      );
+      await McpCapabilityDirectory.instance.start(
+        appBridge: VibekitsHarnessToolBridge(),
+      );
+      if (mounted) setState(() {});
+    } on Object catch (error) {
+      if (mounted) _show('MCP 局域网发现启动失败：$error');
+    }
   }
 
   @override
@@ -1178,9 +1209,238 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 child: _buildChatWorkbench(environment),
               ),
             ),
+            _buildCrossPlatformToolRail(),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildCrossPlatformToolRail() => Container(
+    width: 60,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      border: Border(left: BorderSide(color: context.vibe.border)),
+    ),
+    child: Column(
+      children: <Widget>[
+        const SizedBox(height: 10),
+        _macRailAction(
+          icon: _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
+          tooltip:
+              '${_mcpIdentity.displayName}\nMCP ${_mcpExposureEnabled ? '已开启' : '已关闭'}，点击切换',
+          active: _mcpExposureEnabled,
+          onPressed: _toggleMcpExposure,
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder: (_, AsyncSnapshot<McpCapabilitySnapshot> snapshot) =>
+              _macRailAction(
+                icon: Icons.memory_outlined,
+                badge: snapshot.data?.local.length ?? 0,
+                tooltip: '本机 MCP 设备',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.local),
+              ),
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder: (_, AsyncSnapshot<McpCapabilitySnapshot> snapshot) =>
+              _macRailAction(
+                icon: Icons.hub_outlined,
+                badge: snapshot.data?.lan.length ?? 0,
+                tooltip: '局域网 MCP 设备',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.lan),
+              ),
+        ),
+        PopupMenuButton<FeishuHarnessTask>(
+          tooltip: '飞书任务',
+          onSelected: (FeishuHarnessTask task) {
+            _composer.text = task.prompt;
+            _composer.selection = TextSelection.collapsed(
+              offset: _composer.text.length,
+            );
+            _composerFocus.requestFocus();
+          },
+          itemBuilder: (_) => <PopupMenuEntry<FeishuHarnessTask>>[
+            for (final FeishuHarnessTask task in FeishuHarnessTasks.quickTasks)
+              PopupMenuItem<FeishuHarnessTask>(
+                value: task,
+                child: Text(task.label),
+              ),
+          ],
+          child: const SizedBox(
+            width: 52,
+            height: 46,
+            child: Icon(Icons.forum_outlined, size: 20),
+          ),
+        ),
+        _macRailAction(
+          icon: Icons.receipt_long_outlined,
+          tooltip: 'Harness 工具调用记录',
+          onPressed: _showRecentToolActivity,
+        ),
+        StreamBuilder<RustDeskHarnessLinkSnapshot>(
+          stream: RustDeskHarnessLinkStatusHub.changes,
+          initialData: RustDeskHarnessLinkStatusHub.latest,
+          builder: (_, AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot) {
+            final RustDeskHarnessLinkSnapshot link =
+                snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+            return _macRailAction(
+              icon: Icons.screen_share_outlined,
+              tooltip: '远程状态：${link.message}',
+              active: link.phase == RustDeskHarnessLinkPhase.connected,
+              onPressed: () => _show('远程状态：${link.message}'),
+            );
+          },
+        ),
+        const Spacer(),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: Tooltip(message: '预留后续功能', child: Icon(Icons.more_horiz)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _macRailAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    int badge = 0,
+    bool active = false,
+  }) => Tooltip(
+    message: tooltip,
+    child: SizedBox(
+      width: 52,
+      height: 46,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          IconButton(
+            onPressed: onPressed,
+            icon: Icon(
+              icon,
+              size: 20,
+              color: active ? Theme.of(context).colorScheme.primary : null,
+            ),
+          ),
+          if (badge > 0)
+            Positioned(
+              right: 4,
+              top: 3,
+              child: CircleAvatar(
+                radius: 8,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                child: Text(
+                  badge > 9 ? '9+' : '$badge',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 8,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> _toggleMcpExposure() async {
+    final bool enabled = !_mcpExposureEnabled;
+    LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
+    setState(() => _mcpExposureEnabled = enabled);
+    try {
+      await _mcpExposurePreferences.saveEnabled(enabled);
+    } on Object catch (error) {
+      LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
+      if (mounted) setState(() => _mcpExposureEnabled = !enabled);
+      if (mounted) _show('保存 MCP 开关失败：$error');
+    }
+  }
+
+  Future<void> _showMcpDevices(McpCapabilityTier tier) async {
+    final McpCapabilitySnapshot snapshot = await McpCapabilityDirectory.instance
+        .snapshotForTask();
+    if (!mounted) return;
+    final List<McpDeviceCapability> devices = tier == McpCapabilityTier.local
+        ? snapshot.local
+        : snapshot.lan;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(
+          tier == McpCapabilityTier.local ? '本机 MCP 设备' : '局域网 MCP 设备',
+        ),
+        content: SizedBox(
+          width: 620,
+          height: 420,
+          child: devices.isEmpty
+              ? const Center(child: Text('尚未发现设备；列表会在设备上线后自动更新。'))
+              : ListView(
+                  children: <Widget>[
+                    for (final McpDeviceCapability device in devices)
+                      ExpansionTile(
+                        title: Text(device.name),
+                        subtitle: Text(
+                          '${device.hardwareCode} · ${device.tools.length} 个接口',
+                        ),
+                        children: <Widget>[
+                          for (final McpToolInterface tool in device.tools)
+                            ListTile(
+                              dense: true,
+                              title: SelectableText(tool.name),
+                              subtitle: Text(tool.description),
+                            ),
+                        ],
+                      ),
+                  ],
+                ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showRecentToolActivity() async {
+    final List<HarnessToolActivity> entries =
+        await HarnessToolActivityStore.load(const <String>{});
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('Harness 工具调用记录'),
+        content: SizedBox(
+          width: 620,
+          height: 420,
+          child: entries.isEmpty
+              ? const Center(child: Text('暂无调用记录'))
+              : ListView(
+                  children: <Widget>[
+                    for (final HarnessToolActivity entry in entries.take(100))
+                      ListTile(
+                        dense: true,
+                        title: Text(entry.toolName),
+                        subtitle: Text(
+                          '${entry.status.name} · ${entry.target}',
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 
