@@ -58,8 +58,10 @@ class LanPeerDiscoveryService {
     this.port = 47831,
     InternetAddress? group,
     Duration? peerTtl,
+    bool? reusePort,
   }) : group = group ?? InternetAddress('239.255.42.99'),
-       peerTtl = peerTtl ?? const Duration(seconds: 12);
+       peerTtl = peerTtl ?? const Duration(seconds: 12),
+       reusePort = reusePort ?? !Platform.isWindows;
 
   static final LanPeerDiscoveryService instance = LanPeerDiscoveryService();
   static const String discoveryProtocol = 'lmcp-discovery';
@@ -68,6 +70,10 @@ class LanPeerDiscoveryService {
   final int port;
   final InternetAddress group;
   final Duration peerTtl;
+
+  /// macOS/BSD require SO_REUSEPORT in addition to SO_REUSEADDR when several
+  /// independent APPs listen on the shared LMCP discovery port.
+  final bool reusePort;
   final Map<String, VibekitsLanPeer> _peers = <String, VibekitsLanPeer>{};
   final StreamController<List<VibekitsLanPeer>> _changes =
       StreamController<List<VibekitsLanPeer>>.broadcast();
@@ -126,6 +132,7 @@ class LanPeerDiscoveryService {
       InternetAddress.anyIPv4,
       port,
       reuseAddress: true,
+      reusePort: reusePort,
     );
     socket.joinMulticast(group);
     socket.listen(_onEvent, onError: (_) => stop());
