@@ -130,6 +130,7 @@ class McpCapabilityDirectory {
           tools: peer.tools,
           lastUpdated: peer.lastSeen,
           catalogRevision: peer.capabilityDigest,
+          hardwareCode: peer.hardwareCode,
         ),
     ];
     if (_signature(next) != _signature(_lan)) {
@@ -163,6 +164,7 @@ class McpCapabilityDirectory {
       lastUpdated:
           DateTime.tryParse('${json['updatedAt'] ?? ''}') ?? DateTime.now(),
       catalogRevision: '${json['catalogRevision'] ?? ''}',
+      hardwareCode: '${json['hardwareCode'] ?? ''}',
     );
   }
 
@@ -176,6 +178,7 @@ class McpCapabilityDirectory {
         for (final McpDeviceCapability device in devices)
           <Object?>[
             device.id,
+            device.hardwareCode,
             device.catalogRevision,
             device.endpoint,
             for (final McpToolInterface tool in device.tools) tool.toJson(),

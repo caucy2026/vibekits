@@ -16,6 +16,7 @@ class VibekitsLanPeer {
     required this.protocolVersion,
     required this.capabilityDigest,
     required this.lastSeen,
+    this.hardwareCode = '',
     this.tools = const <McpToolInterface>[],
   });
 
@@ -29,6 +30,7 @@ class VibekitsLanPeer {
   final int protocolVersion;
   final String capabilityDigest;
   final DateTime lastSeen;
+  final String hardwareCode;
   final List<McpToolInterface> tools;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -42,11 +44,12 @@ class VibekitsLanPeer {
     'protocolVersion': protocolVersion,
     'capabilityDigest': capabilityDigest,
     'lastSeen': lastSeen.toUtc().toIso8601String(),
+    'hardwareCode': hardwareCode,
     'tools': <Map<String, Object?>>[
       for (final McpToolInterface tool in tools) tool.toJson(),
     ],
-    'authorized': false,
-    'nextAction': '在主机端核对SSH host key并批准该设备公钥后才能调用',
+    'authorized': true,
+    'nextAction': '普通 MCP 工具可自动读取目录并调用；远程 Harness 任务入口另行审批',
   };
 }
 
@@ -76,10 +79,13 @@ class LanPeerDiscoveryService {
   String _appId = '';
   String _appVersion = '';
   String _capabilityDigest = '';
+  String _hardwareCode = '';
   int _sshPort = 22;
+  bool _exposureEnabled = true;
 
   Stream<List<VibekitsLanPeer>> get changes => _changes.stream;
   bool get running => _socket != null;
+  bool get exposureEnabled => _exposureEnabled;
 
   List<VibekitsLanPeer> get peers {
     final List<VibekitsLanPeer> result = _peers.values.toList()
@@ -96,6 +102,8 @@ class LanPeerDiscoveryService {
     String appId = 'com.vibekits.desktop',
     String appVersion = '1.9.0',
     int sshPort = 22,
+    bool exposureEnabled = true,
+    String hardwareCode = '',
   }) async {
     if (_socket != null) return;
     _instanceId = _safe(instanceId, 80);
@@ -103,6 +111,7 @@ class LanPeerDiscoveryService {
     _appId = _safe(appId, 120);
     _appVersion = _safe(appVersion, 40);
     _capabilityDigest = _safe(capabilityDigest, 128);
+    _hardwareCode = _safe(hardwareCode, 32);
     if (_instanceId.isEmpty ||
         _name.isEmpty ||
         _appId.isEmpty ||
@@ -112,6 +121,7 @@ class LanPeerDiscoveryService {
       throw const FormatException('局域网节点发现参数无效');
     }
     _sshPort = sshPort;
+    _exposureEnabled = exposureEnabled;
     final RawDatagramSocket socket = await RawDatagramSocket.bind(
       InternetAddress.anyIPv4,
       port,
@@ -120,12 +130,18 @@ class LanPeerDiscoveryService {
     socket.joinMulticast(group);
     socket.listen(_onEvent, onError: (_) => stop());
     _socket = socket;
-    _announce();
-    _announceTimer = Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => _announce(),
-    );
+    if (_exposureEnabled) _announce();
+    _announceTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (_exposureEnabled) _announce();
+    });
     _pruneTimer = Timer.periodic(const Duration(seconds: 4), (_) => _prune());
+  }
+
+  void setExposureEnabled(bool enabled) {
+    if (_exposureEnabled == enabled) return;
+    if (!enabled) _announce(messageType: 'goodbye');
+    _exposureEnabled = enabled;
+    if (enabled) _announce();
   }
 
   Future<void> stop() async {
@@ -139,18 +155,20 @@ class LanPeerDiscoveryService {
     _emit();
   }
 
-  void _announce() {
+  void _announce({String messageType = 'announce'}) {
     final RawDatagramSocket? socket = _socket;
     if (socket == null) return;
     final List<int> payload = utf8.encode(
       jsonEncode(<String, Object?>{
         'protocol': discoveryProtocol,
         'protocolVersion': '1.0',
-        'messageType': 'announce',
+        'messageType': messageType,
         'instanceId': _instanceId,
+        'hardwareCode': _hardwareCode,
         'app': <String, Object?>{
           'id': _appId,
-          'name': _name,
+          'name': _name.split('@').first,
+          'displayName': _name,
           'version': _appVersion,
         },
         'endpoint': <String, Object?>{
@@ -162,15 +180,15 @@ class LanPeerDiscoveryService {
           'capabilityDigest': _capabilityDigest,
         },
         'security': <String, Object?>{
-          'pairingRequired': true,
+          'pairingRequired': false,
           'authMethods': <String>['ssh-ed25519'],
-          'controlApproval': 'per-tool',
+          'controlApproval': 'remote-harness-only',
         },
         'ttlSeconds': peerTtl.inSeconds,
         'sentAt': DateTime.now().toUtc().toIso8601String(),
       }),
     );
-    if (payload.length <= 1024) socket.send(payload, group, port);
+    if (payload.length <= 1200) socket.send(payload, group, port);
   }
 
   void _onEvent(RawSocketEvent event) {
@@ -178,7 +196,7 @@ class LanPeerDiscoveryService {
     Datagram? datagram;
     while ((datagram = _socket?.receive()) != null) {
       final Datagram packet = datagram!;
-      if (!_privateIpv4(packet.address.address) || packet.data.length > 1024) {
+      if (!_privateIpv4(packet.address.address) || packet.data.length > 1200) {
         continue;
       }
       try {
@@ -187,7 +205,8 @@ class LanPeerDiscoveryService {
         final bool legacy = decoded['kind'] == 'vibekits.mcp.peer';
         if (!legacy &&
             (decoded['protocol'] != discoveryProtocol ||
-                decoded['messageType'] != 'announce')) {
+                decoded['messageType'] != 'announce' &&
+                    decoded['messageType'] != 'goodbye')) {
           continue;
         }
         final Map<Object?, Object?> app = decoded['app'] is Map
@@ -208,8 +227,15 @@ class LanPeerDiscoveryService {
               ].where((McpToolInterface tool) => tool.name.isNotEmpty).toList()
             : const <McpToolInterface>[];
         final String id = _safe('${decoded['instanceId'] ?? ''}', 80);
+        if (decoded['messageType'] == 'goodbye') {
+          if (id.isNotEmpty) {
+            _peers.remove(id);
+            _emit();
+          }
+          continue;
+        }
         final String name = _safe(
-          '${legacy ? decoded['name'] : app['name'] ?? ''}',
+          '${legacy ? decoded['name'] : app['displayName'] ?? app['name'] ?? ''}',
           80,
         );
         final String digest = _safe(
@@ -250,6 +276,7 @@ class LanPeerDiscoveryService {
                     0,
           capabilityDigest: digest,
           lastSeen: DateTime.now(),
+          hardwareCode: _safe('${decoded['hardwareCode'] ?? ''}', 32),
           tools: tools,
         );
         _emit();

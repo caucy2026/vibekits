@@ -17,6 +17,7 @@ import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/lan_peer_discovery_service.dart';
 import '../../dev_tools/domain/mcp_capability_directory.dart';
 import '../../dev_tools/domain/mcp_capability_models.dart';
+import '../../dev_tools/domain/mcp_device_identity.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -93,6 +94,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   HarnessAgentPermissionMode _permissionMode =
       HarnessAgentPermissionMode.assisted;
   final Set<String> _deletingSessionIds = <String>{};
+  final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
+  final McpExposurePreferences _mcpExposurePreferences =
+      McpExposurePreferences();
+  bool _mcpExposureEnabled = true;
 
   @override
   void initState() {
@@ -116,10 +121,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
+      _mcpExposureEnabled = await _mcpExposurePreferences.loadEnabled();
       await LanPeerDiscoveryService.instance.start(
-        instanceId: '${Platform.localHostname}-$pid',
-        name: Platform.localHostname,
+        instanceId: _mcpIdentity.instanceId,
+        name: _mcpIdentity.displayName,
         capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+        appId: _mcpIdentity.appId,
+        hardwareCode: _mcpIdentity.hardwareCode,
+        exposureEnabled: _mcpExposureEnabled,
       );
       _permissionMode = await HarnessAgentPreferencesStore.loadPermissionMode();
       final Future<void> webviewInitialization = _webview.initialize();
@@ -756,6 +765,43 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       return Stack(
         children: <Widget>[
           _buildHarnessWebview(),
+          Positioned(
+            left: 12,
+            top: 8,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface
+                  .withValues(alpha: 0.96),
+              elevation: 2,
+              borderRadius: BorderRadius.circular(22),
+              child: Tooltip(
+                message: _mcpExposureEnabled
+                    ? '已对本机和局域网发布 MCP；关闭后其他 VibeKits 会立即移除本设备'
+                    : 'MCP 对外发布已关闭；本机仍会继续发现其他设备',
+                child: SizedBox(
+                  height: 40,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const SizedBox(width: 12),
+                      const Icon(Icons.api_outlined, size: 17),
+                      const SizedBox(width: 7),
+                      Text(
+                        _mcpIdentity.displayName,
+                        key: const Key('harness-mcp-device-name'),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      Switch(
+                        key: const Key('harness-mcp-exposure-switch'),
+                        value: _mcpExposureEnabled,
+                        onChanged: (bool enabled) =>
+                            unawaited(_setMcpExposure(enabled)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           const Positioned(
             left: 0,
             right: 0,
@@ -1056,6 +1102,21 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
   );
 
+  Future<void> _setMcpExposure(bool enabled) async {
+    if (_mcpExposureEnabled == enabled) return;
+    setState(() => _mcpExposureEnabled = enabled);
+    LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
+    try {
+      await _mcpExposurePreferences.saveEnabled(enabled);
+    } on Object catch (error) {
+      if (!mounted) return;
+      LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
+      setState(() => _mcpExposureEnabled = !enabled);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('保存 MCP 开关失败：$error')));
+    }
+  }
+
   Widget _mcpDeviceButton({
     required Key key,
     required IconData icon,
@@ -1188,6 +1249,7 @@ class _McpDeviceDetailsDialog extends StatelessWidget {
         children: <Widget>[
           SelectableText(
             '实例：${device.id}\n应用：${device.appId} ${device.appVersion}\n'
+            '硬件识别码：${device.hardwareCode.isEmpty ? '未提供' : device.hardwareCode}\n'
             '连接：${device.transport} · ${device.endpoint}\n'
             '目录版本：${device.catalogRevision.isEmpty ? '未提供' : device.catalogRevision}',
           ),

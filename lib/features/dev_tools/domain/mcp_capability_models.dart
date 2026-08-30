@@ -48,6 +48,7 @@ class McpDeviceCapability {
     required this.lastUpdated,
     this.online = true,
     this.catalogRevision = '',
+    this.hardwareCode = '',
   });
 
   final String id;
@@ -61,6 +62,7 @@ class McpDeviceCapability {
   final DateTime lastUpdated;
   final bool online;
   final String catalogRevision;
+  final String hardwareCode;
 }
 
 class McpCapabilitySnapshot {

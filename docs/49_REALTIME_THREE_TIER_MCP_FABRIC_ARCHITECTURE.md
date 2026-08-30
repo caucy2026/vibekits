@@ -4,6 +4,8 @@
 状态：取代此前“人工配对后才能读取 MCP 列表”的设计  
 核心目标：VibeKits 启动后无感、自动、实时地维护本 APP、本机进程和本局域网三个 MCP 工具列表，再由 Harness 根据实时能力完成任务。
 
+第三方 APP 必须遵循的设备命名、硬件识别码、MCP 开关、上线/离线和远程等价调用要求，以 [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md) 为唯一实施入口。
+
 ## 1. 用户期望
 
 用户打开 VibeKits 后不需要输入 IP、导入公钥、手工配对、添加 MCP 配置或点击刷新。系统自动完成：

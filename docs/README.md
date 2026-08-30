@@ -112,6 +112,7 @@
 105. [LMCP/1 第三方程序接入包](47_LMCP_THIRD_PARTY_INTEGRATION_KIT.md)——应用清单、Sidecar、合规检查、旧程序接入与共同完成标准
 106. [LMCP/1 应用广播与协同接入实施指南](48_LMCP_APP_BROADCAST_IMPLEMENTATION_GUIDE.md)——交付其他APP团队的单一入口架构、报文、授权、工具、长任务、路由和验收规范
 107. [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)——本APP、本机、局域网三个动态列表、无感目录配对、实时能力图和自动任务路由
+108. [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)——第三方APP统一命名、硬件识别码、开关状态机、上下线广播、标准MCP接口和远程等价调用验收
 
 ## 完成定义
 
