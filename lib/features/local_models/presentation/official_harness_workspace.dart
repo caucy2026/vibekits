@@ -765,43 +765,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       return Stack(
         children: <Widget>[
           _buildHarnessWebview(),
-          Positioned(
-            left: 12,
-            top: 8,
-            child: Material(
-              color: Theme.of(context).colorScheme.surface
-                  .withValues(alpha: 0.96),
-              elevation: 2,
-              borderRadius: BorderRadius.circular(22),
-              child: Tooltip(
-                message: _mcpExposureEnabled
-                    ? '已对本机和局域网发布 MCP；关闭后其他 VibeKits 会立即移除本设备'
-                    : 'MCP 对外发布已关闭；本机仍会继续发现其他设备',
-                child: SizedBox(
-                  height: 40,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      const SizedBox(width: 12),
-                      const Icon(Icons.api_outlined, size: 17),
-                      const SizedBox(width: 7),
-                      Text(
-                        _mcpIdentity.displayName,
-                        key: const Key('harness-mcp-device-name'),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      Switch(
-                        key: const Key('harness-mcp-exposure-switch'),
-                        value: _mcpExposureEnabled,
-                        onChanged: (bool enabled) =>
-                            unawaited(_setMcpExposure(enabled)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
+          Positioned(right: 442, top: 54, child: _buildMcpExposureControl()),
           const Positioned(
             left: 0,
             right: 0,
@@ -905,9 +869,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       child: Stack(
         children: <Widget>[
           _buildHarnessWebview(),
+          Positioned(right: 442, top: 54, child: _buildMcpExposureControl()),
           Positioned(
-            right: 674,
-            top: 10,
+            right: 306,
+            top: 56,
             child: StreamBuilder<McpCapabilitySnapshot>(
               stream: McpCapabilityDirectory.instance.changes,
               initialData: McpCapabilityDirectory.instance.snapshot,
@@ -928,8 +893,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             ),
           ),
           Positioned(
-            right: 538,
-            top: 10,
+            right: 170,
+            top: 56,
             child: StreamBuilder<McpCapabilitySnapshot>(
               stream: McpCapabilityDirectory.instance.changes,
               initialData: McpCapabilityDirectory.instance.snapshot,
@@ -1100,6 +1065,41 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Future<void> _showRuntimeLogs() => showDialog<void>(
     context: context,
     builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
+  );
+
+  Widget _buildMcpExposureControl() => Material(
+    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+    elevation: 2,
+    borderRadius: BorderRadius.circular(22),
+    child: Tooltip(
+      message:
+          '${_mcpIdentity.displayName}\n${_mcpExposureEnabled ? '已发布 MCP；关闭后其他 VibeKits 会立即移除本设备' : 'MCP 发布已关闭；本机仍继续发现其他设备'}',
+      child: SizedBox(
+        width: 260,
+        height: 40,
+        child: Row(
+          children: <Widget>[
+            const SizedBox(width: 12),
+            const Icon(Icons.api_outlined, size: 17),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                _mcpIdentity.displayName,
+                key: const Key('harness-mcp-device-name'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            Switch(
+              key: const Key('harness-mcp-exposure-switch'),
+              value: _mcpExposureEnabled,
+              onChanged: (bool enabled) => unawaited(_setMcpExposure(enabled)),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 
   Future<void> _setMcpExposure(bool enabled) async {
