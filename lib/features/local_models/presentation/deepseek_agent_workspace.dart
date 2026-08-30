@@ -1354,6 +1354,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _toggleMcpExposure() async {
     final bool enabled = !_mcpExposureEnabled;
+    if (enabled && !await _confirmMcpExposureRisk()) return;
     LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
     setState(() => _mcpExposureEnabled = enabled);
     try {
@@ -1364,6 +1365,37 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       if (mounted) _show('保存 MCP 开关失败：$error');
     }
   }
+
+  Future<bool> _confirmMcpExposureRisk() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('开启本机 MCP？'),
+          content: const SizedBox(
+            width: 520,
+            child: Text(
+              '开启后，本 APP 会在本机和局域网发布设备名称、硬件识别码、'
+              '版本、连接端点和 MCP 工具清单。\n\n'
+              '被发现的 Harness 可以读取工具参数并调用普通 MCP 工具，'
+              '工具可能按其功能读取数据、写入文件或控制设备，后续不再逐次弹窗。'
+              '远程 Harness 任务控制仍使用独立的授权流程。\n\n'
+              '请仅在可信的本机和局域网中开启。关闭后会发送 goodbye，'
+              '并从其他 VibeKits 的动态列表中消失。',
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('确认开启'),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Future<void> _showMcpDevices(McpCapabilityTier tier) async {
     final McpCapabilitySnapshot snapshot = await McpCapabilityDirectory.instance

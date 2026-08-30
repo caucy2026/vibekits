@@ -4,7 +4,7 @@
 
 ## 1. 本次进入 macOS 的能力
 
-- Harness 右侧 60px 纵向工具轨；所有能力和设置入口统一为小图标，悬浮显示全名。
+- Harness 右侧 60px 纵向工具轨；去掉“工具”总按钮，MCP 开关、能力和设置入口统一为小图标，悬浮显示全名。
 - VibeKits 设备名称、10 位硬件识别码和 MCP 开关持久化。
 - 本 APP、本机进程、局域网三个实时 MCP 目录。
 - `SO_REUSEADDR + SO_REUSEPORT` 多 APP 同端口 LMCP 发现。
@@ -46,14 +46,15 @@ flutter build macos --release
 
 1. 打开智能体页面，确认右侧出现 60px 工具轨。
 2. 悬浮六个图标，确认显示完整名称和状态。
-3. 点击 MCP 图标关闭：另一台 VibeKits 应立即收到 `goodbye` 并移除 Mac。
-4. 再次打开：4 秒内出现 `VibeKits@<Mac名称>-<硬件码>`。
-5. 同一台 Mac 同时运行两个测试 APP，确认都能绑定 UDP 47831，没有 `Address already in use`。
-6. 点击本机/局域网图标，确认设备数量、硬件码和工具接口可见。
-7. 修改对方 `catalogRevision`，确认列表自动更新。
-8. 选择飞书快捷任务，确认文本进入输入框但不会未经任务执行自动发送消息。
-9. 打开调用记录和远程状态，确认没有 Windows 路径或 PowerShell 依赖。
-10. 在 Release 签名包重复 3-6；只验证 Debug 不算完成。
+3. MCP 关闭时点击图标：应先显示权限和风险说明；取消后不发布，点击“确认开启”后才广播和允许普通 MCP 调用。
+4. 再点击 MCP 图标关闭：另一台 VibeKits 应立即收到 `goodbye` 并移除 Mac。
+5. 再次打开：4 秒内出现 `VibeKits@<Mac名称>-<硬件码>`。
+6. 同一台 Mac 同时运行两个测试 APP，确认都能绑定 UDP 47831，没有 `Address already in use`。
+7. 点击本机/局域网图标，确认设备数量、硬件码和工具接口可见。
+8. 修改对方 `catalogRevision`，确认列表自动更新。
+9. 选择飞书快捷任务，确认文本进入输入框但不会未经任务执行自动发送消息。
+10. 打开调用记录和远程状态，确认没有 Windows 路径或 PowerShell 依赖。
+11. 在 Release 签名包重复 3-7；只验证 Debug 不算完成。
 
 ## 5. 当前验证边界
 

@@ -18,7 +18,7 @@
 KEMI-PAD@PAD-53-A18F09C27B   MCP [开]
 ```
 
-- 开：启动 MCP 服务、发布 `announce`、响应 `initialize/tools/list/tools/call`；VibeKits 自动出现该设备。
+- 开：用户首先确认权限与风险说明，然后启动 MCP 服务、发布 `announce`、响应 `initialize/tools/list/tools/call`；VibeKits 自动出现该设备。取消确认不得改变开关、持久化状态或网络状态。
 - 关：先发布 `goodbye`，再停止接受新调用并关闭服务；VibeKits 立即移除该设备。
 - APP 异常退出或断电：没有心跳后最多 12 秒从列表移除。
 - 开关只控制“本 APP 是否对外提供 MCP”，不能关闭 APP 自己发现其他 MCP 的能力。
@@ -58,7 +58,7 @@ ON
 
 要求：
 
-1. 开关状态持久化，APP 重启恢复上次选择。
+1. 开关状态持久化，APP 重启恢复上次选择。由关闭切换为开启时必须先显示一次确认，说明对外发布的身份/端点/工具信息、工具可能拥有的读写与设备控制能力，以及普通 MCP 调用不再逐项弹窗。
 2. 只有端点真正监听成功后才能显示“开”。
 3. `goodbye` 至少发送一次；丢包时仍由 12 秒 TTL 兜底。
 4. 关闭后 `tools/call` 必须拒绝新请求，不能只隐藏 UI。
@@ -356,6 +356,6 @@ lmcp://<instanceId>/<tool.name>
 - 实时三层目录：`McpCapabilityDirectory`
 - 界面：Harness 顶部设备名称、MCP 开关、本机 MCP 和局域网 MCP 列表
 
-VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；MCP 开关、本机 MCP、局域网 MCP、飞书、日志、远程操作和设置全部使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、切换 MCP、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
+VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化并广播；关闭可立即执行。这是对外暴露边界的一次确认，不是普通 MCP 工具的逐次审批；远程 Harness 任务控制仍独立审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、切换 MCP、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
 本文是第三方 APP 的实现入口；总体能力图、权限和任务路由见 [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)。
