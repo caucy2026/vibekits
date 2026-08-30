@@ -10,7 +10,7 @@ void main() {
     expect(RustDeskHarnessLinkStatusHub.latest.connected, isFalse);
   });
 
-  test('只有兼容握手才进入已连接', () {
+  test('兼容握手后仍需订阅才进入已连接', () {
     expect(
       RustDeskHarnessLinkStatusHub.acceptHandshake(<String, Object?>{
         'protocol': RustDeskHarnessLinkStatusHub.protocol,
@@ -19,8 +19,21 @@ void main() {
       }),
       isTrue,
     );
-    expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
+    expect(RustDeskHarnessLinkStatusHub.latest.connected, isFalse);
+    expect(
+      RustDeskHarnessLinkStatusHub.latest.phase,
+      RustDeskHarnessLinkPhase.handshaking,
+    );
     expect(RustDeskHarnessLinkStatusHub.latest.protocolVersion, 1);
+    expect(
+      RustDeskHarnessLinkStatusHub.acceptSubscription(
+        peerId: 'kemi-host-01',
+        version: 1,
+        heartbeatInterval: const Duration(seconds: 2),
+      ),
+      isTrue,
+    );
+    expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
   });
 
   test('协议不兼容时拒绝连接', () {
@@ -44,6 +57,11 @@ void main() {
       'versions': <int>[1],
       'peerId': 'kemi-host-03',
     });
+    RustDeskHarnessLinkStatusHub.acceptSubscription(
+      peerId: 'kemi-host-03',
+      version: 1,
+      heartbeatInterval: const Duration(seconds: 2),
+    );
     expect(
       RustDeskHarnessLinkStatusHub.acceptHeartbeat(
         peerId: 'another-host',

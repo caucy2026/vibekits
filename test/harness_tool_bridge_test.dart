@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:vibekits/features/dev_tools/domain/adb_server_endpoint.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
@@ -491,6 +492,98 @@ void main() {
       'getprop',
       'ro.product.model',
     ]);
+  });
+
+  test('Harness 对远端 ADB 的注入 runner 也统一添加 server 前缀', () async {
+    final List<List<String>> calls = <List<String>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: r'C:\tools\adb.exe',
+      adbEndpoint: AdbServerEndpoint.rustDesk(
+        host: '127.0.0.1',
+        port: 15037,
+        peerId: 'peer-remote',
+        sessionId: 'session-remote',
+        leaseId: 'lease-remote',
+      ),
+      adbRunner: (String executable, List<String> arguments) async {
+        calls.add(arguments);
+        return const AdbCommandResult(
+          exitCode: 0,
+          stdout: 'Pixel_9',
+          stderr: '',
+        );
+      },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.adbCommandId,
+      arguments: <String, Object?>{
+        'serial': 'remote-usb',
+        'arguments': <String>['shell', 'getprop', 'ro.product.model'],
+      },
+      approve: (_) async => true,
+    );
+
+    expect(calls.single, <String>[
+      '-H',
+      '127.0.0.1',
+      '-P',
+      '15037',
+      '-s',
+      'remote-usb',
+      'shell',
+      'getprop',
+      'ro.product.model',
+    ]);
+    expect(result.data?['adbServer'], <String, Object?>{
+      'kind': 'rustDesk',
+      'displayName': 'KEMI 远程办公 · peer-remote',
+      'host': '127.0.0.1',
+      'port': 15037,
+      'peerId': 'peer-remote',
+      'sessionId': 'session-remote',
+    });
+  });
+
+  test('Harness 默认跟随 ADB 工作区发布的远端 server endpoint', () async {
+    final AdbServerEndpoint endpoint = AdbServerEndpoint.rustDesk(
+      host: '127.0.0.1',
+      port: 16037,
+      peerId: 'peer-shared',
+      leaseId: 'lease-shared',
+    );
+    AdbServerEndpointHub.publish(endpoint);
+    addTearDown(() => AdbServerEndpointHub.clearLease(endpoint.leaseId));
+    final List<String> captured = <String>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: r'C:\tools\adb.exe',
+      adbRunner: (String executable, List<String> arguments) async {
+        captured.addAll(arguments);
+        return const AdbCommandResult(
+          exitCode: 0,
+          stdout: 'Pixel shared',
+          stderr: '',
+        );
+      },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.adbCommandId,
+      arguments: <String, Object?>{
+        'serial': 'remote-usb',
+        'arguments': <String>['shell', 'getprop', 'ro.product.model'],
+      },
+      approve: (_) async => true,
+    );
+
+    expect(result.ok, isTrue);
+    expect(captured.take(4).toList(), <String>[
+      '-H',
+      '127.0.0.1',
+      '-P',
+      '16037',
+    ]);
+    expect(result.data?['adbServer'], endpoint.toAuditFields());
   });
 
   test('Harness 通过六个语义 ADB 工具完成常用工作流', () async {

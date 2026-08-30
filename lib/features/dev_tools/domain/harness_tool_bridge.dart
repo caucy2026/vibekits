@@ -11,6 +11,7 @@ import '../../cleaner/domain/software_storage_analyzer.dart';
 import '../../cleaner/domain/system_drive_analysis_runner.dart';
 import '../../cleaner/domain/system_drive_analyzer.dart';
 import '../../cleaner/domain/system_drive_insights.dart';
+import 'adb_server_endpoint.dart';
 import 'adb_service.dart';
 import 'audio_harness_service.dart';
 import 'api_request_service.dart';
@@ -171,6 +172,7 @@ class VibekitsHarnessToolBridge {
         const <String, HarnessToolHandler>{},
     AdbCommandRunner? adbRunner,
     String? adbExecutable,
+    AdbServerEndpoint? adbEndpoint,
     HarnessToolActivityRecorder? activityRecorder,
     HarnessRemoteProfileLoader? remoteProfileLoader,
     HarnessCredentialReader? credentialReader,
@@ -193,6 +195,7 @@ class VibekitsHarnessToolBridge {
     handlers,
     adbRunner,
     adbExecutable,
+    adbEndpoint,
     activityRecorder,
     remoteProfileLoader,
     credentialReader,
@@ -217,6 +220,7 @@ class VibekitsHarnessToolBridge {
     this._customHandlers,
     this._adbRunner,
     this._adbExecutable,
+    this._adbEndpoint,
     this._activityRecorder,
     this._remoteProfileLoader,
     this._credentialReader,
@@ -355,6 +359,9 @@ class VibekitsHarnessToolBridge {
   final Map<String, HarnessToolHandler> _customHandlers;
   final AdbCommandRunner? _adbRunner;
   final String? _adbExecutable;
+  final AdbServerEndpoint? _adbEndpoint;
+  AdbServerEndpoint get _activeAdbEndpoint =>
+      _adbEndpoint ?? AdbServerEndpointHub.latest;
   final HarnessToolActivityRecorder? _activityRecorder;
   final HarnessRemoteProfileLoader? _remoteProfileLoader;
   final HarnessCredentialReader? _credentialReader;
@@ -2468,6 +2475,7 @@ class VibekitsHarnessToolBridge {
     final AdbSnapshot snapshot = await AdbService.discoverAndList(
       preferredExecutable: _adbExecutable ?? AdbService.bundledExecutablePath(),
       runner: _adbRunner,
+      endpoint: _activeAdbEndpoint,
       listAudit: AdbCommandAudit(
         toolId: adbListDevicesId,
         toolName: '列出 ADB 设备',
@@ -2477,6 +2485,7 @@ class VibekitsHarnessToolBridge {
     );
     return <String, Object?>{
       'adbVersion': snapshot.installation.version,
+      'adbServer': snapshot.endpoint.toAuditFields(),
       'devices': <Map<String, Object?>>[
         for (final AdbDevice device in snapshot.devices)
           <String, Object?>{
@@ -2484,6 +2493,7 @@ class VibekitsHarnessToolBridge {
             'state': device.state.name,
             if (device.model != null) 'model': device.model,
             if (device.product != null) 'product': device.product,
+            'source': device.source.toJson(),
           },
       ],
     };
@@ -2500,6 +2510,7 @@ class VibekitsHarnessToolBridge {
       executable,
       address,
       runner: _adbRunner,
+      endpoint: _activeAdbEndpoint,
       audit: AdbCommandAudit(
         toolId: adbConnectId,
         toolName: '连接 ADB 设备',
@@ -2511,6 +2522,7 @@ class VibekitsHarnessToolBridge {
     final List<AdbDevice> devices = await AdbService.listDevices(
       executable,
       runner: _adbRunner,
+      endpoint: _activeAdbEndpoint,
     );
     final AdbDevice? connected = devices
         .where((AdbDevice device) => device.serial == target)
@@ -2528,6 +2540,7 @@ class VibekitsHarnessToolBridge {
           if (connected.device != null) 'device': connected.device,
           if (connected.transportId != null)
             'transportId': connected.transportId,
+          'source': connected.source.toJson(),
         },
     };
   }
@@ -2557,6 +2570,7 @@ class VibekitsHarnessToolBridge {
         ? await AdbService.runCommand(
             executable,
             adbArguments,
+            endpoint: _activeAdbEndpoint,
             audit: AdbCommandAudit(
               toolId: adbCommandId,
               toolName: '执行 ADB 命令',
@@ -2564,7 +2578,10 @@ class VibekitsHarnessToolBridge {
               recorder: _activityRecorder,
             ),
           )
-        : await _adbRunner(executable, adbArguments);
+        : await _adbRunner(
+            executable,
+            _activeAdbEndpoint.applyTo(adbArguments),
+          );
     if (result.exitCode != 0) {
       throw StateError(
         result.stderr.trim().isEmpty
@@ -2576,6 +2593,7 @@ class VibekitsHarnessToolBridge {
       'exitCode': result.exitCode,
       'stdout': result.stdout,
       'stderr': result.stderr,
+      'adbServer': _activeAdbEndpoint.toAuditFields(),
     };
   }
 
@@ -2716,13 +2734,17 @@ class VibekitsHarnessToolBridge {
         ? await AdbService.runCommand(
             executable,
             adbArguments,
+            endpoint: _activeAdbEndpoint,
             timeout: switch (command.first) {
               'install' => const Duration(minutes: 5),
               'push' || 'pull' => const Duration(minutes: 2),
               _ => const Duration(seconds: 30),
             },
           )
-        : await _adbRunner(executable, adbArguments);
+        : await _adbRunner(
+            executable,
+            _activeAdbEndpoint.applyTo(adbArguments),
+          );
     if (result.exitCode != 0) {
       throw StateError(
         result.stderr.trim().isEmpty
@@ -2735,6 +2757,7 @@ class VibekitsHarnessToolBridge {
       'stdout': result.stdout,
       'stderr': result.stderr,
       'arguments': command,
+      'adbServer': _activeAdbEndpoint.toAuditFields(),
     };
   }
 
@@ -3040,11 +3063,15 @@ class VibekitsHarnessToolBridge {
     final String executable =
         _adbExecutable ?? AdbService.bundledExecutablePath();
     if (_adbRunner != null) {
-      return _adbRunner(executable, <String>['-s', serial, 'get-state']);
+      return _adbRunner(
+        executable,
+        _activeAdbEndpoint.applyTo(<String>['-s', serial, 'get-state']),
+      );
     }
     return AdbService.runCommand(
       executable,
       <String>['-s', serial, 'get-state'],
+      endpoint: _activeAdbEndpoint,
       timeout: const Duration(seconds: 5),
       audit: AdbCommandAudit(
         toolId: adbSessionStatusId,

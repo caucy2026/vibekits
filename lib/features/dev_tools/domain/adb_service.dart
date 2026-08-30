@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'adb_server_endpoint.dart';
 import 'harness_tool_activity_store.dart';
 
 enum AdbDeviceState { device, unauthorized, offline, unknown }
@@ -13,6 +14,7 @@ class AdbDevice {
     this.product,
     this.device,
     this.transportId,
+    this.source = const AdbDeviceSource(endpoint: AdbServerEndpoint.local()),
   });
 
   final String serial;
@@ -21,8 +23,19 @@ class AdbDevice {
   final String? product;
   final String? device;
   final String? transportId;
+  final AdbDeviceSource source;
 
   bool get ready => state == AdbDeviceState.device;
+
+  AdbDevice withSource(AdbServerEndpoint endpoint) => AdbDevice(
+    serial: serial,
+    state: state,
+    model: model,
+    product: product,
+    device: device,
+    transportId: transportId,
+    source: AdbDeviceSource(endpoint: endpoint),
+  );
 }
 
 class AdbInstallation {
@@ -33,10 +46,23 @@ class AdbInstallation {
 }
 
 class AdbSnapshot {
-  const AdbSnapshot({required this.installation, required this.devices});
+  const AdbSnapshot({
+    required this.installation,
+    required this.devices,
+    this.endpoint = const AdbServerEndpoint.local(),
+  });
 
   final AdbInstallation installation;
   final List<AdbDevice> devices;
+  final AdbServerEndpoint endpoint;
+
+  AdbSnapshot withEndpoint(AdbServerEndpoint value) => AdbSnapshot(
+    installation: installation,
+    devices: <AdbDevice>[
+      for (final AdbDevice device in devices) device.withSource(value),
+    ],
+    endpoint: value,
+  );
 }
 
 class AdbCommandResult {
@@ -84,6 +110,7 @@ abstract final class AdbService {
     String? preferredExecutable,
     AdbCommandRunner? runner,
     AdbCommandAudit? listAudit,
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
   }) async {
     final AdbCommandRunner execute = runner ?? runCommand;
     final String executable = preferredExecutable?.trim().isNotEmpty == true
@@ -92,18 +119,25 @@ abstract final class AdbService {
     final AdbInstallation installation = await inspectExecutable(
       executable,
       runner: execute,
+      endpoint: endpoint,
     );
     final List<AdbDevice> devices = await listDevices(
       installation.executable,
       runner: runner,
       audit: runner == null ? listAudit : null,
+      endpoint: endpoint,
     );
-    return AdbSnapshot(installation: installation, devices: devices);
+    return AdbSnapshot(
+      installation: installation,
+      devices: devices,
+      endpoint: endpoint,
+    );
   }
 
   static Future<AdbInstallation> inspectExecutable(
     String executable, {
     AdbCommandRunner? runner,
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
   }) async {
     final String path = File(executable).absolute.path;
     final String basename = path
@@ -116,9 +150,9 @@ abstract final class AdbService {
     if (!await File(path).exists()) {
       throw StateError('ADB 不存在：$path');
     }
-    final AdbCommandResult result = await (runner ?? runCommand)(path, <String>[
-      'version',
-    ]);
+    final AdbCommandResult result = runner == null
+        ? await runCommand(path, const <String>['version'], endpoint: endpoint)
+        : await runner(path, endpoint.applyTo(const <String>['version']));
     if (result.exitCode != 0) {
       throw StateError(_commandError('读取 ADB 版本失败', result));
     }
@@ -134,14 +168,23 @@ abstract final class AdbService {
     String executable, {
     AdbCommandRunner? runner,
     AdbCommandAudit? audit,
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
   }) async {
     final AdbCommandResult result = runner == null
-        ? await runCommand(executable, <String>['devices', '-l'], audit: audit)
-        : await runner(executable, <String>['devices', '-l']);
+        ? await runCommand(
+            executable,
+            const <String>['devices', '-l'],
+            audit: audit,
+            endpoint: endpoint,
+          )
+        : await runner(
+            executable,
+            endpoint.applyTo(const <String>['devices', '-l']),
+          );
     if (result.exitCode != 0) {
       throw StateError(_commandError('刷新 ADB 设备失败', result));
     }
-    return parseDevices(result.stdout);
+    return parseDevices(result.stdout, endpoint: endpoint);
   }
 
   static Future<String> connect(
@@ -149,14 +192,20 @@ abstract final class AdbService {
     String address, {
     AdbCommandRunner? runner,
     AdbCommandAudit? audit,
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
   }) async {
     final String target = normalizeWirelessAddress(address);
     final AdbCommandResult result = runner == null
-        ? await runCommand(executable, <String>[
-            'connect',
-            target,
-          ], audit: audit)
-        : await runner(executable, <String>['connect', target]);
+        ? await runCommand(
+            executable,
+            <String>['connect', target],
+            audit: audit,
+            endpoint: endpoint,
+          )
+        : await runner(
+            executable,
+            endpoint.applyTo(<String>['connect', target]),
+          );
     final String output = '${result.stdout}\n${result.stderr}'.trim();
     if (result.exitCode != 0 ||
         (!output.toLowerCase().contains('connected to') &&
@@ -256,7 +305,10 @@ abstract final class AdbService {
         : <String>['shell', ...arguments];
   }
 
-  static List<AdbDevice> parseDevices(String source) {
+  static List<AdbDevice> parseDevices(
+    String source, {
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
+  }) {
     final List<AdbDevice> result = <AdbDevice>[];
     for (final String raw in source.split(RegExp(r'\r?\n'))) {
       final String line = raw.trim();
@@ -284,6 +336,7 @@ abstract final class AdbService {
           product: metadata['product'],
           device: metadata['device'],
           transportId: metadata['transport_id'],
+          source: AdbDeviceSource(endpoint: endpoint),
         ),
       );
     }
@@ -295,11 +348,13 @@ abstract final class AdbService {
     List<String> arguments, {
     AdbCommandAudit? audit,
     Duration timeout = const Duration(seconds: 10),
+    AdbServerEndpoint endpoint = const AdbServerEndpoint.local(),
   }) async {
     final DateTime startedAt = DateTime.now();
+    final List<String> effectiveArguments = endpoint.applyTo(arguments);
     final Process process = await Process.start(
       executable,
-      arguments,
+      effectiveArguments,
       runInShell: false,
       mode: ProcessStartMode.normal,
     );
@@ -328,7 +383,8 @@ abstract final class AdbService {
         target: audit.target,
         arguments: <String, Object?>{
           'executable': File(executable).absolute.path,
-          'arguments': List<String>.unmodifiable(arguments),
+          'arguments': List<String>.unmodifiable(effectiveArguments),
+          'adbServer': endpoint.toAuditFields(),
         },
         result: <String, Object?>{
           'exitCode': result.exitCode,

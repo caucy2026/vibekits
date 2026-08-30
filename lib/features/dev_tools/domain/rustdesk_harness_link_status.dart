@@ -46,7 +46,7 @@ class RustDeskHarnessLinkSnapshot {
 abstract final class RustDeskHarnessLinkStatusHub {
   static const String protocol = 'vibekits.harness.status';
   static const int supportedVersion = 1;
-  static const Duration heartbeatTtl = Duration(seconds: 6);
+  static const Duration minimumHeartbeatTtl = Duration(seconds: 6);
 
   static final StreamController<RustDeskHarnessLinkSnapshot> _changes =
       StreamController<RustDeskHarnessLinkSnapshot>.broadcast(sync: true);
@@ -80,17 +80,44 @@ abstract final class RustDeskHarnessLinkStatusHub {
       return false;
     }
     _activePeerId = peer;
-    _markConnected();
+    _publish(
+      RustDeskHarnessLinkPhase.handshaking,
+      '状态协议已校验，等待远端订阅',
+      protocolVersion: supportedVersion,
+      peerId: _activePeerId,
+    );
     return true;
   }
 
-  static bool acceptHeartbeat({required String peerId, required int version}) {
+  static bool acceptSubscription({
+    required String peerId,
+    required int version,
+    required Duration heartbeatInterval,
+  }) {
+    if (!_matchesActivePeer(peerId: peerId, version: version)) return false;
+    _markConnected(heartbeatInterval);
+    return true;
+  }
+
+  static bool acceptHeartbeat({
+    required String peerId,
+    required int version,
+    Duration heartbeatInterval = const Duration(seconds: 2),
+  }) {
+    if (!_matchesActivePeer(peerId: peerId, version: version)) return false;
+    _markConnected(heartbeatInterval);
+    return true;
+  }
+
+  static bool _matchesActivePeer({
+    required String peerId,
+    required int version,
+  }) {
     if (version != supportedVersion ||
         _activePeerId.isEmpty ||
         peerId != _activePeerId) {
       return false;
     }
-    _markConnected();
     return true;
   }
 
@@ -103,7 +130,7 @@ abstract final class RustDeskHarnessLinkStatusHub {
     );
   }
 
-  static void _markConnected() {
+  static void _markConnected(Duration heartbeatInterval) {
     _publish(
       RustDeskHarnessLinkPhase.connected,
       'KEMI远程办公已连接',
@@ -111,7 +138,11 @@ abstract final class RustDeskHarnessLinkStatusHub {
       peerId: _activePeerId,
     );
     _staleTimer?.cancel();
-    _staleTimer = Timer(heartbeatTtl, () {
+    final Duration proposedTtl = heartbeatInterval * 3;
+    final Duration ttl = proposedTtl > minimumHeartbeatTtl
+        ? proposedTtl
+        : minimumHeartbeatTtl;
+    _staleTimer = Timer(ttl, () {
       if (_latest.phase != RustDeskHarnessLinkPhase.connected) return;
       _publish(
         RustDeskHarnessLinkPhase.stale,

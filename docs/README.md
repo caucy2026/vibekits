@@ -113,6 +113,9 @@
 106. [LMCP/1 应用广播与协同接入实施指南](48_LMCP_APP_BROADCAST_IMPLEMENTATION_GUIDE.md)——交付其他APP团队的单一入口架构、报文、授权、工具、长任务、路由和验收规范
 107. [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)——本APP、本机、局域网三个动态列表、无感目录配对、实时能力图和自动任务路由
 108. [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)——第三方APP统一命名、硬件识别码、开关状态机、上下线广播、标准MCP接口和远程等价调用验收
+109. [RustDesk 远程 ADB 隧道开发与验收要求](51_RUSTDESK_REMOTE_ADB_TUNNEL_REQUIREMENTS.md)——复用已认证 P2P/hbbr 会话、固定远端 5037、动态本地端口、lease/heartbeat 与真机验收门禁
+110. [Harness 实时状态 IPC 与 RustDesk 远端交付要求](52_HARNESS_RUNTIME_STATUS_IPC_AND_RUSTDESK_DELIVERY.md)——安全本机 IPC、脱敏快照、订阅/心跳/resync、P2P 只读面板与权限边界
+111. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
 
 ## 完成定义
 

@@ -77,7 +77,7 @@ Vibekits
 ### 4.1 端点
 
 - Windows：`\\.\pipe\vibekits-harness-status-v1-<user-sid-hash>`。
-- macOS/Linux：当前用户运行目录中的 `vibekits-harness-status-v1.sock`，权限 `0600`。
+- macOS/Linux：`${Directory.systemTemp.path}/vkh/v1.sock`，父目录 `0700`、socket `0600`；不得扩展该后缀导致超过 macOS Unix socket 长度上限。
 - 禁止使用 `0.0.0.0`、局域网地址、固定 TCP 端口或可被其他用户连接的端点。
 
 ### 4.2 连接与重试

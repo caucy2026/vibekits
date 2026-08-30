@@ -59,6 +59,7 @@ class DevToolsTab extends StatefulWidget {
     this.remoteCredentialDelete,
     this.remoteProfileIdGenerator,
     this.adbLoadSnapshot,
+    this.rustDeskExecutable = '',
     this.initialAdbRecentAddresses = const <String>[],
     this.initialAdbCommandHistory = const <String>[],
     this.onAdbRecentAddressesChanged,
@@ -110,6 +111,7 @@ class DevToolsTab extends StatefulWidget {
   final RemoteCredentialDeleter? remoteCredentialDelete;
   final String Function()? remoteProfileIdGenerator;
   final AdbWorkspaceLoader? adbLoadSnapshot;
+  final String rustDeskExecutable;
   final List<String> initialAdbRecentAddresses;
   final List<String> initialAdbCommandHistory;
   final Future<void> Function(List<String> history)?
@@ -488,7 +490,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
     }
     if (tool.id == 'adb_workspace') {
       return AdbWorkspace(
+        key: ValueKey<String>('adb-${widget.rustDeskExecutable}'),
         loadSnapshot: widget.adbLoadSnapshot,
+        rustDeskExecutable: widget.rustDeskExecutable,
         initialRecentAddresses: widget.initialAdbRecentAddresses,
         initialCommandHistory: widget.initialAdbCommandHistory,
         onRecentAddressesChanged: widget.onAdbRecentAddressesChanged,

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/dev_tools/domain/adb_server_endpoint.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
 
@@ -137,5 +138,125 @@ void main() {
       () => AdbService.parseUserCommand('kill-server'),
       throwsFormatException,
     );
+  });
+
+  test('远端 ADB server 参数始终位于实际命令最前并标记设备来源', () async {
+    final AdbServerEndpoint endpoint = AdbServerEndpoint.rustDesk(
+      host: 'localhost',
+      port: 15037,
+      peerId: 'peer-123',
+      sessionId: 'session-7',
+      leaseId: 'lease-9',
+    );
+    final List<List<String>> calls = <List<String>>[];
+    Future<AdbCommandResult> runner(
+      String executable,
+      List<String> arguments,
+    ) async {
+      calls.add(arguments);
+      if (arguments.contains('connect')) {
+        return const AdbCommandResult(
+          exitCode: 0,
+          stdout: 'connected to 192.168.3.53:5555',
+          stderr: '',
+        );
+      }
+      return const AdbCommandResult(
+        exitCode: 0,
+        stdout: 'List of devices attached\nremote-usb device model:Pixel_9\n',
+        stderr: '',
+      );
+    }
+
+    final List<AdbDevice> devices = await AdbService.listDevices(
+      '/unused/adb',
+      runner: runner,
+      endpoint: endpoint,
+    );
+    await AdbService.connect(
+      '/unused/adb',
+      '192.168.3.53',
+      runner: runner,
+      endpoint: endpoint,
+    );
+
+    expect(calls, <List<String>>[
+      <String>['-H', '127.0.0.1', '-P', '15037', 'devices', '-l'],
+      <String>[
+        '-H',
+        '127.0.0.1',
+        '-P',
+        '15037',
+        'connect',
+        '192.168.3.53:5555',
+      ],
+    ]);
+    expect(devices.single.source.remote, isTrue);
+    expect(devices.single.source.peerId, 'peer-123');
+    expect(devices.single.source.label, 'KEMI 远程办公 · peer-123');
+  });
+
+  test('本机 endpoint 保持现有 adb 参数不变', () {
+    const AdbServerEndpoint endpoint = AdbServerEndpoint.local();
+    expect(endpoint.applyTo(<String>['devices', '-l']), <String>[
+      'devices',
+      '-l',
+    ]);
+    final AdbDevice device = AdbService.parseDevices(
+      'List of devices attached\nusb device\n',
+    ).single;
+    expect(device.source.remote, isFalse);
+    expect(device.source.label, '本机设备');
+  });
+
+  test('ADB 审计证据包含远端 server、peer 与 session 但不含 lease', () async {
+    if (Platform.isWindows) return;
+    final AdbServerEndpoint endpoint = AdbServerEndpoint.rustDesk(
+      host: '127.0.0.1',
+      port: 15037,
+      peerId: 'peer-audit',
+      sessionId: 'session-audit',
+      leaseId: 'lease-audit',
+    );
+    Map<String, Object?>? captured;
+    await AdbService.runCommand(
+      '/usr/bin/true',
+      const <String>['devices', '-l'],
+      endpoint: endpoint,
+      audit: AdbCommandAudit(
+        toolId: 'vibekits.adb.list_devices',
+        toolName: '列出 ADB 设备',
+        target: '',
+        recorder:
+            ({
+              required String toolId,
+              required String toolName,
+              required String target,
+              required Map<String, Object?> arguments,
+              required Object? result,
+              required HarnessToolActivityStatus status,
+              required DateTime startedAt,
+            }) async {
+              captured = arguments;
+            },
+      ),
+    );
+
+    expect(captured?['arguments'], <String>[
+      '-H',
+      '127.0.0.1',
+      '-P',
+      '15037',
+      'devices',
+      '-l',
+    ]);
+    expect(captured?['adbServer'], <String, Object?>{
+      'kind': 'rustDesk',
+      'displayName': 'KEMI 远程办公 · peer-audit',
+      'host': '127.0.0.1',
+      'port': 15037,
+      'peerId': 'peer-audit',
+      'sessionId': 'session-audit',
+    });
   });
 }

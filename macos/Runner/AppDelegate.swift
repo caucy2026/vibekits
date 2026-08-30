@@ -8,7 +8,6 @@ class AppDelegate: FlutterAppDelegate {
   private var dartReady = false
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    super.applicationDidFinishLaunching(notification)
     if let controller = mainFlutterWindow?.contentViewController
         as? FlutterViewController {
       fileChannel = FlutterMethodChannel(
@@ -26,7 +25,6 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func application(_ application: NSApplication, open urls: [URL]) {
-    super.application(application, open: urls)
     enqueueFiles(urls.filter(\.isFileURL).map(\.path))
     application.activate(ignoringOtherApps: true)
   }

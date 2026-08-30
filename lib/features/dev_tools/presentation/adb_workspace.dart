@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
+import '../domain/adb_server_endpoint.dart';
 import '../domain/adb_service.dart';
 import '../domain/harness_tool_activity_store.dart';
+import '../domain/rustdesk_adb_tunnel_client.dart';
 
 typedef AdbWorkspaceLoader = Future<AdbSnapshot> Function();
 typedef AdbWirelessConnector = Future<String> Function(
@@ -20,6 +22,10 @@ class AdbWorkspace extends StatefulWidget {
     this.loadSnapshot,
     this.connectDevice,
     this.runCommand,
+    this.tunnelProvider,
+    this.rustDeskExecutable = '',
+    this.rustDeskPeerId = '',
+    this.rustDeskSessionId = '',
     this.initialRecentAddresses = const <String>[],
     this.initialCommandHistory = const <String>[],
     this.onRecentAddressesChanged,
@@ -32,6 +38,10 @@ class AdbWorkspace extends StatefulWidget {
   final AdbWorkspaceLoader? loadSnapshot;
   final AdbWirelessConnector? connectDevice;
   final AdbCommandRunner? runCommand;
+  final RustDeskAdbTunnelProvider? tunnelProvider;
+  final String rustDeskExecutable;
+  final String rustDeskPeerId;
+  final String rustDeskSessionId;
   final List<String> initialRecentAddresses;
   final List<String> initialCommandHistory;
   final Future<void> Function(List<String> history)? onRecentAddressesChanged;
@@ -57,6 +67,9 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     'vibekits.adb.screenshot',
   };
   final TextEditingController _wirelessAddress = TextEditingController();
+  late final TextEditingController _rustDeskPeer = TextEditingController(
+    text: widget.rustDeskPeerId,
+  );
   final TextEditingController _command = TextEditingController();
   final FocusNode _commandFocus = FocusNode();
   final ScrollController _consoleScroll = ScrollController();
@@ -67,8 +80,13 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
   bool _loading = false;
   bool _connecting = false;
   bool _executing = false;
+  bool _switchingSource = false;
   String? _connectionMessage;
   int _generation = 0;
+  AdbServerEndpoint _endpoint = const AdbServerEndpoint.local();
+  RustDeskAdbTunnelState? _tunnelState;
+  RustDeskAdbTunnelProvider? _tunnelProvider;
+  Timer? _tunnelHeartbeatTimer;
   late final List<String> _recentAddresses = widget.initialRecentAddresses
       .take(20)
       .toList();
@@ -113,6 +131,18 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
   @override
   void initState() {
     super.initState();
+    _tunnelProvider = widget.tunnelProvider;
+    if (_tunnelProvider == null &&
+        widget.rustDeskExecutable.trim().isNotEmpty) {
+      _tunnelProvider = RustDeskAdbTunnelProvider(
+        rustDeskExecutable: widget.rustDeskExecutable.trim(),
+      );
+    }
+    _endpoint = _tunnelProvider?.endpoint ?? _endpoint;
+    if (_endpoint.isRemote) {
+      _tunnelState = RustDeskAdbTunnelState.ready;
+      _startTunnelHeartbeat();
+    }
     unawaited(_refresh());
   }
 
@@ -123,14 +153,19 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
       _error = null;
     });
     try {
-      final AdbSnapshot snapshot =
-          await (widget.loadSnapshot?.call() ?? AdbService.discoverAndList());
+      final AdbSnapshot loaded =
+          await (widget.loadSnapshot?.call() ??
+              AdbService.discoverAndList(endpoint: _endpoint));
+      final AdbSnapshot snapshot = widget.loadSnapshot == null
+          ? loaded
+          : loaded.withEndpoint(_endpoint);
       if (!mounted || generation != _generation) return;
       final bool selectionExists = snapshot.devices.any(
         (AdbDevice device) => device.serial == _selectedSerial,
       );
       setState(() {
         _snapshot = snapshot;
+        _endpoint = snapshot.endpoint;
         _selectedSerial = selectionExists
             ? _selectedSerial
             : snapshot.devices
@@ -144,6 +179,77 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
       setState(() {
         _loading = false;
         _error = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
+  }
+
+  Future<void> _toggleRemoteSource() async {
+    final RustDeskAdbTunnelProvider? provider = _tunnelProvider;
+    if (provider == null || _switchingSource) return;
+    setState(() {
+      _switchingSource = true;
+      _error = null;
+    });
+    try {
+      if (_endpoint.isRemote) {
+        _tunnelHeartbeatTimer?.cancel();
+        final String leaseId = _endpoint.leaseId;
+        await provider.close();
+        _endpoint = const AdbServerEndpoint.local();
+        AdbServerEndpointHub.clearLease(leaseId);
+        _tunnelState = RustDeskAdbTunnelState.closed;
+      } else {
+        _endpoint = await provider.open(
+          peerId: _rustDeskPeer.text,
+          sessionId: widget.rustDeskSessionId,
+        );
+        AdbServerEndpointHub.publish(_endpoint);
+        _tunnelState = RustDeskAdbTunnelState.ready;
+        _startTunnelHeartbeat();
+      }
+      await _refresh();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Bad state: ', '');
+      });
+    } finally {
+      if (mounted) setState(() => _switchingSource = false);
+    }
+  }
+
+  void _startTunnelHeartbeat() {
+    _tunnelHeartbeatTimer?.cancel();
+    _tunnelHeartbeatTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      unawaited(_heartbeatTunnel());
+    });
+  }
+
+  Future<void> _heartbeatTunnel() async {
+    final RustDeskAdbTunnelProvider? provider = _tunnelProvider;
+    final AdbServerEndpoint current = _endpoint;
+    if (provider == null || !current.isRemote) return;
+    try {
+      final RustDeskAdbTunnelStatus? status = await provider.heartbeat();
+      if (!mounted || _endpoint.leaseId != current.leaseId || status == null) {
+        return;
+      }
+      setState(() => _tunnelState = status.state);
+      if (status.state == RustDeskAdbTunnelState.closed ||
+          status.state == RustDeskAdbTunnelState.failed) {
+        _tunnelHeartbeatTimer?.cancel();
+        AdbServerEndpointHub.clearLease(current.leaseId);
+        setState(() {
+          _endpoint = const AdbServerEndpoint.local();
+          _error = '远端 ADB 隧道已失效，请重新连接';
+        });
+        await _refresh();
+      }
+    } on Object catch (error) {
+      if (!mounted || _endpoint.leaseId != current.leaseId) return;
+      setState(() {
+        _tunnelState = RustDeskAdbTunnelState.failed;
+        _error = '远端 ADB 隧道心跳失败：$error';
       });
     }
   }
@@ -165,6 +271,8 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
               AdbService.connect(
                 installation.executable,
                 _wirelessAddress.text,
+                endpoint:
+                    _snapshot?.endpoint ?? const AdbServerEndpoint.local(),
               ));
       if (!mounted) return;
       setState(() {
@@ -208,6 +316,7 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
           ? await AdbService.runCommand(
               installation.executable,
               arguments,
+              endpoint: device.source.endpoint,
               audit: AdbCommandAudit(
                 toolId: 'vibekits.adb.command',
                 toolName: '手动执行 ADB 命令',
@@ -390,6 +499,17 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     );
   }
 
+  Future<void> _closeTunnelOnDispose() async {
+    _tunnelHeartbeatTimer?.cancel();
+    final String leaseId = _endpoint.leaseId;
+    try {
+      await _tunnelProvider?.close();
+      if (leaseId.isNotEmpty) AdbServerEndpointHub.clearLease(leaseId);
+    } on Object {
+      // RustDesk also revokes leases when its authenticated session closes.
+    }
+  }
+
   Widget _buildDeviceWorkbench(AdbDevice device) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -508,11 +628,14 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
 
   @override
   void dispose() {
+    _tunnelHeartbeatTimer?.cancel();
     _generation += 1;
     _wirelessAddress.dispose();
+    _rustDeskPeer.dispose();
     _command.dispose();
     _commandFocus.dispose();
     _consoleScroll.dispose();
+    unawaited(_closeTunnelOnDispose());
     super.dispose();
   }
 
@@ -534,6 +657,41 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
+              if (_tunnelProvider != null) ...<Widget>[
+                SizedBox(
+                  width: 180,
+                  child: TextField(
+                    key: const Key('adb-rustdesk-peer-id'),
+                    controller: _rustDeskPeer,
+                    enabled: !_endpoint.isRemote && !_switchingSource,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: '远端设备 ID',
+                      hintText: 'RustDesk / KEMI ID',
+                    ),
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _toggleRemoteSource(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  key: const Key('adb-toggle-remote-source'),
+                  onPressed: _switchingSource ? null : _toggleRemoteSource,
+                  icon: _switchingSource
+                      ? const SizedBox.square(
+                          dimension: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _endpoint.isRemote
+                              ? Icons.link_off_rounded
+                              : Icons.lan_rounded,
+                          size: 18,
+                        ),
+                  label: Text(_endpoint.isRemote ? '断开远端 ADB' : '连接远端 ADB'),
+                ),
+                const SizedBox(width: 8),
+              ],
               OutlinedButton.icon(
                 key: const Key('adb-harness-activity'),
                 onPressed: _showHarnessActivity,
@@ -570,7 +728,21 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('ADB ${installation.version}'),
+                      Row(
+                        children: <Widget>[
+                          Text('ADB ${installation.version}'),
+                          const SizedBox(width: 8),
+                          Chip(
+                            key: const Key('adb-device-source'),
+                            visualDensity: VisualDensity.compact,
+                            label: Text(
+                              _endpoint.isRemote
+                                  ? '${_endpoint.displayName} · ${_tunnelState?.name ?? 'starting'}'
+                                  : '本机设备',
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 3),
                       SelectableText(
                         installation.executable,

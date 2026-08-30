@@ -6,9 +6,14 @@ import 'package:flutter/material.dart';
 import '../features/dev_tools/domain/harness_tool_activity_store.dart';
 import '../features/dev_tools/domain/harness_tool_bridge.dart';
 import '../features/dev_tools/domain/harness_agent_preferences.dart';
+import '../features/dev_tools/domain/harness_status_ipc_protocol.dart';
+import '../features/dev_tools/domain/harness_status_ipc_publisher.dart';
 import '../features/dev_tools/domain/harness_tool_server.dart';
+import '../features/dev_tools/domain/harness_work_status.dart';
+import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
+import 'app_version.dart';
 import 'dropped_file_router.dart';
 import 'main_shell.dart';
 
@@ -46,6 +51,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       widget.settingsController ?? AppSettingsController();
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   HarnessToolServer? _externalToolServer;
+  HarnessStatusIpcPublisher? _harnessStatusPublisher;
   Future<void>? _settingsLoad;
 
   @override
@@ -60,6 +66,65 @@ class _VibekitsAppState extends State<VibekitsApp> {
     // alive without providing a usable mobile workflow.
     if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
       unawaited(_startExternalToolServer());
+      unawaited(_startHarnessStatusPublisher());
+    }
+  }
+
+  Future<void> _startHarnessStatusPublisher() async {
+    late final HarnessStatusIpcPublisher publisher;
+    publisher = HarnessStatusIpcPublisher(
+      snapshotProvider: () => HarnessWorkStatusHub.registryLatest.toJson(),
+      snapshotStream: () => HarnessWorkStatusHub.registryChanges.map(
+        (HarnessWorkRegistrySnapshot snapshot) => snapshot.toJson(),
+      ),
+      publisherVersion: AppVersion.semantic,
+      observer: (HarnessStatusIpcEvent event) {
+        _handleHarnessStatusIpcEvent(publisher, event);
+      },
+    );
+    _harnessStatusPublisher = publisher;
+    final HarnessStatusIpcStartResult result = await publisher.start();
+    if (!mounted) {
+      await publisher.stop();
+      return;
+    }
+    if (!result.available) {
+      debugPrint('Harness status IPC unavailable: ${result.reason}');
+      RustDeskHarnessLinkStatusHub.disconnected(reason: result.reason);
+    }
+  }
+
+  void _handleHarnessStatusIpcEvent(
+    HarnessStatusIpcPublisher publisher,
+    HarnessStatusIpcEvent event,
+  ) {
+    final Duration interval = HarnessWorkStatusHub.registryLatest.busy
+        ? harnessStatusBusyHeartbeat
+        : harnessStatusIdleHeartbeat;
+    switch (event.type) {
+      case HarnessStatusIpcEventType.handshakeSucceeded:
+        RustDeskHarnessLinkStatusHub.acceptHandshake(<String, Object?>{
+          'protocol': RustDeskHarnessLinkStatusHub.protocol,
+          'versions': const <int>[1],
+          'peerId': event.peerId,
+        });
+      case HarnessStatusIpcEventType.subscriptionStarted:
+        RustDeskHarnessLinkStatusHub.acceptSubscription(
+          peerId: event.peerId,
+          version: 1,
+          heartbeatInterval: interval,
+        );
+      case HarnessStatusIpcEventType.heartbeatSent:
+        RustDeskHarnessLinkStatusHub.acceptHeartbeat(
+          peerId: event.peerId,
+          version: 1,
+          heartbeatInterval: interval,
+        );
+      case HarnessStatusIpcEventType.unsubscribed ||
+          HarnessStatusIpcEventType.disconnected:
+        if (publisher.activeSubscriptionCount == 0) {
+          RustDeskHarnessLinkStatusHub.disconnected(reason: 'KEMI远程办公状态订阅已断开');
+        }
     }
   }
 
@@ -141,6 +206,8 @@ class _VibekitsAppState extends State<VibekitsApp> {
     _settings.removeListener(_refresh);
     final HarnessToolServer? server = _externalToolServer;
     if (server != null) unawaited(server.close());
+    final HarnessStatusIpcPublisher? statusPublisher = _harnessStatusPublisher;
+    if (statusPublisher != null) unawaited(statusPublisher.stop());
     if (widget.settingsController == null) _settings.dispose();
     super.dispose();
   }

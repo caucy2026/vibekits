@@ -582,6 +582,7 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.database
                 ? widget.initialFilePath
                 : null),
+        rustDeskExecutable: settings.rustDeskExecutable,
         initialRemoteDatabaseProfiles: settings.remoteDatabaseProfiles,
         onRemoteDatabaseProfilesChanged: (List<String> profiles) =>
             widget.settingsController.updateInBackground(

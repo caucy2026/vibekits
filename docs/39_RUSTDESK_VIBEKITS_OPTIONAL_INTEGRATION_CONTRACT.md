@@ -118,7 +118,7 @@ Host 发送 capability: vibekits_harness_status_v1 = true/false
 ### 5.1 端点
 
 - Windows：`\\.\pipe\vibekits-harness-status-v1-<user-sid-hash>`；
-- macOS/Linux：当前用户运行目录中的 `vibekits-harness-status-v1.sock`，权限 `0600`；
+- macOS/Linux：`${Directory.systemTemp.path}/vkh/v1.sock`，父目录 `0700`、socket `0600`；短路径用于满足 macOS Unix socket 长度上限；
 - 禁止监听 `0.0.0.0`、局域网 IP 或固定 TCP 端口；
 - RustDesk 只在本机连接，不从 hbbs/hbbr 查询 IPC 地址。
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/features/dev_tools/domain/adb_server_endpoint.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
+import 'package:vibekits/features/dev_tools/domain/rustdesk_adb_tunnel_client.dart';
 import 'package:vibekits/features/dev_tools/presentation/adb_workspace.dart';
 import 'package:vibekits/features/dev_tools/presentation/dev_tools_tab.dart';
 
@@ -73,6 +75,47 @@ void main() {
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('ADB 设备'), findsOneWidget);
     expect(find.text('ADB 1.0.41'), findsOneWidget);
+  });
+
+  testWidgets('工作区打开和关闭 RustDesk ADB lease 并显示远端来源', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _WorkspaceTunnelClient client = _WorkspaceTunnelClient();
+    final RustDeskAdbTunnelProvider provider = RustDeskAdbTunnelProvider(
+      rustDeskExecutable: '/Applications/RustDesk',
+      client: client,
+    );
+    const AdbSnapshot snapshot = AdbSnapshot(
+      installation: AdbInstallation(executable: '/adb', version: '1.0.41'),
+      devices: <AdbDevice>[],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdbWorkspace(
+            loadSnapshot: () async => snapshot,
+            tunnelProvider: provider,
+            rustDeskPeerId: 'peer-ui',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adb-toggle-remote-source')));
+    await tester.pumpAndSettle();
+
+    expect(client.opened, <String>['peer-ui']);
+    expect(find.text('KEMI 远程办公 · peer-ui · ready'), findsOneWidget);
+    expect(find.text('断开远端 ADB'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('adb-toggle-remote-source')));
+    await tester.pumpAndSettle();
+    expect(client.closed, <String>['lease-peer-ui']);
+    expect(find.text('本机设备'), findsOneWidget);
   });
 
   testWidgets('选中设备后可以执行命令并在终端显示真实结果', (WidgetTester tester) async {
@@ -251,4 +294,51 @@ void main() {
     expect(entries, isEmpty);
     expect(find.text('暂无 Harness ADB 调用'), findsOneWidget);
   });
+}
+
+class _WorkspaceTunnelClient implements RustDeskAdbTunnelClient {
+  final List<String> opened = <String>[];
+  final List<String> closed = <String>[];
+
+  @override
+  Future<AdbServerEndpoint> open({
+    required String rustDeskExecutable,
+    required String peerId,
+    String sessionId = '',
+  }) async {
+    opened.add(peerId);
+    return AdbServerEndpoint.rustDesk(
+      host: '127.0.0.1',
+      port: 15037,
+      peerId: peerId,
+      sessionId: sessionId,
+      leaseId: 'lease-$peerId',
+    );
+  }
+
+  @override
+  Future<void> close({
+    required String rustDeskExecutable,
+    required String leaseId,
+  }) async {
+    closed.add(leaseId);
+  }
+
+  @override
+  Future<RustDeskAdbTunnelStatus> status({
+    required String rustDeskExecutable,
+    required String leaseId,
+  }) async => RustDeskAdbTunnelStatus(
+    state: RustDeskAdbTunnelState.ready,
+    leaseId: leaseId,
+    peerId: 'peer-ui',
+    host: '127.0.0.1',
+    port: 15037,
+  );
+
+  @override
+  Future<RustDeskAdbTunnelStatus> heartbeat({
+    required String rustDeskExecutable,
+    required String leaseId,
+  }) => status(rustDeskExecutable: rustDeskExecutable, leaseId: leaseId);
 }

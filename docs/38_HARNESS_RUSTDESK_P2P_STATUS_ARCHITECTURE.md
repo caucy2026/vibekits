@@ -89,7 +89,7 @@ dormant → starting → ready → queued → planning → reasoning
 
 ## 5. 本机 IPC
 
-- Windows：`\\.\pipe\vibekits-harness-status-v1-<user-sid-hash>`；macOS/Linux：用户运行目录下权限 `0600` 的 Unix Domain Socket。
+- Windows：`\\.\pipe\vibekits-harness-status-v1-<user-sid-hash>`；macOS/Linux：`${Directory.systemTemp.path}/vkh/v1.sock`，父目录 `0700`、socket `0600`（短后缀满足 macOS Unix socket 长度上限）。
 - Vibekits 是服务端，RustDesk Host 是只读订阅端。RustDesk 不允许通过此通道执行工具、批准操作或读取日志正文。
 - 握手包含协议版本、进程随机 nonce、能力位和最大帧长；帧采用长度前缀 JSON/CBOR，禁止换行流和无限帧。
 - Windows 校验连接进程 SID 与签名/可执行路径；Unix 校验 peer UID。不得开放 TCP 监听端口。
