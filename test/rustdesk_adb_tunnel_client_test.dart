@@ -19,7 +19,7 @@ void main() {
               '{"schemaVersion":1,"ok":true,"operation":"open",'
                   '"state":"ready","host":"127.0.0.1","port":15037,'
                   '"leaseId":"lease-1","peerId":"peer-1",'
-                  '"sessionId":"session-1"}',
+                  '"sessionId":"123e4567-e89b-42d3-a456-426614174000"}',
               '',
             );
           }
@@ -55,7 +55,7 @@ void main() {
       final AdbServerEndpoint endpoint = await client.open(
         rustDeskExecutable: '/Applications/RustDesk',
         peerId: 'peer-1',
-        sessionId: 'session-1',
+        sessionId: '123e4567-e89b-42d3-a456-426614174000',
       );
       await client.close(
         rustDeskExecutable: '/Applications/RustDesk',
@@ -81,7 +81,7 @@ void main() {
           '--peer-id',
           'peer-1',
           '--session-id',
-          'session-1',
+          '123e4567-e89b-42d3-a456-426614174000',
         ],
         <String>['--vibekits-adb-tunnel-close', '--lease-id', 'lease-1'],
         <String>['--vibekits-adb-tunnel-status', '--lease-id', 'lease-1'],
@@ -131,7 +131,8 @@ void main() {
           ProcessResult(
             1,
             7,
-            '{"ok":false,"code":"peer_not_connected",'
+            '{"schemaVersion":1,"ok":false,"operation":"open",'
+                '"code":"peer_not_connected",'
                 '"message":"No active authenticated session for peer"}',
             'diagnostic',
           ),
@@ -148,6 +149,46 @@ void main() {
         error! as RustDeskAdbTunnelException;
     expect(tunnelError.code, 'peer_not_connected');
     expect(tunnelError.exitCode, 7);
+  });
+
+  test('adapter rejects incompatible error envelopes', () async {
+    final RustDeskCliAdbTunnelClient client = RustDeskCliAdbTunnelClient(
+      processRunner: (String executable, List<String> arguments) async =>
+          ProcessResult(
+            1,
+            3,
+            '{"schemaVersion":2,"ok":false,"operation":"status",'
+                '"code":"peer_not_connected","message":"stale contract"}',
+            '',
+          ),
+    );
+
+    await expectLater(
+      client.open(rustDeskExecutable: '/RustDesk', peerId: 'peer-1'),
+      throwsA(
+        isA<RustDeskAdbTunnelException>().having(
+          (RustDeskAdbTunnelException error) => error.code,
+          'code',
+          'invalid_response',
+        ),
+      ),
+    );
+  });
+
+  test('adapter rejects a non-UUID explicit RustDesk sessionId', () async {
+    final RustDeskCliAdbTunnelClient client = RustDeskCliAdbTunnelClient(
+      processRunner: (String executable, List<String> arguments) async =>
+          throw StateError('must not start a process'),
+    );
+
+    await expectLater(
+      client.open(
+        rustDeskExecutable: '/RustDesk',
+        peerId: 'peer-1',
+        sessionId: 'session-1',
+      ),
+      throwsFormatException,
+    );
   });
 
   test('adapter rejects incompatible success envelopes', () async {

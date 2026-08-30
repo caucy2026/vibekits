@@ -146,11 +146,11 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     unawaited(_refresh());
   }
 
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool clearError = true}) async {
     final int generation = ++_generation;
     setState(() {
       _loading = true;
-      _error = null;
+      if (clearError) _error = null;
     });
     try {
       final AdbSnapshot loaded =
@@ -192,9 +192,10 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     });
     try {
       if (_endpoint.isRemote) {
-        _tunnelHeartbeatTimer?.cancel();
         final String leaseId = _endpoint.leaseId;
         await provider.close();
+        _tunnelHeartbeatTimer?.cancel();
+        _tunnelHeartbeatTimer = null;
         _endpoint = const AdbServerEndpoint.local();
         AdbServerEndpointHub.clearLease(leaseId);
         _tunnelState = RustDeskAdbTunnelState.closed;
@@ -237,21 +238,30 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
       setState(() => _tunnelState = status.state);
       if (status.state == RustDeskAdbTunnelState.closed ||
           status.state == RustDeskAdbTunnelState.failed) {
-        _tunnelHeartbeatTimer?.cancel();
-        AdbServerEndpointHub.clearLease(current.leaseId);
-        setState(() {
-          _endpoint = const AdbServerEndpoint.local();
-          _error = '远端 ADB 隧道已失效，请重新连接';
-        });
-        await _refresh();
+        _invalidateRemoteEndpoint(provider, current, '远端 ADB 隧道已失效，请重新连接');
+        await _refresh(clearError: false);
       }
     } on Object catch (error) {
       if (!mounted || _endpoint.leaseId != current.leaseId) return;
-      setState(() {
-        _tunnelState = RustDeskAdbTunnelState.failed;
-        _error = '远端 ADB 隧道心跳失败：$error';
-      });
+      _invalidateRemoteEndpoint(provider, current, '远端 ADB 隧道心跳失败：$error');
+      await _refresh(clearError: false);
     }
+  }
+
+  void _invalidateRemoteEndpoint(
+    RustDeskAdbTunnelProvider provider,
+    AdbServerEndpoint current,
+    String message,
+  ) {
+    _tunnelHeartbeatTimer?.cancel();
+    _tunnelHeartbeatTimer = null;
+    provider.invalidateLease(current.leaseId);
+    AdbServerEndpointHub.clearLease(current.leaseId);
+    setState(() {
+      _endpoint = const AdbServerEndpoint.local();
+      _tunnelState = RustDeskAdbTunnelState.failed;
+      _error = message;
+    });
   }
 
   Future<void> _connect() async {
@@ -504,9 +514,10 @@ class _AdbWorkspaceState extends State<AdbWorkspace> {
     final String leaseId = _endpoint.leaseId;
     try {
       await _tunnelProvider?.close();
-      if (leaseId.isNotEmpty) AdbServerEndpointHub.clearLease(leaseId);
     } on Object {
       // RustDesk also revokes leases when its authenticated session closes.
+    } finally {
+      if (leaseId.isNotEmpty) AdbServerEndpointHub.clearLease(leaseId);
     }
   }
 

@@ -118,6 +118,52 @@ void main() {
     expect(find.text('本机设备'), findsOneWidget);
   });
 
+  testWidgets('RustDesk heartbeat 失败后清理死亡 endpoint 并停止续租', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _WorkspaceTunnelClient client = _WorkspaceTunnelClient()
+      ..failHeartbeat = true;
+    final RustDeskAdbTunnelProvider provider = RustDeskAdbTunnelProvider(
+      rustDeskExecutable: '/Applications/RustDesk',
+      client: client,
+    );
+    const AdbSnapshot snapshot = AdbSnapshot(
+      installation: AdbInstallation(executable: '/adb', version: '1.0.41'),
+      devices: <AdbDevice>[],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdbWorkspace(
+            loadSnapshot: () async => snapshot,
+            tunnelProvider: provider,
+            rustDeskPeerId: 'peer-heartbeat',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('adb-toggle-remote-source')));
+    await tester.pumpAndSettle();
+    expect(AdbServerEndpointHub.latest.isRemote, isTrue);
+
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+
+    expect(client.heartbeatCalls, 1);
+    expect(AdbServerEndpointHub.latest.isRemote, isFalse);
+    expect(provider.endpoint, isNull);
+    expect(find.text('本机设备'), findsOneWidget);
+    expect(find.textContaining('远端 ADB 隧道心跳失败'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 20));
+    expect(client.heartbeatCalls, 1);
+  });
+
   testWidgets('选中设备后可以执行命令并在终端显示真实结果', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1100, 720);
     tester.view.devicePixelRatio = 1;
@@ -299,6 +345,8 @@ void main() {
 class _WorkspaceTunnelClient implements RustDeskAdbTunnelClient {
   final List<String> opened = <String>[];
   final List<String> closed = <String>[];
+  bool failHeartbeat = false;
+  int heartbeatCalls = 0;
 
   @override
   Future<AdbServerEndpoint> open({
@@ -340,5 +388,9 @@ class _WorkspaceTunnelClient implements RustDeskAdbTunnelClient {
   Future<RustDeskAdbTunnelStatus> heartbeat({
     required String rustDeskExecutable,
     required String leaseId,
-  }) => status(rustDeskExecutable: rustDeskExecutable, leaseId: leaseId);
+  }) async {
+    heartbeatCalls += 1;
+    if (failHeartbeat) throw StateError('RustDesk exited');
+    return status(rustDeskExecutable: rustDeskExecutable, leaseId: leaseId);
+  }
 }

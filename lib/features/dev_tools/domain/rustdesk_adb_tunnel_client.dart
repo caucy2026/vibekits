@@ -88,16 +88,21 @@ class RustDeskCliAdbTunnelClient implements RustDeskAdbTunnelClient {
   }) async {
     final String executable = _validatedExecutable(rustDeskExecutable);
     final String normalizedPeerId = peerId.trim();
+    final String normalizedSessionId = sessionId.trim();
     if (normalizedPeerId.isEmpty) {
       throw const FormatException('缺少 RustDesk 远端设备 ID');
+    }
+    if (normalizedSessionId.isNotEmpty &&
+        !_uuidPattern.hasMatch(normalizedSessionId)) {
+      throw const FormatException('RustDesk sessionId 必须是 UUID');
     }
     final List<String> arguments = <String>[
       openCommand,
       '--peer-id',
       normalizedPeerId,
-      if (sessionId.trim().isNotEmpty) ...<String>[
+      if (normalizedSessionId.isNotEmpty) ...<String>[
         '--session-id',
-        sessionId.trim(),
+        normalizedSessionId,
       ],
     ];
     final Map<String, Object?> response = await _invoke(
@@ -117,7 +122,7 @@ class RustDeskCliAdbTunnelClient implements RustDeskAdbTunnelClient {
       host: host,
       port: port ?? 0,
       peerId: (response['peerId'] ?? normalizedPeerId).toString(),
-      sessionId: (response['sessionId'] ?? sessionId).toString(),
+      sessionId: (response['sessionId'] ?? normalizedSessionId).toString(),
       leaseId: (response['leaseId'] ?? '').toString(),
     );
   }
@@ -238,6 +243,14 @@ class RustDeskCliAdbTunnelClient implements RustDeskAdbTunnelClient {
         exitCode: result.exitCode,
       );
     }
+    if (decoded['schemaVersion'] != 1 ||
+        decoded['operation'] != expectedOperation) {
+      throw RustDeskAdbTunnelException(
+        code: 'invalid_response',
+        message: '$operation失败：RustDesk 返回了不兼容的响应协议',
+        exitCode: result.exitCode,
+      );
+    }
     if (result.exitCode != 0 || decoded['ok'] != true) {
       final String code = (decoded['code'] ?? 'internal_error').toString();
       final String message = (decoded['message'] ?? '').toString().trim();
@@ -249,16 +262,13 @@ class RustDeskCliAdbTunnelClient implements RustDeskAdbTunnelClient {
         exitCode: result.exitCode,
       );
     }
-    if (decoded['schemaVersion'] != 1 ||
-        decoded['operation'] != expectedOperation) {
-      throw RustDeskAdbTunnelException(
-        code: 'invalid_response',
-        message: '$operation失败：RustDesk 返回了不兼容的响应协议',
-        exitCode: result.exitCode,
-      );
-    }
     return decoded;
   }
+
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  );
 
   static int? _integer(Object? value) => switch (value) {
     final int number => number,
@@ -332,6 +342,11 @@ class RustDeskAdbTunnelProvider {
       rustDeskExecutable: rustDeskExecutable,
       leaseId: current.leaseId,
     );
+  }
+
+  void invalidateLease(String leaseId) {
+    final AdbServerEndpoint? current = _endpoint;
+    if (current != null && current.leaseId == leaseId) _endpoint = null;
   }
 
   Future<void> dispose() => close();

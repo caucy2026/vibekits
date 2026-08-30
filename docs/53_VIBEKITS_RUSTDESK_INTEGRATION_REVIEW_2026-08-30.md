@@ -47,6 +47,7 @@
 - 独立本机客户端已对 Release App 完成 `helloAck → subscribe → snapshot → unsubscribe`，nonce/protocol/version/schema 均匹配。
 - RustDesk 独立复跑：Harness 11/11、ADB 8/8；完整 `cargo check --locked --features flutter --bin rustdesk` 通过。
 - RustDesk 最终评估已同步回本机；最终 App executable SHA-256 为 `619a74833d972520dfecc2eb134570fcb6568b652da682f830bd0a8136504bc0`，内嵌 Rust dylib SHA-256 为 `7feaaaa2a5dc3f7f17dcbca3a825f0262972fa7aa962e35d342b1707bba48450`。
+- RustDesk 对云端提交 `f28af04` 的交叉评估确认无阻断性协议差异。评估提出的客户端问题已继续收口：heartbeat 异常会停止 timer、清除 Hub 和 provider 中的死亡 endpoint；失败 envelope 也强制校验 `schemaVersion/operation`；显式 `sessionId` 在启动子进程前校验 UUID。对应 tunnel client/workspace 测试 15/15 通过。
 
 此前全仓串行测试用于识别基线问题，结果包含大量与本集成无关的既有平台/资产/旧 UI fixture 失败。最终定向门禁全部通过；例如 `harness_tool_bridge_test.dart` 的既有磁盘容量断言在当前 macOS 沙箱仍返回 0，该测试代码不在本轮改动范围，不能伪装成集成回归。
 
