@@ -52,7 +52,7 @@ class HarnessToolActivity {
         )
         .firstOrNull;
     if (startedAt == null || status == null) return null;
-    String text(String key, {int max = 4096}) {
+    String text(String key, {int max = 1024}) {
       final String result = item[key] is String ? item[key]! as String : '';
       return result.length <= max ? result : result.substring(0, max);
     }
@@ -155,8 +155,9 @@ class HarnessToolLoggingPolicy {
 }
 
 abstract final class HarnessToolActivityStore {
-  static const int maxEntries = 500;
+  static const int maxEntries = 200;
   static const int maxFileBytes = 2 * 1024 * 1024;
+  static const int targetFileBytes = 512 * 1024;
   static final StreamController<void> _changes =
       StreamController<void>.broadcast();
   static Future<void> _writeTail = Future<void>.value();
@@ -287,9 +288,11 @@ abstract final class HarnessToolActivityStore {
   static Future<List<HarnessToolActivity>> _readAll() async {
     final File file = _file();
     try {
-      if (!await file.exists() || await file.length() > maxFileBytes) {
+      if (!await file.exists()) {
         return <HarnessToolActivity>[];
       }
+      final int originalBytes = await file.length();
+      if (originalBytes > maxFileBytes) return <HarnessToolActivity>[];
       final Object? decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map || decoded['entries'] is! List) {
         return <HarnessToolActivity>[];
@@ -303,7 +306,13 @@ abstract final class HarnessToolActivityStore {
         (HarnessToolActivity a, HarnessToolActivity b) =>
             b.startedAt.compareTo(a.startedAt),
       );
-      return entries.take(maxEntries).toList(growable: true);
+      final List<HarnessToolActivity> bounded = entries
+          .take(maxEntries)
+          .toList(growable: true);
+      if (originalBytes > targetFileBytes || entries.length > maxEntries) {
+        await _write(bounded);
+      }
+      return bounded;
     } on Object {
       return <HarnessToolActivity>[];
     }
@@ -312,14 +321,14 @@ abstract final class HarnessToolActivityStore {
   static Future<void> _write(List<HarnessToolActivity> entries) async {
     final File file = _file();
     await file.parent.create(recursive: true);
-    final String payload = jsonEncode(<String, Object?>{
-      'version': 1,
-      'entries': <Map<String, Object?>>[
-        for (final HarnessToolActivity entry in entries) entry.toJson(),
-      ],
-    });
-    if (utf8.encode(payload).length > maxFileBytes) {
-      throw const FileSystemException('Harness 工具记录超过 2 MiB');
+    final List<HarnessToolActivity> bounded = entries
+        .take(maxEntries)
+        .toList(growable: true);
+    String payload = _encode(bounded);
+    while (utf8.encode(payload).length > targetFileBytes &&
+        bounded.isNotEmpty) {
+      bounded.removeLast();
+      payload = _encode(bounded);
     }
     final File temporary = File('${file.path}.tmp');
     await temporary.writeAsString(payload, flush: true);
@@ -344,8 +353,16 @@ abstract final class HarnessToolActivityStore {
   static String _summarize(Object? value) {
     final Object? redacted = _redact(value);
     final String encoded = redacted is String ? redacted : jsonEncode(redacted);
-    return _bounded(encoded, 4096);
+    return _bounded(encoded, 1024);
   }
+
+  static String _encode(List<HarnessToolActivity> entries) =>
+      jsonEncode(<String, Object?>{
+        'version': 1,
+        'entries': <Map<String, Object?>>[
+          for (final HarnessToolActivity entry in entries) entry.toJson(),
+        ],
+      });
 
   static Object? _redact(Object? value, [String key = '']) {
     final String normalized = key.toLowerCase().replaceAll(

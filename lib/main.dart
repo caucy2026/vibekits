@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import 'app/app.dart';
+import 'app/app_crash_log.dart';
 import 'app/platform_storage_layout.dart';
 import 'app/windows_file_associations.dart';
 import 'features/dev_tools/domain/harness_tool_bridge.dart';
@@ -18,6 +20,20 @@ Future<void> main(List<String> arguments) async {
     );
   }
   await PlatformStorageLayout.initialize();
+  final void Function(FlutterErrorDetails)? defaultFlutterErrorHandler =
+      FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    AppCrashLog.recordSync(
+      details.exception,
+      details.stack ?? StackTrace.current,
+      source: 'flutter-framework',
+    );
+    defaultFlutterErrorHandler?.call(details);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stackTrace) {
+    AppCrashLog.recordSync(error, stackTrace, source: 'platform-dispatcher');
+    return true;
+  };
   final List<String> initialFilePaths = arguments
       .where((String argument) => File(argument).existsSync())
       .toList(growable: false);
