@@ -106,21 +106,13 @@
 99. [KEMI远程办公 × Vibekits 智能体状态集成需求](41_KEMI_RUSTDESK_STATUS_INTEGRATION_REQUIREMENTS.md)——交付 KEMI/RustDesk 团队设计的连接方向、协议、安全边界、交付物和联合验收基线
 100. [Android APK 长时间压力任务设计](42_ANDROID_APK_STRESS_AGENT_REQUIREMENTS.md)——APK下载、ADB/串口自动发现、100轮长任务、异常取证、Git关联和报告闭环
 101. [飞书官方 CLI 移植与 Harness MCP 接口](43_FEISHU_OFFICIAL_CLI_HARNESS_API.md)——官方 larksuite/cli、D盘构建、四个 MCP 工具、凭据隔离与验收边界
-102. [局域网 Harness MCP 跨设备调用](44_LAN_HARNESS_MCP_ACCESS.md)——SSH stdio、设备公钥授权、APP控制审批、审计与私网门禁
-103. [VibeKits 局域网发现与协同](45_LAN_PEER_DISCOVERY_AND_COLLABORATION.md)——私网组播发现、协同节点界面、配对边界与任务分派流程
-104. [LMCP/1 局域网 MCP 开放协议（历史）](46_LAN_MCP_DISCOVERY_PROTOCOL_V1.md)——仅供旧版接收兼容与迁移审计；新应用禁止据此实现，统一转到 50 号 LMCP/2 标准
-105. [LMCP/1 第三方程序接入包（历史）](47_LMCP_THIRD_PARTY_INTEGRATION_KIT.md)——仅保留旧 Sidecar/清单迁移背景；不是当前第三方接入入口
-106. [LMCP/1 应用广播与协同接入指南（历史）](48_LMCP_APP_BROADCAST_IMPLEMENTATION_GUIDE.md)——仅保留旧协议背景；其中的 LMCP/1/SSH 方案不得用于新实现
-107. [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)——本APP、本机、局域网三个动态列表、无感目录配对、实时能力图和自动任务路由
-108. [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准（唯一单文档入口）](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)——交给第三方 APP 团队的完整实现规范：身份、授权开关、跨机发现、HTTPS MCP、详细工具目录、安全审批与双机验收
-109. [RustDesk 远程 ADB 隧道开发与验收要求](51_RUSTDESK_REMOTE_ADB_TUNNEL_REQUIREMENTS.md)——复用已认证 P2P/hbbr 会话、固定远端 5037、动态本地端口、lease/heartbeat 与真机验收门禁
-110. [Harness 实时状态 IPC 与 RustDesk 远端交付要求](52_HARNESS_RUNTIME_STATUS_IPC_AND_RUSTDESK_DELIVERY.md)——安全本机 IPC、脱敏快照、订阅/心跳/resync、P2P 只读面板与权限边界
-111. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
-112. [macOS 最近 Windows 功能对齐与实机验收](54_MACOS_RECENT_WINDOWS_FEATURE_PARITY.md)——MCP工具轨、设备身份、三层目录、组播复用、沙箱权限和Mac Release验收步骤
-113. [Harness 语义 Record & Replay](55_HARNESS_SEMANTIC_RECORD_AND_REPLAY.md)——一次示教生成参数化 Skill，按实时三层 MCP 重新规划、逐步验证和安全恢复，禁止坐标宏回放
-114. [VibeKits × KEMI传书 LMCP/2 联调记录](55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md)——协议代际根因、TLS指纹固定、真实目录与工具调用、滚动升级边界
-115. [macOS 自包含 Harness 运行时验收](56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md)——Key 已配置仍启动失败的根因、Universal Node/DSH 打包签名、真实工具调用证据和剩余发布门槛
-116. [MCP 全局信誉、长期记忆与 Harness 路由验收规范](57_MCP_GLOBAL_REPUTATION_AND_ROUTING_ACCEPTANCE_2026-08-31.md)——本机/本地/局域网固定优先级、跨设备工具类型评分、垃圾工具降权、UI 标识和安全验收
+102. [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准（唯一文档）](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)——第三方 APP 唯一交付与验收规范：身份、授权开关、跨机发现、HTTPS MCP、完整工具合同、KEMI 文件发送、全局评分、安全审批与双机验收
+103. [RustDesk 远程 ADB 隧道开发与验收要求](51_RUSTDESK_REMOTE_ADB_TUNNEL_REQUIREMENTS.md)——复用已认证 P2P/hbbr 会话、固定远端 5037、动态本地端口、lease/heartbeat 与真机验收门禁
+104. [Harness 实时状态 IPC 与 RustDesk 远端交付要求](52_HARNESS_RUNTIME_STATUS_IPC_AND_RUSTDESK_DELIVERY.md)——安全本机 IPC、脱敏快照、订阅/心跳/resync、P2P 只读面板与权限边界
+105. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
+106. [macOS 最近 Windows 功能对齐与实机验收](54_MACOS_RECENT_WINDOWS_FEATURE_PARITY.md)——MCP工具轨、设备身份、三层目录、组播复用、沙箱权限和Mac Release验收步骤
+107. [Harness 语义 Record & Replay](55_HARNESS_SEMANTIC_RECORD_AND_REPLAY.md)——一次示教生成参数化 Skill，按实时三层 MCP 重新规划、逐步验证和安全恢复，禁止坐标宏回放
+108. [macOS 自包含 Harness 运行时验收](56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md)——Key 已配置仍启动失败的根因、Universal Node/DSH 打包签名、真实工具调用证据和剩余发布门槛
 
 ## 完成定义
 

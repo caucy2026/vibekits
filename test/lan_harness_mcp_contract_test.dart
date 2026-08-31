@@ -3,27 +3,23 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('局域网MCP使用SSH强制命令且不暴露回环Token', () {
+  test('LMCP/2 唯一文档要求HTTPS指纹和控制授权', () {
     final String root = Directory.current.path;
-    final String script = File(
-      '$root${Platform.pathSeparator}tool${Platform.pathSeparator}'
-      'start_vibekits_mcp_ssh.ps1',
-    ).readAsStringSync();
     final String documentation = File(
       '$root${Platform.pathSeparator}docs${Platform.pathSeparator}'
-      '44_LAN_HARNESS_MCP_ACCESS.md',
+      '50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md',
     ).readAsStringSync();
 
-    expect(script, contains('SSH_CONNECTION'));
-    expect(script, contains('Test-PrivateIPv4'));
-    expect(script, contains('start_vibekits_mcp.ps1'));
-    expect(documentation, contains('restrict,command='));
-    expect(documentation, contains('StrictHostKeyChecking=yes'));
-    expect(documentation, contains('控制授权'));
-    expect(documentation, isNot(contains('tool-bridge.json` 中的')));
+    expect(documentation, contains('https-streamable-http'));
+    expect(documentation, contains('instanceKeyFingerprint'));
+    expect(documentation, contains('239.255.42.99'));
+    expect(documentation, contains('权限申请'));
+    expect(documentation, contains('kemi.files.send'));
+    expect(documentation, contains('Harness 的长期评分'));
+    expect(documentation, contains('不再对外公告无证书 `http-jsonrpc`'));
   });
 
-  test('第三方接入包包含清单Schema和无凭据发现Sidecar', () {
+  test('历史兼容 Sidecar 仍不携带凭据', () {
     final String root = Directory.current.path;
     final String sidecar = File(
       '$root${Platform.pathSeparator}tool${Platform.pathSeparator}'

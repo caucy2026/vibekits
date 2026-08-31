@@ -1165,7 +1165,7 @@
 - 新增 MCP 全局长期信誉：固定 `app → local → lan` 路由层级，同层候选按评分排序；同名工具跨设备共享分数，成功、失败、超时和完成度自动加权，人工 0–5 分可覆盖倾向，0 分/低于 30 标记为“垃圾”但不隐藏或绕过审批。无真实历史的工具保持原 UI。
 - 本地其他进程 MCP 已接入无 shell 的 stdio `initialize → tools/list → tools/call`；局域网 MCP 继续要求 LMCP/2、TLS pinning、目录摘要和副作用审批。新增 `vibekits.mcp.reputation_list` 与 `vibekits.mcp.reputation_rate`。
 - 最终验证：Flutter 3.47.0 `analyze --no-pub` 0 issue；Harness 界面 17/17、Harness/MCP 联合 36/36、MCP 评分与路由 8/8、Harness 工具桥 28/28（另 1 项按平台条件跳过）；macOS Release 592.8 MB，最终 App executable SHA-256 `3ac39c2456748cb148dbf232dae11aa9ea0bc4904a999812572c2003d415433b`，App.framework SHA-256 `e635c49cba36c0202e5c869cd83c414d2770d84e4fe35ea65b0436b994aebb3d`。
-- 最终 Release 已作为唯一 VibeKits 实例运行并监听 UDP 47831；MCP 暴露开关保持关闭，未绕过用户授权强制开启 9443。专题证据见 `55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md`、`56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md` 和 `57_MCP_GLOBAL_REPUTATION_AND_ROUTING_ACCEPTANCE_2026-08-31.md`。
+- 最终 Release 已作为唯一 VibeKits 实例运行并监听 UDP 47831；MCP 暴露开关保持关闭，未绕过用户授权强制开启 9443。LMCP/KEMI/评分合同已统一收敛到文档 50；macOS 自包含运行时证据保留在文档 56。
 
 # 2026-08-31 · 云端主线同步与 GitHub 备份复核
 
@@ -1184,7 +1184,7 @@
 
 # 2026-08-31 · LMCP/2 单一交付文档与 Windows 跨机门禁
 
-- 明确 `50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md` 是第三方 APP 唯一实现文档；文档 37 只是 VibeKits 工具目录。46/47/48 页首统一标记为 LMCP/1 历史资料，禁止用于新 APP。
+- 明确 `50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md` 是第三方 APP 唯一实现文档；文档 37 只是 VibeKits 工具目录。旧 SSH/LMCP/1、重复架构、KEMI 联调和评分专题文档已在有效内容并入 50 后删除，避免其他项目误用。
 - 文档 50 现在一份覆盖身份/证书、MCP 开关、UDP 47831 多网卡发现、HTTPS `/mcp`、TLS 指纹、目录摘要、工具详细合同、KEMI 四工具及文件发送边界、Harness 全局评分与三层路由、Windows Private 防火墙、双机调用和最短排障树，并删除与现状矛盾的无证书 `http-jsonrpc` 描述。第三方团队只交付并只按这一份文档验收，不再要求拼读联调记录或评分专题。
 - VibeKits 新版本未配置 LMCP/2 HTTPS 端点时不再回退广播 LMCP/1；仍接收旧 LMCP/1，但明确返回“仅发现、不可调用”。`peers.list` 注册源和自动目录文字一并更正为 LMCP/2。
 - 本机 10 秒真实监听只收到 Mac KEMI build102 LMCP/2，没有收到 Windows VibeKits 任何公告；因此“Windows 收不到 Mac KEMI”尚未闭环。后续必须以 Windows 产物 Git revision/SHA-256、`pktmon` UDP 证据、Private 入站规则和反向只读 `tools/call` 作为验收，不用同机测试代替。
