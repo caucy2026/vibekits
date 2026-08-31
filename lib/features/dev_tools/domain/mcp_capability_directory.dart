@@ -53,6 +53,8 @@ class McpCapabilityDirectory {
       <String, List<McpToolInterface>>{};
   final Map<String, String> _remoteCatalogKeys = <String, String>{};
   final Map<String, String> _loadingCatalogKeys = <String, String>{};
+  final Map<String, String> _remoteCatalogErrors = <String, String>{};
+  final Map<String, DateTime> _remoteRetryAfter = <String, DateTime>{};
   int _version = 0;
   bool _started = false;
 
@@ -167,6 +169,9 @@ class McpCapabilityDirectory {
         'endpoint': device.endpoint,
         'catalogRevision': device.catalogRevision,
         'callable': device.callable,
+        if (device.tier == McpCapabilityTier.lan &&
+            _remoteCatalogErrors.containsKey(device.id))
+          'catalogError': _remoteCatalogErrors[device.id]!,
         'tools': <Map<String, Object?>>[
           for (final McpToolInterface tool in tools)
             <String, Object?>{
@@ -392,11 +397,15 @@ class McpCapabilityDirectory {
     _remoteTools.removeWhere((String id, _) => !online.contains(id));
     _remoteCatalogKeys.removeWhere((String id, _) => !online.contains(id));
     _loadingCatalogKeys.removeWhere((String id, _) => !online.contains(id));
+    _remoteCatalogErrors.removeWhere((String id, _) => !online.contains(id));
+    _remoteRetryAfter.removeWhere((String id, _) => !online.contains(id));
     for (final VibekitsLanPeer peer in peers) {
       if (!peer.supportsLmcp2Calls) continue;
       final String key = _remoteCatalogKey(peer);
+      final DateTime? retryAfter = _remoteRetryAfter[peer.instanceId];
       if (_remoteCatalogKeys[peer.instanceId] == key ||
-          _loadingCatalogKeys[peer.instanceId] == key) {
+          _loadingCatalogKeys[peer.instanceId] == key ||
+          (retryAfter != null && DateTime.now().isBefore(retryAfter))) {
         continue;
       }
       unawaited(_loadRemoteCatalog(peer, key));
@@ -438,10 +447,16 @@ class McpCapabilityDirectory {
       if (current == null || _remoteCatalogKey(current) != catalogKey) return;
       _remoteTools[peer.instanceId] = tools;
       _remoteCatalogKeys[peer.instanceId] = catalogKey;
+      _remoteCatalogErrors.remove(peer.instanceId);
+      _remoteRetryAfter.remove(peer.instanceId);
       _updateLan(_lanPeers.values.toList(growable: false));
-    } on Object {
+    } on Object catch (error) {
       // Discovery heartbeats retry failed authenticated catalogs. A failed
       // node remains visible without tools and is never treated as callable.
+      _remoteCatalogErrors[peer.instanceId] = '$error';
+      _remoteRetryAfter[peer.instanceId] = DateTime.now().add(
+        const Duration(seconds: 5),
+      );
     } finally {
       if (_loadingCatalogKeys[peer.instanceId] == catalogKey) {
         _loadingCatalogKeys.remove(peer.instanceId);

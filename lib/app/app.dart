@@ -10,6 +10,10 @@ import '../features/dev_tools/domain/harness_status_ipc_protocol.dart';
 import '../features/dev_tools/domain/harness_status_ipc_publisher.dart';
 import '../features/dev_tools/domain/harness_tool_server.dart';
 import '../features/dev_tools/domain/harness_work_status.dart';
+import '../features/dev_tools/domain/lan_peer_discovery_service.dart';
+import '../features/dev_tools/domain/lmcp_exposure_server.dart';
+import '../features/dev_tools/domain/mcp_capability_directory.dart';
+import '../features/dev_tools/domain/mcp_device_identity.dart';
 import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
@@ -65,7 +69,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
     // local socket server on Android adds cold-start work and keeps resources
     // alive without providing a usable mobile workflow.
     if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
-      unawaited(_startExternalToolServer());
+      unawaited(_startMcpFabricAndExternalToolServer());
       unawaited(_startHarnessStatusPublisher());
     }
   }
@@ -128,14 +132,55 @@ class _VibekitsAppState extends State<VibekitsApp> {
     }
   }
 
-  Future<void> _startExternalToolServer() async {
+  /// Starts discovery and the three-tier capability directory for the entire
+  /// desktop process, not only while a Harness workspace happens to be open.
+  /// This keeps LAN presence, catalog revisions and tool routing live while
+  /// the user navigates to Cleaner, Documents or another top-level page.
+  Future<void> _startMcpFabricAndExternalToolServer() async {
+    VibekitsHarnessToolBridge? bridge;
     try {
       await _settingsLoad;
+      final McpDeviceIdentity identity = McpDeviceIdentity.forVibekits();
+      await LanPeerDiscoveryService.instance.start(
+        instanceId: identity.instanceId,
+        name: identity.displayName,
+        capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+        appId: identity.appId,
+        appVersion: VibekitsLmcpExposureServer.currentAppVersion,
+        hardwareCode: identity.hardwareCode,
+        // Receiving is process-wide. Publishing remains controlled by the
+        // explicit MCP consent flow in the Harness workspace.
+        exposureEnabled: false,
+      );
+      final McpCapabilityDirectory directory = McpCapabilityDirectory.instance;
+      bridge = VibekitsHarnessToolBridge(
+        activityRecorder: HarnessToolActivityStore.record,
+        downloadDirectory: _settings.value.toolDownloadDirectory,
+        mcpCatalogLoader: directory.exportForHarness,
+        mcpToolInvoker:
+            (
+              String instanceId,
+              String toolName,
+              Map<String, Object?> arguments,
+            ) => directory.invokeTool(
+              instanceId: instanceId,
+              toolName: toolName,
+              arguments: arguments,
+            ),
+        mcpReputationLoader: directory.exportReputations,
+        mcpReputationRater:
+            (String tier, String instanceId, String toolName, int rating) =>
+                directory.rateTool(
+                  tierName: tier,
+                  instanceId: instanceId,
+                  toolName: toolName,
+                  rating: rating,
+                ),
+      );
+      final VibekitsHarnessToolBridge activeBridge = bridge;
+      await directory.start(appBridge: activeBridge);
       final HarnessToolServer server = await HarnessToolServer.start(
-        bridge: VibekitsHarnessToolBridge(
-          activityRecorder: HarnessToolActivityStore.record,
-          downloadDirectory: _settings.value.toolDownloadDirectory,
-        ),
+        bridge: bridge,
         approve: _approveExternalTool,
         connectionFile: HarnessToolServer.defaultConnectionFile(),
       );
@@ -144,9 +189,12 @@ class _VibekitsAppState extends State<VibekitsApp> {
         return;
       }
       _externalToolServer = server;
-    } on Object {
+      bridge = null; // Ownership transferred to HarnessToolServer.
+    } on Object catch (error) {
+      await bridge?.dispose();
       // MCP is an optional integration. A publishing failure must never block
       // the desktop UI or unrelated offline tools.
+      debugPrint('Process-wide MCP fabric unavailable: $error');
     }
   }
 
@@ -208,6 +256,10 @@ class _VibekitsAppState extends State<VibekitsApp> {
     if (server != null) unawaited(server.close());
     final HarnessStatusIpcPublisher? statusPublisher = _harnessStatusPublisher;
     if (statusPublisher != null) unawaited(statusPublisher.stop());
+    if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
+      unawaited(McpCapabilityDirectory.instance.dispose());
+      unawaited(LanPeerDiscoveryService.instance.stop());
+    }
     if (widget.settingsController == null) _settings.dispose();
     super.dispose();
   }
