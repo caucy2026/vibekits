@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import '../../../app/platform_storage_layout.dart';
+
 class McpDeviceIdentity {
   const McpDeviceIdentity({
     required this.appId,
@@ -47,17 +49,15 @@ class McpDeviceIdentity {
 }
 
 class McpExposurePreferences {
-  McpExposurePreferences({File? file})
-    : file =
-          file ??
-          File(
-            '${Directory.current.absolute.path}${Platform.pathSeparator}'
-            '.runtime-cache${Platform.pathSeparator}mcp'
-            '${Platform.pathSeparator}exposure.json',
-          );
+  McpExposurePreferences({File? file}) : file = file ?? defaultFile();
 
   final File file;
   static const int consentVersion = 2;
+
+  static File defaultFile() => File(
+    '${PlatformStorageLayout.current().settingsDirectory}'
+    '${Platform.pathSeparator}mcp${Platform.pathSeparator}exposure.json',
+  );
 
   Future<bool> loadEnabled() async {
     try {

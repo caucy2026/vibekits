@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../../app/platform_storage_layout.dart';
 import 'harness_tool_bridge.dart';
 import 'lan_peer_discovery_service.dart';
 import 'local_mcp_stdio_client.dart';
@@ -11,9 +12,9 @@ import 'mcp_tool_reputation_store.dart';
 
 /// Maintains the live MCP catalog shared by the Harness planner and its UI.
 ///
-/// Other local processes publish one JSON file per provider in
-/// [.runtime-cache/mcp/registrations]. Files are reread atomically; malformed
-/// or stale registrations never replace the last valid snapshot.
+/// Other local processes publish one JSON file per provider in the stable app
+/// cache MCP registration directory. Files are reread atomically; malformed or
+/// stale registrations never replace the last valid snapshot.
 class McpCapabilityDirectory {
   McpCapabilityDirectory({
     Directory? registrationDirectory,
@@ -22,18 +23,18 @@ class McpCapabilityDirectory {
     McpToolReputationStore? reputationStore,
     LocalMcpStdioClient? localClient,
   }) : registrationDirectory =
-           registrationDirectory ??
-           Directory(
-             '${Directory.current.absolute.path}${Platform.pathSeparator}'
-             '.runtime-cache${Platform.pathSeparator}mcp'
-             '${Platform.pathSeparator}registrations',
-           ),
+           registrationDirectory ?? defaultRegistrationDirectory(),
        _remoteClient = remoteClient ?? LmcpRemoteClient(),
        _discoveryService = discoveryService ?? LanPeerDiscoveryService.instance,
        _reputationStore = reputationStore ?? McpToolReputationStore.instance,
        _localClient = localClient ?? const LocalMcpStdioClient();
 
   static final McpCapabilityDirectory instance = McpCapabilityDirectory();
+
+  static Directory defaultRegistrationDirectory() => Directory(
+    '${PlatformStorageLayout.current().cacheDirectory}'
+    '${Platform.pathSeparator}mcp${Platform.pathSeparator}registrations',
+  );
 
   final Directory registrationDirectory;
   final LmcpRemoteClient _remoteClient;
@@ -88,13 +89,32 @@ class McpCapabilityDirectory {
       ),
     ];
     if (!_started) {
-      _started = true;
-      await registrationDirectory.create(recursive: true);
-      _lanSubscription = _discoveryService.changes.listen(_updateLan);
-      _localRefreshTimer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => unawaited(refreshLocal()),
-      );
+      StreamSubscription<List<VibekitsLanPeer>>? subscription;
+      Timer? refreshTimer;
+      try {
+        // Local stdio registrations are optional. A read-only or temporarily
+        // unavailable cache must never disable independent LAN discovery.
+        try {
+          await registrationDirectory.create(recursive: true);
+        } on Object {
+          // refreshLocal treats a missing directory as an empty local tier.
+        }
+        subscription = _discoveryService.changes.listen(_updateLan);
+        refreshTimer = Timer.periodic(
+          const Duration(seconds: 1),
+          (_) => unawaited(refreshLocal()),
+        );
+        _lanSubscription = subscription;
+        _localRefreshTimer = refreshTimer;
+        _started = true;
+      } on Object {
+        refreshTimer?.cancel();
+        await subscription?.cancel();
+        _lanSubscription = null;
+        _localRefreshTimer = null;
+        _started = false;
+        rethrow;
+      }
     }
     await refreshLocal();
     _updateLan(_discoveryService.peers);

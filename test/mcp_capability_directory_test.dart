@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/app/platform_storage_layout.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
 import 'package:vibekits/features/dev_tools/domain/local_mcp_stdio_client.dart';
@@ -12,6 +13,20 @@ import 'package:vibekits/features/dev_tools/domain/mcp_capability_models.dart';
 import 'package:vibekits/features/dev_tools/domain/mcp_tool_reputation_store.dart';
 
 void main() {
+  test('默认 MCP 注册目录不依赖进程当前工作目录', () {
+    final String expected =
+        '${PlatformStorageLayout.current().cacheDirectory}'
+        '${Platform.pathSeparator}mcp${Platform.pathSeparator}registrations';
+    expect(
+      McpCapabilityDirectory.defaultRegistrationDirectory().path,
+      expected,
+    );
+    expect(
+      expected,
+      isNot(contains('${Directory.current.path}/.runtime-cache')),
+    );
+  });
+
   test('LMCP 目录和工具调用使用不同超时边界', () {
     final LmcpRemoteClient client = LmcpRemoteClient();
     expect(client.timeout, const Duration(seconds: 8));
@@ -247,6 +262,59 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('本机注册缓存不可创建时仍订阅并显示局域网节点', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits-mcp-readonly-registration-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final File blocker = File(
+      '${root.path}${Platform.pathSeparator}not-a-directory',
+    );
+    await blocker.writeAsString('blocks child directory creation');
+    final _FakeDiscoveryService discovery = _FakeDiscoveryService();
+    final McpCapabilityDirectory directory = McpCapabilityDirectory(
+      registrationDirectory: Directory(
+        '${blocker.path}${Platform.pathSeparator}registrations',
+      ),
+      discoveryService: discovery,
+      remoteClient: _FakeRemoteClient(),
+      reputationStore: McpToolReputationStore(
+        file: File('${root.path}${Platform.pathSeparator}reputation.json'),
+      ),
+    );
+    addTearDown(directory.dispose);
+    addTearDown(discovery.close);
+
+    await directory.start(appBridge: VibekitsHarnessToolBridge());
+    discovery.emit(<VibekitsLanPeer>[
+      VibekitsLanPeer(
+        instanceId: 'com.newlink.kemiscrollbench:41B8C7FDF4',
+        name: 'KEMI-BM@hua-41B8C7FDF4',
+        appId: 'com.newlink.kemiscrollbench',
+        appVersion: '2.1.5',
+        address: '192.168.3.62',
+        port: 9443,
+        transport: 'https-streamable-http',
+        protocolVersion: 2,
+        capabilityDigest: 'sha256:${List<String>.filled(64, '7').join()}',
+        lastSeen: DateTime.now(),
+        hardwareCode: '41B8C7FDF4',
+        catalogPath: '/mcp',
+        callPath: '/mcp',
+        instanceKeyFingerprint: 'sha256:${List<String>.filled(64, '5').join()}',
+        catalogRevision: '3',
+        serviceRole: 'tool-provider',
+      ),
+    ]);
+    await pumpEventQueue();
+
+    expect(directory.snapshot.local, isEmpty);
+    expect(directory.snapshot.lan, hasLength(1));
+    expect(directory.snapshot.lan.single.hardwareCode, '41B8C7FDF4');
   });
 }
 

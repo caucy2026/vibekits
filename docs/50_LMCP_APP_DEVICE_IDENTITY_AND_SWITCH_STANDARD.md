@@ -448,9 +448,33 @@ VibeKits 直接使用 `tools/list` 的 `name` 与用户任务生成参数：
 
 身份扩展字段允许位于 `tools/call.result` 顶层，或位于 MCP 标准的 `tools/call.result.structuredContent`；同一次响应不得给出两套冲突值。VibeKits 从两处合并读取后仍严格比较公告的 `instanceId`、实际工具名和 `catalogRevision`，缺失或不一致都拒绝结果。
 
+### 5.5 异步任务必须提供完整参数和可回收结果（KEMI-BM 生产样例）
+
+“发现了工具”不算完成。提供者必须在 `tools/list` 中完整给出每个参数的类型、必填项、枚举、长度和语义，并保证调用方在 APP 重启或原调用断开后仍能取回终态。以 2026-08-31 真机 `KEMI-BM@hua-41B8C7FDF4`（`192.168.3.62:9443/mcp`、APP 2.1.5、catalogRevision 3）为已验收样例，其五个工具合同如下：
+
+| 工具 | 风险 | 精确输入 | 必须返回 |
+| --- | --- | --- | --- |
+| `kemi.benchmark.device_status` | `readOnly` | 空对象，`additionalProperties=false` | 实例/版本、MCP 状态、任务状态、附近 LMCP/2 数量；不得返回私钥、原始硬件配置 |
+| `kemi.benchmark.last_result` | `readOnly` | 空对象，`additionalProperties=false` | `ok`、`available`；有结果时返回完整 `result` 和 `reportSha256`，无结果返回稳定 `NO_RESULT`；不得返回本地绝对路径 |
+| `kemi.benchmark.run` | `controlsDevice` | 必填 `mode`：`quick` 或 `stability`；必填 `idempotencyKey`：字符串 8–128 字符；拒绝额外参数 | 审批通过后返回非空 `taskId`、状态工具名、建议轮询秒数；同一幂等键重试必须指向同一任务 |
+| `kemi.benchmark.status` | `readOnly` | 必填 `taskId`：字符串 1–128 字符；拒绝额外参数 | 活动态返回审批/阶段/轮次进度和 `final=false`；完成态必须在同一响应返回 `final=true`、完整 `result`、`reportSha256`；未知/过期任务返回稳定 `TASK_NOT_FOUND` |
+| `kemi.benchmark.cancel` | `controlsDevice` | 必填 `taskId`：1–128 字符；必填 `idempotencyKey`：8–128 字符；拒绝额外参数 | 返回当前任务终态；重复取消必须幂等；运行中的设备控制仍需被调用端审批 |
+
+标准调用流程固定为：
+
+1. 先从已固定证书且摘要验证通过的当前目录取得 Schema，禁止调用方硬编码旧 revision 或猜参数。
+2. 调用 `run({"mode":"quick","idempotencyKey":"<8-128 字符唯一键>"})`。被调用端必须弹出本机权限确认；拒绝或审批超时返回 `isError=true`、稳定错误码（生产样例为 `DENIED`），调用方立即停止且不得伪造 taskId。
+3. 审批通过后保存 `taskId`，按返回的建议间隔（缺失时 5 秒，客户端夹在 2–15 秒）调用 `status({"taskId":"..."})`，直到 `final=true`。查询本身必须只读且可跨调用方重启恢复。
+4. 若网络/调用方在运行中断开，恢复后调用 `last_result({})`；提供者至少保留最近一条完整终态，使调用方仍能取得结果证据。
+5. 调用方只有同时验证 `isError=false`、`ok=true`、实例/工具/revision 身份、`result` 为对象、`reportSha256=sha256:<64 位小写十六进制>` 后，才能宣布任务完成。
+
+本次真实回收验证通过：VibeKits 调用 `kemi.benchmark.last_result` 得到 `isError=false`、`available=true`、完整三轮 `result`；taskId=`b07e6779-8815-45e2-b94e-dea3a7ff2311`，mode=`quick`，elapsedMs=`73744`，finalScore=`99.15625`，grade=`S`，capacity/frame/input/stability 均为 `100`，reportSha256=`sha256:db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。另一次 `run` 在未获本机批准时正确返回 `DENIED`，证明权限门禁没有被远程调用绕过。
+
 VibeKits 服务端仅接受私网/loopback 来源的 `POST /mcp`，其他 path/method 返回 404，排空时返回 503，并发超过 8 返回 429，请求超过 1 MiB 返回 413。JSON-RPC parse/invalid request/invalid params/method not found/internal error 分别使用标准 `-32700/-32600/-32602/-32601/-32603`；通知成功可返回 HTTP 202 空响应。
 
 所有远端 `tools/call` 必须进入与本机 Harness 相同的 `VibekitsHarnessToolBridge.invoke`：先按当前 inputSchema 再验证参数，再按 `readOnly/writesData/controlsDevice/destructive` 执行当前权限策略；需要审批时在本机显示工具、目标和有界参数，拒绝即不执行。成功、失败和拒绝都写入 `HarnessToolActivityStore`，不得因为来源是 KEMI 或另一台 VibeKits 而绕过审批/审计。MCP 总开关默认关闭；只有显示证书指纹和完整目录的风险确认通过后才监听首选 9443 或公告中的真实回退端口并广播。
+
+VibeKits 的发现接收与“向外暴露 MCP”开关相互独立：即使总开关关闭，APP 仍监听局域网公告并显示其他设备；关闭只停止本 APP 的 HTTPS Server 和对外公告。运行态路径不得从 `Directory.current`/工作区推导。开关同意状态保存在平台 Application Support 的 `Vibekits/mcp/exposure.json`；本机进程注册目录保存在平台 Application Cache 的 `Vibekits/mcp/registrations`。任一本地注册目录不可写都只能令 local 层为空，不能阻断 LAN 订阅。初始化失败必须回滚 started/subscription/timer 状态，允许下一次重试。
 
 以下情况 VibeKits 会拒绝调用：工具不在当前目录、Schema 无效、目录摘要不匹配、实例指纹改变、设备已 `goodbye`/TTL 离线、端点跳出私网、响应超出限制。
 

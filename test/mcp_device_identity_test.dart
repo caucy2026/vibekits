@@ -1,9 +1,21 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vibekits/app/platform_storage_layout.dart';
 import 'package:vibekits/features/dev_tools/domain/mcp_device_identity.dart';
 
 void main() {
+  test('默认 MCP 开关状态保存在稳定应用目录', () {
+    final String expected =
+        '${PlatformStorageLayout.current().settingsDirectory}'
+        '${Platform.pathSeparator}mcp${Platform.pathSeparator}exposure.json';
+    expect(McpExposurePreferences.defaultFile().path, expected);
+    expect(
+      expected,
+      isNot(contains('${Directory.current.path}/.runtime-cache')),
+    );
+  });
+
   test('VibeKits 设备身份稳定且名称包含硬件识别码', () {
     final McpDeviceIdentity first = McpDeviceIdentity.forVibekits();
     final McpDeviceIdentity second = McpDeviceIdentity.forVibekits();
