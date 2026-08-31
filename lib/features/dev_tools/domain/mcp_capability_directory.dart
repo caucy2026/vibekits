@@ -187,7 +187,7 @@ class McpCapabilityDirectory {
           'discoveryAlive': device.online,
           'endpointReachable': endpointReachable,
           'catalogState': catalogState,
-          if (catalogErrorCode != null) 'catalogErrorCode': catalogErrorCode,
+          'catalogErrorCode': ?catalogErrorCode,
         },
         if (device.tier == McpCapabilityTier.lan &&
             _remoteCatalogErrors.containsKey(device.id))
