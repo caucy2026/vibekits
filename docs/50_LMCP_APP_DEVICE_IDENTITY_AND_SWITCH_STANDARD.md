@@ -1,6 +1,6 @@
 # LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准
 
-版本：2.1
+版本：2.2
 状态：VibeKits、KEMI传书和第三方 APP 唯一可执行互通规范
 目标：另一台机器只需完整实现本文，即可让 VibeKits 与对端双向发现、固定实例证书、读取目录，并像调用本机工具一样互相调用。
 
@@ -13,7 +13,8 @@
 1. 身份与开关：稳定 `instanceId`、持久证书、风险确认和可撤销状态机；
 2. 跨机发现：按本文固定参数在每张私网网卡上发送/接收 LMCP/2，并完成 Windows Private 防火墙规则；
 3. 真实调用：HTTPS `/mcp`、TLS 指纹固定、`initialize → tools/list → tools/call`、目录摘要和错误语义；
-4. 可理解工具：每个工具提供用途、完整 Schema、风险、成功结果、错误码和真实双机验收状态。
+4. 可理解工具：每个工具提供用途、完整 Schema、风险、成功结果、错误码和真实双机验收状态；
+5. 工程闭环：Harness 能按当前目录自行选工具、组合调用、跟踪长任务、验证物理结果、恢复中断并输出可审计证据，而不是只把一次 HTTP 成功当作任务完成。
 
 仓库中的 Harness 能力目录只是 VibeKits 当前构建的自动生成结果；LMCP/1 文件只是历史兼容资料。它们都不是接入前置条件，且出现冲突时一律以本文为准。
 
@@ -478,7 +479,7 @@ VibeKits 使用 UDP 包的源地址拼接连接 URL。例如源 IP 为 `192.168.
 
 所有 LMCP JSON 请求都已序列化且受 1 MiB 上限约束，客户端必须发送准确 `Content-Length`，不得依赖 `Transfer-Encoding: chunked`。这是 Windows、小型原生 HTTP Server 与 Dart/Flutter 客户端共同互通的硬门槛；服务端可以支持 chunked 作为扩展，但不能要求客户端只能使用 chunked。
 
-`capabilityDigest` 的输入是完成所有分页后的规范对象 `{"tools":[...],"nextCursor":null}`：Map key 递归按 Unicode 字符串排序，数组保序，UTF-8 编码后 SHA-256。tools 中必须包含 name/title/description/inputSchema/annotations 以及实现公开的 risk 扩展。客户端必须基于服务端返回的**原始完整工具对象**计算摘要，不能先映射成自己的 UI 模型再计算，否则未知扩展或结构化 `risk` 会被删除/改形。公告三个位置的 digest 完全相同；任何差异拒绝目录。`catalogRevision` 是独立的单调变更键，不能用四位摘要截断代替。
+`capabilityDigest` 的输入是完成所有分页后的规范对象 `{"tools":[...],"nextCursor":null}`：Map key 递归按 Unicode 字符串排序，数组保序，UTF-8 编码后 SHA-256。tools 中必须包含 name/title/description/inputSchema/outputSchema/annotations/_meta 以及实现公开的 risk 扩展。客户端必须基于服务端返回的**原始完整工具对象**计算摘要，不能先映射成自己的 UI 模型再计算，否则未知扩展、工程 `_meta` 或结构化 `risk` 会被删除/改形。公告三个位置的 digest 完全相同；任何差异拒绝目录。`catalogRevision` 是独立的单调变更键，不能用四位摘要截断代替。
 
 连接后 VibeKits 发送的初始化请求：
 
@@ -630,6 +631,260 @@ app（VibeKits 自身 MCP） → local（本机其他进程 MCP） → lan（局
 
 Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibekits.mcp.reputation_rate` 写入 0–5 分。任何评分都不能绕过 TLS 指纹、目录摘要、inputSchema、在线检查或持久授权作用域。
 
+### 6.3 Harness 工程执行闭环（核心目标）
+
+LMCP 的最终目标不是“设备出现在列表里”，而是让 Harness 在没有阅读对方源码、
+没有人工逐步指定工具的情况下，依据实时 `tools/list` 完成工程任务。每个工程任务
+必须按以下闭环执行；任何一步缺失都只能报告“部分完成”：
+
+```text
+理解目标
+  → 刷新 app/local/lan 三层目录并验证身份、在线和目录摘要
+  → 读取候选工具的完整 Schema、风险、资源和完成合同
+  → 分解为 preflight / action / observe / verify / recover
+  → 选择同层最高信誉且满足作用域的工具
+  → 生成幂等键并按 Schema 调用
+  → 短任务读取终态；长任务保存 taskId 并自动轮询 status
+  → 用设备状态、传感器读数、接收回执或制品哈希验证物理结果
+  → 失败时按稳定错误码重试、恢复、取消或换候选
+  → 输出结果、证据、未验证项并更新全局信誉
+```
+
+Harness 不得：根据工具名猜参数；把 `announce` 当可调用；把 `accepted/running` 当
+完成；网络失败后静默改走 shell；因调用端重启丢掉 `taskId`；只复述提供方的
+“成功”文字而不检查完成合同；为了自动化而绕过首次持久授权。
+
+对于“测试 62 机器稳定性”这类目标，合格 Harness 应自行完成：刷新目录 → 找到
+声明稳定性测试能力的已验证实例 → 比较 Schema/风险/评分 → 调用 run → 保存
+taskId/traceId → 按建议间隔调用 status 到 `final=true` → 校验报告哈希、分数和
+设备身份 → 返回证据。用户不需要先告诉 Harness 每个具体工具名。
+
+### 6.4 物理工具的机器可理解自描述
+
+所有允许 Harness 自动选择的工具，除 MCP 标准 `name`、`title`、`description`、
+`inputSchema`、`annotations` 外，必须提供 `outputSchema`，并在 MCP 标准 `_meta` 的命名空间键
+`com.caucy.vibekits/lmcp-engineering` 下提供以下工程合同。其他 MCP 客户端可按标准
+忽略未知 `_meta`，但 LMCP/2 工程验收必须读取；该字段属于目录摘要输入，变化必须
+提升 `catalogRevision`。禁止自创会被严格 MCP Schema 拒绝的顶层字段。
+
+```json
+{
+  "name": "kemi.benchmark.run",
+  "title": "运行设备稳定性测试",
+  "description": "在指定设备上启动真实稳定性基准。返回 taskId，不代表测试已完成；必须调用声明的 statusTool 直到 final=true。",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["quick", "stability"],
+        "description": "quick 用于约两分钟预检；stability 用于发布前长时验收"
+      },
+      "idempotencyKey": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 128,
+        "description": "调用方为一次逻辑任务生成；重试必须复用"
+      }
+    },
+    "required": ["mode", "idempotencyKey"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": ["schemaVersion", "ok", "final", "state", "instanceId", "toolName", "catalogRevision", "traceId", "taskId"],
+    "properties": {
+      "schemaVersion": {"const": 1},
+      "ok": {"type": "boolean"},
+      "final": {"type": "boolean"},
+      "instanceId": {"type": "string"},
+      "toolName": {"const": "kemi.benchmark.run"},
+      "catalogRevision": {"type": "integer", "minimum": 1},
+      "traceId": {"type": "string"},
+      "taskId": {"type": "string"},
+      "state": {"enum": ["accepted", "running", "succeeded", "failed", "cancelled", "unknown"]}
+    }
+  },
+  "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": false
+  },
+  "_meta": {
+    "com.caucy.vibekits/lmcp-engineering": {
+      "contractVersion": 1,
+      "capabilityId": "device.stability.benchmark",
+      "domains": ["device-testing", "performance", "stability"],
+      "verbs": ["measure", "stress", "report"],
+      "riskClass": "controlsDevice",
+      "executionMode": "asynchronous",
+      "resources": [{"kind": "device", "selector": "provider-instance"}],
+      "preconditions": ["provider MCP is ON", "no benchmark is already running"],
+      "effects": ["creates CPU/GPU/input load", "writes a benchmark report"],
+      "statusTool": "kemi.benchmark.status",
+      "cancelTool": "kemi.benchmark.cancel",
+      "recoveryTool": "kemi.benchmark.last_result",
+      "defaultPollAfterMs": 5000,
+      "completion": {
+        "terminalStates": ["succeeded", "failed", "cancelled"],
+        "successState": "succeeded",
+        "requiredEvidence": ["reportSha256", "finalScore", "grade", "completedAt"]
+      },
+      "retry": {
+        "requiresIdempotencyKey": true,
+        "retryableCodes": ["ENDPOINT_UNAVAILABLE", "CALL_TIMEOUT"],
+        "nonRetryableCodes": ["INVALID_ARGUMENTS", "AUTH_SCOPE_REQUIRED"]
+      }
+    }
+  }
+}
+```
+
+字段合同：
+
+| 字段 | 必须表达的内容 |
+|---|---|
+| `capabilityId` | 与设备实例无关的稳定能力类别；同能力多设备候选可比较，不作为安全身份 |
+| `domains/verbs` | 让 Harness 按目标检索，而不是只做工具名模糊匹配 |
+| `riskClass` | `readOnly/writesData/controlsDevice/destructive` 之一，必须与首次授权一致 |
+| `executionMode` | `synchronous/asynchronous/streaming`；不得让客户端猜是否需要轮询 |
+| `resources` | 操作的设备、文件根、端口、账号或项目选择方式及边界 |
+| `preconditions/effects` | 调用前必须成立的条件，以及会真实改变或占用什么 |
+| `statusTool/cancelTool/recoveryTool` | 长任务的查询、取消和断线恢复入口；异步工具必须提供 |
+| `completion` | 哪个状态才算成功，以及必须取得哪些证据字段 |
+| `retry` | 哪些错误可安全重试、是否必须复用幂等键、哪些错误必须停止 |
+
+只写“执行测试”“发送文件”“控制设备”不合格。`description` 必须明确：何时调用、
+何时不要调用、参数如何选择、返回是受理还是终态、怎样验证、可能的副作用和失败。
+
+### 6.5 标准结果信封和长任务恢复
+
+每次 `tools/call` 的 `structuredContent` 必须返回一个可机器判断的信封。同步成功
+直接 `final=true`；异步受理必须 `final=false`，且给出后续工具和参数，不能只在
+自然语言 `content` 中说“已开始”。按 MCP 2025-06-18 兼容要求，返回
+`structuredContent` 时还应在一个 `TextContent` 中返回同一 JSON 的序列化文本；
+`outputSchema` 存在时服务端必须保证 structuredContent 符合它，客户端必须验证。
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "final": false,
+  "state": "running",
+  "instanceId": "com.newlink.kemiscrollbench:41B8C7FDF4",
+  "toolName": "kemi.benchmark.run",
+  "catalogRevision": 4,
+  "traceId": "b0abf463-271d-4f80-8bed-317b19227ea4",
+  "taskId": "73f07dc1-b686-42cb-a26b-b264ae70f929",
+  "startedAt": "2026-09-01T01:20:00Z",
+  "pollAfterMs": 5000,
+  "status": {"toolName": "kemi.benchmark.status", "arguments": {"taskId": "73f07dc1-b686-42cb-a26b-b264ae70f929"}},
+  "cancel": {"toolName": "kemi.benchmark.cancel", "requiresNewIdempotencyKey": true},
+  "recovery": {"toolName": "kemi.benchmark.last_result", "retentionSeconds": 604800},
+  "progress": {"completed": 1, "total": 4, "unit": "phase"},
+  "result": null,
+  "evidence": [],
+  "warnings": []
+}
+```
+
+终态必须保留同一 `taskId`，每次调用拥有自己的 `traceId`，并返回：
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "final": true,
+  "state": "succeeded",
+  "instanceId": "com.newlink.kemiscrollbench:41B8C7FDF4",
+  "toolName": "kemi.benchmark.status",
+  "catalogRevision": 4,
+  "traceId": "87f11dc6-063c-4f87-a789-b06f51984649",
+  "taskId": "73f07dc1-b686-42cb-a26b-b264ae70f929",
+  "startedAt": "2026-09-01T01:20:00Z",
+  "completedAt": "2026-09-01T01:21:14Z",
+  "result": {"finalScore": 99.54, "grade": "S"},
+  "evidence": [{
+    "kind": "artifact",
+    "name": "benchmark-report",
+    "sha256": "sha256:db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363",
+    "observedAt": "2026-09-01T01:21:14Z",
+    "sourceInstanceId": "com.newlink.kemiscrollbench:41B8C7FDF4"
+  }],
+  "sideEffects": ["benchmark report persisted"],
+  "warnings": []
+}
+```
+
+失败时 `isError=true`，同时保留结构化信封：`ok=false`、`final=true`、稳定
+`error.code`、有界脱敏 `message`、`retryable`、`category` 和可选 `retryAfterMs`。
+HTTP 200 只代表 MCP 信封成功传输；`isError=false` 只代表工具没有报告错误；只有
+`ok=true && final=true && state=succeeded` 且完成证据通过 Schema 和身份校验，
+Harness 才能宣布工程任务完成。
+
+客户端必须把 `taskId/provider instanceId/tool/catalogRevision/status arguments` 写入
+任务恢复记录。APP、Harness 或网络重启后先刷新并重新验证目录，再调用 status；
+若 taskId 已过期则调用 recoveryTool。不得因重启重复执行物理副作用。
+
+### 6.6 物理世界任务的结果验真
+
+物理操作必须区分四个阶段：`requested`（请求已发送）、`accepted`（提供者受理）、
+`executed`（动作代码返回）、`verified`（目标世界状态已观察并满足完成条件）。前
+三个阶段都不能单独写“已完成”。优先使用独立只读工具或目标端回执验证，不得只
+相信发起动作的同一字符串。
+
+| 任务 | 最低完成证据 |
+|---|---|
+| 远程文件发送 | 接收目标稳定身份、实际保存状态/路径摘要、字节数、接收端 SHA-256；发送端上传完成不够 |
+| APP 安装/启动 | 目标设备 ID、安装后包版本/签名摘要、进程或 Activity 状态、观察时间；ADB exit 0 不够 |
+| 稳定性/性能测试 | 新 taskId、run/status traceId、终态、完整指标、报告 SHA-256、开始/完成时间 |
+| 设备开关/控制 | 动作前状态、动作回执、动作后只读状态或传感器读数；仅“命令已下发”不够 |
+| 数据写入/配置 | 目标资源 ID、写入版本/ETag/哈希、读回值或服务端提交回执 |
+| 采集/测量 | 设备/传感器身份、单位、采样时间、样本数、量程/置信度、原始制品哈希或可追溯摘要 |
+
+每条证据必须标注 `sourceInstanceId/observedAt/kind`；制品使用
+`sha256:<64 位小写十六进制>`。Harness 最终报告必须把结论分为：已验证事实、提供
+方声明但未独立验证、推断、阻塞项。任何无法取得最低证据的任务必须返回
+`verification=partial|failed`，不能为了让流程全绿而补写虚假成功。
+
+### 6.7 自动选型、组合调用和降级规则
+
+1. Harness 先按工程 `_meta` 中的 `capabilityId/domains/verbs/resources` 找候选，再验证工具 Schema；
+   只有旧工具没有工程扩展时才退回 `name/title/description` 语义匹配并明确降低置信度。
+2. 固定层级仍是 `app → local → lan`；同层同能力按兼容性、授权范围、在线状态、
+   完成证据能力、全局信誉、延迟排序。评分不能让未验证端点越过安全门禁。
+3. 多工具任务必须形成显式执行图；例如“向 62 发包并压力测试”至少包含设备查询、
+   文件发送、接收验证、安装、启动、测试、status、结果验真和清理，不得在中途成功
+   后跳过后续目标。
+4. 可并行的只读观察可并行；共享设备、端口、文件或控制会话的副作用操作默认串行，
+   除非工具明确声明并发安全和锁语义。
+5. `AUTH_SCOPE_REQUIRED/INVALID_ARGUMENTS/CALLER_BLOCKED` 不自动换工具规避授权；
+   `ENDPOINT_UNAVAILABLE/CALL_TIMEOUT` 才可在保留幂等键和审计的前提下重试或换同层候选。
+6. 降级到更低层、不同设备或功能较弱工具前，Harness 必须确认仍能满足原完成合同；
+   不能把“做了类似动作”当成完成用户目标。
+
+每次调用结束后，自动完成质量由“调用成功、终态取得、证据完整、结果满足目标、
+无需人工补救”共同计算。HTTP 成功但没有终态/物理证据应降权；错误结果、虚假完成、
+重复副作用或任务完成率低必须显著降权。
+
+### 6.8 Harness 面向用户的最终报告
+
+Harness 完成工程任务后至少输出：
+
+- 用户目标及实际执行范围；
+- 使用的每个 `instanceId/toolName/catalogRevision` 和选择原因；
+- 关键输入的脱敏摘要、幂等键摘要、taskId 与各阶段 traceId；
+- 每一步 `state/final/duration`，以及重试、换工具、取消和恢复记录；
+- `result` 中与目标相关的字段和最低物理证据；
+- 明确的 `completed/partially_completed/failed/cancelled` 结论；
+- 未验证项、残留副作用、需要人工处理的下一步；
+- 对实际工具完成质量的信誉更新。
+
+自然语言可以解释结果，但不得替代结构化结果和证据。敏感路径、Token、私钥、完整
+文件内容、远程会话密码不得进入报告；需要关联时使用稳定资源 ID、basename、大小和
+哈希。
+
 ## 7. 第三方 APP 交付检查表
 
 - [ ] 显示名称包含 APP 名、主机名和 10 位硬件识别码。
@@ -646,7 +901,12 @@ Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibek
 - [ ] 周期 announce 与监听恢复不依赖启动顺序：提供方先启动 10 秒、调用方后启动时仍在 8 秒内发现，反向顺序和调用方重启同样通过。
 - [ ] 实现标准 `initialize/tools/list/tools/call`。
 - [ ] 每个工具具有完整描述和 JSON Schema。
+- [ ] 工程工具提供 `outputSchema` 与完整 `_meta["com.caucy.vibekits/lmcp-engineering"]`；Harness 不看源码也能知道能力、资源、前置条件、副作用、完成证据和恢复方式。
 - [ ] 文件传输能力提供显式 send 和可查终态；异步长任务另有 status/cancel，不能只列设备。
+- [ ] 异步工具返回 taskId/traceId/pollAfterMs/status/cancel/recovery，调用方重启后能恢复，重复请求不会重复物理副作用。
+- [ ] 物理工具区分 requested/accepted/executed/verified，只有取得工具声明的最低证据才标记完成。
+- [ ] 结果使用标准信封；成功必须 `ok=true/final=true/state=succeeded`，错误提供稳定 code/retryable/category。
+- [ ] 已用一个包含至少三个工具的真实工程任务验证自动选型、编排、终态轮询、物理验真、失败恢复和最终报告。
 - [ ] 每个工具已写明用途、全部参数、风险、成功结果、错误码和实际验收状态。
 - [ ] 接口变化更新目录版本并发出通知。
 - [ ] 广播不包含秘密或业务数据。
@@ -712,6 +972,31 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
 
 验收记录至少保存：两端版本/SHA-256、两端私网 IP、10 秒 UDP 抓包、公告 TCP 端口建连、initialize 与每页 tools/list 的脱敏 JSON、摘要重算、一次只读调用、一次持久授权范围内的自动高风险调用、一次撤销后 `AUTH_SCOPE_REQUIRED` 审计、goodbye/TTL 时间。不得保存私钥、Token、完整用户路径或文件内容。
 
+### 9.3 通用物理工程任务验收
+
+每个第三方 APP 至少提交一个由 VibeKits Harness 自主执行的真实工程任务；不能由
+开发者预先把每个工具名和调用顺序硬编码到测试脚本。验收提示只描述目标和目标
+设备，例如“检查 62 机器当前能力，运行一次 quick 稳定性测试并给出可验证报告”。
+Harness 必须自行完成：
+
+1. 调用 `vibekits.mcp.catalog_list` 刷新目录，并记录目标的 instanceId、版本、
+   revision、指纹和 catalogState；
+2. 读取完整 `tools/list`，按工程 `_meta` 分析全部候选工具，输出所选工具、
+   未选工具及原因；
+3. 用完整 Schema 生成参数和唯一幂等键，通过 `vibekits.mcp.tool_call` 发起副作用
+   工具；首次持久授权已覆盖时不得出现第二次审批；
+4. 保存 run traceId/taskId，自动轮询声明的 statusTool 到终态；在中途重启 Harness
+   一次，确认能从恢复记录继续而不重复副作用；
+5. 取得 completion 声明的全部证据，并至少调用一个独立只读观察/验证工具；
+6. 模拟一次可重试网络错误，确认复用幂等键；再模拟一次不可重试 Schema/授权错误，
+   确认立即停止且不改走 shell；
+7. 生成 6.8 规定的最终报告，并按真实完成质量更新信誉。
+
+通过条件：目标完成、`final=true/state=succeeded`、实例与 revision 未串用、全部必需
+证据可验证、无重复物理动作、无额外审批、恢复后结果一致。若设备本身拒绝、离线或
+证据不足，Harness 正确输出 `partially_completed/failed` 也可证明错误处理合同工作，
+但不能把该业务任务计为“成功完成”。
+
 ## 10. 最短排障决策树
 
 ```text
@@ -729,6 +1014,12 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
   ├─revision/instance/tool 不一致 → 清旧缓存并重新 initialize/list
   ├─invalid params → 严格按 inputSchema 传参，不猜字段
   └─AUTH_SCOPE_REQUIRED → 首次授权范围不足或已撤销；在设置中显式扩权后自动重试，禁止逐次弹窗
+
+调用已返回但工程目标未完成
+  ├─final=false → 保存 taskId，按 pollAfterMs 调 status；调用方重启后从恢复记录继续
+  ├─state=succeeded 但无 requiredEvidence → 标记 verification=partial，不得宣布完成
+  ├─物理状态与结果冲突 → 以目标端/独立观察证据为准，记录冲突并降低工具信誉
+  └─任务失联 → 先 status，再 recoveryTool；不得直接重跑副作用工具
 ```
 
 如果 `lsof`/`Get-NetTCPConnection` 显示 9443 已被同机另一个 LMCP APP 占用，VibeKits 允许绑定 OS 分配的动态端口，但必须在 announce 的两个 endpoint 精确广播这个端口并通过同样的 TLS/摘要校验；KEMI 的严格解析器接受 `1..65535` 的真实端口。任何端口都不得“偷偷”使用而不更新公告。自动化测试必须通过依赖注入使用隔离的 TCP/UDP 端口。
