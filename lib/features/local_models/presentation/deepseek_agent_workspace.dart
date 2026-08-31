@@ -232,7 +232,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         appVersion: VibekitsLmcpExposureServer.currentAppVersion,
         hardwareCode: _mcpIdentity.hardwareCode,
         bridge: bridge,
-        approve: _approveHarnessTool,
       );
 
   @override

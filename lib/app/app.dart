@@ -15,6 +15,7 @@ import '../features/dev_tools/domain/lmcp_exposure_server.dart';
 import '../features/dev_tools/domain/mcp_capability_directory.dart';
 import '../features/dev_tools/domain/mcp_device_identity.dart';
 import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
+import '../features/dev_tools/presentation/lmcp_inbound_call_overlay.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
 import 'app_version.dart';
@@ -273,6 +274,8 @@ class _VibekitsAppState extends State<VibekitsApp> {
       theme: VibekitsTheme.light(),
       darkTheme: VibekitsTheme.dark(),
       themeMode: _settings.value.themeMode,
+      builder: (BuildContext context, Widget? child) =>
+          LmcpInboundCallOverlay(child: child ?? const SizedBox.shrink()),
       home: MainShell(
         settingsController: _settings,
         preapprovedHarnessToolIds: widget.preapprovedExternalToolIds,

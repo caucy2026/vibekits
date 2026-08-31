@@ -8,6 +8,8 @@ import 'package:crypto/crypto.dart';
 
 import 'harness_tool_bridge.dart';
 import 'lan_peer_discovery_service.dart';
+import 'lmcp_caller_auth.dart';
+import 'lmcp_inbound_call_hub.dart';
 import 'platform_credential_store.dart';
 
 typedef LmcpCredentialReader = Future<String?> Function(String key);
@@ -133,6 +135,36 @@ class LmcpProtocolException implements Exception {
   final Object? data;
 }
 
+class LmcpCallerIdentity {
+  const LmcpCallerIdentity({
+    this.appId = '',
+    this.instanceId = '',
+    this.address = '',
+  });
+
+  final String appId;
+  final String instanceId;
+  final String address;
+}
+
+typedef LmcpToolInvocationRunner = Future<HarnessToolCallResult> Function(
+  HarnessToolDefinition tool,
+  Map<String, Object?> arguments,
+  LmcpInboundCallCancellation cancellation,
+  LmcpInboundCallHandle call,
+);
+
+class _LmcpInvocationFailure {
+  const _LmcpInvocationFailure(this.error, this.stackTrace);
+
+  final Object error;
+  final StackTrace stackTrace;
+}
+
+class _LmcpInvocationTerminated {
+  const _LmcpInvocationTerminated();
+}
+
 /// Standard MCP 2025-06-18 protocol surface backed by the same bridge used by
 /// the local Harness. Consequently the normal risk approval and activity audit
 /// paths remain mandatory for remote calls as well.
@@ -141,9 +173,30 @@ class VibekitsLmcpProtocol {
     required this.instanceId,
     required this.serverVersion,
     required VibekitsHarnessToolBridge bridge,
-    required this.approve,
     this.pageSize = 100,
-  }) : _bridge = bridge,
+    LmcpInboundCallHub? callHub,
+    LmcpToolInvocationRunner? invocationRunner,
+  }) : _callHub = callHub ?? LmcpInboundCallHub.instance,
+       _invocationRunner =
+           invocationRunner ??
+           ((
+             HarnessToolDefinition tool,
+             Map<String, Object?> arguments,
+             LmcpInboundCallCancellation cancellation,
+             LmcpInboundCallHandle call,
+           ) async {
+             cancellation.throwIfCancelled();
+             final HarnessToolCallResult result = await bridge.invoke(
+               toolId: tool.id,
+               arguments: arguments,
+               preauthorized: true,
+               // Enabling LMCP exposure is the persisted provider-wide
+               // authorization. Runtime disclosure is not a second approval.
+               approve: (_) async => true,
+             );
+             cancellation.throwIfCancelled();
+             return result;
+           }),
        tools = List<HarnessToolDefinition>.unmodifiable(
          bridge.executableCatalog,
        ) {
@@ -158,8 +211,8 @@ class VibekitsLmcpProtocol {
 
   final String instanceId;
   final String serverVersion;
-  final VibekitsHarnessToolBridge _bridge;
-  final HarnessToolApproval approve;
+  final LmcpInboundCallHub _callHub;
+  final LmcpToolInvocationRunner _invocationRunner;
   final int pageSize;
   final List<HarnessToolDefinition> tools;
   late final String catalogRevision;
@@ -185,7 +238,10 @@ class VibekitsLmcpProtocol {
   String get capabilityDigest =>
       'sha256:${sha256.convert(utf8.encode(canonicalJson(<String, Object?>{'tools': toolCatalog, 'nextCursor': null})))}';
 
-  Future<Map<String, Object?>?> handle(Object? payload) async {
+  Future<Map<String, Object?>?> handle(
+    Object? payload, {
+    LmcpCallerIdentity caller = const LmcpCallerIdentity(),
+  }) async {
     if (payload is! Map) return _error(null, -32600, 'Invalid Request');
     final Map<Object?, Object?> request = payload;
     final Object? id = request['id'];
@@ -206,7 +262,7 @@ class VibekitsLmcpProtocol {
         'initialize' => _initialize(params),
         'ping' => <String, Object?>{},
         'tools/list' => _listTools(params),
-        'tools/call' => await _callTool(params),
+        'tools/call' => await _callTool(params, caller),
         _ => null,
       };
       if (result == null) return _error(id, -32601, 'Method not found');
@@ -272,7 +328,10 @@ class VibekitsLmcpProtocol {
     };
   }
 
-  Future<Map<String, Object?>> _callTool(Map<String, Object?> params) async {
+  Future<Map<String, Object?>> _callTool(
+    Map<String, Object?> params,
+    LmcpCallerIdentity caller,
+  ) async {
     final String name = params['name'] is String
         ? (params['name']! as String).trim()
         : '';
@@ -293,22 +352,79 @@ class VibekitsLmcpProtocol {
         ? <String, Object?>{}
         : Map<String, Object?>.from(rawArguments as Map);
     validateToolArguments(arguments, tool.inputSchema);
-    final HarnessToolCallResult result = await _bridge.invoke(
-      toolId: name,
-      arguments: arguments,
-      approve: approve,
-    );
     final String traceId =
         '${DateTime.now().toUtc().microsecondsSinceEpoch}-${_traceSequence++}';
+    final LmcpInboundCallHandle call = _callHub.begin(
+      traceId: traceId,
+      callerAppId: caller.appId,
+      callerInstanceId: caller.instanceId,
+      callerAddress: caller.address,
+      toolId: tool.id,
+      toolName: tool.name,
+      arguments: arguments,
+      scopeSummary: '已授权 ${tool.risk.name} · ${tool.id}',
+    );
+    final Future<Object> invocation =
+        Future<HarnessToolCallResult>.sync(
+          () => _invocationRunner(tool, arguments, call.cancellation, call),
+        ).then<Object>(
+          (HarnessToolCallResult result) => result,
+          onError: (Object error, StackTrace stackTrace) =>
+              _LmcpInvocationFailure(error, stackTrace),
+        );
+    final Object outcome = await Future.any<Object>(<Future<Object>>[
+      invocation,
+      call.cancellation.whenCancelled.then<Object>(
+        (_) => const _LmcpInvocationTerminated(),
+      ),
+    ]);
+    if (outcome is _LmcpInvocationTerminated) {
+      final Map<String, Object?> terminated = <String, Object?>{
+        'ok': false,
+        'cancelled': true,
+        'code': LmcpUserTerminatedException.code,
+        'error': '调用已由本机用户强制终止',
+      };
+      return _toolCallResponse(
+        structured: terminated,
+        isError: true,
+        toolName: name,
+        traceId: traceId,
+      );
+    }
+    if (outcome is _LmcpInvocationFailure) {
+      call.fail();
+      Error.throwWithStackTrace(outcome.error, outcome.stackTrace);
+    }
+    final HarnessToolCallResult result = outcome as HarnessToolCallResult;
+    if (result.ok) {
+      call.succeed();
+    } else {
+      call.fail(result.error);
+    }
     final Map<String, Object?> structured = result.toJson();
+    return _toolCallResponse(
+      structured: structured,
+      isError: !result.ok,
+      toolName: name,
+      traceId: traceId,
+    );
+  }
+
+  Map<String, Object?> _toolCallResponse({
+    required Map<String, Object?> structured,
+    required bool isError,
+    required String toolName,
+    required String traceId,
+  }) {
     return <String, Object?>{
       'content': <Map<String, Object?>>[
         <String, Object?>{'type': 'text', 'text': jsonEncode(structured)},
       ],
       'structuredContent': structured,
-      'isError': !result.ok,
+      'isError': isError,
       'instanceId': instanceId,
-      'tool': name,
+      'tool': toolName,
       'catalogRevision': catalogRevision,
       'traceId': traceId,
     };
@@ -330,11 +446,13 @@ class VibekitsLmcpExposureServer {
   VibekitsLmcpExposureServer({
     required this.discovery,
     LmcpCertificateStore? certificateStore,
+    LmcpCallerRequestVerifier? callerVerifier,
     this.preferredPort = 9443,
     this.path = '/mcp',
     this.maxRequestBytes = 1024 * 1024,
     this.maxConcurrentCalls = 8,
-  }) : certificateStore = certificateStore ?? LmcpCertificateStore();
+  }) : certificateStore = certificateStore ?? LmcpCertificateStore(),
+       callerVerifier = callerVerifier ?? LmcpCallerRequestVerifier();
 
   static final VibekitsLmcpExposureServer instance = VibekitsLmcpExposureServer(
     discovery: LanPeerDiscoveryService.instance,
@@ -343,6 +461,7 @@ class VibekitsLmcpExposureServer {
 
   final LanPeerDiscoveryService discovery;
   final LmcpCertificateStore certificateStore;
+  final LmcpCallerRequestVerifier callerVerifier;
   final int preferredPort;
   final String path;
   final int maxRequestBytes;
@@ -368,7 +487,6 @@ class VibekitsLmcpExposureServer {
     required String appVersion,
     required String hardwareCode,
     required VibekitsHarnessToolBridge bridge,
-    required HarnessToolApproval approve,
   }) async {
     if (!discovery.running) {
       throw StateError('LMCP discovery listener must start before exposure');
@@ -383,7 +501,6 @@ class VibekitsLmcpExposureServer {
       instanceId: instanceId,
       serverVersion: appVersion,
       bridge: bridge,
-      approve: approve,
     );
     final HttpServer? currentServer = _server;
     if (currentServer != null && _accepting) {
@@ -506,8 +623,21 @@ class VibekitsLmcpExposureServer {
           return;
         }
       }
-      final Object? decoded = jsonDecode(utf8.decode(body.takeBytes()));
-      final Map<String, Object?>? response = await _protocol!.handle(decoded);
+      final Uint8List requestBody = body.takeBytes();
+      final LmcpVerifiedCaller verifiedCaller = callerVerifier.verify(
+        headers: request.headers,
+        uri: request.uri,
+        body: requestBody,
+      );
+      final Object? decoded = jsonDecode(utf8.decode(requestBody));
+      final Map<String, Object?>? response = await _protocol!.handle(
+        decoded,
+        caller: LmcpCallerIdentity(
+          appId: verifiedCaller.appId,
+          instanceId: verifiedCaller.instanceId,
+          address: connectionInfo.remoteAddress.address,
+        ),
+      );
       request.response.headers.contentType = ContentType.json;
       if (response == null) {
         request.response.statusCode = HttpStatus.accepted;
@@ -530,6 +660,20 @@ class VibekitsLmcpExposureServer {
           request.response.add(encoded);
         }
       }
+    } on LmcpCallerAuthException catch (error) {
+      request.response.statusCode = HttpStatus.unauthorized;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode(<String, Object?>{
+          'jsonrpc': '2.0',
+          'id': null,
+          'error': <String, Object?>{
+            'code': -32001,
+            'message': 'Caller identity verification failed',
+            'data': <String, Object?>{'code': error.code},
+          },
+        }),
+      );
     } on FormatException {
       request.response.statusCode = HttpStatus.badRequest;
       request.response.headers.contentType = ContentType.json;

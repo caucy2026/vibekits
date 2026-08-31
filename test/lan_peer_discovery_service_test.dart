@@ -89,6 +89,58 @@ void main() {
     expect(peer.catalogUri.path, '/mcp');
   }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
 
+  test('提供方先运行后启动的观察者仍会收到周期公告', () async {
+    final int port = 50500 + pid % 400;
+    final LanPeerDiscoveryService provider = LanPeerDiscoveryService(
+      port: port,
+    );
+    final LanPeerDiscoveryService lateObserver = LanPeerDiscoveryService(
+      port: port,
+    );
+    addTearDown(provider.stop);
+    addTearDown(lateObserver.stop);
+    await provider.start(
+      instanceId: 'com.example.provider:3333333333',
+      name: 'Provider@early-3333333333',
+      capabilityDigest: 'provider',
+      exposureEnabled: false,
+    );
+    provider.configureLmcp2Advertisement(
+      Lmcp2Advertisement(
+        appId: 'com.example.provider',
+        appVersion: '1.0.0',
+        displayName: 'Provider@early-3333333333',
+        instanceId: 'com.example.provider:3333333333',
+        hardwareCode: '3333333333',
+        port: 9443,
+        path: '/mcp',
+        instanceKeyFingerprint: 'sha256:${List<String>.filled(64, 'c').join()}',
+        catalogRevision: '1',
+        capabilityDigest: 'sha256:${List<String>.filled(64, 'd').join()}',
+      ),
+    );
+    provider.setExposureEnabled(true);
+    await Future<void>.delayed(const Duration(milliseconds: 4200));
+
+    await lateObserver.start(
+      instanceId: 'com.vibekits.desktop:4444444444',
+      name: 'VibeKits@late-4444444444',
+      capabilityDigest: 'observer',
+      exposureEnabled: false,
+    );
+    for (
+      int attempt = 0;
+      attempt < 25 && lateObserver.peers.isEmpty;
+      attempt++
+    ) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    expect(
+      lateObserver.peers.map((VibekitsLanPeer peer) => peer.instanceId),
+      contains('com.example.provider:3333333333'),
+    );
+  }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
+
   test('多网卡筛选保留每个 RFC1918 IPv4 地址并排除公网和回环', () {
     expect(
       LanPeerDiscoveryService.eligiblePrivateIpv4Addresses(<String>[

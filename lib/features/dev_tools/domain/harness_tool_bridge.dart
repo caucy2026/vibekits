@@ -1868,10 +1868,15 @@ class VibekitsHarnessToolBridge {
     ],
   };
 
+  /// [preauthorized] is reserved for a caller whose durable scope grant was
+  /// already established outside this individual invocation (for example the
+  /// explicit LMCP exposure consent). It suppresses only the duplicate prompt;
+  /// the same handler, work-status and activity-audit paths remain in force.
   Future<HarnessToolCallResult> invoke({
     required String toolId,
     required Map<String, Object?> arguments,
     required HarnessToolApproval approve,
+    bool preauthorized = false,
   }) async {
     final DateTime startedAt = DateTime.now();
     final HarnessToolDefinition? definition = _definitions[toolId];
@@ -1911,7 +1916,7 @@ class VibekitsHarnessToolBridge {
       );
       return HarnessToolCallResult.success(gate);
     }
-    if (definition.risk != HarnessToolRisk.readOnly) {
+    if (definition.risk != HarnessToolRisk.readOnly && !preauthorized) {
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.waitingApproval,
         message: '等待批准 ${definition.name}',

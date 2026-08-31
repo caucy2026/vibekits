@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
+import 'package:vibekits/features/dev_tools/domain/lmcp_caller_auth.dart';
 import 'package:vibekits/features/dev_tools/domain/lmcp_exposure_server.dart';
+import 'package:vibekits/features/dev_tools/domain/lmcp_inbound_call_hub.dart';
 import 'package:vibekits/features/dev_tools/domain/lmcp_remote_client.dart';
 
 void main() {
@@ -50,13 +53,41 @@ void main() {
           'nextCursor': null,
         }))))}';
     final List<bool> requestUsedContentLength = <bool>[];
+    final List<Map<String, String>> callerHeaders = <Map<String, String>>[];
+    final List<LmcpVerifiedCaller> verifiedCallers = <LmcpVerifiedCaller>[];
+    final LmcpCallerRequestVerifier callerVerifier =
+        LmcpCallerRequestVerifier();
     unawaited(() async {
       await for (final HttpRequest request in server) {
         requestUsedContentLength.add(
           request.contentLength > 0 && !request.headers.chunkedTransferEncoding,
         );
+        callerHeaders.add(<String, String>{
+          for (final String name in <String>[
+            'LMCP-Caller-Instance-Id',
+            'LMCP-Caller-App-Id',
+            'LMCP-Caller-Certificate',
+            'LMCP-Caller-Fingerprint',
+            'LMCP-Caller-Timestamp',
+            'LMCP-Caller-Nonce',
+            'LMCP-Caller-Signature',
+          ])
+            name: request.headers.value(name) ?? '',
+        });
+        final BytesBuilder requestBody = BytesBuilder(copy: false);
+        await for (final List<int> chunk in request) {
+          requestBody.add(chunk);
+        }
+        final List<int> requestBytes = requestBody.takeBytes();
+        verifiedCallers.add(
+          callerVerifier.verify(
+            headers: request.headers,
+            uri: request.uri,
+            body: requestBytes,
+          ),
+        );
         final Map<String, Object?> payload = Map<String, Object?>.from(
-          jsonDecode(await utf8.decodeStream(request)) as Map,
+          jsonDecode(utf8.decode(requestBytes)) as Map,
         );
         final String method = '${payload['method'] ?? ''}';
         request.response.headers.contentType = ContentType.json;
@@ -125,6 +156,24 @@ void main() {
     final result = await client.callTool(peer: peer, name: tools.single.name);
     expect(result['isError'], isFalse);
     expect(requestUsedContentLength, everyElement(isTrue));
+    expect(
+      callerHeaders,
+      everyElement(
+        predicate<Map<String, String>>(
+          (Map<String, String> headers) =>
+              headers.values.every((String value) => value.isNotEmpty) &&
+              headers['LMCP-Caller-Instance-Id'] ==
+                  'com.vibekits.desktop:${headers['LMCP-Caller-Instance-Id']!.split(':').last}' &&
+              headers['LMCP-Caller-App-Id'] == 'com.vibekits.desktop' &&
+              headers['LMCP-Caller-Fingerprint'] ==
+                  'sha256:${sha256.convert(base64.decode(headers['LMCP-Caller-Certificate']!))}',
+        ),
+      ),
+    );
+    expect(
+      verifiedCallers.map((LmcpVerifiedCaller caller) => caller.instanceId),
+      everyElement(startsWith('com.vibekits.desktop:')),
+    );
   });
 
   test('持久 EC 证书重载后保持同一 SHA-256 实例指纹', () async {
@@ -184,7 +233,6 @@ void main() {
   });
 
   test('MCP 2025-06-18 支持分页目录、参数验证和统一审批审计桥', () async {
-    int approvals = 0;
     int executions = 0;
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
       handlers: <String, HarnessToolHandler>{
@@ -205,10 +253,6 @@ void main() {
       serverVersion: '1.9.0',
       bridge: bridge,
       pageSize: 2,
-      approve: (HarnessToolApprovalRequest request) async {
-        approvals++;
-        return true;
-      },
     );
 
     final Map<String, Object?> initialize = (await protocol.handle(
@@ -286,7 +330,6 @@ void main() {
         readOnly['result']! as Map<Object?, Object?>;
     expect(readOnlyResult['isError'], isFalse);
     expect(readOnlyResult['instanceId'], 'com.vibekits.desktop:0123456789');
-    expect(approvals, 0, reason: '只读工具沿用 Harness 的免审批风险规则');
 
     final Map<String, Object?> write = (await protocol.handle(<String, Object?>{
       'jsonrpc': '2.0',
@@ -298,7 +341,6 @@ void main() {
       },
     }))!;
     expect((write['result']! as Map<Object?, Object?>)['isError'], isFalse);
-    expect(approvals, 1, reason: '写入工具必须进入现有 Harness 审批回调');
     expect(executions, 2);
   });
 
@@ -342,6 +384,74 @@ void main() {
     );
   });
 
+  test('强制关闭使运行中的 tools/call 快速返回 USER_TERMINATED', () async {
+    final LmcpInboundCallHub hub = LmcpInboundCallHub(
+      minimumVisibleDuration: Duration.zero,
+    );
+    addTearDown(hub.dispose);
+    final Completer<HarnessToolCallResult> blocked =
+        Completer<HarnessToolCallResult>();
+    bool resourceClosed = false;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      handlers: <String, HarnessToolHandler>{
+        VibekitsHarnessToolBridge.programmerCalculatorId: (
+          Map<String, Object?> arguments,
+        ) async => <String, Object?>{'unused': true},
+      },
+    );
+    final VibekitsLmcpProtocol protocol = VibekitsLmcpProtocol(
+      instanceId: 'com.vibekits.desktop:0123456789',
+      serverVersion: '1.9.0',
+      bridge: bridge,
+      callHub: hub,
+      invocationRunner:
+          (
+            HarnessToolDefinition tool,
+            Map<String, Object?> arguments,
+            LmcpInboundCallCancellation cancellation,
+            LmcpInboundCallHandle call,
+          ) {
+            cancellation.addCleanupHook(() => resourceClosed = true);
+            call.update(taskId: 'task-cancellable', progress: 0.2);
+            return blocked.future;
+          },
+    );
+
+    final Future<Map<String, Object?>?> pending = protocol.handle(
+      <String, Object?>{
+        'jsonrpc': '2.0',
+        'id': 77,
+        'method': 'tools/call',
+        'params': <String, Object?>{
+          'name': VibekitsHarnessToolBridge.programmerCalculatorId,
+          'arguments': <String, Object?>{'expression': '1+1'},
+        },
+      },
+      caller: const LmcpCallerIdentity(
+        appId: 'com.newlink.kemi',
+        instanceId: 'com.newlink.kemi:device-d',
+        address: '192.168.3.11',
+      ),
+    );
+    expect(hub.snapshots.single.taskId, 'task-cancellable');
+
+    final Stopwatch stopwatch = Stopwatch()..start();
+    await hub.forceClose(hub.snapshots.single.traceId);
+    final Map<String, Object?> response = (await pending.timeout(
+      const Duration(milliseconds: 500),
+    ))!;
+    stopwatch.stop();
+    final Map<Object?, Object?> result =
+        response['result']! as Map<Object?, Object?>;
+    final Map<Object?, Object?> structured =
+        result['structuredContent']! as Map<Object?, Object?>;
+    expect(result['isError'], isTrue);
+    expect(structured['code'], LmcpUserTerminatedException.code);
+    expect(structured['cancelled'], isTrue);
+    expect(resourceClosed, isTrue);
+    expect(stopwatch.elapsed, lessThan(const Duration(milliseconds: 500)));
+  });
+
   test('真实 HTTPS 服务广播严格 LMCP/2 并在关闭时撤销端点', () async {
     final Map<String, String> credentials = <String, String>{};
     final _FakeDiscovery discovery = _FakeDiscovery();
@@ -380,7 +490,6 @@ void main() {
       appVersion: '1.9.0',
       hardwareCode: '0123456789',
       bridge: bridge,
-      approve: (HarnessToolApprovalRequest request) async => false,
     );
 
     expect(server.running, isTrue);
@@ -470,13 +579,15 @@ void main() {
       }),
     );
     final HttpClientResponse response = await request.close();
-    expect(response.statusCode, HttpStatus.ok);
+    expect(response.statusCode, HttpStatus.unauthorized);
     final Map<String, Object?> responseJson = Map<String, Object?>.from(
       jsonDecode(await utf8.decodeStream(response)) as Map,
     );
+    final Map<Object?, Object?> error =
+        responseJson['error']! as Map<Object?, Object?>;
     expect(
-      (responseJson['result']! as Map<Object?, Object?>)['protocolVersion'],
-      '2025-06-18',
+      (error['data']! as Map<Object?, Object?>)['code'],
+      'CALLER_IDENTITY_REQUIRED',
     );
 
     await server.stop();

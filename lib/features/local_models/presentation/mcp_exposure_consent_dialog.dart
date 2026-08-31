@@ -17,73 +17,75 @@ Future<bool> showMcpExposureConsentDialog({
         title: const Text('允许打开 MCP 权限？'),
         content: SizedBox(
           width: 680,
-          height: 520,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('设备：$deviceName'),
-              const Text('当前对外身份：LMCP/2 HTTPS Streamable HTTP'),
-              SelectableText(
-                '实例证书：$certificateFingerprint',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 10),
-              const Text('打开后，同一局域网内的设备可以发现本应用、读取下面的工具目录，并向这些工具发起调用。'),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(10),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('设备：$deviceName'),
+                const Text('当前对外身份：LMCP/2 HTTPS Streamable HTTP'),
+                SelectableText(
+                  '实例证书：$certificateFingerprint',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
-                child: const Text(
-                  '风险提示\n'
-                  '• 设备名、应用版本、传输身份和工具说明会在局域网内公开；采用 LMCP/2 的 APP 还会公开证书指纹。\n'
-                  '• 工具可能读取本机信息、写入文件、发送文件或控制已连接设备。\n'
-                  '• 局域网中的恶意设备可能反复尝试连接；传输必须经过认证，敏感操作仍需审批并写入审计记录。\n'
-                  '• 可随时关闭 MCP；关闭会停止新调用并广播离线。',
+                const SizedBox(height: 10),
+                const Text('打开后，同一局域网内的设备可以发现本应用、读取下面的工具目录，并向这些工具发起调用。'),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    '风险提示\n'
+                    '• 设备名、应用版本、传输身份和工具说明会在局域网内公开；采用 LMCP/2 的 APP 还会公开证书指纹。\n'
+                    '• 工具可能读取本机信息、写入文件、发送文件或控制已连接设备。\n'
+                    '• 本次确认会持久授权相同证书身份、当前工具和当前风险范围；后续命中范围的调用将自动执行，不会逐次再问。\n'
+                    '• 每次调用仍会显示运行提示；可查看调用方、工具和脱敏参数，也可强制关闭并撤销授权。\n'
+                    '• 身份、证书、工具或资源范围扩大时必须重新授权；可随时关闭 MCP，停止新调用并广播离线。',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '本应用将公开 ${tools.length} 个工具接口',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: tools.isEmpty
-                    ? const Center(child: Text('工具目录尚未就绪，不能授权打开。'))
-                    : ListView.builder(
-                        itemCount: tools.length,
-                        itemBuilder: (BuildContext context, int index) {
-                          final McpToolInterface tool = tools[index];
-                          return ExpansionTile(
-                            dense: true,
-                            title: SelectableText(tool.name),
-                            subtitle: Text(
-                              '${tool.title.isEmpty ? '未提供标题' : tool.title} · 风险 ${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
-                            ),
-                            childrenPadding: const EdgeInsets.fromLTRB(
-                              16,
-                              0,
-                              16,
-                              12,
-                            ),
-                            expandedCrossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: <Widget>[
-                              SelectableText(
-                                tool.description.isEmpty
-                                    ? '提供者未填写用途、前置条件和副作用说明。'
-                                    : tool.description,
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Text(
+                  '本应用将公开 ${tools.length} 个工具接口',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 6),
+                if (tools.isEmpty)
+                  const Center(child: Text('工具目录尚未就绪，不能授权打开。'))
+                else
+                  ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: tools.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final McpToolInterface tool = tools[index];
+                      return ExpansionTile(
+                        dense: true,
+                        title: SelectableText(tool.name),
+                        subtitle: Text(
+                          '${tool.title.isEmpty ? '未提供标题' : tool.title} · 风险 ${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          12,
+                        ),
+                        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SelectableText(
+                            tool.description.isEmpty
+                                ? '提供者未填写用途、前置条件和副作用说明。'
+                                : tool.description,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
         actions: <Widget>[

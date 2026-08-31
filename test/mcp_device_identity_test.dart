@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -43,6 +44,14 @@ void main() {
     expect(await preferences.loadEnabled(), isFalse);
     await preferences.saveEnabled(true);
     expect(await preferences.loadEnabled(), isTrue);
+    final Map<String, Object?> stored = Map<String, Object?>.from(
+      jsonDecode(await preferences.file.readAsString()) as Map,
+    );
+    final Map<Object?, Object?> grant =
+        stored['grant']! as Map<Object?, Object?>;
+    expect(grant['callerScope'], 'authenticated-private-network');
+    expect(grant['toolScope'], 'published-catalog');
+    expect(grant['validUntil'], 'mcp-disabled-or-revoked');
   });
 
   test('旧版已开启状态在未确认新风险说明前不恢复', () async {

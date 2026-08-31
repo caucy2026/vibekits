@@ -484,7 +484,6 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         appVersion: VibekitsLmcpExposureServer.currentAppVersion,
         hardwareCode: _mcpIdentity.hardwareCode,
         bridge: bridge,
-        approve: _approveVibekitsTool,
       );
 
   Future<void> _waitUntilReady(Uri url) async {

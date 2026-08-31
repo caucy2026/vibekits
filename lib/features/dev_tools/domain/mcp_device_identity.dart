@@ -81,6 +81,16 @@ class McpExposurePreferences {
         'version': 2,
         'consentVersion': consentVersion,
         'enabled': enabled,
+        if (enabled) ...<String, Object?>{
+          'grant': <String, Object?>{
+            'callerScope': 'authenticated-private-network',
+            'toolScope': 'published-catalog',
+            'maxRisk': 'destructive',
+            'resourceScope': 'tool-schema-bounds',
+            'validUntil': 'mcp-disabled-or-revoked',
+          },
+          'grantedAt': DateTime.now().toUtc().toIso8601String(),
+        },
         'updatedAt': DateTime.now().toUtc().toIso8601String(),
       }),
       flush: true,

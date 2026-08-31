@@ -1,6 +1,6 @@
 # LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准
 
-版本：2.0  
+版本：2.1
 状态：VibeKits、KEMI传书和第三方 APP 唯一可执行互通规范
 目标：另一台机器只需完整实现本文，即可让 VibeKits 与对端双向发现、固定实例证书、读取目录，并像调用本机工具一样互相调用。
 
@@ -109,6 +109,80 @@ ON
 对落在该授权范围内的调用，服务端必须：立即校验 Schema 和幂等键 → 自动执行 → 返回结构化结果或 taskId → 允许调用方自动轮询/取消/恢复；不得出现第二次权限弹窗、不得等待人工点击、不得因无人值守而返回 `DENIED`/审批超时。`readOnly`、`writesData`、`controlsDevice` 和 `serviceRole=harness-controller` 都遵守这一原则；风险级别决定首次授权页展示内容和可选范围，不决定是否每次再问。
 
 只有以下事件允许把调用变回“需要用户重新授权”：提供者实例证书指纹变化；调用方超出原授权身份范围；新工具或现有工具的风险/数据/设备作用域扩大；用户关闭 MCP、撤销授权或降低风险上限；操作系统自身权限已撤销。单纯 APP 重启、网络重连、catalogRevision 递增但能力未扩权、相同幂等任务重试、status/last_result 恢复都不得重新询问。发生扩权时只暂停新增范围，原授权范围仍可自动运行。
+
+### 3.2 运行中调用提示（不是第二次审批）
+
+所有远程 `tools/call` 必须采用与远程桌面连接状态相同的“首次建立信任、
+后续持续可见、随时可以终止”交互：
+
+1. 首次连接或首次申请某个工具/风险/资源作用域时显示正式授权页。授权页必须
+   显示调用方 APP、设备显示名、`instanceId`、证书指纹、工具、参数作用域、
+   风险、有效期、审计和撤销方法。用户确认后持久化授权；取消则返回
+   `AUTH_SCOPE_REQUIRED`，不得执行副作用。
+2. 命中持久授权的后续调用立即自动执行，不再等待“允许/拒绝”。调用开始时
+   必须在被调用 APP 内显示非模态运行提示，默认至少可见 3 秒；短任务完成后可
+   自动收起，长任务必须持续显示到完成、失败或取消。提示不得阻塞 MCP 响应或
+   Harness 自动化。
+3. 提示至少显示“调用方设备/APP、工具名称、开始时间、当前状态”，并提供两个
+   可访问按钮：`调用信息` 展开脱敏参数摘要、作用域、traceId/taskId、进度和
+   审计入口；`强制关闭` 立即停止接受该调用的后续工作、触发协作取消、关闭其
+   网络/文件/设备会话并返回 `USER_TERMINATED`。按钮不能只是关闭提示窗口。
+4. 强制关闭菜单必须允许用户进一步选择“仅终止本次”“撤销该工具授权”或
+   “撤销/拉黑该调用方”。撤销后下一次调用立即返回 `AUTH_SCOPE_REQUIRED`；
+   黑名单命中返回 `CALLER_BLOCKED`。终止、撤销和失败均写入脱敏审计。
+5. 工具实现必须接受取消信号，并在安全边界检查取消；文件发送还必须取消准备、
+   上传和接收会话、释放文件锁且保留可查询终态。无法安全中断的原子动作要在
+   `tools/list` 明确说明 `cancelBehavior`，但仍须阻止后续步骤。
+6. 同一调用方的并发提示可合并成一个状态卡，但每条调用必须有独立 traceId、
+   详情和终止动作。应用切到后台时仍应提供系统通知或托盘状态；不得静默执行。
+
+调用提示是透明告知而非审批。实现若在每次调用时再次弹出需要人工点击的确认框，
+即使工具最终成功，也按自动化不合格处理。
+
+### 3.3 调用方身份与授权绑定
+
+服务端不能仅凭“来源 IP 位于 RFC1918”授予持久权限。每个 MCP 会话必须携带可由
+TLS/签名材料验证的调用方 `instanceId`、APP 身份和实例证书指纹；授权主键至少为
+`callerInstanceId + callerFingerprint + providerInstanceId + tool/scope`。来源 IP
+只用于局域网边界检查，不是身份。身份缺失或验签失败返回 `CALLER_IDENTITY_REQUIRED`
+或 `CALLER_IDENTITY_INVALID`，不能降级为匿名高风险调用。证书轮换必须重新授权。
+
+具体传输可以使用双向 TLS，或在已固定服务端 TLS 的 HTTPS 请求上使用标准化的
+调用方证书/签名头；无论采用哪种方式，调用方私钥不得进入 UDP、参数、日志或
+业务响应。`initialize` 成功后服务端应返回当前识别的调用方身份摘要，调用方必须
+核对，防止授权串用。
+
+本标准当前固定使用“服务端 TLS + 每请求 ECDSA 调用方签名”，禁止各 APP 自定义
+不兼容头。所有 POST `/mcp` 请求必须携带：
+
+| HTTP Header | 值 |
+|---|---|
+| `LMCP-Caller-Instance-Id` | 调用方稳定 `instanceId` |
+| `LMCP-Caller-App-Id` | 调用方 `app.id`，必须是 instanceId 前缀 |
+| `LMCP-Caller-Certificate` | 调用方 P-256 实例证书 DER 的 base64，不含换行 |
+| `LMCP-Caller-Fingerprint` | 上述 DER 的 `sha256:` 小写十六进制 |
+| `LMCP-Caller-Timestamp` | UTC Unix 毫秒整数 |
+| `LMCP-Caller-Nonce` | 16–32 随机字节的无填充 base64url；5 分钟内不得重复 |
+| `LMCP-Caller-Signature` | 对下列 canonical bytes 做 ECDSA-SHA256，DER 签名 base64 |
+
+签名输入精确为 UTF-8，字段间只用 `\n`，末尾没有换行：
+
+```text
+LMCP/2
+POST
+/mcp
+<callerInstanceId>
+<timestamp>
+<nonce>
+sha256:<HTTP body 原始字节的小写 SHA-256>
+```
+
+服务端必须在解析 JSON 和执行工具前完成：请求体哈希、证书 DER 指纹、P-256
+ECDSA 签名、instanceId/appId 关系、时间偏差不超过 120 秒、nonce 防重放。失败
+使用 HTTP 401 和结构化 `CALLER_IDENTITY_INVALID`；缺头使用
+`CALLER_IDENTITY_REQUIRED`；重放使用 `CALLER_REPLAYED`。目录读取也必须签名，
+但可在正式授权前完成，以便授权页显示完整工具；`tools/call` 必须命中持久授权。
+调用方证书与服务端证书可来自同一个安全的实例证书存储，但各 APP 私钥永不共享。
 
 ## 4. LMCP/2 在线和离线报文
 
@@ -258,6 +332,22 @@ test worker N: 49100 + N
 6. 两个 endpoint 的 transport、port、path、fingerprint、protocolVersions、catalogRevision、capabilityDigest 必须逐项一致；路径恰为 `/mcp`，禁止 query、`..` 和重定向。
 7. 指纹和摘要均匹配 `sha256:` 加 64 位小写十六进制；三个位置的 revision/摘要必须一致；协议列表包含 `2025-06-18`。
 8. `callEndpoint.serviceRole` 只能是 `tool-provider` 或 `harness-controller`；`mcp.changeNotifications` 必须是 boolean。
+
+### 4.4 启动顺序、周期发现与恢复（先启动的 APP 也必须被发现）
+
+发现不得依赖一次性启动报文。提供方在 MCP 为 ON 且 HTTPS listener 健康期间必须
+立即发送一次 announce，并每 4 秒在每张合格私网 IPv4 网卡重发；调用方无论何时
+启动，都必须先完成 `bind + joinMulticast + listen`，然后持续接收，不能只在自己
+启动瞬间扫描一次。调用方启动后应在一个公告周期内开始看到已运行提供方，最迟
+8 秒进入 `verifying`，在 TLS/目录验证完成后进入 `verified`；12 秒 TTL 只用于移除，
+不能被当作首次扫描等待时间。
+
+网卡新增、地址变化、睡眠唤醒、VPN 切换和监听 socket 异常后，双方必须重新枚举
+接口、重新 join 并立即 announce；接收端必须保持已知节点的退避验证状态，下一条
+有效公告到达时恢复。APP A 先开、B 后开与 B 先开、A 后开都属于强制测试矩阵。
+测试至少覆盖：提供方提前运行 10 秒后再启动调用方，调用方在 8 秒内发现；调用方
+先运行后提供方打开，结果相同；调用方重启后无需提供方重启即可重新发现；丢失
+goodbye 时 12 秒移除，提供方恢复后 8 秒内重新出现。
 9. 同一实例的端点、指纹、revision 或 digest 变化时废弃旧目录并重新 initialize/list，不能继续使用旧缓存。
 10. goodbye 只要求协议、版本、类型、实例 ID 和 `sentAt`；收到后立即移除。没有 goodbye 时按最后有效 announce 的 12 秒 TTL 清理。
 
@@ -547,9 +637,13 @@ Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibek
 - [ ] 有用户可见、可持久化的 MCP 开关。
 - [ ] 从关闭到打开会先显示完整工具清单、证书身份、风险和撤销方法；拒绝时保持关闭。
 - [ ] 首次授权持久化调用方、工具、风险和资源作用域；范围内调用、重启、重连和 status/last_result 恢复均不再弹窗。
+- [ ] 每次命中授权的调用自动执行，同时显示至少 3 秒的非阻塞运行提示；包含“调用信息”和真正取消工作的“强制关闭”。
+- [ ] 调用方身份绑定实例证书；匿名私网 IP 不能获得持久高风险授权；证书变化重新授权。
+- [ ] 强制关闭返回 `USER_TERMINATED` 并释放网络、文件、设备会话；可继续撤销工具授权或拉黑调用方。
 - [ ] 未授权或扩权调用立即返回 `AUTH_SCOPE_REQUIRED`，不得占用调用超时等待人工批准。
 - [ ] OFF/STARTING/ON/DRAINING/ERROR 的状态有明显区别。
 - [ ] 打开发送 `announce`，关闭发送 `goodbye` 并停止服务。
+- [ ] 周期 announce 与监听恢复不依赖启动顺序：提供方先启动 10 秒、调用方后启动时仍在 8 秒内发现，反向顺序和调用方重启同样通过。
 - [ ] 实现标准 `initialize/tools/list/tools/call`。
 - [ ] 每个工具具有完整描述和 JSON Schema。
 - [ ] 文件传输能力提供显式 send 和可查终态；异步长任务另有 status/cancel，不能只列设备。
@@ -591,17 +685,17 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
   test/mcp_device_identity_test.dart
 ```
 
-其中必须覆盖：持久 P-256 证书重载指纹不变；严格公告 `<=1200` bytes；两个进程/实例共享一个 UDP 端口并收到 LMCP/2；RFC1918 多网卡地址全部入选且公网/回环排除；真实 TLS 指纹固定；initialize→分页 tools/list→tools/call；错误 schema 不执行；持久授权命中后写入/控制工具无弹窗自动完成；扩权立即返回 `AUTH_SCOPE_REQUIRED`；关闭清公告、endpoint 和授权。
+其中必须覆盖：持久 P-256 证书重载指纹不变；严格公告 `<=1200` bytes；两个进程/实例共享一个 UDP 端口并收到 LMCP/2；提供方先启动 10 秒、调用方后启动仍在 8 秒内发现，反向顺序和调用方重启同样通过；RFC1918 多网卡地址全部入选且公网/回环排除；真实 TLS 指纹固定；调用方实例证书身份绑定；initialize→分页 tools/list→tools/call；错误 schema 不执行；持久授权命中后写入/控制工具无弹窗自动完成且显示非阻塞调用提示；调用信息可查、强制关闭返回 `USER_TERMINATED` 并释放资源；扩权立即返回 `AUTH_SCOPE_REQUIRED`；关闭清公告、endpoint 和授权。
 
 ### 9.1 VibeKits ↔ VibeKits
 
 优先使用两台不同机器 A/B；同机验证时第一个服务使用 9443，第二个服务必须广播其真实动态端口：
 
 1. 两边 MCP 初始为关；确认 UDP 47831 在监听但 TCP 9443 未监听、无 LMCP/2 announce。
-2. A 打开，确认授权框列出证书指纹和全部工具；抓包看到 A 每 4 秒 announce，B 在 12 秒内出现 A。
+2. A 先打开并保持至少 10 秒，再启动 B；确认 A 的授权框列出证书指纹和全部工具，抓包看到 A 每 4 秒 announce，B 启动后 8 秒内出现 A。随后重启 B，A 不重启，B 仍须在 8 秒内重新发现。
 3. B 对 A 依次发送 initialize、notifications/initialized、完整分页 tools/list；重算摘要必须等于公告。
 4. B 调用 `vibekits.calculator.programmer`，参数 `{"expression":"1+1"}`；结果 `isError=false`，并精确回显 A 的 instanceId、工具名、revision 和 traceId。
-5. 在 A 的首次确认页仅授权一个无破坏性的 writesData/controlsDevice 测试工具；B 连续调用两次，确认 A 均不再弹窗且自动完成。随后 A 撤销该工具授权，B 再调必须立即得到 `AUTH_SCOPE_REQUIRED` 且无副作用。禁止拿真实用户文件做破坏测试。
+5. 在 A 的首次确认页仅授权一个无破坏性的 writesData/controlsDevice 测试工具；B 连续调用两次，确认 A 均不再弹审批且自动完成，但每次出现至少 3 秒的非阻塞调用提示。展开“调用信息”核对调用方、工具和 traceId；再发起一个可取消测试，点击“强制关闭”，B 必须得到 `USER_TERMINATED` 且 A 释放资源。随后 A 撤销该工具授权，B 再调必须立即得到 `AUTH_SCOPE_REQUIRED` 且无副作用。禁止拿真实用户文件做破坏测试。
 6. 交换 A/B 重复 2–5，证明双向而非单向。
 7. A 关闭：先抓到 goodbye，B 立即移除；模拟断电不发 goodbye，B 在最后有效公告 12 秒后移除；A 公告的 TCP 端口不再接受连接。
 

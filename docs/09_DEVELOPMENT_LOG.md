@@ -1220,3 +1220,12 @@
 - 新增非致命错误码 `subscription_busy`，第二订阅不再伪装成无法区分的 `internal_error`。首订阅 unsubscribe 或断开后立即释放名额，第二客户端可保留 hello 连接并重试 subscribe。
 - 文档 52 增加生产排障顺序：先用 `getSnapshot` 验证序列化，再确保 Host 取消现有订阅后测试独占订阅；禁止用并发第二订阅判断 Publisher 不健康。
 - 真实 Unix socket 与 registry 定向测试 16/16、Flutter analyze 0 issue；新 macOS Release 已启动，真实 hello/getSnapshot 成功，RustDesk Host 占用期间第二订阅精确返回 `subscription_busy`。App executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`。
+
+# 2026-08-31 · LMCP 首次信任、运行可见与后启动发现标准
+
+- 唯一文档 50 统一采用远程桌面的授权体验：首次连接或扩权时正式确认并持久化；后续命中范围自动执行，不再逐次审批，但每次显示至少 3 秒的非阻塞调用状态卡，可查看调用方/工具/脱敏参数/traceId，并可“强制关闭”真正取消工作、释放资源及返回 `USER_TERMINATED`。
+- 固定调用方身份合同：每个 POST `/mcp` 携带 7 个 `LMCP-Caller-*` 头，使用持久 P-256 实例证书对 method/path/instance/timestamp/nonce/body SHA-256 做 ECDSA-SHA256 签名；服务端校验 ±120 秒、5 分钟 nonce 防重放和证书指纹。私网 IP 不再等同可信身份。
+- 发现标准增加启动顺序门禁：提供方先运行、调用方后启动，调用方重启而提供方不重启，以及反向顺序都必须靠每 4 秒 announce 在 8 秒内发现。真实 12 秒监听已经从先运行的 `192.168.3.62` 收到 KEMI-BM 2.1.6/revision 4 公告；新增隔离端口回归同样覆盖提供方提前启动后观察者加入。
+- 首次 MCP 授权页改为可滚动布局，避免较矮窗口溢出；风险文字明确本次授权会持久化，后续自动执行但保持状态可见和可强制终止。开关记录同时持久化 authenticated-private-network、published-catalog、最高风险、Schema 资源边界和撤销有效期。
+- LMCP/发现定向回归 33/33、全项目 `flutter analyze --no-pub` 0 issue、macOS Release 构建通过；新 Release executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`，承载 Dart AOT 的 App.framework SHA-256 为 `6faf34f16eabceba6bf80979e9affdf16643937f4db55f3e218b7649a8549f82`。在 KEMI-BM 2.1.6 已先运行的条件下再启动该 Release，生产 UI 的“局域网 MCP 设备”角标真实显示 1，公告身份为 `com.newlink.kemiscrollbench:41B8C7FDF4`、`192.168.3.62:9443`、catalogRevision 4。
+- 完整 Flutter 套件本轮另有 568 项通过、11 项跳过、57 项失败；失败集中在仓库既有的缺失内置 Git runtime、清理页/文档页并行状态和 live gate，不得误写成全绿，也未把这些非 LMCP 失败掩盖或计入本次定向门禁。

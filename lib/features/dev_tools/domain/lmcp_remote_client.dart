@@ -1,13 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
 
 import 'lan_peer_discovery_service.dart';
 import 'lmcp_exposure_server.dart';
 import 'mcp_capability_models.dart';
+import 'mcp_device_identity.dart';
+
+typedef LmcpCallerHeaderProvider = Future<Map<String, String>> Function(
+  Uri endpoint,
+  List<int> body,
+);
 
 class LmcpRemoteException implements Exception {
   const LmcpRemoteException(this.code, this.message);
@@ -29,6 +37,7 @@ class LmcpRemoteClient {
     this.timeout = const Duration(seconds: 8),
     this.callTimeout = const Duration(seconds: 120),
     this.maxResponseBytes = 1024 * 1024,
+    this.callerHeaderProvider,
   });
 
   static const String mcpProtocolVersion = '2025-06-18';
@@ -36,6 +45,8 @@ class LmcpRemoteClient {
   final Duration timeout;
   final Duration callTimeout;
   final int maxResponseBytes;
+  final LmcpCallerHeaderProvider? callerHeaderProvider;
+  LmcpInstanceCertificate? _callerCertificate;
 
   Future<List<McpToolInterface>> loadTools(VibekitsLanPeer peer) async {
     _requireCallablePeer(peer);
@@ -260,6 +271,14 @@ class LmcpRemoteClient {
       request.persistentConnection = false;
       request.headers.contentType = ContentType.json;
       final List<int> requestBytes = utf8.encode(jsonEncode(payload));
+      final Map<String, String> callerHeaders =
+          await (callerHeaderProvider ?? _defaultCallerHeaders)(
+            endpoint,
+            requestBytes,
+          );
+      for (final MapEntry<String, String> header in callerHeaders.entries) {
+        request.headers.set(header.key, header.value);
+      }
       // Some small Windows MCP servers deliberately reject chunked request
       // bodies. LMCP requests are bounded and already materialized, so always
       // send an explicit Content-Length for broad HTTP/1.1 interoperability.
@@ -313,6 +332,49 @@ class LmcpRemoteClient {
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<Map<String, String>> _defaultCallerHeaders(
+    Uri endpoint,
+    List<int> body,
+  ) async {
+    final McpDeviceIdentity caller = McpDeviceIdentity.forVibekits();
+    final LmcpInstanceCertificate certificate = _callerCertificate ??=
+        await LmcpCertificateStore().loadOrCreate(
+          commonName: caller.displayName,
+        );
+    final int timestamp = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final Random random = Random.secure();
+    final String nonce = base64Url
+        .encode(List<int>.generate(16, (_) => random.nextInt(256)))
+        .replaceAll('=', '');
+    final String bodyDigest = 'sha256:${sha256.convert(body)}';
+    final String canonical = <String>[
+      'LMCP/2',
+      'POST',
+      endpoint.path,
+      caller.instanceId,
+      '$timestamp',
+      nonce,
+      bodyDigest,
+    ].join('\n');
+    final signature = CryptoUtils.ecSign(
+      CryptoUtils.ecPrivateKeyFromPem(certificate.privateKeyPem),
+      Uint8List.fromList(utf8.encode(canonical)),
+      algorithmName: 'SHA-256/ECDSA',
+    );
+    final String certificateDer = base64.encode(
+      CryptoUtils.getBytesFromPEMString(certificate.certificatePem),
+    );
+    return <String, String>{
+      'LMCP-Caller-Instance-Id': caller.instanceId,
+      'LMCP-Caller-App-Id': caller.appId,
+      'LMCP-Caller-Certificate': certificateDer,
+      'LMCP-Caller-Fingerprint': certificate.fingerprint,
+      'LMCP-Caller-Timestamp': '$timestamp',
+      'LMCP-Caller-Nonce': nonce,
+      'LMCP-Caller-Signature': CryptoUtils.ecSignatureToBase64(signature),
+    };
   }
 
   HttpClient _pinnedClient(
