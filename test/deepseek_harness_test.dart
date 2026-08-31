@@ -1025,6 +1025,73 @@ void main() {
     );
     expect(composer.controller?.text, '解释 ESTLOG 是否合理');
   });
+
+  testWidgets('向上滚动显示圆形向下箭头并可回到最新消息', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1000, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final DateTime now = DateTime.now();
+    final List<HarnessConversationMessage> messages = List.generate(
+      30,
+      (int index) => HarnessConversationMessage(
+        text: '第 $index 条历史消息，用于验证离开底部后出现回到最新消息按钮。' * 3,
+        user: index.isEven,
+      ),
+    );
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: Directory.systemTemp.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'scroll-session',
+          title: '滚动验收',
+          messages: messages,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+      activeSessionId: 'scroll-session',
+      updatedAt: now,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: Directory.systemTemp.path,
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '11.6.0',
+              message: '已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder button = find.byKey(const Key('agent-scroll-to-latest'));
+    AnimatedOpacity opacity() => tester.widget<AnimatedOpacity>(
+      find.ancestor(of: button, matching: find.byType(AnimatedOpacity)).first,
+    );
+    expect(button, findsOneWidget);
+    expect(opacity().opacity, 0);
+
+    await tester.drag(
+      find.byKey(const Key('agent-conversation')),
+      const Offset(0, 420),
+    );
+    await tester.pumpAndSettle();
+    expect(opacity().opacity, 1);
+
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(opacity().opacity, 0);
+  });
 }
 
 class _FakeAgentHandle implements HarnessAgentHandle {

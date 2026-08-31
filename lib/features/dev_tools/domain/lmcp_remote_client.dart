@@ -69,6 +69,7 @@ class LmcpRemoteClient {
     );
 
     final List<McpToolInterface> tools = <McpToolInterface>[];
+    final List<Map<String, Object?>> rawCatalogTools = <Map<String, Object?>>[];
     final Set<String> cursors = <String>{};
     String? cursor;
     for (int page = 0; page < 20; page++) {
@@ -93,9 +94,8 @@ class LmcpRemoteClient {
             '远端 tools/list 包含非对象工具',
           );
         }
-        final McpToolInterface tool = McpToolInterface.fromJson(
-          Map<Object?, Object?>.from(item),
-        );
+        final Map<String, Object?> rawTool = Map<String, Object?>.from(item);
+        final McpToolInterface tool = McpToolInterface.fromJson(rawTool);
         if (tool.name.isEmpty ||
             tools.any((candidate) => candidate.name == tool.name)) {
           throw const LmcpRemoteException(
@@ -103,6 +103,7 @@ class LmcpRemoteClient {
             '远端 tools/list 包含空名称或重复工具',
           );
         }
+        rawCatalogTools.add(rawTool);
         tools.add(tool);
       }
       final Object? next = result['nextCursor'];
@@ -123,7 +124,11 @@ class LmcpRemoteClient {
     if (RegExp(r'^sha256:[0-9a-f]{64}$').hasMatch(advertisedDigest)) {
       final String actual =
           'sha256:${sha256.convert(utf8.encode(_canonicalJson(<String, Object?>{
-            'tools': <Map<String, Object?>>[for (final McpToolInterface tool in tools) tool.toJson()],
+            // The digest covers the provider's complete catalog, including
+            // extensions unknown to this client. Re-serializing the reduced
+            // UI model would discard or reshape fields such as structured
+            // risk metadata and incorrectly reject a valid provider.
+            'tools': rawCatalogTools,
             'nextCursor': null,
           })))}';
       if (!_constantTimeEquals(actual, advertisedDigest)) {
@@ -153,14 +158,22 @@ class LmcpRemoteClient {
       params: <String, Object?>{'name': name, 'arguments': arguments},
       requestTimeout: callTimeout,
     );
-    if (result['instanceId'] != peer.instanceId || result['tool'] != name) {
+    final Map<Object?, Object?> structured = result['structuredContent'] is Map
+        ? result['structuredContent']! as Map<Object?, Object?>
+        : const <Object?, Object?>{};
+    final Object? responseInstanceId =
+        result['instanceId'] ?? structured['instanceId'];
+    final Object? responseTool = result['tool'] ?? structured['tool'];
+    final Object? responseRevision =
+        result['catalogRevision'] ?? structured['catalogRevision'];
+    if (responseInstanceId != peer.instanceId || responseTool != name) {
       throw const LmcpRemoteException(
         'response_identity_mismatch',
         '远端工具结果的实例或工具身份不匹配',
       );
     }
     if (peer.catalogRevision.isNotEmpty &&
-        '${result['catalogRevision'] ?? ''}' != peer.catalogRevision) {
+        '${responseRevision ?? ''}' != peer.catalogRevision) {
       throw const LmcpRemoteException(
         'catalog_revision_mismatch',
         '远端工具结果的目录版本已经变化',
@@ -246,7 +259,12 @@ class LmcpRemoteClient {
           .timeout(operationTimeout);
       request.persistentConnection = false;
       request.headers.contentType = ContentType.json;
-      request.add(utf8.encode(jsonEncode(payload)));
+      final List<int> requestBytes = utf8.encode(jsonEncode(payload));
+      // Some small Windows MCP servers deliberately reject chunked request
+      // bodies. LMCP requests are bounded and already materialized, so always
+      // send an explicit Content-Length for broad HTTP/1.1 interoperability.
+      request.contentLength = requestBytes.length;
+      request.add(requestBytes);
       final HttpClientResponse response = await request.close().timeout(
         operationTimeout,
       );
@@ -284,6 +302,11 @@ class LmcpRemoteClient {
       throw const LmcpRemoteException(
         'tls_handshake_failed',
         '远端 MCP TLS 握手失败',
+      );
+    } on HttpException {
+      throw const LmcpRemoteException(
+        'invalid_http_response',
+        '远端 MCP 在完整 HTTP 响应前断开连接',
       );
     } on SocketException {
       throw const LmcpRemoteException('connection_failed', '无法连接远端 MCP 端点');

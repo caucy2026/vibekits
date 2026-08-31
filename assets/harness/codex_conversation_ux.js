@@ -78,6 +78,43 @@
         font-size: 12px !important;
         line-height: 18px !important;
       }
+
+      #vibekits-scroll-to-latest {
+        position: fixed;
+        left: 50%;
+        bottom: 92px;
+        z-index: 2147483000;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid rgba(120, 120, 120, 0.22);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.96);
+        color: rgba(45, 45, 45, 0.76);
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.14);
+        font: 500 22px/30px system-ui, sans-serif;
+        cursor: pointer;
+        transform: translate(-50%, 8px) scale(0.92);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 140ms ease, transform 140ms ease,
+          background-color 140ms ease;
+      }
+
+      #vibekits-scroll-to-latest[data-visible="true"] {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translate(-50%, 0) scale(1);
+      }
+
+      #vibekits-scroll-to-latest:hover {
+        background: #fff;
+      }
+
+      #vibekits-scroll-to-latest:focus-visible {
+        outline: 2px solid #6f8cff;
+        outline-offset: 2px;
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -89,6 +126,50 @@
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  const findConversationHost = () =>
+    [...document.querySelectorAll('[data-conversation-scroll]')]
+      .find((element) => element instanceof HTMLElement &&
+        element.offsetParent !== null && element.clientHeight > 0);
+
+  const scrollButtonId = 'vibekits-scroll-to-latest';
+  let scrollButton = document.getElementById(scrollButtonId);
+  if (!scrollButton) {
+    scrollButton = document.createElement('button');
+    scrollButton.id = scrollButtonId;
+    scrollButton.type = 'button';
+    scrollButton.textContent = '↓';
+    scrollButton.title = '滚动到最新消息';
+    scrollButton.setAttribute('aria-label', '滚动到最新消息');
+    scrollButton.setAttribute('data-visible', 'false');
+    scrollButton.addEventListener('click', () => {
+      const host = findConversationHost();
+      if (!(host instanceof HTMLElement)) return;
+      host.scrollTo({ top: host.scrollHeight, behavior: 'smooth' });
+    });
+    document.body.appendChild(scrollButton);
+  }
+
+  const updateScrollToLatest = () => {
+    const host = findConversationHost();
+    const distance = host instanceof HTMLElement
+      ? host.scrollHeight - host.clientHeight - host.scrollTop
+      : 0;
+    scrollButton?.setAttribute('data-visible', distance > 72 ? 'true' : 'false');
+  };
+
+  if (!window.__vibekitsScrollToLatestInstalled) {
+    window.__vibekitsScrollToLatestInstalled = true;
+    document.addEventListener('scroll', updateScrollToLatest, true);
+    window.addEventListener('resize', updateScrollToLatest);
+    const scrollObserver = new MutationObserver(() =>
+      requestAnimationFrame(updateScrollToLatest));
+    scrollObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  }
+  requestAnimationFrame(updateScrollToLatest);
+
   if (window.__vibekitsConversationWheelInstalled) return true;
   window.__vibekitsConversationWheelInstalled = true;
 
@@ -98,9 +179,7 @@
       ? event.target
       : event.target?.parentElement;
     const host = target?.closest?.('[data-conversation-scroll]') ||
-      [...document.querySelectorAll('[data-conversation-scroll]')]
-        .find((element) => element instanceof HTMLElement &&
-          element.offsetParent !== null && element.clientHeight > 0);
+      findConversationHost();
     if (!(host instanceof HTMLElement)) return;
 
     // Preserve native scrolling inside code, terminal and tool-result panes.

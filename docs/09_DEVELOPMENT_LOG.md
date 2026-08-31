@@ -1188,3 +1188,10 @@
 - 文档 50 现在一份覆盖身份/证书、MCP 开关、UDP 47831 多网卡发现、HTTPS `/mcp`、TLS 指纹、目录摘要、工具详细合同、KEMI 四工具及文件发送边界、Harness 全局评分与三层路由、Windows Private 防火墙、双机调用和最短排障树，并删除与现状矛盾的无证书 `http-jsonrpc` 描述。第三方团队只交付并只按这一份文档验收，不再要求拼读联调记录或评分专题。
 - VibeKits 新版本未配置 LMCP/2 HTTPS 端点时不再回退广播 LMCP/1；仍接收旧 LMCP/1，但明确返回“仅发现、不可调用”。`peers.list` 注册源和自动目录文字一并更正为 LMCP/2。
 - 本机 10 秒真实监听只收到 Mac KEMI build102 LMCP/2，没有收到 Windows VibeKits 任何公告；因此“Windows 收不到 Mac KEMI”尚未闭环。后续必须以 Windows 产物 Git revision/SHA-256、`pktmon` UDP 证据、Private 入站规则和反向只读 `tools/call` 作为验收，不用同机测试代替。
+
+# 2026-08-31 · 192.168.3.62 LMCP/2 真机兼容与 Harness 回到底部
+
+- 真实抓到 `192.168.3.62` 的 `KEMI-BM@hua-41B8C7FDF4` 每 4 秒 LMCP/2 公告，证书指纹与 HTTPS 9443 实际证书一致；revision 2 目录含 5 个完整工具。
+- 修复远端目录在 UI 消失的三个客户端兼容点：请求显式发送 `Content-Length`；目录摘要按服务端原始完整工具对象计算，保留结构化 risk/未知扩展；调用身份允许来自标准 `structuredContent`，但仍严格核对实例、工具和 revision。
+- VibeKits 生产客户端已真实加载 5 工具并调用 `kemi.benchmark.device_status`，返回 `isError=false`、设备空闲、MCP ON、输入权限已授予。
+- Harness 对话向上滚动离开底部超过 72px 后显示圆形向下箭头；点击平滑滚动到最新消息，到底自动隐藏，并提供键盘焦点与无障碍名称。

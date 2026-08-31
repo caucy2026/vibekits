@@ -377,7 +377,9 @@ VibeKits 使用 UDP 包的源地址拼接连接 URL。例如源 IP 为 `192.168.
 
 客户端允许自签名证书仅用于取得 peer certificate，随后必须常量时间比较公告中的完整 SHA-256 指纹；不匹配立即断开且不发送 HTTP 内容。禁用证书校验但不固定指纹、HTTP、302 跳转、系统代理和把 Token 放在 URL 都不合规。实例证书变化按新身份安全事件处理：清目录并要求用户确认，不能静默信任。
 
-`capabilityDigest` 的输入是完成所有分页后的规范对象 `{"tools":[...],"nextCursor":null}`：Map key 递归按 Unicode 字符串排序，数组保序，UTF-8 编码后 SHA-256。tools 中必须包含 name/title/description/inputSchema/annotations 以及实现公开的 risk 扩展。公告三个位置的 digest 完全相同；客户端按收到的完整 tools/list 重新计算，任何差异拒绝目录。`catalogRevision` 是独立的单调变更键，不能用四位摘要截断代替。
+所有 LMCP JSON 请求都已序列化且受 1 MiB 上限约束，客户端必须发送准确 `Content-Length`，不得依赖 `Transfer-Encoding: chunked`。这是 Windows、小型原生 HTTP Server 与 Dart/Flutter 客户端共同互通的硬门槛；服务端可以支持 chunked 作为扩展，但不能要求客户端只能使用 chunked。
+
+`capabilityDigest` 的输入是完成所有分页后的规范对象 `{"tools":[...],"nextCursor":null}`：Map key 递归按 Unicode 字符串排序，数组保序，UTF-8 编码后 SHA-256。tools 中必须包含 name/title/description/inputSchema/annotations 以及实现公开的 risk 扩展。客户端必须基于服务端返回的**原始完整工具对象**计算摘要，不能先映射成自己的 UI 模型再计算，否则未知扩展或结构化 `risk` 会被删除/改形。公告三个位置的 digest 完全相同；任何差异拒绝目录。`catalogRevision` 是独立的单调变更键，不能用四位摘要截断代替。
 
 连接后 VibeKits 发送的初始化请求：
 
@@ -443,6 +445,8 @@ VibeKits 直接使用 `tools/list` 的 `name` 与用户任务生成参数：
 - 写操作支持调用方提供的幂等键时，应在 Schema 中明确字段名、有效期和重复调用语义。
 - 长任务不要占用无限 HTTP 请求，应返回 `taskId`，再提供明确描述的 status/cancel 工具。
 - 每个响应保留 `instanceId`、工具名、目录版本和服务端追踪 ID，便于 VibeKits 审计来源。
+
+身份扩展字段允许位于 `tools/call.result` 顶层，或位于 MCP 标准的 `tools/call.result.structuredContent`；同一次响应不得给出两套冲突值。VibeKits 从两处合并读取后仍严格比较公告的 `instanceId`、实际工具名和 `catalogRevision`，缺失或不一致都拒绝结果。
 
 VibeKits 服务端仅接受私网/loopback 来源的 `POST /mcp`，其他 path/method 返回 404，排空时返回 503，并发超过 8 返回 429，请求超过 1 MiB 返回 413。JSON-RPC parse/invalid request/invalid params/method not found/internal error 分别使用标准 `-32700/-32600/-32602/-32601/-32603`；通知成功可返回 HTTP 202 空响应。
 

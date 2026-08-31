@@ -162,10 +162,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _sessionSidebarOpen = true;
   bool _workspaceSearchOpen = false;
   bool _workspaceCatalogLoading = true;
+  bool _showScrollToLatest = false;
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_updateScrollToLatest);
     _adoptExternalPrompt();
     unawaited(_loadSettings());
     unawaited(_restoreConversation(widget.initialWorkspace));
@@ -291,7 +293,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _model.dispose();
     _debugDirectory.dispose();
     _composerFocus.dispose();
-    _scroll.dispose();
+    _scroll
+      ..removeListener(_updateScrollToLatest)
+      ..dispose();
     _workspaceSearch.dispose();
     super.dispose();
   }
@@ -1462,6 +1466,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       !_scroll.hasClients ||
       _scroll.position.maxScrollExtent - _scroll.position.pixels < 120;
 
+  void _updateScrollToLatest() {
+    if (!_scroll.hasClients || !mounted) return;
+    final bool show =
+        _scroll.position.maxScrollExtent - _scroll.position.pixels > 72;
+    if (show != _showScrollToLatest) {
+      setState(() => _showScrollToLatest = show);
+    }
+  }
+
   void _scrollToEnd({required bool force}) {
     if (!force) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2242,32 +2255,68 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             ),
             child: _messages.isEmpty
                 ? _buildEmptyState()
-                : ListView.separated(
-                    key: const Key('agent-conversation'),
-                    controller: _scroll,
-                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
-                    itemCount: _messages.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 16),
-                    itemBuilder: (BuildContext context, int index) {
-                      final bool activeAssistant =
-                          _running &&
-                          index == _messages.length - 1 &&
-                          !_messages[index].user;
-                      return _MessageBubble(
-                        message: _messages[index],
-                        progressSteps: activeAssistant
-                            ? List<_AgentProgressStep>.unmodifiable(
-                                _progressSteps,
-                              )
-                            : const <_AgentProgressStep>[],
-                        progressExpanded: _progressExpanded,
-                        onToggleProgress: activeAssistant
-                            ? () => setState(
-                                () => _progressExpanded = !_progressExpanded,
-                              )
-                            : null,
-                      );
-                    },
+                : Stack(
+                    children: <Widget>[
+                      Positioned.fill(
+                        child: ListView.separated(
+                          key: const Key('agent-conversation'),
+                          controller: _scroll,
+                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+                          itemCount: _messages.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 16),
+                          itemBuilder: (BuildContext context, int index) {
+                            final bool activeAssistant =
+                                _running &&
+                                index == _messages.length - 1 &&
+                                !_messages[index].user;
+                            return _MessageBubble(
+                              message: _messages[index],
+                              progressSteps: activeAssistant
+                                  ? List<_AgentProgressStep>.unmodifiable(
+                                      _progressSteps,
+                                    )
+                                  : const <_AgentProgressStep>[],
+                              progressExpanded: _progressExpanded,
+                              onToggleProgress: activeAssistant
+                                  ? () => setState(
+                                      () => _progressExpanded =
+                                          !_progressExpanded,
+                                    )
+                                  : null,
+                            );
+                          },
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 12,
+                        child: IgnorePointer(
+                          ignoring: !_showScrollToLatest,
+                          child: AnimatedOpacity(
+                            opacity: _showScrollToLatest ? 1 : 0,
+                            duration: const Duration(milliseconds: 140),
+                            child: Center(
+                              child: Material(
+                                color: Theme.of(context).colorScheme.surface,
+                                elevation: 4,
+                                shape: const CircleBorder(),
+                                child: IconButton(
+                                  key: const Key('agent-scroll-to-latest'),
+                                  tooltip: '滚动到最新消息',
+                                  onPressed: () => _scrollToEnd(force: true),
+                                  icon: const Icon(
+                                    Icons.arrow_downward_rounded,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ),

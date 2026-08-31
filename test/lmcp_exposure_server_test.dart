@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
@@ -8,6 +10,123 @@ import 'package:vibekits/features/dev_tools/domain/lmcp_exposure_server.dart';
 import 'package:vibekits/features/dev_tools/domain/lmcp_remote_client.dart';
 
 void main() {
+  test('远端原始目录扩展、Content-Length 和 structuredContent 身份兼容', () async {
+    final Map<String, String> credentials = <String, String>{};
+    final LmcpInstanceCertificate identity = await LmcpCertificateStore(
+      readCredential: (String key) async => credentials[key],
+      writeCredential: (String key, String value) async {
+        credentials[key] = value;
+      },
+    ).loadOrCreate(commonName: 'KEMI-BM@test-0123456789');
+    final SecurityContext context = SecurityContext()
+      ..useCertificateChainBytes(utf8.encode(identity.certificatePem))
+      ..usePrivateKeyBytes(utf8.encode(identity.privateKeyPem));
+    final HttpServer server = await HttpServer.bindSecure(
+      InternetAddress.loopbackIPv4,
+      0,
+      context,
+    );
+    addTearDown(() => server.close(force: true));
+
+    final Map<String, Object?> rawTool = <String, Object?>{
+      'name': 'kemi.benchmark.device_status',
+      'title': '读取基准设备状态',
+      'description': '只读状态',
+      'inputSchema': <String, Object?>{
+        'type': 'object',
+        'properties': <String, Object?>{},
+        'additionalProperties': false,
+      },
+      'annotations': <String, Object?>{'readOnlyHint': true},
+      'risk': <String, Object?>{
+        'level': 'readOnly',
+        'writesData': false,
+        'providerExtension': 'must-remain-in-digest',
+      },
+    };
+    final String digest =
+        'sha256:${sha256.convert(utf8.encode(jsonEncode(_canonicalize(<String, Object?>{
+          'tools': <Map<String, Object?>>[rawTool],
+          'nextCursor': null,
+        }))))}';
+    final List<bool> requestUsedContentLength = <bool>[];
+    unawaited(() async {
+      await for (final HttpRequest request in server) {
+        requestUsedContentLength.add(
+          request.contentLength > 0 && !request.headers.chunkedTransferEncoding,
+        );
+        final Map<String, Object?> payload = Map<String, Object?>.from(
+          jsonDecode(await utf8.decodeStream(request)) as Map,
+        );
+        final String method = '${payload['method'] ?? ''}';
+        request.response.headers.contentType = ContentType.json;
+        if (!payload.containsKey('id')) {
+          request.response.statusCode = HttpStatus.accepted;
+          await request.response.close();
+          continue;
+        }
+        final Object result = switch (method) {
+          'initialize' => <String, Object?>{
+            'protocolVersion': '2025-06-18',
+            'capabilities': <String, Object?>{},
+            'serverInfo': <String, Object?>{
+              'name': 'KEMI-BM',
+              'version': '2.1.4',
+            },
+          },
+          'tools/list' => <String, Object?>{
+            'tools': <Map<String, Object?>>[rawTool],
+            'nextCursor': null,
+          },
+          'tools/call' => <String, Object?>{
+            'content': <Object?>[],
+            'structuredContent': <String, Object?>{
+              'instanceId': 'com.newlink.kemiscrollbench:0123456789',
+              'tool': 'kemi.benchmark.device_status',
+              'catalogRevision': 2,
+              'ok': true,
+            },
+            'isError': false,
+          },
+          _ => <String, Object?>{},
+        };
+        request.response.write(
+          jsonEncode(<String, Object?>{
+            'jsonrpc': '2.0',
+            'id': payload['id'],
+            'result': result,
+          }),
+        );
+        await request.response.close();
+      }
+    }());
+
+    final VibekitsLanPeer peer = VibekitsLanPeer(
+      instanceId: 'com.newlink.kemiscrollbench:0123456789',
+      name: 'KEMI-BM@test-0123456789',
+      appId: 'com.newlink.kemiscrollbench',
+      appVersion: '2.1.4',
+      address: InternetAddress.loopbackIPv4.address,
+      port: server.port,
+      transport: 'https-streamable-http',
+      protocolVersion: 2,
+      capabilityDigest: digest,
+      lastSeen: DateTime.now(),
+      hardwareCode: '0123456789',
+      catalogPath: '/mcp',
+      callPath: '/mcp',
+      instanceKeyFingerprint: identity.fingerprint,
+      catalogRevision: '2',
+      serviceRole: 'tool-provider',
+    );
+    final LmcpRemoteClient client = LmcpRemoteClient();
+    final tools = await client.loadTools(peer);
+    expect(tools.single.risk, 'readOnly');
+    final result = await client.callTool(peer: peer, name: tools.single.name);
+    expect(result['isError'], isFalse);
+    expect(requestUsedContentLength, everyElement(isTrue));
+  });
+
   test('持久 EC 证书重载后保持同一 SHA-256 实例指纹', () async {
     final Map<String, String> credentials = <String, String>{};
     final LmcpCertificateStore store = LmcpCertificateStore(
@@ -365,6 +484,20 @@ void main() {
     expect(discovery.enabled, isFalse);
     expect(discovery.advertisement, isNull);
   });
+}
+
+Object? _canonicalize(Object? value) {
+  if (value is List) {
+    return value.map(_canonicalize).toList(growable: false);
+  }
+  if (value is Map) {
+    final List<String> keys = value.keys.map((Object? key) => '$key').toList()
+      ..sort();
+    return <String, Object?>{
+      for (final String key in keys) key: _canonicalize(value[key]),
+    };
+  }
+  return value;
 }
 
 class _FakeDiscovery extends LanPeerDiscoveryService {

@@ -25,7 +25,9 @@ class McpToolInterface {
           '${json['title'] ?? json['displayName'] ?? json['name'] ?? json['id'] ?? ''}'
               .trim(),
       description: '${json['description'] ?? ''}'.trim(),
-      risk: '${json['risk'] ?? ''}'.trim(),
+      risk: json['risk'] is Map
+          ? '${(json['risk']! as Map)['level'] ?? ''}'.trim()
+          : '${json['risk'] ?? ''}'.trim(),
       annotations: json['annotations'] is Map
           ? Map<String, Object?>.from(json['annotations']! as Map)
           : const <String, Object?>{},
