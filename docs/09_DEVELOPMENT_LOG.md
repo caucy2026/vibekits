@@ -1198,3 +1198,12 @@
 - 真机 Release 复测发现 Finder/App Bundle 启动时 `Directory.current` 不指向仓库，旧实现创建 `.runtime-cache/mcp/registrations` 失败后提前遗留 `_started=true`，导致 UDP 47831 已绑定但 UI 未订阅，表现为对端持续广播而列表为 0。注册缓存和开关状态现改用 `PlatformStorageLayout` 的 Cache/Application Support 稳定路径；local 缓存不可写不再阻断 LAN，初始化异常会完整回滚以便重试。
 - 修复后重新构建并从 App Bundle 启动 Release，右侧“局域网 MCP 设备”角标实际显示 `1`。真实读取 `192.168.3.62` APP 2.1.5/revision 3 的 5 个完整 Schema；`run` 未获本机批准时返回 `DENIED`，未绕过权限。随后只读调用 `last_result` 成功回收完整三轮结果：99.15625/S、四项 100、报告 SHA-256 `db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。唯一接入文档补齐异步 run/status/cancel/last_result 的参数、终态和断线恢复合同。
 - 自动化授权语义收口：首次 MCP 确认页必须持久化调用方、工具、风险和资源作用域；命中范围的 readOnly/writesData/controlsDevice/Harness 调用在重启、重连和新会话后均自动执行，不得逐次弹窗。只有证书/调用方/风险或资源扩权、主动撤销、关闭 MCP、系统权限撤销才重新授权；未授权立即返回 `AUTH_SCOPE_REQUIRED`，不能等待审批超时。KEMI-BM 旧 `run` 每次弹窗并返回 `DENIED` 现明确判定为自动化不合格。
+
+# 2026-08-31 · 近期改动交接摘要与云端备份
+
+- `0ff8911` 修复跨平台 LMCP 调用兼容：请求发送准确 `Content-Length`；目录摘要使用服务端原始完整工具对象；结构化 `risk.level` 正确展示；调用结果身份允许位于标准 `structuredContent` 且继续严格核对 instance/tool/revision。Harness Web 与 macOS 原生工作区均新增离开底部后出现的圆形向下箭头。
+- `edd10f2` 修复打包 APP 真机发现：MCP 注册缓存和开关状态不再依赖 `Directory.current`，改用 `PlatformStorageLayout` 的 Application Cache/Support；本地注册目录不可写时 LAN 订阅仍工作，初始化失败完整回滚。新 Release 从 App Bundle 启动后实际显示局域网设备角标 `1`，不再出现“UDP 已监听但 UI 为 0”的假在线。
+- `51a617b` 将唯一 LMCP 文档改为自动化安全授权：首次确认持久化调用方、工具、风险和资源作用域；范围内调用在重启、重连、新会话和任务恢复后均自动执行，不得逐次弹窗；扩权或撤销后立即返回 `AUTH_SCOPE_REQUIRED`。同一规则覆盖 KEMI 文件发送、KEMI-BM run/status/cancel/last_result 与远程 Harness。
+- Harness 已在正式 Release 会话中自行完成 `vibekits.mcp.catalog_list → vibekits.mcp.tool_call → LAN kemi.benchmark.last_result`，目录 21 ms、远端调用 86 ms；本次 traceId=`8561edb6-241c-48be-b62e-8d04c339f366`，结果为 taskId `b07e6779-8815-45e2-b94e-dea3a7ff2311`、99.15625/S、capacity/frame/input/stability 全 100、report SHA-256 `db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。这条证据来自 Harness UI 调用记录，不是后台临时测试程序。
+- 验证基线：MCP 路径/身份/服务端/发现定向测试 25/25，Harness 滚动相关测试 19/19，Flutter analyze 0 issue，macOS Release 592.8 MB；最终 App.framework SHA-256 `aebd857f0ab4d69ffe8b573492eb5943a6c68f9e3c5db1922879846311c3c355`。
+- 尚未完成的跨项目门禁只有一项：`192.168.3.62` KEMI-BM 必须按文档 50 实现持久自动授权，然后由 VibeKits Harness 无人工二次点击完成新的 `run → status → final=true`，回传新 taskId/traceId/reportSha256。修改要求已发送到“系统流畅性测试”开发任务；在取得该证据前不得把旧 `DENIED` 流程写成自动化通过。
