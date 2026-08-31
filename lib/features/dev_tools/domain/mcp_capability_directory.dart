@@ -126,7 +126,7 @@ class McpCapabilityDirectory {
           appVersion: peer.appVersion,
           tier: McpCapabilityTier.lan,
           transport: peer.transport,
-          endpoint: '${peer.address}:${peer.sshPort}',
+          endpoint: 'http://${peer.address}:${peer.port}/mcp',
           tools: peer.tools,
           lastUpdated: peer.lastSeen,
           catalogRevision: peer.capabilityDigest,

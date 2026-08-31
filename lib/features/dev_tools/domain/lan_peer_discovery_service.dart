@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'lan_mcp_tool_server.dart';
 import 'mcp_capability_models.dart';
 
 class VibekitsLanPeer {
@@ -11,7 +12,7 @@ class VibekitsLanPeer {
     required this.appId,
     required this.appVersion,
     required this.address,
-    required this.sshPort,
+    required this.port,
     required this.transport,
     required this.protocolVersion,
     required this.capabilityDigest,
@@ -25,7 +26,7 @@ class VibekitsLanPeer {
   final String appId;
   final String appVersion;
   final String address;
-  final int sshPort;
+  final int port;
   final String transport;
   final int protocolVersion;
   final String capabilityDigest;
@@ -39,7 +40,7 @@ class VibekitsLanPeer {
     'appId': appId,
     'appVersion': appVersion,
     'address': address,
-    'sshPort': sshPort,
+    'port': port,
     'transport': transport,
     'protocolVersion': protocolVersion,
     'capabilityDigest': capabilityDigest,
@@ -86,7 +87,7 @@ class LanPeerDiscoveryService {
   String _appVersion = '';
   String _capabilityDigest = '';
   String _hardwareCode = '';
-  int _sshPort = 22;
+  LanMcpToolServer? _mcpServer;
   bool _exposureEnabled = true;
 
   Stream<List<VibekitsLanPeer>> get changes => _changes.stream;
@@ -107,7 +108,6 @@ class LanPeerDiscoveryService {
     required String capabilityDigest,
     String appId = 'com.vibekits.desktop',
     String appVersion = '1.9.0',
-    int sshPort = 22,
     bool exposureEnabled = true,
     String hardwareCode = '',
   }) async {
@@ -121,19 +121,23 @@ class LanPeerDiscoveryService {
     if (_instanceId.isEmpty ||
         _name.isEmpty ||
         _appId.isEmpty ||
-        _appVersion.isEmpty ||
-        sshPort < 1 ||
-        sshPort > 65535) {
+        _appVersion.isEmpty) {
       throw const FormatException('局域网节点发现参数无效');
     }
-    _sshPort = sshPort;
     _exposureEnabled = exposureEnabled;
-    final RawDatagramSocket socket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      port,
-      reuseAddress: true,
-      reusePort: reusePort,
-    );
+    if (_exposureEnabled) await _startMcpServer();
+    late final RawDatagramSocket socket;
+    try {
+      socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        port,
+        reuseAddress: true,
+        reusePort: reusePort,
+      );
+    } on Object {
+      await _stopMcpServer();
+      rethrow;
+    }
     socket.joinMulticast(group);
     socket.listen(_onEvent, onError: (_) => stop());
     _socket = socket;
@@ -144,11 +148,17 @@ class LanPeerDiscoveryService {
     _pruneTimer = Timer.periodic(const Duration(seconds: 4), (_) => _prune());
   }
 
-  void setExposureEnabled(bool enabled) {
+  Future<void> setExposureEnabled(bool enabled) async {
     if (_exposureEnabled == enabled) return;
-    if (!enabled) _announce(messageType: 'goodbye');
-    _exposureEnabled = enabled;
-    if (enabled) _announce();
+    if (!enabled) {
+      _announce(messageType: 'goodbye');
+      _exposureEnabled = false;
+      await _stopMcpServer();
+      return;
+    }
+    await _startMcpServer();
+    _exposureEnabled = true;
+    _announce();
   }
 
   Future<void> stop() async {
@@ -158,6 +168,7 @@ class LanPeerDiscoveryService {
     _pruneTimer = null;
     _socket?.close();
     _socket = null;
+    await _stopMcpServer();
     _peers.clear();
     _emit();
   }
@@ -179,8 +190,9 @@ class LanPeerDiscoveryService {
           'version': _appVersion,
         },
         'endpoint': <String, Object?>{
-          'transport': 'ssh-stdio',
-          'port': _sshPort,
+          'transport': 'http-jsonrpc',
+          'port': _mcpServer?.port ?? 0,
+          'path': '/mcp',
         },
         'mcp': <String, Object?>{
           'protocolVersions': <String>['2025-06-18'],
@@ -188,7 +200,7 @@ class LanPeerDiscoveryService {
         },
         'security': <String, Object?>{
           'pairingRequired': false,
-          'authMethods': <String>['ssh-ed25519'],
+          'authMethods': <String>['provider-consent'],
           'controlApproval': 'remote-harness-only',
         },
         'ttlSeconds': peerTtl.inSeconds,
@@ -259,7 +271,7 @@ class LanPeerDiscoveryService {
         if (id.isEmpty ||
             id == _instanceId ||
             name.isEmpty ||
-            transport != 'ssh-stdio' ||
+            transport != 'ssh-stdio' && transport != 'http-jsonrpc' ||
             remotePort < 1 ||
             remotePort > 65535) {
           continue;
@@ -273,7 +285,7 @@ class LanPeerDiscoveryService {
           ),
           appVersion: _safe('${legacy ? '' : app['version'] ?? ''}', 40),
           address: packet.address.address,
-          sshPort: remotePort,
+          port: remotePort,
           transport: transport,
           protocolVersion: legacy
               ? (decoded['version'] as num?)?.toInt() ?? 0
@@ -302,6 +314,16 @@ class LanPeerDiscoveryService {
   }
 
   void _emit() => _changes.add(peers);
+
+  Future<void> _startMcpServer() async {
+    _mcpServer ??= await LanMcpToolServer.start();
+  }
+
+  Future<void> _stopMcpServer() async {
+    final LanMcpToolServer? server = _mcpServer;
+    _mcpServer = null;
+    await server?.close();
+  }
 
   static String _safe(String value, int max) {
     final String clean = value

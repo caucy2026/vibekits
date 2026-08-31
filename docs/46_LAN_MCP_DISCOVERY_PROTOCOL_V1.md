@@ -59,7 +59,9 @@
 
 LMCP/1 必须支持 `ssh-stdio`：客户端以 SSH 进程的 stdin/stdout 承载 MCP JSON-RPC，每行一个完整 JSON 消息。SSH 必须固定 host key、使用每设备独立 Ed25519 身份并采用强制命令；禁止授权通用 Shell。
 
-未来次版本可以增加 `https-streamable-http`，但只有受信 CA 或人工固定证书指纹、TLS 1.2+、独立客户端身份和服务端授权都满足时才能声明。LMCP/1 客户端不得把明文 HTTP、发现包内 Token或查询参数 Secret 当成 MCP 传输。
+未来次版本可以增加 `https-streamable-http`，但只有受信 CA 或人工固定证书指纹、TLS 1.2+、独立客户端身份和服务端授权都满足时才能声明。发现包内 Token 和查询参数 Secret 始终禁止。
+
+VibeKits 1.9 的过渡实现另接受 `http-jsonrpc`：它只允许回环和 RFC1918 私网源地址，只有用户在提供端确认风险并打开 MCP 开关时才监听，关闭时立即发送 `goodbye` 并停止端口。端点固定为 `POST /mcp`，实现标准 JSON-RPC 2.0 的 `initialize`、`ping`、`tools/list`、`tools/call`，正文上限 1 MiB。该模式用于可信、隔离的局域网自动协作，不具备 TLS 的窃听/篡改防护，不能跨路由器暴露，也不能标记为 LMCP/2 安全合规；生产跨网部署仍必须使用 HTTPS 或 SSH。
 
 连接成功后必须重新执行标准 MCP：
 

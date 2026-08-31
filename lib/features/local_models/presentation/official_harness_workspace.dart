@@ -1407,12 +1407,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     if (_mcpExposureEnabled == enabled) return;
     if (enabled && !await _confirmMcpExposureRisk()) return;
     setState(() => _mcpExposureEnabled = enabled);
-    LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
     try {
+      await LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
       await _mcpExposurePreferences.saveEnabled(enabled);
     } on Object catch (error) {
       if (!mounted) return;
-      LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
+      await LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
       setState(() => _mcpExposureEnabled = !enabled);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('保存 MCP 开关失败：$error')));

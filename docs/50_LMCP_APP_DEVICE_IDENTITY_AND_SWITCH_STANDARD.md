@@ -358,4 +358,15 @@ lmcp://<instanceId>/<tool.name>
 
 VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化并广播；关闭可立即执行。这是对外暴露边界的一次确认，不是普通 MCP 工具的逐次审批；远程 Harness 任务控制仍独立审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、切换 MCP、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
+### 14.1 VibeKits 1.9 当前可运行传输
+
+当前 VibeKits 在用户确认开启后启动一个动态端口的 `http-jsonrpc` MCP 服务，并在 LMCP 公告中发布 `port` 与 `/mcp`。客户端不得依赖固定端口，必须从每次实时公告取得端点，然后依次调用：
+
+1. `initialize`，协议版本为 `2025-06-18`；
+2. `tools/list`，以返回的 `name` 和完整 `inputSchema` 建立实时工具目录；
+3. `tools/call`，参数为 `{ "name": "工具名", "arguments": { ... } }`；
+4. 收到 `goodbye` 或超过 TTL 后立即删除设备、端点和缓存目录。
+
+该传输只接受回环和 RFC1918 私网来源，请求上限 1 MiB。它满足可信隔离局域网内“发现后像本地工具一样调用”的开发需求，但不是 LMCP/2 的最终安全传输。第三方正式实现仍以本章 `https-streamable-http` 要求为验收目标；如果为了与当前 VibeKits 联调而同时提供 `http-jsonrpc`，必须明确标为过渡端点、受 APP MCP 总开关控制，且不得包含广播 Token、查询参数 Secret 或公网监听配置。
+
 本文是第三方 APP 的实现入口；总体能力图、权限和任务路由见 [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)。

@@ -40,7 +40,8 @@ void main() {
     );
     expect(futureApp.appId, 'com.example.future-app');
     expect(futureApp.appVersion, '2.3.0');
-    expect(futureApp.transport, 'ssh-stdio');
+    expect(futureApp.transport, 'http-jsonrpc');
+    expect(futureApp.port, greaterThan(0));
   }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
 
   test('历史 LMCP/1 JSON Schema 仍可被解析', () {
@@ -86,7 +87,7 @@ void main() {
       isTrue,
     );
 
-    provider.setExposureEnabled(false);
+    await provider.setExposureEnabled(false);
     await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(
       observer.peers.any(

@@ -1374,12 +1374,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   Future<void> _toggleMcpExposure() async {
     final bool enabled = !_mcpExposureEnabled;
     if (enabled && !await _confirmMcpExposureRisk()) return;
-    LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
     setState(() => _mcpExposureEnabled = enabled);
     try {
+      await LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
       await _mcpExposurePreferences.saveEnabled(enabled);
     } on Object catch (error) {
-      LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
+      await LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
       if (mounted) setState(() => _mcpExposureEnabled = !enabled);
       if (mounted) _show('保存 MCP 开关失败：$error');
     }
