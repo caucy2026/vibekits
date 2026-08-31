@@ -253,6 +253,50 @@ void main() {
     expect(publisher.activeConnectionCount, 0);
   });
 
+  test(
+    'disconnect releases subscription before input cancellation completes',
+    () async {
+      final Completer<void> cancelGate = Completer<void>();
+      final _FakeTransport transport = _FakeTransport(localIdentity: 'same');
+      final HarnessStatusIpcPublisher publisher = HarnessStatusIpcPublisher(
+        snapshotProvider: () => _snapshot(sequence: 1, busy: false),
+        snapshotStream: () => const Stream<Map<String, Object?>>.empty(),
+        publisherVersion: 'test',
+        transport: transport,
+      );
+      addTearDown(() async {
+        if (!cancelGate.isCompleted) cancelGate.complete();
+        await publisher.stop();
+      });
+      await publisher.start();
+
+      final _FakeConnection connection = _FakeConnection(
+        peerIdentity: 'same',
+        inputCancelGate: cancelGate,
+      );
+      transport.accept(connection);
+      final Future<Map<String, Object?>> ack = connection.nextOutput(
+        'helloAck',
+      );
+      connection.sendInput(_hello(nonce: 'cancel-gate'));
+      await ack;
+      final Future<Map<String, Object?>> snapshot = connection.nextOutput(
+        'snapshot',
+      );
+      connection.sendInput(<String, Object?>{
+        'type': 'subscribe',
+        'afterStreamSequence': 0,
+      });
+      await snapshot;
+      expect(publisher.activeSubscriptionCount, 1);
+
+      connection.endInput();
+      await _eventually(() => publisher.activeSubscriptionCount == 0);
+      expect(publisher.activeConnectionCount, 0);
+      expect(cancelGate.isCompleted, isFalse);
+    },
+  );
+
   test('latest-wins replaces a pending slow-subscriber snapshot', () async {
     final StreamController<Map<String, Object?>> changes =
         StreamController<Map<String, Object?>>.broadcast(sync: true);
@@ -448,13 +492,20 @@ class _FakeListener implements HarnessStatusIpcListener {
 }
 
 class _FakeConnection implements HarnessStatusIpcConnection {
-  _FakeConnection({required this.peerIdentity});
+  _FakeConnection({
+    required this.peerIdentity,
+    Completer<void>? inputCancelGate,
+  }) : _input = StreamController<List<int>>.broadcast(
+         sync: true,
+         onCancel: inputCancelGate == null
+             ? null
+             : () => inputCancelGate.future,
+       );
 
   @override
   final String? peerIdentity;
 
-  final StreamController<List<int>> _input =
-      StreamController<List<int>>.broadcast(sync: true);
+  final StreamController<List<int>> _input;
   final HarnessStatusFrameDecoder _outputDecoder = HarnessStatusFrameDecoder();
   final List<Map<String, Object?>> outputs = <Map<String, Object?>>[];
   final List<Map<String, Object?>> _pendingOutputs = <Map<String, Object?>>[];
@@ -491,6 +542,10 @@ class _FakeConnection implements HarnessStatusIpcConnection {
 
   void sendInput(Map<String, Object?> message) =>
       _input.add(HarnessStatusFrameCodec.encode(message));
+
+  void endInput() {
+    unawaited(_input.close());
+  }
 
   Future<Map<String, Object?>> nextOutput(String type) {
     final int pendingIndex = _pendingOutputs.indexWhere(

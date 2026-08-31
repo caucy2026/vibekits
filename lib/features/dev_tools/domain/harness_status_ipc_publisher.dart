@@ -568,12 +568,20 @@ class _HarnessStatusClient {
     _closed = true;
     _handshakeTimer?.cancel();
     _heartbeatTimer?.cancel();
-    await _inputSubscription?.cancel();
+    // `close` is also invoked from this subscription's onDone/onError
+    // callbacks. Some Socket/stream implementations do not complete cancel()
+    // until that callback returns. Release the single-subscriber lease and
+    // destroy the connection before awaiting cancellation so an abruptly
+    // disconnected RustDesk client cannot leave the publisher permanently
+    // reporting subscription_busy.
+    final Future<void>? inputCancelled = _inputSubscription?.cancel();
+    _inputSubscription = null;
     if (_subscribed) {
       _subscribed = false;
       publisher._releaseSubscription();
     }
     await _statusSubscription?.cancel();
+    _statusSubscription = null;
     _writer.destroy();
     if (_handshaken) {
       publisher._notify(
@@ -583,6 +591,7 @@ class _HarnessStatusClient {
       );
     }
     onClosed();
+    await inputCancelled;
   }
 }
 

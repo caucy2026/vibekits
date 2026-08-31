@@ -1248,3 +1248,10 @@
 - 32 路并发执行 1000 次 MCP 大目录洪峰请求，0 失败；总耗时 127.8 秒、最慢请求 10.4 秒，结束后窗口仍响应，工作集 225.8 MiB、754 句柄、29 线程。
 - Windows 事件日志没有捕获到本轮报告对应的 `vibekits.exe` 原生崩溃，旧版本也没有全局 Flutter/异步异常落盘。新增 512 KiB 轮转的 `app-crash.log`，同步捕获 Flutter framework 与 PlatformDispatcher 未处理异常并脱敏 Token、密码和密钥；记录器自身失败不会造成二次崩溃。
 - 洪峰测试将旧 `tool_activity.json` 推到 2,096,559 B，并曾复现窗口与 MCP 同时长时间无响应。活动历史现从 500 条×4 KiB 收敛为最多 200 条×1 KiB、目标文件不超过 512 KiB；真实旧文件在一次调用后自动迁移到 327,863 B。修复版再跑 20 轮冷启动全部通过，就绪时间 4.865～5.062 秒、平均 4.925 秒，最终只保留 1 个 Node 子进程。
+
+# 2026-09-01 · Harness IPC 断线释放死锁修复
+
+- RustDesk 真机联调发现旧 VibeKits PID 92810 在订阅客户端退出后仍保留已接受 socket，后续订阅永久返回 `subscription_busy`。根因是客户端 `onDone`/`onError` 回调进入 `close()` 后先等待自身输入订阅的 `cancel()`；部分 Socket/Stream 实现要等回调返回才完成取消，形成自等待，导致订阅名额、状态流和 socket 均无法释放。
+- 关闭顺序改为：先标记关闭并取得输入取消 Future，再立即释放唯一订阅名额、取消状态流、销毁连接、移除客户端，最后等待输入取消完成。这样即使底层取消 Future 延迟或不完成，也不会阻塞新的 RustDesk Host 订阅。
+- 新增阻塞输入取消 Future 的专门回归，确认断线后 `activeSubscriptionCount` 与 `activeConnectionCount` 立即归零；Harness IPC 定向测试 9/9、Flutter analyze 0 issue、macOS Release 构建通过。旧 PID 92810 已用 SIGTERM 优雅退出，新 Release PID 7515 已启动并监听 `${TMPDIR}/vkh/v1.sock`。
+- 重启后的已接受 FD 不是孤儿：内核 endpoint 精确配对确认 VibeKits PID 7515 FD16 对端为 KEMI传书内嵌旧 `S1-远程桌面 --server` PID 35983 FD16。该进程是当前合法唯一订阅者；它存活期间第二诊断客户端返回 `subscription_busy` 属于预期门禁。要做“两次生产订阅”验收，必须先由用户明确允许短时停止该旧服务，不能把合法占用误判为释放失败。
