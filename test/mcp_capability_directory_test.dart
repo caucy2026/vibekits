@@ -264,6 +264,69 @@ void main() {
     );
   });
 
+  test('失败目录对重复公告退避但目录身份变化立即重验', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits-mcp-lmcp2-retry-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final _FakeDiscoveryService discovery = _FakeDiscoveryService();
+    final _FailingRemoteClient remote = _FailingRemoteClient();
+    final McpCapabilityDirectory directory = McpCapabilityDirectory(
+      registrationDirectory: root,
+      discoveryService: discovery,
+      remoteClient: remote,
+      reputationStore: McpToolReputationStore(
+        file: File('${root.path}${Platform.pathSeparator}reputation.json'),
+      ),
+    );
+    addTearDown(directory.dispose);
+    addTearDown(discovery.close);
+    await directory.start(appBridge: VibekitsHarnessToolBridge());
+
+    VibekitsLanPeer peer(String revision) => VibekitsLanPeer(
+      instanceId: 'com.vendor.device:ABCDEF0123',
+      name: 'Vendor@host-ABCDEF0123',
+      appId: 'com.vendor.device',
+      appVersion: '1.0.0',
+      address: '192.168.3.62',
+      port: 9443,
+      transport: 'https-streamable-http',
+      protocolVersion: 2,
+      capabilityDigest: 'sha256:${List<String>.filled(64, '7').join()}',
+      lastSeen: DateTime.now(),
+      catalogPath: '/mcp',
+      callPath: '/mcp',
+      instanceKeyFingerprint: 'sha256:${List<String>.filled(64, '5').join()}',
+      catalogRevision: revision,
+      serviceRole: 'tool-provider',
+    );
+
+    discovery.emit(<VibekitsLanPeer>[peer('3')]);
+    await pumpEventQueue();
+    discovery.emit(<VibekitsLanPeer>[peer('3')]);
+    discovery.emit(<VibekitsLanPeer>[peer('3')]);
+    await pumpEventQueue();
+    expect(remote.catalogLoads, 1);
+
+    final Map<String, Object?> failedCatalog = await directory
+        .exportForHarness();
+    final Map<String, Object?> failedLan =
+        ((((failedCatalog['tiers'] as Map)['lan'] as List).single) as Map)
+            .cast<String, Object?>();
+    expect(failedLan['callable'], isFalse);
+    expect(failedLan['discoveryAlive'], isTrue);
+    expect(failedLan['endpointReachable'], isFalse);
+    expect(failedLan['catalogState'], 'unreachable');
+    expect(failedLan['catalogErrorCode'], 'connection_failed');
+    expect(failedLan['catalogError'], contains('connection_failed'));
+
+    discovery.emit(<VibekitsLanPeer>[peer('4')]);
+    await pumpEventQueue();
+    expect(remote.catalogLoads, 2);
+  });
+
   test('本机注册缓存不可创建时仍订阅并显示局域网节点', () async {
     final Directory root = await Directory.systemTemp.createTemp(
       'vibekits-mcp-readonly-registration-',
@@ -373,6 +436,16 @@ class _FakeRemoteClient extends LmcpRemoteClient {
       'catalogRevision': peer.catalogRevision,
       'isError': false,
     };
+  }
+}
+
+class _FailingRemoteClient extends LmcpRemoteClient {
+  int catalogLoads = 0;
+
+  @override
+  Future<List<McpToolInterface>> loadTools(VibekitsLanPeer peer) async {
+    catalogLoads++;
+    throw const LmcpRemoteException('connection_failed', '无法连接远端 MCP 端点');
   }
 }
 

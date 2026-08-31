@@ -97,6 +97,7 @@ ON
 3. 每次从关闭切到打开都必须弹出不可跳过的权限申请，至少展示：APP/设备身份、局域网可发现范围、实例证书指纹、将公开的完整工具名与用途、只读/写入/文件外发/设备控制风险、审计位置、关闭和撤销方法。取消后保持 `OFF`，不能先启动再补问。
 4. 只有端点真正监听成功后才能显示“开”；保存设置或启动失败进入 `ERROR` 并给出可操作原因。
 5. `goodbye` 至少发送一次；丢包时仍由 12 秒 TTL 兜底。
+6. 每次发送 announce 前必须确认 HTTPS listener 仍在运行；listener 异常退出时立即停止 announce、尝试发送 goodbye 并进入 `ERROR`。禁止 TCP 端点已经关闭却持续广播“在线”。
 6. 关闭后 `tools/call` 必须拒绝新请求，不能只隐藏 UI。
 7. 在途调用最多等待配置的排空时间，然后返回结构化取消结果。
 8. 接口服务崩溃时开关显示异常/关闭，不得继续广播在线。
@@ -486,7 +487,7 @@ VibeKits 的发现接收与“向外暴露 MCP”开关相互独立：即使总�
 
 以下情况 VibeKits 会拒绝调用：工具不在当前目录、Schema 无效、目录摘要不匹配、实例指纹改变、设备已 `goodbye`/TTL 离线、端点跳出私网、响应超出限制。
 
-VibeKits 对目录握手使用 8 秒短超时，对 `tools/call` 使用 120 秒调用超时。目录认证失败时实例仍保留在实时列表，但必须标记 `callable=false` 并返回有界 `catalogError`；同一端点、指纹、revision 和 digest 未变化时，失败重试至少退避 5 秒，禁止每个重复 UDP 公告都立即重做 TLS/目录认证。任一身份或目录键变化则立即清除退避并重新验证。授权检查必须本地同步完成，命中持久授权立即执行，不得把 110 秒预算用于等待人工批准；未授权立即返回 `AUTH_SCOPE_REQUIRED`。文件接收等外部目标响应可使用不超过 110 秒的业务超时。超过客户端调用时长的工作必须尽快返回 `taskId`，并提供无需再次授权的 status/cancel 工具。
+VibeKits 对目录握手使用 8 秒短超时，对 `tools/call` 使用 120 秒调用超时。目录认证失败时实例仍保留在实时列表，但必须标记 `callable=false` 并返回有界 `catalogError` 与稳定 `catalogErrorCode`。机器目录必须分别表达 `discoveryAlive`（TTL 内收到公告）、`endpointReachable`（TCP/TLS/HTTP 端点是否可达）和 `catalogState=verifying|unreachable|rejected|verified`；UI 和 Harness 禁止把 `discoveryAlive=true` 简写成“可用”。同一端点、指纹、revision 和 digest 未变化时，失败重试至少退避 5 秒，禁止每个重复 UDP 公告都立即重做 TLS/目录认证。任一身份或目录键变化则立即清除退避并重新验证。授权检查必须本地同步完成，命中持久授权立即执行，不得把 110 秒预算用于等待人工批准；未授权立即返回 `AUTH_SCOPE_REQUIRED`。文件接收等外部目标响应可使用不超过 110 秒的业务超时。超过客户端调用时长的工作必须尽快返回 `taskId`，并提供无需再次授权的 status/cancel 工具。
 
 ## 6. 像本地工具一样远程调用
 

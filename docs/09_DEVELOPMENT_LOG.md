@@ -3,7 +3,7 @@
 ## 2026-08-31 · APP 级实时 MCP 发现、更新与调用
 
 - 三层 MCP 能力目录、局域网监听和 Harness 工具桥提升为桌面 APP 全生命周期服务；用户无需先进入 Harness 工作区，每个新任务都可实时读取 `app → local → lan` 目录并按当前实例、工具名和 Schema 调用。
-- 局域网目录认证失败不再静默显示空工具：目录返回受限的 `catalogError`，实例继续可见但保持 `callable=false`；失败实例采用 5 秒退避，避免高频公告触发 TLS/目录认证重试风暴，端点、指纹、revision 或 digest 变化仍立即废弃旧缓存并重验。
+- 局域网目录认证失败不再静默显示空工具：目录返回受限的 `catalogError/catalogErrorCode`，并区分 `discoveryAlive`、`endpointReachable` 和 `catalogState`；实例继续可见但保持 `callable=false`。失败退避绑定完整目录身份，重复公告 5 秒内不重试，端点、指纹、revision 或 digest 变化则立即废弃旧缓存并重验。
 - Windows Release 实机发现 `192.168.3.62` 的 `KEMI-BM@hua-41B8C7FDF4`（revision 4）；全局目录调用 405 ms 返回。验收时对端仍广播 9443 但 TCP 已不可达，VibeKits 正确返回 `connection_failed` 并拒绝伪调用。LMCP、目录、暴露服务和 Harness 桥定向回归 50/50 通过。
 
 ## 2026-08-31 · Harness 语义 Record & Replay 内核

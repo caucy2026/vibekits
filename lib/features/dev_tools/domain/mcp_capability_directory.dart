@@ -54,7 +54,9 @@ class McpCapabilityDirectory {
   final Map<String, String> _remoteCatalogKeys = <String, String>{};
   final Map<String, String> _loadingCatalogKeys = <String, String>{};
   final Map<String, String> _remoteCatalogErrors = <String, String>{};
+  final Map<String, String> _remoteCatalogErrorCodes = <String, String>{};
   final Map<String, DateTime> _remoteRetryAfter = <String, DateTime>{};
+  final Map<String, String> _remoteFailureKeys = <String, String>{};
   int _version = 0;
   bool _started = false;
 
@@ -150,6 +152,18 @@ class McpCapabilityDirectory {
           toolName: tool.name,
         );
     Map<String, Object?> deviceJson(McpDeviceCapability device) {
+      final String? catalogErrorCode = _remoteCatalogErrorCodes[device.id];
+      final bool? endpointReachable = catalogErrorCode == null
+          ? (device.callable ? true : null)
+          : catalogErrorCode != 'connection_failed' &&
+                catalogErrorCode != 'timeout';
+      final String catalogState = device.callable
+          ? 'verified'
+          : catalogErrorCode == null
+          ? 'verifying'
+          : endpointReachable == true
+          ? 'rejected'
+          : 'unreachable';
       final List<McpToolInterface> tools = device.tools.toList()
         ..sort((McpToolInterface left, McpToolInterface right) {
           final int byScore = reputation(
@@ -169,6 +183,12 @@ class McpCapabilityDirectory {
         'endpoint': device.endpoint,
         'catalogRevision': device.catalogRevision,
         'callable': device.callable,
+        if (device.tier == McpCapabilityTier.lan) ...<String, Object?>{
+          'discoveryAlive': device.online,
+          'endpointReachable': endpointReachable,
+          'catalogState': catalogState,
+          if (catalogErrorCode != null) 'catalogErrorCode': catalogErrorCode,
+        },
         if (device.tier == McpCapabilityTier.lan &&
             _remoteCatalogErrors.containsKey(device.id))
           'catalogError': _remoteCatalogErrors[device.id]!,
@@ -398,14 +418,21 @@ class McpCapabilityDirectory {
     _remoteCatalogKeys.removeWhere((String id, _) => !online.contains(id));
     _loadingCatalogKeys.removeWhere((String id, _) => !online.contains(id));
     _remoteCatalogErrors.removeWhere((String id, _) => !online.contains(id));
+    _remoteCatalogErrorCodes.removeWhere(
+      (String id, _) => !online.contains(id),
+    );
     _remoteRetryAfter.removeWhere((String id, _) => !online.contains(id));
+    _remoteFailureKeys.removeWhere((String id, _) => !online.contains(id));
     for (final VibekitsLanPeer peer in peers) {
       if (!peer.supportsLmcp2Calls) continue;
       final String key = _remoteCatalogKey(peer);
       final DateTime? retryAfter = _remoteRetryAfter[peer.instanceId];
+      final bool sameFailedCatalog = _remoteFailureKeys[peer.instanceId] == key;
       if (_remoteCatalogKeys[peer.instanceId] == key ||
           _loadingCatalogKeys[peer.instanceId] == key ||
-          (retryAfter != null && DateTime.now().isBefore(retryAfter))) {
+          (sameFailedCatalog &&
+              retryAfter != null &&
+              DateTime.now().isBefore(retryAfter))) {
         continue;
       }
       unawaited(_loadRemoteCatalog(peer, key));
@@ -448,12 +475,18 @@ class McpCapabilityDirectory {
       _remoteTools[peer.instanceId] = tools;
       _remoteCatalogKeys[peer.instanceId] = catalogKey;
       _remoteCatalogErrors.remove(peer.instanceId);
+      _remoteCatalogErrorCodes.remove(peer.instanceId);
       _remoteRetryAfter.remove(peer.instanceId);
+      _remoteFailureKeys.remove(peer.instanceId);
       _updateLan(_lanPeers.values.toList(growable: false));
     } on Object catch (error) {
       // Discovery heartbeats retry failed authenticated catalogs. A failed
       // node remains visible without tools and is never treated as callable.
       _remoteCatalogErrors[peer.instanceId] = '$error';
+      _remoteCatalogErrorCodes[peer.instanceId] = error is LmcpRemoteException
+          ? error.code
+          : 'catalog_load_failed';
+      _remoteFailureKeys[peer.instanceId] = catalogKey;
       _remoteRetryAfter[peer.instanceId] = DateTime.now().add(
         const Duration(seconds: 5),
       );
