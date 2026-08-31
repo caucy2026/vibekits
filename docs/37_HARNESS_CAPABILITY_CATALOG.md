@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：176。
-- Harness 当前可执行接口：154。
+- Harness 定义接口：180。
+- Harness 当前可执行接口：158。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -67,7 +67,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 
 | 模块 | 定义接口数 |
 | --- | ---: |
-| 系统诊断 | 35 |
+| 系统诊断 | 39 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
@@ -82,7 +82,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 版本控制 | 10 |
 | 虚拟化 | 3 |
 
-## 系统诊断（定义 35）
+## 系统诊断（定义 39）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -121,6 +121,10 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.virtual_machine` | `virtual_machine` | 轻量虚拟机（QEMU） | 否（环境/接线门禁） | 使用内置 QEMU 创建虚拟磁盘并运行 Windows、Linux 等本地虚拟机。 适合：用户明确需要“轻量虚拟机（QEMU）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.windows_node.ensure_client_identity` | `windows_node__ensure_client_identity` | 确保客户端独立身份 | 否（环境/接线门禁） | 等待 macOS Keychain/受保护文件实现；只返回公钥和不透明凭据引用，永不返回私钥。 | `writesData` | `{}` |
 | `vibekits.windows_node.helper_status` | `windows_node__helper_status` | 检查 Windows 节点 Helper | 是 | 读取当前 Release 中 helper 实体和 manifest 状态；缺失或不匹配时明确关闭系统写入工具。 | `readOnly` | `{}` |
+| `vibekits.workflow.list` | `workflow__list` | 列出已学习工作流 | 是 | 只读列出 Harness 已从示教生成的语义工作流及步骤数。 | `readOnly` | `{}` |
+| `vibekits.workflow.prepare_replay` | `workflow__prepare_replay` | 准备智能回放 | 是 | 绑定本次变化的输入并返回语义 Skill。Harness 必须实时刷新三层 MCP 目录、按意图重新规划、逐步验证，禁止照搬坐标。 | `readOnly` | `workflowId`* (string), `inputs` (object) |
+| `vibekits.workflow.record_start` | `workflow__record_start` | 开始语义示教 | 是 | 开始学习一次真实工作流。记录目标、可变输入、后续 MCP 工具意图、结构化参数、结果证据和成功标准；不录制鼠标坐标。 | `writesData` | `name`* (string), `goal`* (string), `successCriteria`* (array), `variables` (array) |
+| `vibekits.workflow.record_stop` | `workflow__record_stop` | 完成语义示教 | 是 | 停止当前示教，把捕获的工具调用编译为可参数化语义 Skill，包含逐步验证和环境变化恢复策略。 | `writesData` | `notes` (string) |
 
 ## 文件工具（定义 7）
 

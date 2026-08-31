@@ -43,6 +43,7 @@ import 'remote_connection_status.dart';
 import 'remote_database_service.dart';
 import 'remote_session.dart';
 import 'serial_port_service.dart';
+import 'semantic_workflow_service.dart';
 import 'sftp_service.dart';
 import 'sqlite_database_service.dart';
 import 'tool_registry.dart';
@@ -328,6 +329,11 @@ class VibekitsHarnessToolBridge {
   static const String systemDriveAnalyzeCancelId =
       'vibekits.cleaner.analyze_drive_cancel';
   static const String screenshotOcrId = 'vibekits.ocr.capture_screen';
+  static const String workflowRecordStartId = 'vibekits.workflow.record_start';
+  static const String workflowRecordStopId = 'vibekits.workflow.record_stop';
+  static const String workflowListId = 'vibekits.workflow.list';
+  static const String workflowPrepareReplayId =
+      'vibekits.workflow.prepare_replay';
   static const String runtimeInspectId = 'vibekits.runtime.inspect';
   static const String runtimeStatusId = 'vibekits.runtime.status';
   static const String proxyStartId = 'vibekits.proxy.start';
@@ -1574,6 +1580,68 @@ class VibekitsHarnessToolBridge {
       },
       available: _screenshotOcrRunner != null,
     ),
+    workflowRecordStartId: _definition(
+      id: workflowRecordStartId,
+      name: '开始语义示教',
+      description: '开始学习一次真实工作流。记录目标、可变输入、后续 MCP 工具意图、结构化参数、结果证据和成功标准；不录制鼠标坐标。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'name': _string('工作流名称'),
+        'goal': _string('用户真正要完成的业务目标，不是按钮序列'),
+        'successCriteria': <String, Object?>{
+          'type': 'array',
+          'description': '回放完成时逐项验证的客观标准',
+          'items': <String, Object?>{'type': 'string'},
+          'minItems': 1,
+          'maxItems': 20,
+        },
+        'variables': <String, Object?>{
+          'type': 'array',
+          'description': '本次示范值与以后变化的输入映射；敏感值不得录入',
+          'items': <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{
+              'name': _string('变量名，例如 deviceSerial'),
+              'description': _string('变量业务含义'),
+              'recordedValue': _string('本次示范使用的非敏感值'),
+              'required': <String, Object?>{'type': 'boolean', 'default': true},
+            },
+            'required': <String>['name', 'recordedValue'],
+            'additionalProperties': false,
+          },
+          'maxItems': 30,
+        },
+      },
+      required: <String>['name', 'goal', 'successCriteria'],
+    ),
+    workflowRecordStopId: _definition(
+      id: workflowRecordStopId,
+      name: '完成语义示教',
+      description: '停止当前示教，把捕获的工具调用编译为可参数化语义 Skill，包含逐步验证和环境变化恢复策略。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{'notes': _string('可选：示教中未显式表现的偏好、分支或约束')},
+    ),
+    workflowListId: _definition(
+      id: workflowListId,
+      name: '列出已学习工作流',
+      description: '只读列出 Harness 已从示教生成的语义工作流及步骤数。',
+      properties: const <String, Object?>{},
+    ),
+    workflowPrepareReplayId: _definition(
+      id: workflowPrepareReplayId,
+      name: '准备智能回放',
+      description:
+          '绑定本次变化的输入并返回语义 Skill。Harness 必须实时刷新三层 MCP 目录、按意图重新规划、逐步验证，禁止照搬坐标。',
+      properties: <String, Object?>{
+        'workflowId': _string('workflow.list 返回的工作流 ID'),
+        'inputs': <String, Object?>{
+          'type': 'object',
+          'description': '本次回放的变量值，键对应录制时 variables.name',
+          'additionalProperties': true,
+        },
+      },
+      required: <String>['workflowId'],
+    ),
     runtimeInspectId: _definition(
       id: runtimeInspectId,
       name: '检查代理与虚拟机运行时',
@@ -2016,6 +2084,18 @@ class VibekitsHarnessToolBridge {
       return _cancelSystemDriveAnalysis;
     }
     if (toolId == screenshotOcrId) return _captureScreenAndOcr;
+    if (toolId == workflowRecordStartId) {
+      return SemanticWorkflowService.instance.start;
+    }
+    if (toolId == workflowRecordStopId) {
+      return SemanticWorkflowService.instance.stop;
+    }
+    if (toolId == workflowListId) {
+      return (_) => SemanticWorkflowService.instance.list();
+    }
+    if (toolId == workflowPrepareReplayId) {
+      return SemanticWorkflowService.instance.prepareReplay;
+    }
     if (toolId == runtimeInspectId) return _inspectBundledRuntimes;
     if (toolId == runtimeStatusId) return _runtimeStatus;
     if (toolId == proxyStartId) return _startProxy;

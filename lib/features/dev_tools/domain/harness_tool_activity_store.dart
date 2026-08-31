@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'semantic_workflow_service.dart';
+
 enum HarnessToolActivityStatus { succeeded, failed, denied }
 
 class HarnessToolActivity {
@@ -218,6 +220,15 @@ abstract final class HarnessToolActivityStore {
     required HarnessToolActivityStatus status,
     required DateTime startedAt,
   }) async {
+    await SemanticWorkflowService.instance.capture(
+      toolId: toolId,
+      toolName: toolName,
+      target: target,
+      arguments: Map<String, Object?>.from(_redact(arguments)! as Map),
+      result: _redact(result),
+      status: status.name,
+      startedAt: startedAt,
+    );
     if (!await loadLoggingEnabled(<String>{toolId})) return;
     return _enqueue(() async {
       final List<HarnessToolActivity> entries = await _readAll();

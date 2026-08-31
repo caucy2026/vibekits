@@ -117,6 +117,7 @@
 110. [Harness 实时状态 IPC 与 RustDesk 远端交付要求](52_HARNESS_RUNTIME_STATUS_IPC_AND_RUSTDESK_DELIVERY.md)——安全本机 IPC、脱敏快照、订阅/心跳/resync、P2P 只读面板与权限边界
 111. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
 112. [macOS 最近 Windows 功能对齐与实机验收](54_MACOS_RECENT_WINDOWS_FEATURE_PARITY.md)——MCP工具轨、设备身份、三层目录、组播复用、沙箱权限和Mac Release验收步骤
+113. [Harness 语义 Record & Replay](55_HARNESS_SEMANTIC_RECORD_AND_REPLAY.md)——一次示教生成参数化 Skill，按实时三层 MCP 重新规划、逐步验证和安全恢复，禁止坐标宏回放
 
 ## 完成定义
 

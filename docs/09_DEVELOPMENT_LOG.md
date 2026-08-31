@@ -1,5 +1,11 @@
 # Vibekits 开发日志
 
+## 2026-08-31 · Harness 语义 Record & Replay 内核
+
+- 新增 `workflow.record_start/record_stop/list/prepare_replay` 四个 MCP 接口，把一次真实示教编译为带目标、变量、语义步骤、结果证据、恢复规则和成功标准的 Skill。
+- 回放前强制刷新本 APP、本机、局域网 MCP 目录，按当前 Schema 和可用工具重新规划；禁止鼠标坐标回放、盲目复用旧参数和继承录制时批准。
+- 工作流在 D 盘 `.runtime-cache` 原子持久化，沿用工具活动脱敏；新增参数替换、缺失输入拒绝和既有 Harness 工具桥回归测试。
+
 ## 2026-08-28 · v1.9.0-dev.137 KEMI 品牌文案纠正
 
 - `KEMI` 作为品牌名不再翻译；启动按钮改为“启动KEMI远程办公”，设备号改为“KEMI办公 ID”。
