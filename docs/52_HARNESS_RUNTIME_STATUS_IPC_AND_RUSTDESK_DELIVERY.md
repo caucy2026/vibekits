@@ -198,7 +198,15 @@ Vibekits 首先发送完整快照，随后状态变化立即发送。每个 subs
 {"type":"error","code":"invalid_frame","message":"Invalid status frame"}
 ```
 
-允许错误码：`invalid_frame`、`frame_too_large`、`invalid_handshake`、`unsupported_version`、`unauthorized_peer`、`not_subscribed`、`internal_error`。不得发送堆栈、路径或凭据。
+允许错误码：`invalid_frame`、`frame_too_large`、`invalid_handshake`、`unsupported_version`、`unauthorized_peer`、`not_subscribed`、`subscription_busy`、`internal_error`。不得发送堆栈、路径或凭据。
+
+Publisher 同时只允许一个状态订阅。第二个已完成 hello 的客户端发送
+`subscribe` 时必须收到非致命 `subscription_busy`，不能复用
+`internal_error`，也不能据此判定快照提供器失败。首个订阅显式
+`unsubscribe` 或断开连接后必须立即释放名额；第二个客户端可在原连接上重试
+`subscribe` 并收到完整快照。生产诊断应先用 `getSnapshot` 验证快照序列化，
+再确保 RustDesk Host 已取消现有订阅后测试独占订阅，禁止用并发第二订阅作为
+Publisher 健康检查。
 
 ## 8. RustDesk P2P 消息
 

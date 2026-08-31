@@ -201,6 +201,7 @@ class HarnessStatusIpcPublisher {
     'unsupported_version' => 'No compatible Harness status version',
     'unauthorized_peer' => 'Local peer identity was rejected',
     'not_subscribed' => 'No active Harness status subscription',
+    'subscription_busy' => 'Another Harness status subscription is active',
     _ => 'Harness status request failed',
   };
 
@@ -376,7 +377,7 @@ class _HarnessStatusClient {
     if (!_subscribed) {
       if (!publisher._tryAcquireSubscription()) {
         _writer.enqueueCritical(
-          HarnessStatusIpcPublisher._error('internal_error'),
+          HarnessStatusIpcPublisher._error('subscription_busy'),
         );
         return;
       }

@@ -14,6 +14,7 @@ const Set<String> harnessStatusErrorCodes = <String>{
   'unsupported_version',
   'unauthorized_peer',
   'not_subscribed',
+  'subscription_busy',
   'internal_error',
 };
 

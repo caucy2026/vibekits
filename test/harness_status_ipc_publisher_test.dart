@@ -185,6 +185,53 @@ void main() {
         expect((await ack)['nonce'], 'healthy-client');
       },
     );
+
+    test(
+      'reports a busy subscription and allows retry after disconnect',
+      () async {
+        await publisher.start();
+        final _UnixTestClient first = await _UnixTestClient.connect(
+          publisher.endpoint,
+        );
+        addTearDown(first.close);
+        final Future<Map<String, Object?>> firstAck = first.next('helloAck');
+        first.send(_hello(nonce: 'first-subscriber'));
+        await firstAck;
+        final Future<Map<String, Object?>> firstSnapshot = first.next(
+          'snapshot',
+        );
+        first.send(<String, Object?>{
+          'type': 'subscribe',
+          'afterStreamSequence': 0,
+        });
+        await firstSnapshot;
+        expect(publisher.activeSubscriptionCount, 1);
+
+        final _UnixTestClient second = await _UnixTestClient.connect(
+          publisher.endpoint,
+        );
+        addTearDown(second.close);
+        final Future<Map<String, Object?>> secondAck = second.next('helloAck');
+        second.send(_hello(nonce: 'second-subscriber'));
+        await secondAck;
+        final Future<Map<String, Object?>> busy = second.next('error');
+        second.send(<String, Object?>{
+          'type': 'subscribe',
+          'afterStreamSequence': 0,
+        });
+        expect((await busy)['code'], 'subscription_busy');
+
+        await first.close();
+        await _eventually(() => publisher.activeSubscriptionCount == 0);
+        final Future<Map<String, Object?>> retried = second.next('snapshot');
+        second.send(<String, Object?>{
+          'type': 'subscribe',
+          'afterStreamSequence': 0,
+        });
+        expect((await retried)['streamSequence'], 1);
+        expect(publisher.activeSubscriptionCount, 1);
+      },
+    );
   });
 
   test('wrong local identity is rejected before handshake', () async {

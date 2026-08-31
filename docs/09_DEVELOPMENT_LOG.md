@@ -1213,3 +1213,10 @@
 - Harness 已在正式 Release 会话中自行完成 `vibekits.mcp.catalog_list → vibekits.mcp.tool_call → LAN kemi.benchmark.last_result`，目录 21 ms、远端调用 86 ms；本次 traceId=`8561edb6-241c-48be-b62e-8d04c339f366`，结果为 taskId `b07e6779-8815-45e2-b94e-dea3a7ff2311`、99.15625/S、capacity/frame/input/stability 全 100、report SHA-256 `db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。这条证据来自 Harness UI 调用记录，不是后台临时测试程序。
 - 验证基线：MCP 路径/身份/服务端/发现定向测试 25/25，Harness 滚动相关测试 19/19，Flutter analyze 0 issue，macOS Release 592.8 MB；最终 App.framework SHA-256 `aebd857f0ab4d69ffe8b573492eb5943a6c68f9e3c5db1922879846311c3c355`。
 - 尚未完成的跨项目门禁只有一项：`192.168.3.62` KEMI-BM 必须按文档 50 实现持久自动授权，然后由 VibeKits Harness 无人工二次点击完成新的 `run → status → final=true`，回传新 taskId/traceId/reportSha256。修改要求已发送到“系统流畅性测试”开发任务；在取得该证据前不得把旧 `DENIED` 流程写成自动化通过。
+
+# 2026-08-31 · Harness 状态 IPC 订阅占用诊断收口
+
+- RustDesk 联调中 hello 成功但 subscribe 返回 `internal_error`。生产 socket 分流复测证明 `getSnapshot` 能返回完整 sequence 39 快照，`HarnessWorkStatusHub.registryLatest.toJson()` 无异常；失败原因是 RustDesk Host 已占用契约规定的唯一状态订阅，第二个诊断客户端被容量门禁拒绝。
+- 新增非致命错误码 `subscription_busy`，第二订阅不再伪装成无法区分的 `internal_error`。首订阅 unsubscribe 或断开后立即释放名额，第二客户端可保留 hello 连接并重试 subscribe。
+- 文档 52 增加生产排障顺序：先用 `getSnapshot` 验证序列化，再确保 Host 取消现有订阅后测试独占订阅；禁止用并发第二订阅判断 Publisher 不健康。
+- 真实 Unix socket 与 registry 定向测试 16/16、Flutter analyze 0 issue；新 macOS Release 已启动，真实 hello/getSnapshot 成功，RustDesk Host 占用期间第二订阅精确返回 `subscription_busy`。App executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`。
