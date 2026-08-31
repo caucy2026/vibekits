@@ -1227,7 +1227,7 @@
 - 固定调用方身份合同：每个 POST `/mcp` 携带 7 个 `LMCP-Caller-*` 头，使用持久 P-256 实例证书对 method/path/instance/timestamp/nonce/body SHA-256 做 ECDSA-SHA256 签名；服务端校验 ±120 秒、5 分钟 nonce 防重放和证书指纹。私网 IP 不再等同可信身份。
 - 发现标准增加启动顺序门禁：提供方先运行、调用方后启动，调用方重启而提供方不重启，以及反向顺序都必须靠每 4 秒 announce 在 8 秒内发现。真实 12 秒监听已经从先运行的 `192.168.3.62` 收到 KEMI-BM 2.1.6/revision 4 公告；新增隔离端口回归同样覆盖提供方提前启动后观察者加入。
 - 首次 MCP 授权页改为可滚动布局，避免较矮窗口溢出；风险文字明确本次授权会持久化，后续自动执行但保持状态可见和可强制终止。开关记录同时持久化 authenticated-private-network、published-catalog、最高风险、Schema 资源边界和撤销有效期。
-- LMCP/发现定向回归 33/33、全项目 `flutter analyze --no-pub` 0 issue、macOS Release 构建通过；最终 Release executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`，承载 Dart AOT 的 App.framework SHA-256 为 `2556f0b20b828741767485d0f8200f4ae923f42114265f3968c60294e22155f2`。在 KEMI-BM 2.1.6 已先运行的条件下再启动该 Release，生产 UI 的“局域网 MCP 设备”角标真实显示 1，公告身份为 `com.newlink.kemiscrollbench:41B8C7FDF4`、`192.168.3.62:9443`、catalogRevision 4。
+- LMCP/发现定向回归 33/33、全项目 `flutter analyze --no-pub` 0 issue、macOS Release 构建通过；同步云端 `e61c5a66008f3a0089782cd6673ba1f30f7b0971` 后的最终 Release executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`，承载 Dart AOT 的 App.framework SHA-256 为 `7d726660afc3e45a108ae14f5b31403b22d0ea2ca8c1507cd217733c643e4622`。在 KEMI-BM 2.1.6 已先运行的条件下再启动该 Release，生产 UI 的“局域网 MCP 设备”角标真实显示 1，公告身份为 `com.newlink.kemiscrollbench:41B8C7FDF4`、`192.168.3.62:9443`、catalogRevision 4。
 - 完整 Flutter 套件本轮另有 568 项通过、11 项跳过、57 项失败；失败集中在仓库既有的缺失内置 Git runtime、清理页/文档页并行状态和 live gate，不得误写成全绿，也未把这些非 LMCP 失败掩盖或计入本次定向门禁。
 
 # 2026-08-31 · Windows 稳定性回归与 Harness MCP 启动修复
