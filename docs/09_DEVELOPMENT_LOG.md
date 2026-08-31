@@ -1229,8 +1229,8 @@
 - 首次 MCP 授权页改为可滚动布局，避免较矮窗口溢出；风险文字明确本次授权会持久化，后续自动执行但保持状态可见和可强制终止。开关记录同时持久化 authenticated-private-network、published-catalog、最高风险、Schema 资源边界和撤销有效期。
 - LMCP/发现定向回归 33/33、全项目 `flutter analyze --no-pub` 0 issue、macOS Release 构建通过；同步云端 `e61c5a66008f3a0089782cd6673ba1f30f7b0971` 后的最终 Release executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`，承载 Dart AOT 的 App.framework SHA-256 为 `7d726660afc3e45a108ae14f5b31403b22d0ea2ca8c1507cd217733c643e4622`。在 KEMI-BM 2.1.6 已先运行的条件下再启动该 Release，生产 UI 的“局域网 MCP 设备”角标真实显示 1，公告身份为 `com.newlink.kemiscrollbench:41B8C7FDF4`、`192.168.3.62:9443`、catalogRevision 4。
 - 完整 Flutter 套件本轮另有 568 项通过、11 项跳过、57 项失败；失败集中在仓库既有的缺失内置 Git runtime、清理页/文档页并行状态和 live gate，不得误写成全绿，也未把这些非 LMCP 失败掩盖或计入本次定向门禁。
-- KEMI传书按文档 50 v2.1 重编为 macOS Developer ID 签名 Release `2.0.5+106`，实现七头验签、防重放、持久作用域授权、至少 3 秒调用状态卡、`USER_TERMINATED` 和提供方先启动晚发现；其完整测试 105/105、analyze 0 issue。生产身份为 `org.kemi.send:E16497473C`、catalogRevision 5，Windows `KEMI-E668` 目标指纹为 `F34A13BD70FB0F4B6BB7DA54E4F8921FC8B81B9AC278B6C97B5E9A87170BC12A`。
-- 该 KEMI Release 当前 PID 92048，但 MCP 仍为 OFF、TCP 9443 未监听；两条独立 Computer Use 动作通道均在点击/输入时返回 `Sky Computer Use native pipe closed before response`。首次授权未被绕过，文件 fixture 保持 HOLD，尚无接收端落盘路径/大小/SHA-256，不得声明 `kemi.files.send` 已完成本轮验收。
+- KEMI传书按文档 50 v2.1 重编为 macOS Developer ID 签名 Release `2.0.5+106`，Apple 公证为 Accepted（Submission ID `60a2cebc-0fe1-49cd-a29a-9b073fe654a9`），票据已 staple 且 validate 通过。代码实现七头验签、防重放、持久作用域授权、至少 3 秒调用状态卡、`USER_TERMINATED` 和提供方先启动晚发现；其完整测试 105/105、analyze 0 issue。生产身份为 `org.kemi.send:E16497473C`、catalogRevision 5，Windows `KEMI-E668` 目标指纹为 `F34A13BD70FB0F4B6BB7DA54E4F8921FC8B81B9AC278B6C97B5E9A87170BC12A`。
+- 该 KEMI Release 最近确认的运行 PID 为 92048，之后未执行关闭动作，但受当前沙箱限制不能再次读取进程表；MCP 仍为 OFF、TCP 9443 未监听。两条独立 Computer Use 动作通道均在点击/输入时返回 `Sky Computer Use native pipe closed before response`。首次授权未被绕过，文件 fixture 保持 HOLD，尚无接收端落盘路径/大小/SHA-256，不得声明 `kemi.files.send` 已完成本轮验收。
 
 # 2026-08-31 · Windows 稳定性回归与 Harness MCP 启动修复
 
