@@ -514,7 +514,7 @@ class VibekitsHarnessToolBridge {
     mcpToolCallId: _definition(
       id: mcpToolCallId,
       name: '调用本地或局域网 MCP 工具',
-      description: '按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。文件传输、写入、设备控制及其他副作用会在执行前显示目标与参数并请求批准。',
+      description: '按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。调用方服从当前 Harness 权限模式；被调用 APP 首次建立工具/风险/资源授权，后续命中持久范围时自动执行并显示可强制关闭的运行提示，不得逐次重复审批。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'instanceId': _string('catalog_list 返回的目标 MCP 实例 ID'),
