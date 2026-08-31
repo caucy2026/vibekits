@@ -1174,3 +1174,10 @@
 - 云端紧凑 MCP 设置弹窗与本地 60px 工具轨同时保留；开启动作仍必须先生成实例证书并展示完整工具清单、权限和风险，取消时不会保存开关或启动 HTTPS 服务。
 - 修复合并后 `consentVersion` 重复写入、异步测试桩签名和 Dart 风格问题。最终 `flutter analyze --no-pub` 为 0 issue；Harness、设备身份/开关持久化、LAN 发现、LMCP/2 服务端、开启确认、全局评分/路由、能力目录及工具桥定向测试 69 项通过，另 1 项按平台条件跳过。
 - 本节验证的是同步后的源码提交。上一节所列 Release 哈希属于同步前已构建产物；未重新构建时不得声称该二进制包含本节云端合并内容。
+
+# 2026-08-31 · KEMI build102 MCP 完整功能目录复核
+
+- 启动本机 KEMI传书 `2.0.5+102` 后，VibeKits 最新客户端通过共享 UDP 47831 发现 `org.kemi.send:E16497473C`，固定 `192.168.3.65:9443/mcp` 的实际 TLS 证书并复算 catalogRevision 4 的完整目录摘要。
+- 生产 `tools/list` 返回四个工具及完整 Schema：设备状态、在线设备列表、最近一次脱敏文件发送状态和高风险文件外发。真实调用前三个只读入口均为 `isError=false`；当前在线目标为 Windows `KEMI-E668` 与 macOS `caucy.mac.2`，最近传输状态为 `available=false`。
+- `kemi.files.send` 已确认可由 `vibekits.mcp.tool_call` 路由进入 KEMI 正式文件传输 handler；参数、16 MiB/普通文件/非符号链接限制、目标证书固定、接收许可、110 秒终态和稳定错误码已逐项写入联调文档。本轮未在用户未指定文件和接收端未 READY 时擅自外发，不能把“可调用”误写成“已落盘成功”。
+- `docs/37_HARNESS_CAPABILITY_CATALOG.md` 新增动态 MCP 文档门禁：任何外部工具都必须展示用途、完整 inputSchema、风险/副作用、前置条件、成功结果、错误码和真实验收状态，禁止只列工具名。

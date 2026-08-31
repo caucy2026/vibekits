@@ -19,6 +19,8 @@ MCP 关闭、启动中、开启、排空中和异常必须显示为不同状态�
 
 VibeKits Harness 通过 `vibekits.mcp.catalog_list` 获取本 APP、本机进程和局域网设备的实时完整目录，通过 `vibekits.mcp.tool_call` 调用本地 stdio 或已完成 TLS 指纹固定和目录摘要校验的局域网工具。固定查找顺序为本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网 MCP（lan），评分只能调整同层候选，不能让远端越级。`vibekits.mcp.reputation_list` 返回跨项目、会话和重启的全局工具类型评分，`vibekits.mcp.reputation_rate` 允许经写权限审批给出 0–5 分；同名工具跨设备共享评分。副作用调用执行前展示实例、真实工具名和参数并进入统一审批、审计；离线、仅发现或目录中不存在的工具不能调用。
 
+动态 MCP 目录不能只显示工具名称。对每个本机进程或局域网工具，界面、Harness 和接入文档必须保留运行时 `title`、完整 `description`、全部 `inputSchema` 字段（必填、类型、范围、枚举和默认值）、只读/写入/文件外发/设备控制风险、前置条件、成功结果、稳定错误码和真实验收状态。目录中出现工具只证明“可路由”，不等价于副作用结果已经在目标端完成；文件发送必须补接收端路径、大小和哈希。KEMI传书四工具的当前生产合同和 `kemi.files.send` 示例见 [VibeKits × KEMI传书 LMCP/2 联调记录](55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md#2026-08-31-第四轮build102-生产目录逐工具审计)。
+
 ## 外部智能体接入
 
 VibeKits 对 Codex、Claude Desktop、Cursor、VS Code 智能体和其他支持 stdio MCP 的客户端开放同一套工具。客户端不需要接触 Harness API Key，也不需要复制内部实现。

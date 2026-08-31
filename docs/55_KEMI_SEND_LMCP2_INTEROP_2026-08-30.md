@@ -1,7 +1,7 @@
 # VibeKits × KEMI传书 LMCP/2 联调记录
 
 日期：2026-08-30
-状态：LMCP/2 双向代码与 Release 已交付；VibeKits → KEMI 只读调用已闭环；单次文件落盘与 KEMI → VibeKits 真机调用等待两端 UI 解锁后完成
+状态：LMCP/2 双向代码与 Release 已交付；VibeKits → KEMI build102 的发现、完整目录和三个只读工具调用已闭环；`kemi.files.send` 已进入可调用目录和正式发送链路，但单次文件落盘仍需接收端在场审批后补最终哈希证据
 
 ## 1. 现场根因
 
@@ -60,7 +60,7 @@ VibeKits 当前仍只对外广播真实存在的 LMCP/1 `ssh-stdio` 能力。它
 - 右侧工具轨新增“本 APP MCP”入口，完整列出 VibeKits 自己公开的工具；设备列表明确区分“可调用”和“仅发现”。
 - MCP 从关闭切到打开时先弹出权限申请，列出全部本 APP 工具以及局域网发现、读取、写入、文件外发和设备控制风险；取消时保持关闭。
 
-KEMI 首轮生产目录仅有 `kemi.device.status` 和 `kemi.devices.list`，所以“能列设备”不等于“能发文件”。文件发送必须作为显式 `kemi.files.send`（以及长任务的 status/cancel）进入真实 `tools/list`，参数和风险遵循 [LMCP/2 标准第 5.4 节](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md#54-文件发送是完整工具不是设备列表的隐含动作)。在 KEMI 返回该目录并完成真机接收闭环前，不宣称 MCP 已能发送文件。
+KEMI 首轮生产目录仅有 `kemi.device.status` 和 `kemi.devices.list`，所以“能列设备”不等于“能发文件”。文件发送必须作为显式 `kemi.files.send` 进入真实 `tools/list`，并提供可核验的进度/终态接口；最终合同采用阻塞式 `send` 加只读 `kemi.files.last_status`，而不是未实现的隐藏动作。参数和风险遵循 [LMCP/2 标准第 5.4 节](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md#54-文件发送是完整工具不是设备列表的隐含动作)。在 KEMI 返回该目录并完成真机接收闭环前，不宣称 MCP 已能发送文件。
 
 KEMI build97 随后已把 `kemi.files.send` 加入 catalogRevision 3；VibeKits 生产客户端真实读取到三个工具并向 Windows KEMI-E668 发起 164 字节测试文件调用。该次调用进入真实发送链路，但接收端在客户端等待边界内未返回许可或拒绝，build97 又没有持久化最后一次结构化传输审计，故不能证明文件落盘，也不能给出接收路径或接收端哈希。此结果按失败门槛记录，不能写成“发送成功”。暴露出的修复要求是：VibeKits 将目录/调用超时拆为 8 秒/120 秒；KEMI 服务端必须在 110 秒内返回结构化终态、清理发送锁，并公开脱敏 status 接口。完成修复后才重新执行一次、且只执行一次真机发送。
 
@@ -95,3 +95,69 @@ VibeKits 已补齐此前第 5 节列出的服务端缺口。开启 MCP 前必须
 
 1. Mac 当前锁屏，尚未在最终 Release 的真实风险菜单中点击允许，因此运行态仅验证 VibeKits 共享监听 UDP 47831、默认未开放 TCP MCP；解锁后必须确认动态 HTTPS 端口、KEMI 反向 tools/list 和一次 `vibekits.calculator.programmer` 调用。
 2. build98 新文件样本已创建但保持 HOLD。只有 Windows KEMI-E668 接收窗口置前并明确 READY 后，VibeKits 才通过最新目录调用一次 `kemi.files.send`；必须取得 structuredContent/isError、transfer/trace 标识、接收保存路径、大小和两端一致 SHA-256 后才能标记成功，禁止自动重试。
+
+## 2026-08-31 第四轮：build102 生产目录逐工具审计
+
+VibeKits 最新 LMCP/2 客户端对当前运行的 KEMI传书 `2.0.5+102` 做了真实只读生产探测。发现结果为：
+
+- 实例：`org.kemi.send:E16497473C`；
+- 显示名称：`KEMI传书@newlinkdeMac-mini-E16497473C`；
+- 端点：`https://192.168.3.65:9443/mcp`；
+- 目录修订：`4`；
+- 证书固定：实际 TLS 证书 DER SHA-256 与公告 `sha256:1a8d1de21a36a8119dee3afb0c49782c548dbe2687fdb432e74da96304bfc7c3` 一致；
+- 完整目录摘要：`sha256:e87706796735d5b4c30f49df21f88b99df51a2a2e9eba3453fdc4812d5b6537c`，经规范化 `tools/list` 复算一致。
+
+### 1. 当前四个工具的准确功能
+
+| 工具 | 参数 | 实际功能 | 风险/副作用 | 当前生产验证 |
+|---|---|---|---|---|
+| `kemi.device.status` | `{}` | 读取 KEMI 实例、版本/构建号、系统版本、运行时长、常驻内存、本机 IP、文件服务、附近设备数和 MCP 发送状态 | 只读；暴露有限设备运行元数据 | 已真实调用，`isError=false`；返回 build102、文件服务在线、附近设备 2 台、无发送任务 |
+| `kemi.devices.list` | `{}` | 列出 KEMI/LocalSend 当前确认在线的接收目标，返回 `targetDeviceId`、别名、IP、端口、HTTPS、设备系统和类型 | 只读；暴露局域网设备元数据；结果会随网络变化 | 已真实调用，`isError=false`；当前看到 Windows `KEMI-E668` 与 macOS `caucy.mac.2`，均为 HTTPS `:53317` |
+| `kemi.files.last_status` | `{}` | 查询当前或最近一次 MCP 文件发送的脱敏审计；活动态 `final=false`，终态 `final=true` | 只读；只保留最近一条终态 7 天 | 已真实调用，`isError=false`、`available=false`、`retentionSeconds=604800`；当前没有可恢复的历史终态 |
+| `kemi.files.send` | 见下方 Schema | 读取一个明确的本机普通文件，通过 KEMI/LocalSend 正式 TLS 固定链路外发给 `kemi.devices.list` 中的在线目标 | 高风险写操作；源文件内容离开本机，接收端可能创建文件；必须审批 | `tools/list`、Schema、VibeKits 路由和 KEMI 正式 handler 均已验证；build97 曾进入发送链路但没有取得终态，build102 尚未在接收端 READY 条件下重发，因此不能写成“已成功落盘” |
+
+所有只读工具都拒绝额外参数：
+
+```json
+{"type":"object","properties":{},"additionalProperties":false}
+```
+
+### 2. `kemi.files.send` 完整参数
+
+| 参数 | 必填 | 限制 | 含义 |
+|---|---:|---|---|
+| `sourcePath` | 是 | 1–4096 字符；必须是本机绝对路径、普通文件；拒绝目录、符号链接、`content://`；最大 16 MiB | 要从运行 KEMI传书的本机读取并外发的文件 |
+| `targetDeviceId` | 是 | 1–256 字符；必须来自最新 `kemi.devices.list` 且目标仍在线 | 目标设备证书指纹；用于把发送请求固定到该设备身份 |
+| `conflictPolicy` | 是 | 当前只能是 `receiver-default` | 同名文件由接收端本地安全策略决定，发送端不能强制覆盖 |
+| `targetName` | 否 | 1–255 字符；只能是单个文件名，不能带 `/` 或 `\` | 接收端建议文件名；省略时沿用源文件名 |
+
+VibeKits Harness 的调用参数形状：
+
+```json
+{
+  "instanceId": "org.kemi.send:E16497473C",
+  "toolName": "kemi.files.send",
+  "arguments": {
+    "sourcePath": "/absolute/path/to/example.txt",
+    "targetDeviceId": "<kemi.devices.list 返回的在线目标 ID>",
+    "conflictPolicy": "receiver-default",
+    "targetName": "example.txt"
+  }
+}
+```
+
+该对象传给 `vibekits.mcp.tool_call`。Harness 必须先重新读取 `vibekits.mcp.catalog_list` 和 `kemi.devices.list`，展示源文件、目标、文件外发风险并取得批准；禁止把远端文件发送降级成 shell、HTTP 任意请求或绕过 KEMI 接收许可的上传。
+
+### 3. 发送结果与失败语义
+
+成功时 `structuredContent` 至少包含：`ok=true`、`status=completed`、`transferId/sessionId`、目标 ID/别名/IP、源文件名、目标文件名、`sizeBytes`、`bytesSent`、`progress=1.0`、发送前 SHA-256 和完成时间；LMCP 外层还包含 `isError=false`、实例 ID、工具名、`catalogRevision=4` 与 `traceId`。
+
+调用从开始计时，KEMI 在 110 秒内必须完成、拒绝或返回终态；VibeKits 客户端上限为 120 秒。失败使用 `isError=true` 和稳定错误码，包括源路径/类型/大小/变化错误、目标离线/拒绝/忙/限流、文件跳过、取消、传输失败、`TARGET_RESPONSE_TIMEOUT` 与 `SEND_IN_PROGRESS`。超时必须取消任务、关闭会话并释放单任务锁。
+
+`kemi.files.last_status` 永不返回 `sourcePath`、文件内容、传输 Token、`remoteSessionId` 或接收端保存路径。因此要宣称“文件发送验收通过”，不能只看该审计工具；仍必须从接收端取得实际保存路径、文件大小和 SHA-256，并与发送端结果一致。
+
+### 4. “能否通过 MCP 发送文件”的准确结论
+
+**能发起真实发送。** VibeKits 已能发现 build102、固定证书、验证目录、找到 `kemi.files.send`，并可通过统一 `mcp.tool_call` 路由把上述参数送入 KEMI 正式文件传输 handler；这不是仅展示按钮或伪造目录。
+
+**当前还不能把文件落盘写成已验收成功。** 唯一一次 build97 调用没有保留最终结构化结果，接收端也没有可核对的保存路径和哈希；build102 本轮只执行只读工具，没有在用户未指定文件/目标且接收端未 READY 时擅自外发。下一次验收必须单次调用、禁止自动重试，并取得发送端 `structuredContent`、接收端落盘路径/大小/SHA-256 和两端一致性。
