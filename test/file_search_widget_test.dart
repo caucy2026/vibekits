@@ -70,7 +70,7 @@ void main() {
     );
     await tester.enterText(toolSearch, '文件搜索');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '文件搜索'));
+    await tester.tap(find.byKey(const Key('dev-tool-nav-file_search')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('file-search-query')), findsOneWidget);
@@ -281,7 +281,7 @@ void main() {
     );
     await tester.enterText(toolSearch, '文件搜索');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, '文件搜索'));
+    await tester.tap(find.byKey(const Key('dev-tool-nav-file_search')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('file-search-pick-directory')));
     await tester.pumpAndSettle();

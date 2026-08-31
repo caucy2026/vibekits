@@ -39,9 +39,9 @@ void main() {
       (Widget widget) =>
           widget is TextField && widget.decoration?.hintText == '搜索工具',
     );
-    await tester.enterText(search, 'GitHub 网络诊断');
+    await tester.enterText(search, 'GitHub');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'GitHub 网络诊断'));
+    await tester.tap(find.byKey(const Key('dev-tool-nav-github_diagnostics')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('github-diagnostics-run')));
     await tester.pumpAndSettle();

@@ -1,11 +1,42 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+// This server can live next to the app sources while Node and the MCP SDK are
+// shipped inside the platform Harness runtime. ESM package lookup starts at
+// this file, so resolve the SDK from the runtime explicitly instead of relying
+// on a repository-level node_modules directory.
+const nodeDirectory = dirname(process.execPath);
+const runtimeCandidates = [nodeDirectory, dirname(nodeDirectory)];
+let sdkDirectory;
+for (const runtimeRoot of runtimeCandidates) {
+  const candidate = join(
+    runtimeRoot,
+    'node_modules',
+    '@modelcontextprotocol',
+    'sdk',
+    'dist',
+    'esm',
+  );
+  try {
+    const module = await import(pathToFileURL(join(candidate, 'server', 'index.js')).href);
+    if (module.Server) {
+      sdkDirectory = candidate;
+      break;
+    }
+  } catch (_) {
+    // Try the next supported runtime layout (Windows root or macOS root/bin).
+  }
+}
+if (!sdkDirectory) {
+  throw new Error(`Harness MCP SDK not found beside ${process.execPath}`);
+}
+const [{ Server }, { StdioServerTransport }, types] = await Promise.all([
+  import(pathToFileURL(join(sdkDirectory, 'server', 'index.js')).href),
+  import(pathToFileURL(join(sdkDirectory, 'server', 'stdio.js')).href),
+  import(pathToFileURL(join(sdkDirectory, 'types.js')).href),
+]);
+const { CallToolRequestSchema, ListToolsRequestSchema } = types;
 
 const endpoint = process.env.VIBEKITS_TOOL_BRIDGE_URL;
 const token = process.env.VIBEKITS_TOOL_BRIDGE_TOKEN;

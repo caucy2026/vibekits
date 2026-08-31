@@ -180,13 +180,17 @@ abstract interface class HarnessAgentHandle {
 }
 
 typedef HarnessEnvironmentChecker = Future<HarnessEnvironmentReport> Function();
-typedef HarnessSessionStarter =
-    Future<HarnessSessionHandle> Function(HarnessLaunchSpec spec);
+typedef HarnessSessionStarter = Future<HarnessSessionHandle> Function(
+  HarnessLaunchSpec spec,
+);
 typedef HarnessBrowserOpener = Future<void> Function(Uri url);
-typedef HarnessAgentRunner =
-    Future<HarnessAgentHandle> Function(HarnessAgentRequest request);
-typedef HarnessModelLister =
-    Future<List<String>> Function(String apiKey, String baseUrl);
+typedef HarnessAgentRunner = Future<HarnessAgentHandle> Function(
+  HarnessAgentRequest request,
+);
+typedef HarnessModelLister = Future<List<String>> Function(
+  String apiKey,
+  String baseUrl,
+);
 
 abstract final class DeepSeekHarnessService {
   /// Official DSH ships optional multi-provider, telemetry and HMR plugins.
@@ -895,9 +899,9 @@ class _HarnessRuntime {
 }
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
-  final String executableDirectory = File(
-    Platform.resolvedExecutable,
-  ).parent.path;
+  final String executableDirectory = File(Platform.resolvedExecutable)
+      .parent
+      .path;
   final Directory? appBundle = Platform.isMacOS
       ? macOsAppBundleForExecutable(Platform.resolvedExecutable)
       : null;
@@ -983,6 +987,12 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
 /// App.framework binary as [Platform.resolvedExecutable]. Walk ancestors
 /// instead of assuming one layout.
 Directory? macOsAppBundleForExecutable(String resolvedExecutable) {
+  final String portable = resolvedExecutable.replaceAll('\\', '/');
+  final RegExpMatch? bundleMatch = RegExp(
+    r'^(.+?\.app)(?:/|$)',
+    caseSensitive: false,
+  ).firstMatch(portable);
+  if (bundleMatch != null) return Directory(bundleMatch.group(1)!);
   Directory cursor = File(resolvedExecutable).absolute.parent;
   for (int depth = 0; depth < 12; depth++) {
     if (cursor.path.toLowerCase().endsWith('.app')) return cursor;
@@ -1354,10 +1364,8 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
       try {
-        await Future.wait<void>(<Future<void>>[
-          _stdoutDone,
-          _stderrDone,
-        ]).timeout(const Duration(seconds: 2));
+        await Future.wait<void>(<Future<void>>[_stdoutDone, _stderrDone])
+            .timeout(const Duration(seconds: 2));
       } on Object {
         await _stdout.cancel();
         await _stderr.cancel();

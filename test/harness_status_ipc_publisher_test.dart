@@ -185,7 +185,6 @@ void main() {
         expect((await ack)['nonce'], 'healthy-client');
       },
     );
-
     test(
       'reports a busy subscription and allows retry after disconnect',
       () async {
@@ -232,7 +231,7 @@ void main() {
         expect(publisher.activeSubscriptionCount, 1);
       },
     );
-  });
+  }, skip: Platform.isWindows ? 'Windows 不支持 Unix-domain socket 验收' : false);
 
   test('wrong local identity is rejected before handshake', () async {
     final _FakeTransport transport = _FakeTransport(localIdentity: 'uid-501');

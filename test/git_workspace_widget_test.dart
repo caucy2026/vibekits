@@ -33,9 +33,9 @@ void main() {
       (Widget widget) =>
           widget is TextField && widget.decoration?.hintText == '搜索工具',
     );
-    await tester.enterText(search, 'Git 工作区');
+    await tester.enterText(search, '版本控制');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'Git 工作区'));
+    await tester.tap(find.byKey(const Key('dev-tool-nav-git_workspace')));
     await tester.pump();
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();
@@ -119,9 +119,9 @@ void main() {
       (Widget widget) =>
           widget is TextField && widget.decoration?.hintText == '搜索工具',
     );
-    await tester.enterText(search, 'Git 工作区');
+    await tester.enterText(search, '版本控制');
     await tester.pump();
-    await tester.tap(find.widgetWithText(ListTile, 'Git 工作区'));
+    await tester.tap(find.byKey(const Key('dev-tool-nav-git_workspace')));
     await tester.pump();
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();

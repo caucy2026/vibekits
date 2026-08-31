@@ -1229,3 +1229,12 @@
 - 首次 MCP 授权页改为可滚动布局，避免较矮窗口溢出；风险文字明确本次授权会持久化，后续自动执行但保持状态可见和可强制终止。开关记录同时持久化 authenticated-private-network、published-catalog、最高风险、Schema 资源边界和撤销有效期。
 - LMCP/发现定向回归 33/33、全项目 `flutter analyze --no-pub` 0 issue、macOS Release 构建通过；最终 Release executable SHA-256 为 `f4b67e484e8c1f30f50e58d2d1687b8545af0d395c6ddd97b3319c0da306bdd8`，承载 Dart AOT 的 App.framework SHA-256 为 `2556f0b20b828741767485d0f8200f4ae923f42114265f3968c60294e22155f2`。在 KEMI-BM 2.1.6 已先运行的条件下再启动该 Release，生产 UI 的“局域网 MCP 设备”角标真实显示 1，公告身份为 `com.newlink.kemiscrollbench:41B8C7FDF4`、`192.168.3.62:9443`、catalogRevision 4。
 - 完整 Flutter 套件本轮另有 568 项通过、11 项跳过、57 项失败；失败集中在仓库既有的缺失内置 Git runtime、清理页/文档页并行状态和 live gate，不得误写成全绿，也未把这些非 LMCP 失败掩盖或计入本次定向门禁。
+
+# 2026-08-31 · Windows 稳定性回归与 Harness MCP 启动修复
+
+- 修复小窗口下 Harness 右侧工具轨固定高度溢出，改为可滚动布局；侧栏标题明确为“Harness 设置”，避免与应用设置混淆。
+- 系统清理不再无限等待 Harness 调试目录容量统计；可选统计超过 2 秒即降级为空摘要，主磁盘扫描、取消和候选结果仍可正常完成。
+- Windows 串口在启动原生 worker 前校验 `COM1` 以上的合法端口名，非法端口立即返回，不再造成测试和任务长时间挂起。
+- macOS App Bundle 路径识别改为先按可移植斜杠提取 `.app`，Windows 上的跨平台合同测试不再把 `/Applications/...` 错拼为 D 盘路径。
+- Android 压测 MCP 不再依赖源码目录的 Node 包解析；它会从随包 Harness runtime 显式加载 MCP SDK，真实 Harness 集成由原先 53 秒后插件树失败恢复为约 9 秒完成一次真实任务。
+- 最终验证：Flutter 静态分析 0 issue；完整串行测试 619 项通过、9 项按真实外设/平台条件跳过、0 失败；Harness 与全部开发工具点击性能 22/22 通过，Harness 首次打开 1436 ms、热切换 370 ms。

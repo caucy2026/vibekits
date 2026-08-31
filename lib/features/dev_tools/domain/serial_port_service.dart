@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -105,6 +106,13 @@ class SerialConnectionSettings {
 
   void validate() {
     if (portName.trim().isEmpty) throw const FormatException('请输入串口名称');
+    if (Platform.isWindows &&
+        !RegExp(
+          r'^COM[1-9][0-9]*$',
+          caseSensitive: false,
+        ).hasMatch(portName.trim())) {
+      throw const FormatException('Windows 串口名称必须是 COM 加正整数，例如 COM3');
+    }
     if (baudRate < 1 || baudRate > 12000000) {
       throw const FormatException('波特率必须在 1 到 12000000 之间');
     }

@@ -420,6 +420,10 @@ class _CleanerTabState extends State<CleanerTab> {
           : widget.harnessDebugDirectory.trim();
       final Future<HarnessDebugStorageSummary> harnessSummaryFuture =
           HarnessDebugStorageService.inspect(harnessRoot)
+              .timeout(
+                const Duration(seconds: 2),
+                onTimeout: () => HarnessDebugStorageSummary.empty(harnessRoot),
+              )
               .catchError((_) => HarnessDebugStorageSummary.empty(harnessRoot));
       void onProgress(CleanupScanProgress progress) {
         if (mounted) setState(() => _scanProgress = progress);

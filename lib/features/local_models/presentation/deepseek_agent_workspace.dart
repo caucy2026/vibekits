@@ -1836,9 +1836,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       border: Border(left: BorderSide(color: context.vibe.border)),
     ),
-    child: Column(
+    child: ListView(
+      padding: const EdgeInsets.only(top: 10, bottom: 12),
       children: <Widget>[
-        const SizedBox(height: 10),
         _macRailAction(
           icon: _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
           tooltip:
@@ -1930,9 +1930,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           tooltip: 'MCP 与协同设置',
           onPressed: _showMacMcpSettings,
         ),
-        const Spacer(),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 12),
+        const SizedBox(
+          height: 34,
           child: Tooltip(message: '预留后续功能', child: Icon(Icons.more_horiz)),
         ),
       ],
@@ -2462,7 +2461,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               dense: true,
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
               leading: const Icon(Icons.settings_outlined, size: 17),
-              title: const Text('设置', style: TextStyle(fontSize: 12)),
+              title: const Text('Harness 设置', style: TextStyle(fontSize: 12)),
               subtitle: Text(
                 '${environment?.ready == true ? 'Harness 已就绪' : '连接未就绪'} · ${_model.text}',
                 maxLines: 1,

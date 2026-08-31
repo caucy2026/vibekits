@@ -406,7 +406,7 @@ void main() {
     expect(find.byKey(const Key('agent-add-workspace')), findsOneWidget);
     expect(find.byKey(const Key('agent-manage-workspaces')), findsOneWidget);
     expect(find.byKey(const Key('agent-sidebar-settings')), findsOneWidget);
-    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('Harness 设置'), findsOneWidget);
     expect(find.text('新建会话'), findsOneWidget);
   });
 
@@ -592,7 +592,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('编辑名称'), findsOneWidget);
-    expect(find.text('在 Finder 中显示'), findsOneWidget);
+    expect(
+      find.text('在 Finder 中显示'),
+      Platform.isMacOS ? findsOneWidget : findsNothing,
+    );
     expect(find.text('在此新建会话'), findsOneWidget);
     expect(find.text('移除项目'), findsOneWidget);
     await tester.tap(find.text('编辑名称'));
