@@ -4,7 +4,18 @@
 状态：VibeKits、KEMI传书和第三方 APP 唯一可执行互通规范
 目标：另一台机器只需完整实现本文，即可让 VibeKits 与对端双向发现、固定实例证书、读取目录，并像调用本机工具一样互相调用。
 
-本文中的 MUST/“必须”是上线门禁。旧 [LMCP/1](46_LAN_MCP_DISCOVERY_PROTOCOL_V1.md) 只保留接收兼容：显示为“仅发现、不可调用”；新版本不得把 `ssh-stdio` 伪装成 LMCP/2，也不得再正式发送 LMCP/1 公告。
+本文中的 MUST/“必须”是上线门禁。LMCP/1 只保留接收兼容：显示为“仅发现、不可调用”；新版本不得把 `ssh-stdio` 伪装成 LMCP/2，也不得再正式发送 LMCP/1 公告。
+
+### 一文交付规则
+
+把第三方 APP 交给另一个开发团队时，**只交付本文，也只以本文验收**。本文是自包含合同，不要求接入方再组合阅读仓库中的能力目录、历史协议或联调记录。对方必须同时完成以下四层，不得只做“发现”或只复制一段 UDP JSON：
+
+1. 身份与开关：稳定 `instanceId`、持久证书、风险确认和可撤销状态机；
+2. 跨机发现：按本文固定参数在每张私网网卡上发送/接收 LMCP/2，并完成 Windows Private 防火墙规则；
+3. 真实调用：HTTPS `/mcp`、TLS 指纹固定、`initialize → tools/list → tools/call`、目录摘要和错误语义；
+4. 可理解工具：每个工具提供用途、完整 Schema、风险、成功结果、错误码和真实双机验收状态。
+
+仓库中的 Harness 能力目录只是 VibeKits 当前构建的自动生成结果；LMCP/1 文件只是历史兼容资料。它们都不是接入前置条件，且出现冲突时一律以本文为准。
 
 ## 0. 固定生产参数（不要猜）
 
@@ -311,7 +322,7 @@ initialize
 
 `description` 必须让智能体不看源码也能知道什么时候调用、前置条件、结果、重要副作用和失败情形。`inputSchema` 必须完整声明类型、必填、默认值、枚举、范围和每个字段含义。工具还应使用 MCP `annotations` 声明 `readOnlyHint`、`destructiveHint`、`idempotentHint` 和 `openWorldHint`；服务端必须再次验证参数，不能相信调用方。禁止只广播“常用工具”，所有真正允许远端使用的工具都必须出现在 `tools/list`。
 
-### 5.4 文件发送是完整工具，不是设备列表的隐含动作
+### 5.1 文件发送是完整工具，不是设备列表的隐含动作
 
 提供文件传输能力的 APP 必须显式提供工具，不能只提供 `devices.list` 后要求智能体猜内部接口。KEMI传书的正式工具为 `kemi.files.send`，最低契约如下：
 
@@ -325,7 +336,27 @@ initialize
 
 返回至少包含 `transferId/status/sourceSize/sha256/targetDeviceId/targetName/bytesTransferred`；长传输应另有 `kemi.files.status` 和 `kemi.files.cancel`。文件内容和路径不得进入 UDP 公告、日志摘要或证书。调用前必须显示源文件、大小、目标设备和覆盖策略并请求批准；接收端仍保留接受/拒绝权。
 
-### 5.1 端点参数必须写到可直接连接
+KEMI传书当前生产目录必须完整列出下列四个工具；VibeKits 不得只显示名称，必须同时展示运行时 `description/inputSchema/risk/验收状态`：
+
+| 工具 | 输入 | 功能与结果 | 风险和当前边界 |
+|---|---|---|---|
+| `kemi.device.status` | `{}` | 返回 KEMI 实例、版本/构建号、系统、运行时长、内存、本机 IP、文件服务、附近设备数和 MCP 发送状态 | 只读；已真实调用成功 |
+| `kemi.devices.list` | `{}` | 返回在线接收目标的 `targetDeviceId`、别名、IP、端口、HTTPS、系统和设备类型 | 只读但暴露局域网设备元数据；已真实调用成功 |
+| `kemi.files.last_status` | `{}` | 返回活动态或最近一条脱敏发送终态；活动态 `final=false`，终态 `final=true`，终态保留 7 天 | 只读；不得返回源路径、文件内容、Token、远程会话 ID 或接收端保存路径；已真实调用成功 |
+| `kemi.files.send` | 见下表 | 从本机读取一个明确的普通文件，经 KEMI 正式 TLS 固定链路发送到 `devices.list` 的在线目标 | 高风险文件外发；接收端仍须允许；真实 handler 和路由已验证，但尚未取得 Windows 接收端落盘路径/大小/SHA-256，不能标为“落盘成功” |
+
+`kemi.files.send` 当前可调用参数合同：
+
+| 参数 | 必填 | 约束 |
+|---|---:|---|
+| `sourcePath` | 是 | 本机绝对路径；普通文件、非符号链接、调用时存在且可读；当前 KEMI 上限 16 MiB |
+| `targetDeviceId` | 是 | 1–256 字符，必须来自紧邻调用前的 `kemi.devices.list`，并再次核对在线和证书身份 |
+| `targetName` | 是 | 1–255 字符，只能是文件名，不得包含绝对路径、目录穿越或路径分隔符 |
+| `conflictPolicy` | 是 | 当前生产值 `receiver-default`；同名处理由接收端安全策略决定，不得静默覆盖 |
+
+VibeKits 调用时先刷新目录和设备列表，再通过 `vibekits.mcp.tool_call` 原样传递 `instanceId/toolName/arguments`。服务端必须在 110 秒内返回完成、拒绝或 `TARGET_RESPONSE_TIMEOUT`，取消准备/上传任务、关闭会话并释放发送锁。要宣称发送成功，必须另外取得接收端实际保存路径、文件大小和 SHA-256，并与发送端一致；目录可调用、进入发送链路或 `last_status` 有记录都不能替代落盘证据。
+
+### 5.2 端点参数必须写到可直接连接
 
 `catalogEndpoint` 和 `callEndpoint` 不能只写协议名称，必须包含 VibeKits 无需猜测即可连接的全部非秘密参数：
 
@@ -365,7 +396,7 @@ VibeKits 使用 UDP 包的源地址拼接连接 URL。例如源 IP 为 `192.168.
 
 服务端必须返回自己实际采用的协议版本、能力和 `serverInfo`；不支持时返回标准 JSON-RPC 错误，不能返回 HTTP 200 加自定义字符串。
 
-### 5.2 `tools/list` 必须完整且可分页
+### 5.3 `tools/list` 必须完整且可分页
 
 VibeKits 首次连接、`catalogRevision` 改变或收到 `notifications/tools/list_changed` 时调用：
 
@@ -388,7 +419,7 @@ VibeKits 首次连接、`catalogRevision` 改变或收到 `notifications/tools/l
 
 有 `nextCursor` 时 VibeKits继续请求 `{"cursor":"opaque-next-page-token"}`，直到游标为空。游标必须是不透明短时值，不能包含凭据。服务端不得只返回“常用工具”；开关打开后所有允许 Harness 使用的工具都应在目录中。建议上限：单页 100 个工具、单页 1 MiB、Schema 深度 16、工具名 128 字符。
 
-### 5.3 `tools/call` 参数和结果
+### 5.4 `tools/call` 参数和结果
 
 VibeKits 直接使用 `tools/list` 的 `name` 与用户任务生成参数：
 
@@ -444,6 +475,34 @@ lmcp://<instanceId>/<tool.name>
 
 网络断开、目录版本变化和远端错误必须保留来源信息；不得悄悄改成本机 shell 执行。写入/设备控制是否允许由任务本身和工具风险控制，不做普通 MCP 的逐工具配对审批。
 
+### 6.1 每个工具必须说清“能做什么”
+
+`tools/list` 和 APP 接入文档对每个工具都必须给出：
+
+- 稳定 `name`、人类可读 `title` 和不含糊的 `description`；
+- 完整 `inputSchema`：字段、必填、类型、范围、枚举、默认值、`additionalProperties`；
+- `readOnly/writesData/controlsDevice/destructive`、外发数据范围和审批点；
+- 前置条件、成功 `structuredContent` 字段、稳定错误码、超时/取消/幂等语义；
+- 当前验收状态：只完成 `tools/list` 不得写成“功能已成功”。
+
+文件发送必须是显式 `send` 工具，并提供可查的进度/终态；异步长任务必须另有 `status` 和 `cancel`。“设备列表里有目标”不等于“能发文件”，发送端成功也不等于接收端已落盘；最终验收需比对接收路径、大小和 SHA-256。
+
+### 6.2 Harness 的长期评分和固定路由
+
+每次 Harness 选择 MCP 时必须先刷新完整目录，固定按层选择：
+
+```text
+app（VibeKits 自身 MCP） → local（本机其他进程 MCP） → lan（局域网 MCP）
+```
+
+评分不能让低层候选越级抢占高层；只在同一层的同类候选间按 `reputation.score DESC` 排序。未评分工具初始 60 分且界面保持普通样式；一旦有自动结果或人工评分，MCP 列表必须显示分数/等级标识。低分和 `garbage` 工具降权但仍可见，不能伪装成不存在。
+
+评分是跨项目、跨会话、跨重启的长期记忆，主键是规范化后的 `toolName`，不是设备实例。因此多台设备提供同名工具（例如多台 KEMI 的 `kemi.files.send`）共享同一个全局分数；每台设备的在线状态、证书和端点仍须逐台实时验证。记录字段至少包含总调用、成功、失败、连续失败、平均延迟、自动完成质量、可选人工 0–5 分和更新时间。
+
+当前计算规则为：自动完成质量映射到 0–100；有人工评分时使用 `35% 自动质量 + 65% 人工评分`；每次连续失败再扣 7 分，结果限制到 0–100。等级为 `excellent >=85`、`good >=70`、`neutral >=50`、`poor >=30`、`garbage <30`。人工 0 分表示垃圾并强力降权；成功会清零连续失败。调用完成后必须按真实完成质量记录，不能只因 HTTP/MCP 返回成功就给满分。
+
+Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibekits.mcp.reputation_rate` 写入 0–5 分。任何评分都不能绕过 TLS 指纹、目录摘要、inputSchema、在线检查或写入/设备控制审批。
+
 ## 7. 第三方 APP 交付检查表
 
 - [ ] 显示名称包含 APP 名、主机名和 10 位硬件识别码。
@@ -454,7 +513,8 @@ lmcp://<instanceId>/<tool.name>
 - [ ] 打开发送 `announce`，关闭发送 `goodbye` 并停止服务。
 - [ ] 实现标准 `initialize/tools/list/tools/call`。
 - [ ] 每个工具具有完整描述和 JSON Schema。
-- [ ] 文件传输能力提供显式 send/status/cancel 工具，不能只列设备。
+- [ ] 文件传输能力提供显式 send 和可查终态；异步长任务另有 status/cancel，不能只列设备。
+- [ ] 每个工具已写明用途、全部参数、风险、成功结果、错误码和实际验收状态。
 - [ ] 接口变化更新目录版本并发出通知。
 - [ ] 广播不包含秘密或业务数据。
 - [ ] 两台真实设备验证上线、调用、关闭立即消失、断电 TTL 消失。
@@ -473,18 +533,11 @@ lmcp://<instanceId>/<tool.name>
 
 VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化并广播；关闭可立即执行。这是对外暴露边界的一次确认，不是普通 MCP 工具的逐次审批；远程 Harness 任务控制仍独立审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、切换 MCP、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
-### 14.1 VibeKits 1.9 当前可运行传输
+### 8.1 VibeKits 1.9 当前正式传输
 
-当前 VibeKits 在用户确认开启后启动一个动态端口的 `http-jsonrpc` MCP 服务，并在 LMCP 公告中发布 `port` 与 `/mcp`。客户端不得依赖固定端口，必须从每次实时公告取得端点，然后依次调用：
+VibeKits 当前实现就是本文的 LMCP/2 `https-streamable-http`，不再对外公告无证书 `http-jsonrpc`。用户确认后启动 HTTPS `/mcp`，固定端口被同机 KEMI 占用时可回退动态端口，但公告中的两个 endpoint 必须精确携带真实端口、`/mcp`、证书指纹、协议版本、目录版本和摘要。客户端每次从实时公告取得端点，固定 TLS 证书后依次执行 `initialize → notifications/initialized → tools/list → tools/call`。
 
-1. `initialize`，协议版本为 `2025-06-18`；
-2. `tools/list`，以返回的 `name` 和完整 `inputSchema` 建立实时工具目录；
-3. `tools/call`，参数为 `{ "name": "工具名", "arguments": { ... } }`；
-4. 收到 `goodbye` 或超过 TTL 后立即删除设备、端点和缓存目录。
-
-该传输只接受回环和 RFC1918 私网来源，请求上限 1 MiB。它满足可信隔离局域网内“发现后像本地工具一样调用”的开发需求，但不是 LMCP/2 的最终安全传输。第三方正式实现仍以本章 `https-streamable-http` 要求为验收目标；如果为了与当前 VibeKits 联调而同时提供 `http-jsonrpc`，必须明确标为过渡端点、受 APP MCP 总开关控制，且不得包含广播 Token、查询参数 Secret 或公网监听配置。
-
-本文是第三方 APP 的实现入口；总体能力图、权限和任务路由见 [VibeKits 三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md)。
+本文是第三方 APP 的唯一实现入口。
 
 ## 9. 双向真实验收（交付门禁）
 
@@ -515,12 +568,14 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
 
 ### 9.2 VibeKits ↔ KEMI传书
 
-已完成并可引用的生产证据是：VibeKits 能固定 KEMI 证书、读取真实目录并调用 `kemi.device.status`，KEMI 的 `lmcpPeerCount` 能看到两台 VibeKits；详见 [联调记录](55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md)。新增 VibeKits 服务端合入后，还必须在 KEMI 与 VibeKits 分处两台机器时补齐反向证据，不能用单元测试冒充：
+已完成的生产证据是：Mac VibeKits 能固定 KEMI build102 证书、读取四工具目录并真实调用三个只读工具。这只证明了本机接收与调用。2026-08-31 的 10 秒实时监听只收到 Mac KEMI LMCP/2，没有收到 Windows VibeKits 任何公告；Windows 端也尚未给出“收到 KEMI announce”的抓包。因此当前跨机双向发现为**未验收**，必须按以下步骤补齐，不能用同机单元测试冒充：
 
 1. KEMI 的 MCP 面板出现 VibeKits LMCP/2（不是兼容 LMCP/1），显示与抓包一致的 `instanceId/192.168.x.x:<实际端口>/mcp/fingerprint/revision/digest`。
 2. KEMI 初始化 VibeKits 并读取完整目录，调用同一个只读计算器用例成功；VibeKits 审计记录来源工具、结果和耗时。
 3. KEMI 发起高风险工具时 VibeKits 本机审批可拒绝；KEMI 收到结构化 `isError`，不得自动改走 shell。
 4. 分别关闭 KEMI 和 VibeKits，另一端验证 goodbye 立即消失、断电 TTL 消失、证书篡改拒绝、digest/revision 改变重新加载。
+5. Windows 必须运行包含 LMCP/2 接收器的新构建，不能只核对 `1.9.0-dev.137+2137` 文本版本；验收记录必须同时保存 Git/source revision 或产物 SHA-256。
+6. Windows 签名安装程序必须为实际 VibeKits 可执行文件创建 Private profile 入站 UDP 47831 和公告 TCP 端口规则；先用 `pktmon`/抓包证明收到 KEMI 报文，再调查 UI 解析。
 
 验收记录至少保存：两端版本/SHA-256、两端私网 IP、10 秒 UDP 抓包、公告 TCP 端口建连、initialize 与每页 tools/list 的脱敏 JSON、摘要重算、一次只读调用、一次拒绝审计、goodbye/TTL 时间。不得保存私钥、Token、完整用户路径或文件内容。
 

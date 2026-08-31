@@ -83,11 +83,19 @@ String buildHarnessCapabilityCatalog() {
     ..writeln('## MCP 开关、授权和动态远端目录')
     ..writeln()
     ..writeln(
+      '> 第三方 APP 要被 VibeKits 在另一台机器上发现并调用时，只按 [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md) 实现和验收。本文是 VibeKits 运行时工具目录，不定义 UDP 公告或 HTTPS 协议。',
+    )
+    ..writeln()
+    ..writeln(
       'MCP 关闭、启动中、开启、排空中和异常必须显示为不同状态。从关闭切换到开启时，APP 必须先展示不可跳过的授权对话框：说明局域网可发现性、证书身份、下列完整工具目录、读取/写入/文件外发/设备控制风险和撤销方法；用户取消时保持关闭。打开开关只授权发布接口，不等于预先批准每次高风险调用。',
     )
     ..writeln()
     ..writeln(
       'VibeKits Harness 通过 `vibekits.mcp.catalog_list` 获取本 APP、本机进程和局域网设备的实时完整目录，通过 `vibekits.mcp.tool_call` 调用本地 stdio 或已完成 TLS 指纹固定和目录摘要校验的局域网工具。固定查找顺序为本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网 MCP（lan），评分只能调整同层候选，不能让远端越级。`vibekits.mcp.reputation_list` 返回跨项目、会话和重启的全局工具类型评分，`vibekits.mcp.reputation_rate` 允许经写权限审批给出 0–5 分；同名工具跨设备共享评分。副作用调用执行前展示实例、真实工具名和参数并进入统一审批、审计；离线、仅发现或目录中不存在的工具不能调用。',
+    )
+    ..writeln()
+    ..writeln(
+      '动态 MCP 目录不能只显示工具名称。对每个本机进程或局域网工具，界面、Harness 和接入文档必须保留运行时 `title`、完整 `description`、全部 `inputSchema` 字段（必填、类型、范围、枚举和默认值）、只读/写入/文件外发/设备控制风险、前置条件、成功结果、稳定错误码和真实验收状态。目录中出现工具只证明“可路由”，不等价于副作用结果已经在目标端完成；文件发送必须补接收端路径、大小和哈希。KEMI传书四工具、`kemi.files.send` 参数、评分路由和双机验收均已收敛到 [LMCP/2 唯一单文档标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。',
     )
     ..writeln()
     ..writeln('## 外部智能体接入')

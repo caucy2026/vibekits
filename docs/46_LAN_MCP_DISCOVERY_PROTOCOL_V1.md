@@ -1,5 +1,9 @@
 # LMCP/1：局域网 MCP 发现、授权与协同协议
 
+> **历史文档：禁止用于新 APP。** 第三方开发、联调和双机验收只使用 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。LMCP/1 仅供 VibeKits 把旧节点显示为“仅发现、不可调用”。
+
+> **历史文档：禁止用于新 APP。** 第三方开发、联调和双机验收只使用 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。LMCP/1 仅供 VibeKits 把旧节点显示为“仅发现、不可调用”。
+
 状态：VibeKits 开放应用协议 v1.0，作为兼容基础保留；自动目录配对和三层实时列表由 [LMCP 2.0 架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md) 取代。它不是 MCP 官方标准；MCP 本身仍使用标准 JSON-RPC、`initialize`、`tools/list` 和 `tools/call`。
 
 ## 1. 设计目标

@@ -7,19 +7,21 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：180。
-- Harness 当前可执行接口：158。
+- Harness 定义接口：184。
+- Harness 当前可执行接口：162。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
 ## MCP 开关、授权和动态远端目录
 
+> 第三方 APP 要被 VibeKits 在另一台机器上发现并调用时，只按 [LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md) 实现和验收。本文是 VibeKits 运行时工具目录，不定义 UDP 公告或 HTTPS 协议。
+
 MCP 关闭、启动中、开启、排空中和异常必须显示为不同状态。从关闭切换到开启时，APP 必须先展示不可跳过的授权对话框：说明局域网可发现性、证书身份、下列完整工具目录、读取/写入/文件外发/设备控制风险和撤销方法；用户取消时保持关闭。打开开关只授权发布接口，不等于预先批准每次高风险调用。
 
 VibeKits Harness 通过 `vibekits.mcp.catalog_list` 获取本 APP、本机进程和局域网设备的实时完整目录，通过 `vibekits.mcp.tool_call` 调用本地 stdio 或已完成 TLS 指纹固定和目录摘要校验的局域网工具。固定查找顺序为本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网 MCP（lan），评分只能调整同层候选，不能让远端越级。`vibekits.mcp.reputation_list` 返回跨项目、会话和重启的全局工具类型评分，`vibekits.mcp.reputation_rate` 允许经写权限审批给出 0–5 分；同名工具跨设备共享评分。副作用调用执行前展示实例、真实工具名和参数并进入统一审批、审计；离线、仅发现或目录中不存在的工具不能调用。
 
-动态 MCP 目录不能只显示工具名称。对每个本机进程或局域网工具，界面、Harness 和接入文档必须保留运行时 `title`、完整 `description`、全部 `inputSchema` 字段（必填、类型、范围、枚举和默认值）、只读/写入/文件外发/设备控制风险、前置条件、成功结果、稳定错误码和真实验收状态。目录中出现工具只证明“可路由”，不等价于副作用结果已经在目标端完成；文件发送必须补接收端路径、大小和哈希。KEMI传书四工具的当前生产合同和 `kemi.files.send` 示例见 [VibeKits × KEMI传书 LMCP/2 联调记录](55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md#2026-08-31-第四轮build102-生产目录逐工具审计)。
+动态 MCP 目录不能只显示工具名称。对每个本机进程或局域网工具，界面、Harness 和接入文档必须保留运行时 `title`、完整 `description`、全部 `inputSchema` 字段（必填、类型、范围、枚举和默认值）、只读/写入/文件外发/设备控制风险、前置条件、成功结果、稳定错误码和真实验收状态。目录中出现工具只证明“可路由”，不等价于副作用结果已经在目标端完成；文件发送必须补接收端路径、大小和哈希。KEMI传书四工具、`kemi.files.send` 参数、评分路由和双机验收均已收敛到 [LMCP/2 唯一单文档标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。
 
 ## 外部智能体接入
 
@@ -75,7 +77,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 
 | 模块 | 定义接口数 |
 | --- | ---: |
-| 系统诊断 | 39 |
+| 系统诊断 | 43 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
@@ -90,7 +92,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 版本控制 | 10 |
 | 虚拟化 | 3 |
 
-## 系统诊断（定义 39）
+## 系统诊断（定义 43）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -119,7 +121,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.network_virtualization` | `network_virtualization` | 网络代理（Clash Verge） | 否（环境/接线门禁） | 使用内置 Mihomo 管理订阅、节点、测速、连接、规则、日志与系统代理。 适合：用户明确需要“网络代理（Clash Verge）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.ocr.capture_screen` | `ocr__capture_screen` | 截图并 OCR 分析 | 否（环境/接线门禁） | 让用户框选屏幕区域并在本机 OCR。返回原图尺寸、文字、像素框 boundsPx、0..1 归一化框 boundsRelative、九宫格 region 和 spatialText；没有多模态视觉的智能体应依据这些字段理解控件位置、阅读顺序和空间关系。 | `controlsDevice` | `{}` |
 | `vibekits.packet_capture` | `packet_capture` | 网络抓包（PCAP） | 否（环境/接线门禁） | 使用内置 WinDivert 实时抓取和过滤网络包，保存、读取并分析标准 PCAP 文件。 适合：用户需要抓包、保存网络流量、读取 PCAP、定位协议或端点流量时。 不适合：不得抓取未获授权的第三方设备流量；实时抓包在 Windows 需要管理员权限。 示例：抓 30 秒 DNS 包并保存；分析这个 PCAP 里流量最多的端点 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.peers.list` | `peers__list` | 发现局域网MCP协同节点 | 是 | 按LMCP/1列出同一私网内VibeKits或第三方应用主动上报的SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。 | `readOnly` | `{}` |
+| `vibekits.peers.list` | `peers__list` | 发现局域网MCP协同节点 | 是 | 按 LMCP/2 列出同一私网内 VibeKits 或第三方 APP 主动广播的 HTTPS MCP 节点；仅通过 TLS 指纹、双端点和目录摘要校验的节点可调用。旧 LMCP/1 ssh-stdio 节点只显示“仅发现、不可调用”；第三方实现必须遵循 docs/50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md。 | `readOnly` | `{}` |
 | `vibekits.programmer_calculator` | `programmer_calculator` | 程序员计算器（HEX/DEC） | 否（环境/接线门禁） | 整数表达式、进制转换、位运算和有符号/无符号解释。 适合：用户明确需要“程序员计算器（HEX/DEC）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.project.build` | `project__build` | 验证并编译 Vibekits APP | 是 | 在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。 | `writesData` | `workspace`* (string), `target`* (string；枚举=windows/android/macos), `flutterExecutable` (string), `runTests` (boolean) |
 | `vibekits.project.iteration_inspect` | `project__iteration_inspect` | 检查 APP 自迭代工作区 | 是 | 检查 Vibekits 源码、ToolSpec 单一注册表和 Harness 桥接位置，并返回新增工具必须遵循的自动发现流程。 | `readOnly` | `workspace`* (string) |

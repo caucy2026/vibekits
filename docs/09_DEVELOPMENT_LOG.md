@@ -1181,3 +1181,10 @@
 - 生产 `tools/list` 返回四个工具及完整 Schema：设备状态、在线设备列表、最近一次脱敏文件发送状态和高风险文件外发。真实调用前三个只读入口均为 `isError=false`；当前在线目标为 Windows `KEMI-E668` 与 macOS `caucy.mac.2`，最近传输状态为 `available=false`。
 - `kemi.files.send` 已确认可由 `vibekits.mcp.tool_call` 路由进入 KEMI 正式文件传输 handler；参数、16 MiB/普通文件/非符号链接限制、目标证书固定、接收许可、110 秒终态和稳定错误码已逐项写入联调文档。本轮未在用户未指定文件和接收端未 READY 时擅自外发，不能把“可调用”误写成“已落盘成功”。
 - `docs/37_HARNESS_CAPABILITY_CATALOG.md` 新增动态 MCP 文档门禁：任何外部工具都必须展示用途、完整 inputSchema、风险/副作用、前置条件、成功结果、错误码和真实验收状态，禁止只列工具名。
+
+# 2026-08-31 · LMCP/2 单一交付文档与 Windows 跨机门禁
+
+- 明确 `50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md` 是第三方 APP 唯一实现文档；文档 37 只是 VibeKits 工具目录。46/47/48 页首统一标记为 LMCP/1 历史资料，禁止用于新 APP。
+- 文档 50 现在一份覆盖身份/证书、MCP 开关、UDP 47831 多网卡发现、HTTPS `/mcp`、TLS 指纹、目录摘要、工具详细合同、KEMI 四工具及文件发送边界、Harness 全局评分与三层路由、Windows Private 防火墙、双机调用和最短排障树，并删除与现状矛盾的无证书 `http-jsonrpc` 描述。第三方团队只交付并只按这一份文档验收，不再要求拼读联调记录或评分专题。
+- VibeKits 新版本未配置 LMCP/2 HTTPS 端点时不再回退广播 LMCP/1；仍接收旧 LMCP/1，但明确返回“仅发现、不可调用”。`peers.list` 注册源和自动目录文字一并更正为 LMCP/2。
+- 本机 10 秒真实监听只收到 Mac KEMI build102 LMCP/2，没有收到 Windows VibeKits 任何公告；因此“Windows 收不到 Mac KEMI”尚未闭环。后续必须以 Windows 产物 Git revision/SHA-256、`pktmon` UDP 证据、Private 入站规则和反向只读 `tools/call` 作为验收，不用同机测试代替。

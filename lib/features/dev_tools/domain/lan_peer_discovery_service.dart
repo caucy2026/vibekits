@@ -185,8 +185,10 @@ class VibekitsLanPeer {
     'tools': <Map<String, Object?>>[
       for (final McpToolInterface tool in tools) tool.toJson(),
     ],
-    'authorized': true,
-    'nextAction': '普通 MCP 工具可自动读取目录并调用；远程 Harness 任务入口另行审批',
+    'authorized': supportsLmcp2Calls,
+    'nextAction': supportsLmcp2Calls
+        ? '普通 MCP 工具可自动读取目录并调用；远程 Harness 任务入口另行审批'
+        : '仅发现、不可调用；对端必须升级为 LMCP/2 HTTPS MCP',
   };
 }
 
@@ -202,7 +204,7 @@ class LanPeerDiscoveryService {
 
   static final LanPeerDiscoveryService instance = LanPeerDiscoveryService();
   static const String discoveryProtocol = 'lmcp-discovery';
-  static const int protocolVersion = 1;
+  static const int protocolVersion = 2;
   static const int _ipMulticastInterfaceOption = 9;
 
   final int port;
@@ -220,12 +222,6 @@ class LanPeerDiscoveryService {
   Timer? _announceTimer;
   Timer? _pruneTimer;
   String _instanceId = '';
-  String _name = '';
-  String _appId = '';
-  String _appVersion = '';
-  String _capabilityDigest = '';
-  String _hardwareCode = '';
-  int _sshPort = 22;
   bool _exposureEnabled = true;
   Lmcp2Advertisement? _lmcp2Advertisement;
 
@@ -250,23 +246,16 @@ class LanPeerDiscoveryService {
     String appVersion = '1.9.0',
     bool exposureEnabled = true,
     String hardwareCode = '',
-    int sshPort = 22,
   }) async {
     if (_socket != null) return;
     _instanceId = _safe(instanceId, 80);
-    _name = _safe(name, 80);
-    _appId = _safe(appId, 120);
-    _appVersion = _safe(appVersion, 40);
-    _capabilityDigest = _safe(capabilityDigest, 128);
-    _hardwareCode = _safe(hardwareCode, 32);
-    if (sshPort < 1 || sshPort > 65535) {
-      throw const FormatException('局域网节点 SSH 端口无效');
-    }
-    _sshPort = sshPort;
+    final String normalizedName = _safe(name, 80);
+    final String normalizedAppId = _safe(appId, 120);
+    final String normalizedAppVersion = _safe(appVersion, 40);
     if (_instanceId.isEmpty ||
-        _name.isEmpty ||
-        _appId.isEmpty ||
-        _appVersion.isEmpty) {
+        normalizedName.isEmpty ||
+        normalizedAppId.isEmpty ||
+        normalizedAppVersion.isEmpty) {
       throw const FormatException('局域网节点发现参数无效');
     }
     _exposureEnabled = exposureEnabled;
@@ -330,40 +319,13 @@ class LanPeerDiscoveryService {
     final RawDatagramSocket? socket = _socket;
     if (socket == null) return;
     final Lmcp2Advertisement? lmcp2 = _lmcp2Advertisement;
+    if (lmcp2 == null) return;
     final List<int> payload = utf8.encode(
       jsonEncode(
-        lmcp2?.toAnnouncement(
-              messageType: messageType,
-              ttlSeconds: peerTtl.inSeconds,
-            ) ??
-            <String, Object?>{
-              'protocol': discoveryProtocol,
-              'protocolVersion': '1.0',
-              'messageType': messageType,
-              'instanceId': _instanceId,
-              'hardwareCode': _hardwareCode,
-              'app': <String, Object?>{
-                'id': _appId,
-                'name': _name.split('@').first,
-                'displayName': _name,
-                'version': _appVersion,
-              },
-              'endpoint': <String, Object?>{
-                'transport': 'ssh-stdio',
-                'port': _sshPort,
-              },
-              'mcp': <String, Object?>{
-                'protocolVersions': <String>['2025-06-18'],
-                'capabilityDigest': _capabilityDigest,
-              },
-              'security': <String, Object?>{
-                'pairingRequired': false,
-                'authMethods': <String>['ssh-ed25519'],
-                'controlApproval': 'remote-harness-only',
-              },
-              'ttlSeconds': peerTtl.inSeconds,
-              'sentAt': DateTime.now().toUtc().toIso8601String(),
-            },
+        lmcp2.toAnnouncement(
+          messageType: messageType,
+          ttlSeconds: peerTtl.inSeconds,
+        ),
       ),
     );
     if (payload.length > 1200) return;

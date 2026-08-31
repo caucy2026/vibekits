@@ -1,5 +1,9 @@
 # LMCP/1 第三方程序接入包
 
+> **历史文档：禁止用于新 APP。** 新 APP 不得复制本文 Sidecar/LMCP/1 方案；请只交付并实现 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。
+
+> **历史文档：禁止用于新 APP。** 新 APP 不得复制本文 Sidecar/LMCP/1 方案；请只交付并实现 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)。
+
 ## 新程序
 
 新程序应原生提供标准 MCP server，并实现 `LMCP/1` 广播。复制 `docs/schemas/lmcp-app-manifest-1.0.schema.json` 作为构建门禁；发布时使用稳定、非秘密的 `instanceId`，根据规范化 `tools/list` 生成 `capabilityDigest`。

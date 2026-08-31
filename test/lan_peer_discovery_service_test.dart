@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
 
 void main() {
-  test('同机两个实例通过组播互相发现且普通 MCP 默认可调用', () async {
+  test('未配置 LMCP/2 HTTPS 端点时不再回退发送 LMCP/1', () async {
     final int port = 48000 + pid % 1000;
     final LanPeerDiscoveryService first = LanPeerDiscoveryService(port: port);
     final LanPeerDiscoveryService second = LanPeerDiscoveryService(port: port);
@@ -26,22 +26,8 @@ void main() {
     );
     await Future<void>.delayed(const Duration(seconds: 5));
 
-    expect(
-      first.peers.any((VibekitsLanPeer peer) => peer.instanceId == 'peer-b'),
-      isTrue,
-    );
-    expect(
-      second.peers.any((VibekitsLanPeer peer) => peer.instanceId == 'peer-a'),
-      isTrue,
-    );
-    expect(first.peers.first.toJson()['authorized'], isTrue);
-    final VibekitsLanPeer futureApp = first.peers.firstWhere(
-      (VibekitsLanPeer peer) => peer.instanceId == 'peer-b',
-    );
-    expect(futureApp.appId, 'com.example.future-app');
-    expect(futureApp.appVersion, '2.3.0');
-    expect(futureApp.transport, 'ssh-stdio');
-    expect(futureApp.port, 22);
+    expect(first.peers, isEmpty);
+    expect(second.peers, isEmpty);
   }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
 
   test('LMCP/2 跨实例公告通过共享端口被另一个 VibeKits 接收', () async {
@@ -131,6 +117,31 @@ void main() {
     expect(content, contains('lmcp-discovery'));
     expect(content, contains('pairingRequired'));
     expect(content, contains('ssh-ed25519'));
+  });
+
+  test('历史 LMCP/1 公告只发现且明确不可调用', () {
+    final VibekitsLanPeer? peer =
+        LanPeerDiscoveryService.decodePeerAnnouncement(
+          decoded: <Object?, Object?>{
+            'protocol': 'lmcp-discovery',
+            'protocolVersion': '1.0',
+            'messageType': 'announce',
+            'instanceId': 'legacy-vibekits',
+            'app': <String, Object?>{
+              'id': 'com.vibekits.desktop',
+              'displayName': 'Legacy VibeKits',
+              'version': '1.9.0-dev.137',
+            },
+            'endpoint': <String, Object?>{'transport': 'ssh-stdio', 'port': 22},
+            'mcp': <String, Object?>{'capabilityDigest': 'legacy'},
+          },
+          sourceAddress: '192.168.3.58',
+        );
+
+    expect(peer, isNotNull);
+    expect(peer!.supportsLmcp2Calls, isFalse);
+    expect(peer.toJson()['authorized'], isFalse);
+    expect(peer.toJson()['nextAction'], contains('仅发现、不可调用'));
   });
 
   test('KEMI传书 LMCP/2 公告可解析为固定指纹 HTTPS 端点', () {
@@ -259,14 +270,31 @@ void main() {
       exposureEnabled: false,
     );
     await provider.start(
-      instanceId: 'provider',
+      instanceId: 'com.example.provider:2222222222',
       name: 'Provider@host-2222222222',
       capabilityDigest: 'provider',
+      exposureEnabled: false,
     );
+    provider.configureLmcp2Advertisement(
+      Lmcp2Advertisement(
+        appId: 'com.example.provider',
+        appVersion: '1.0.0',
+        displayName: 'Provider@host-2222222222',
+        instanceId: 'com.example.provider:2222222222',
+        hardwareCode: '2222222222',
+        port: 9443,
+        path: '/mcp',
+        instanceKeyFingerprint: 'sha256:${List<String>.filled(64, 'a').join()}',
+        catalogRevision: '1',
+        capabilityDigest: 'sha256:${List<String>.filled(64, 'b').join()}',
+      ),
+    );
+    await provider.setExposureEnabled(true);
     await Future<void>.delayed(const Duration(milliseconds: 800));
     expect(
       observer.peers.any(
-        (VibekitsLanPeer peer) => peer.instanceId == 'provider',
+        (VibekitsLanPeer peer) =>
+            peer.instanceId == 'com.example.provider:2222222222',
       ),
       isTrue,
     );
@@ -275,7 +303,8 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(
       observer.peers.any(
-        (VibekitsLanPeer peer) => peer.instanceId == 'provider',
+        (VibekitsLanPeer peer) =>
+            peer.instanceId == 'com.example.provider:2222222222',
       ),
       isFalse,
     );

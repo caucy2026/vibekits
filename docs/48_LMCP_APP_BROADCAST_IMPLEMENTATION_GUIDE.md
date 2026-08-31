@@ -1,5 +1,9 @@
 # LMCP/1 应用广播与协同接入实施指南
 
+> **历史文档：禁止用于新 APP。** 另一个 APP 团队只需读取 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)；本文不再是实现、编译或验收依据。
+
+> **历史文档：禁止用于新 APP。** 另一个 APP 团队只需读取 [LMCP/2 唯一互通标准](50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md)；本文不再是实现、编译或验收依据。
+
 版本：1.0  
 状态：已被 [三层实时 MCP 能力网络架构](49_REALTIME_THREE_TIER_MCP_FABRIC_ARCHITECTURE.md) 取代；本文仅保留 LMCP/1 历史实现参考
 适用对象：所有需要被 VibeKits Harness 或其他智能体在局域网发现、授权和调用的 APP、服务、设备控制程序与 Sidecar。
