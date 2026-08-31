@@ -16,9 +16,13 @@ import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/lan_harness_key_receiver.dart';
 import '../../dev_tools/domain/lan_peer_discovery_service.dart';
+import '../../dev_tools/domain/lmcp_exposure_server.dart';
 import '../../dev_tools/domain/mcp_capability_directory.dart';
 import '../../dev_tools/domain/mcp_capability_models.dart';
 import '../../dev_tools/domain/mcp_device_identity.dart';
+import '../../dev_tools/domain/mcp_tool_reputation_store.dart';
+import 'mcp_exposure_consent_dialog.dart';
+import 'mcp_reputation_badge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 
@@ -62,6 +66,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.credentialWriter,
     this.loadConversation = HarnessConversationStore.load,
     this.saveConversation = HarnessConversationStore.save,
+    this.loadWorkspaceCatalog = HarnessConversationStore.loadWorkspaceCatalog,
+    this.saveWorkspaceCatalog = HarnessConversationStore.saveWorkspaceCatalog,
     this.loadPermissionMode = HarnessAgentPreferencesStore.loadPermissionMode,
     this.savePermissionMode = HarnessAgentPreferencesStore.savePermissionMode,
     this.externalPrompt = '',
@@ -82,6 +88,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final AgentCredentialWriter? credentialWriter;
   final HarnessConversationLoader loadConversation;
   final HarnessConversationSaver saveConversation;
+  final HarnessWorkspaceCatalogLoader loadWorkspaceCatalog;
+  final HarnessWorkspaceCatalogSaver saveWorkspaceCatalog;
   final HarnessAgentPermissionLoader loadPermissionMode;
   final HarnessAgentPermissionSaver savePermissionMode;
   final String externalPrompt;
@@ -121,9 +129,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   );
   final FocusNode _composerFocus = FocusNode();
   final ScrollController _scroll = ScrollController();
+  final TextEditingController _workspaceSearch = TextEditingController();
   final List<_AgentMessage> _messages = <_AgentMessage>[];
   final List<HarnessConversationSession> _sessions =
       <HarnessConversationSession>[];
+  final List<String> _workspaceCatalog = <String>[];
+  final Map<String, String> _workspaceNames = <String, String>{};
+  final Map<String, List<HarnessConversationSession>> _workspaceSessions =
+      <String, List<HarnessConversationSession>>{};
+  final Set<String> _collapsedWorkspaces = <String>{};
   String? _activeSessionId;
   HarnessEnvironmentReport? _environment;
   HarnessAgentHandle? _handle;
@@ -142,7 +156,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
   final McpExposurePreferences _mcpExposurePreferences =
       McpExposurePreferences();
-  bool _mcpExposureEnabled = true;
+  bool _mcpExposureEnabled = false;
+  bool _mcpExposureChanging = false;
+  VibekitsHarnessToolBridge? _mcpExposureBridge;
+  bool _sessionSidebarOpen = true;
+  bool _workspaceSearchOpen = false;
+  bool _workspaceCatalogLoading = true;
 
   @override
   void initState() {
@@ -150,29 +169,69 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _adoptExternalPrompt();
     unawaited(_loadSettings());
     unawaited(_restoreConversation(widget.initialWorkspace));
-    unawaited(_initializeMcp());
+    unawaited(_initializeWorkspaceCatalog());
+    // Socket/timer behavior has dedicated LMCP tests. Ordinary widget tests
+    // must not start the process-lifetime LAN discovery singleton.
+    if (Platform.environment['FLUTTER_TEST'] != 'true') {
+      unawaited(_initializeMcp());
+    }
     _checkEnvironment();
   }
 
   Future<void> _initializeMcp() async {
     try {
-      _mcpExposureEnabled = await _mcpExposurePreferences.loadEnabled();
+      final bool shouldEnable = await _mcpExposurePreferences.loadEnabled();
       await LanPeerDiscoveryService.instance.start(
         instanceId: _mcpIdentity.instanceId,
         name: _mcpIdentity.displayName,
         hardwareCode: _mcpIdentity.hardwareCode,
         appId: _mcpIdentity.appId,
+        appVersion: VibekitsLmcpExposureServer.currentAppVersion,
         capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
-        exposureEnabled: _mcpExposureEnabled,
+        exposureEnabled: false,
       );
-      await McpCapabilityDirectory.instance.start(
-        appBridge: VibekitsHarnessToolBridge(),
-      );
+      final VibekitsHarnessToolBridge bridge = _createMcpBridge();
+      _mcpExposureBridge = bridge;
+      await McpCapabilityDirectory.instance.start(appBridge: bridge);
+      if (shouldEnable) await _startMcpExposure(bridge);
+      _mcpExposureEnabled = VibekitsLmcpExposureServer.instance.running;
       if (mounted) setState(() {});
     } on Object catch (error) {
       if (mounted) _show('MCP 局域网发现启动失败：$error');
     }
   }
+
+  VibekitsHarnessToolBridge _createMcpBridge() => VibekitsHarnessToolBridge(
+    activityRecorder: _recordHarnessToolActivity,
+    mcpCatalogLoader: McpCapabilityDirectory.instance.exportForHarness,
+    mcpToolInvoker:
+        (String instanceId, String toolName, Map<String, Object?> arguments) =>
+            McpCapabilityDirectory.instance.invokeTool(
+              instanceId: instanceId,
+              toolName: toolName,
+              arguments: arguments,
+            ),
+    mcpReputationLoader: McpCapabilityDirectory.instance.exportReputations,
+    mcpReputationRater:
+        (String tier, String instanceId, String toolName, int rating) =>
+            McpCapabilityDirectory.instance.rateTool(
+              tierName: tier,
+              instanceId: instanceId,
+              toolName: toolName,
+              rating: rating,
+            ),
+  );
+
+  Future<void> _startMcpExposure(VibekitsHarnessToolBridge bridge) =>
+      VibekitsLmcpExposureServer.instance.start(
+        instanceId: _mcpIdentity.instanceId,
+        displayName: _mcpIdentity.displayName,
+        appId: _mcpIdentity.appId,
+        appVersion: VibekitsLmcpExposureServer.currentAppVersion,
+        hardwareCode: _mcpIdentity.hardwareCode,
+        bridge: bridge,
+        approve: _approveHarnessTool,
+      );
 
   @override
   void didUpdateWidget(covariant DeepSeekAgentWorkspace oldWidget) {
@@ -233,6 +292,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _debugDirectory.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
+    _workspaceSearch.dispose();
     super.dispose();
   }
 
@@ -279,10 +339,312 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _composerFocus.requestFocus();
   }
 
+  Future<void> _initializeWorkspaceCatalog() async {
+    final String current = _workspace.text.trim();
+    if (Platform.environment['FLUTTER_TEST'] == 'true' &&
+        widget.loadWorkspaceCatalog ==
+            HarnessConversationStore.loadWorkspaceCatalog) {
+      if (!mounted) return;
+      setState(() {
+        _workspaceCatalog
+          ..clear()
+          ..addAll(<String>[if (current.isNotEmpty) current]);
+        _workspaceCatalogLoading = false;
+      });
+      return;
+    }
+    List<String> workspaces;
+    Map<String, String> workspaceNames = <String, String>{};
+    try {
+      workspaces = await widget.loadWorkspaceCatalog();
+      if (widget.loadWorkspaceCatalog ==
+          HarnessConversationStore.loadWorkspaceCatalog) {
+        workspaceNames = await HarnessConversationStore.loadWorkspaceNames();
+      }
+    } on Object {
+      workspaces = <String>[];
+    }
+    final List<String> merged = <String>[
+      if (current.isNotEmpty) current,
+      ...workspaces.where((String item) => item.trim() != current),
+    ];
+    final Map<String, List<HarnessConversationSession>> projects =
+        <String, List<HarnessConversationSession>>{};
+    for (final String workspace in merged) {
+      try {
+        final HarnessConversationProject? project = await widget
+            .loadConversation(workspace);
+        projects[workspace] = List<HarnessConversationSession>.of(
+          project?.sessions ?? const <HarnessConversationSession>[],
+        );
+      } on Object {
+        projects[workspace] = <HarnessConversationSession>[];
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _workspaceCatalog
+        ..clear()
+        ..addAll(merged.take(HarnessConversationStore.maxWorkspaces));
+      _workspaceNames
+        ..clear()
+        ..addAll(workspaceNames);
+      _workspaceSessions
+        ..clear()
+        ..addAll(projects);
+      _workspaceCatalogLoading = false;
+    });
+    if (current.isNotEmpty && !workspaces.contains(current)) {
+      await _saveWorkspaceCatalog();
+    }
+  }
+
+  Future<void> _registerWorkspace(String workspace) async {
+    final String target = workspace.trim();
+    if (target.isEmpty || _workspaceCatalog.contains(target)) return;
+    _workspaceCatalog.insert(0, target);
+    _workspaceSessions.putIfAbsent(
+      target,
+      () => <HarnessConversationSession>[],
+    );
+    if (_workspaceCatalog.length > HarnessConversationStore.maxWorkspaces) {
+      final String removed = _workspaceCatalog.removeLast();
+      _workspaceSessions.remove(removed);
+    }
+    if (mounted) setState(() {});
+    await _saveWorkspaceCatalog();
+  }
+
+  Future<void> _saveWorkspaceCatalog() async {
+    try {
+      if (Platform.environment['FLUTTER_TEST'] == 'true' &&
+          widget.saveWorkspaceCatalog ==
+              HarnessConversationStore.saveWorkspaceCatalog) {
+        return;
+      }
+      await widget.saveWorkspaceCatalog(
+        List<String>.unmodifiable(_workspaceCatalog),
+      );
+    } on Object catch (error) {
+      if (mounted) _show('保存工作区列表失败：$error');
+    }
+  }
+
+  String _workspaceDisplayName(String workspace) =>
+      _workspaceNames[workspace] ??
+      workspace.replaceAll('\\', '/').split('/').last;
+
+  Future<void> _renameWorkspace(String workspace) async {
+    String draft = _workspaceDisplayName(workspace);
+    final String? value = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('修改项目名称'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            TextFormField(
+              key: const Key('agent-workspace-name-field'),
+              initialValue: draft,
+              autofocus: true,
+              maxLength: 60,
+              decoration: const InputDecoration(
+                labelText: '显示名称',
+                helperText: '只修改 VibeKits 中的名称，不重命名磁盘目录',
+              ),
+              onChanged: (String input) => draft = input,
+              onFieldSubmitted: (String input) =>
+                  Navigator.pop(dialogContext, input.trim()),
+            ),
+            Text(
+              workspace,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: context.vibe.muted),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('agent-save-workspace-name'),
+            onPressed: () => Navigator.pop(dialogContext, draft.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || value == null) return;
+    final String name = value.trim();
+    if (name.isEmpty) {
+      _show('项目名称不能为空');
+      return;
+    }
+    setState(() => _workspaceNames[workspace] = name);
+    try {
+      if (widget.saveWorkspaceCatalog ==
+          HarnessConversationStore.saveWorkspaceCatalog) {
+        await HarnessConversationStore.saveWorkspaceName(workspace, name);
+      }
+    } on Object catch (error) {
+      if (mounted) _show('保存项目名称失败：$error');
+    }
+  }
+
+  Future<void> _revealWorkspace(String workspace) async {
+    if (!Platform.isMacOS) {
+      _show('当前平台暂不支持在 Finder 中显示');
+      return;
+    }
+    final ProcessResult result = await Process.run('/usr/bin/open', <String>[
+      '-R',
+      workspace,
+    ]);
+    if (result.exitCode != 0 && mounted) _show('无法在 Finder 中显示该项目');
+  }
+
+  Future<void> _removeWorkspace(String workspace) async {
+    if (_workspaceCatalog.length <= 1) {
+      _show('至少保留一个项目');
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('移除项目？'),
+        content: Text(
+          '将“${_workspaceDisplayName(workspace)}”从侧边栏移除。\n\n'
+          '不会删除磁盘目录或历史会话文件。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('agent-confirm-remove-workspace'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('移除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (workspace == _workspace.text.trim()) {
+      final String replacement = _workspaceCatalog.firstWhere(
+        (String candidate) => candidate != workspace,
+      );
+      await _adoptWorkspace(replacement);
+      if (!mounted) return;
+    }
+    setState(() {
+      _workspaceCatalog.remove(workspace);
+      _workspaceSessions.remove(workspace);
+      _workspaceNames.remove(workspace);
+      _collapsedWorkspaces.remove(workspace);
+    });
+    await _saveWorkspaceCatalog();
+    if (widget.saveWorkspaceCatalog ==
+        HarnessConversationStore.saveWorkspaceCatalog) {
+      await HarnessConversationStore.saveWorkspaceName(workspace, null);
+    }
+  }
+
+  Future<void> _showWorkspaceContextMenu(
+    String workspace,
+    Offset globalPosition,
+  ) async {
+    final RenderBox overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final RelativeRect position = RelativeRect.fromRect(
+      Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 1, 1),
+      Offset.zero & overlay.size,
+    );
+    final String? action = await showMenu<String>(
+      context: context,
+      position: position,
+      color: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      elevation: 12,
+      shadowColor: const Color(0x33000000),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      constraints: const BoxConstraints(minWidth: 214, maxWidth: 248),
+      items: <PopupMenuEntry<String>>[
+        _workspaceMenuItem('rename', Icons.edit_outlined, '编辑名称'),
+        if (Platform.isMacOS)
+          _workspaceMenuItem(
+            'finder',
+            Icons.folder_open_outlined,
+            '在 Finder 中显示',
+          ),
+        const PopupMenuDivider(),
+        _workspaceMenuItem('new', Icons.add_comment_outlined, '在此新建会话'),
+        if (workspace != _workspace.text.trim())
+          _workspaceMenuItem('switch', Icons.login_outlined, '切换到此项目'),
+        const PopupMenuDivider(),
+        _workspaceMenuItem('remove', Icons.close, '移除项目', destructive: true),
+      ],
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'rename':
+        await _renameWorkspace(workspace);
+      case 'finder':
+        await _revealWorkspace(workspace);
+      case 'new':
+        await _newSessionInWorkspace(workspace);
+      case 'switch':
+        await _adoptWorkspace(workspace);
+      case 'remove':
+        await _removeWorkspace(workspace);
+    }
+  }
+
+  PopupMenuItem<String> _workspaceMenuItem(
+    String value,
+    IconData icon,
+    String label, {
+    bool destructive = false,
+  }) => PopupMenuItem<String>(
+    value: value,
+    height: 42,
+    child: Row(
+      children: <Widget>[
+        Icon(
+          icon,
+          size: 17,
+          color: destructive
+              ? const Color(0xFFB42318)
+              : const Color(0xFF343832),
+        ),
+        const SizedBox(width: 11),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12.5,
+            color: destructive
+                ? const Color(0xFFB42318)
+                : const Color(0xFF242722),
+          ),
+        ),
+      ],
+    ),
+  );
+
   Future<void> _adoptWorkspace(String workspace, {bool notify = true}) async {
     final String target = workspace.trim();
     if (_running || target == _workspace.text.trim()) return;
+    if (!Directory(target).isAbsolute || !Directory(target).existsSync()) {
+      if (mounted) _show('工作区不存在或无法访问：$target');
+      return;
+    }
     await _persistConversation();
+    if (!mounted) return;
+    await _registerWorkspace(target);
     if (!mounted) return;
     setState(() {
       _workspace.text = target;
@@ -315,6 +677,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _sessions
         ..clear()
         ..addAll(project?.sessions ?? const <HarnessConversationSession>[]);
+      _workspaceSessions[target] = List<HarnessConversationSession>.of(
+        project?.sessions ?? const <HarnessConversationSession>[],
+      );
       _activeSessionId = project?.activeSessionId;
       final HarnessConversationSession? active = _sessions
           .where(
@@ -384,6 +749,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _sessions
       ..clear()
       ..addAll(sessions);
+    _workspaceSessions[workspace] = List<HarnessConversationSession>.of(
+      sessions,
+    );
     try {
       await widget.saveConversation(
         HarnessConversationProject(
@@ -454,9 +822,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       debugDirectory: _debugDirectory.text.trim(),
       permissionMode: _permissionMode,
       approveTool: _approveHarnessTool,
-      toolBridge: VibekitsHarnessToolBridge(
-        activityRecorder: _recordHarnessToolActivity,
-      ),
+      toolBridge: _createMcpBridge(),
     );
     if (request.apiKey.isEmpty) {
       _show('请先点右上角设置并填写 DeepSeek API Key');
@@ -713,6 +1079,20 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       status: status,
       startedAt: startedAt,
     );
+    if (status != HarnessToolActivityStatus.denied &&
+        Platform.environment['FLUTTER_TEST'] != 'true') {
+      final double quality = status == HarnessToolActivityStatus.succeeded
+          ? result is Map
+                ? inferMcpCompletionQuality(Map<String, Object?>.from(result))
+                : 1
+          : 0;
+      await McpCapabilityDirectory.instance.recordAppToolResult(
+        toolName: toolId,
+        succeeded: status == HarnessToolActivityStatus.succeeded && quality > 0,
+        completionQuality: quality,
+        latencyMs: DateTime.now().difference(startedAt).inMilliseconds,
+      );
+    }
     if (!mounted) return;
     setState(() {
       final int index = _progressSteps.lastIndexWhere(
@@ -822,6 +1202,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       updatedAt: now,
     );
     setState(() {
+      _collapsedWorkspaces.remove(_workspace.text.trim());
       _sessions.insert(0, session);
       _activeSessionId = session.id;
       _messages.clear();
@@ -862,6 +1243,219 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     });
     await _persistConversation();
     _scrollToEnd(force: true);
+  }
+
+  Future<void> _newSessionInWorkspace(String workspace) async {
+    if (_running) return;
+    if (workspace != _workspace.text.trim()) {
+      await _adoptWorkspace(workspace);
+      if (!mounted || workspace != _workspace.text.trim()) return;
+    }
+    await _newTask();
+  }
+
+  Future<void> _activateWorkspaceSession(
+    String workspace,
+    String sessionId,
+  ) async {
+    if (_running) return;
+    if (workspace != _workspace.text.trim()) {
+      await _adoptWorkspace(workspace);
+      if (!mounted || workspace != _workspace.text.trim()) return;
+    }
+    await _switchSession(sessionId);
+  }
+
+  Future<void> _requestMoveSession(
+    String sourceWorkspace,
+    HarnessConversationSession session,
+    String targetWorkspace,
+  ) async {
+    if (_running || sourceWorkspace == targetWorkspace) return;
+    if (!Directory(targetWorkspace).existsSync()) {
+      _show('目标工作区不存在或无法访问');
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('移动会话并重新绑定工作区权限？'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Text(
+            '“${session.title}”将从\n$sourceWorkspace\n移动到\n$targetWorkspace\n\n'
+            '后续 Harness 命令的 workspace-write 根目录会改为目标项目；'
+            '源项目权限不会跟随会话带过去。只迁移会话记录，不移动任何项目文件。',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('agent-confirm-move-session'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认移动'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _moveSession(sourceWorkspace, session, targetWorkspace);
+  }
+
+  Future<void> _moveSession(
+    String sourceWorkspace,
+    HarnessConversationSession session,
+    String targetWorkspace,
+  ) async {
+    if (sourceWorkspace == _workspace.text.trim()) {
+      await _persistConversation();
+    }
+    final HarnessConversationProject? source = await widget.loadConversation(
+      sourceWorkspace,
+    );
+    final HarnessConversationProject? target = await widget.loadConversation(
+      targetWorkspace,
+    );
+    final List<HarnessConversationSession> sourceSessions =
+        List<HarnessConversationSession>.of(
+          source?.sessions ??
+              _workspaceSessions[sourceWorkspace] ??
+              const <HarnessConversationSession>[],
+        )..removeWhere(
+          (HarnessConversationSession candidate) => candidate.id == session.id,
+        );
+    final List<HarnessConversationSession> targetSessions =
+        List<HarnessConversationSession>.of(
+          target?.sessions ??
+              _workspaceSessions[targetWorkspace] ??
+              const <HarnessConversationSession>[],
+        )..removeWhere(
+          (HarnessConversationSession candidate) => candidate.id == session.id,
+        );
+    targetSessions.insert(0, session.copyWith(updatedAt: DateTime.now()));
+    final DateTime now = DateTime.now();
+    try {
+      // Save the destination first: an interrupted move may temporarily leave
+      // a duplicate, but must never lose the only copy of a conversation.
+      await widget.saveConversation(
+        HarnessConversationProject(
+          workspace: targetWorkspace,
+          sessions: targetSessions,
+          activeSessionId: session.id,
+          updatedAt: now,
+        ),
+      );
+      await widget.saveConversation(
+        HarnessConversationProject(
+          workspace: sourceWorkspace,
+          sessions: sourceSessions,
+          activeSessionId: source?.activeSessionId == session.id
+              ? sourceSessions.firstOrNull?.id
+              : source?.activeSessionId,
+          updatedAt: now,
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) _show('移动会话失败；源记录仍保留：$error');
+      return;
+    }
+    _workspaceSessions[sourceWorkspace] = sourceSessions;
+    _workspaceSessions[targetWorkspace] = targetSessions;
+    if (_workspace.text.trim() == sourceWorkspace) {
+      _sessions
+        ..clear()
+        ..addAll(sourceSessions);
+      if (_activeSessionId == session.id) {
+        _activeSessionId = sourceSessions.firstOrNull?.id;
+        _messages.clear();
+      }
+    }
+    if (_workspace.text.trim() == targetWorkspace) {
+      if (!mounted) return;
+      setState(() {
+        _sessions
+          ..clear()
+          ..addAll(targetSessions);
+        _activeSessionId = session.id;
+        _messages
+          ..clear()
+          ..addAll(
+            session.messages.map(
+              (HarnessConversationMessage message) => _AgentMessage._(
+                text: message.text,
+                user: message.user,
+                elapsed: message.elapsedMs == null
+                    ? null
+                    : Duration(milliseconds: message.elapsedMs!),
+                exitCode: message.exitCode,
+                stopped: message.stopped,
+              ),
+            ),
+          );
+      });
+    } else {
+      await _adoptWorkspace(targetWorkspace);
+      if (!mounted) return;
+      await _switchSession(session.id);
+    }
+    if (mounted) _show('会话已移动，权限根目录已切换到目标工作区');
+  }
+
+  Future<void> _showWorkspaceManager() async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('管理工作区'),
+        content: SizedBox(
+          width: 560,
+          height: 360,
+          child: StatefulBuilder(
+            builder: (BuildContext context, StateSetter setDialogState) =>
+                ListView.separated(
+                  itemCount: _workspaceCatalog.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (BuildContext context, int index) {
+                    final String workspace = _workspaceCatalog[index];
+                    final bool active = workspace == _workspace.text.trim();
+                    return ListTile(
+                      leading: const Icon(Icons.folder_outlined),
+                      title: Text(_workspaceDisplayName(workspace)),
+                      subtitle: Text(workspace),
+                      trailing: active
+                          ? const Chip(label: Text('当前'))
+                          : IconButton(
+                              tooltip: '从列表移除（不删除会话或项目文件）',
+                              onPressed: () async {
+                                _workspaceCatalog.remove(workspace);
+                                _workspaceSessions.remove(workspace);
+                                await _saveWorkspaceCatalog();
+                                if (mounted) setState(() {});
+                                setDialogState(() {});
+                              },
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                      onTap: active
+                          ? null
+                          : () async {
+                              Navigator.pop(dialogContext);
+                              await _adoptWorkspace(workspace);
+                            },
+                    );
+                  },
+                ),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   bool get _nearBottom =>
@@ -1196,7 +1790,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final HarnessEnvironmentReport? environment = _environment;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final bool showSessionSidebar = constraints.maxWidth >= 1020;
+        // The Harness tab is usually about 776 px wide inside the application
+        // shell. Requiring 1020 px made the session controls unreachable on a
+        // normal 800 px window even though the panel fits comfortably.
+        final bool sidebarCanFit = constraints.maxWidth >= 720;
+        final bool showSessionSidebar = sidebarCanFit && _sessionSidebarOpen;
         return Row(
           children: <Widget>[
             if (showSessionSidebar) ...<Widget>[
@@ -1206,7 +1804,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                child: _buildChatWorkbench(environment),
+                child: _buildChatWorkbench(
+                  environment,
+                  showSessionSidebar: showSessionSidebar,
+                  sidebarCanFit: sidebarCanFit,
+                ),
               ),
             ),
             _buildCrossPlatformToolRail(),
@@ -1232,6 +1834,21 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           caption: 'MCP',
           active: _mcpExposureEnabled,
           onPressed: _toggleMcpExposure,
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder: (_, AsyncSnapshot<McpCapabilitySnapshot> snapshot) =>
+              _macRailAction(
+                icon: Icons.apps_rounded,
+                badge:
+                    snapshot.data?.app
+                        .expand((McpDeviceCapability item) => item.tools)
+                        .length ??
+                    0,
+                tooltip: '本 APP MCP：查看 VibeKits 的完整工具目录',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.app),
+              ),
         ),
         StreamBuilder<McpCapabilitySnapshot>(
           stream: McpCapabilityDirectory.instance.changes,
@@ -1373,62 +1990,96 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _toggleMcpExposure() async {
     final bool enabled = !_mcpExposureEnabled;
-    if (enabled && !await _confirmMcpExposureRisk()) return;
-    setState(() => _mcpExposureEnabled = enabled);
+    if (_mcpExposureChanging) return;
+    final VibekitsHarnessToolBridge? bridge = _mcpExposureBridge;
+    if (bridge == null) {
+      _show('MCP 工具目录尚未就绪，请稍后重试');
+      return;
+    }
+    if (enabled) {
+      late final LmcpInstanceCertificate identity;
+      try {
+        identity = await VibekitsLmcpExposureServer.instance.prepareIdentity(
+          displayName: _mcpIdentity.displayName,
+        );
+      } on Object catch (error) {
+        if (mounted) _show('准备 MCP 实例证书失败：$error');
+        return;
+      }
+      if (!mounted) return;
+      final List<McpToolInterface> tools = McpCapabilityDirectory
+          .instance
+          .snapshot
+          .app
+          .expand((McpDeviceCapability device) => device.tools)
+          .toList(growable: false);
+      final bool allowed = await showMcpExposureConsentDialog(
+        context: context,
+        deviceName: _mcpIdentity.displayName,
+        tools: tools,
+        certificateFingerprint: identity.fingerprint,
+      );
+      if (!mounted || !allowed) return;
+    }
+    setState(() => _mcpExposureChanging = true);
     try {
-      await LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
-      await _mcpExposurePreferences.saveEnabled(enabled);
+      if (enabled) {
+        await _startMcpExposure(bridge);
+        try {
+          await _mcpExposurePreferences.saveEnabled(true);
+        } on Object {
+          await VibekitsLmcpExposureServer.instance.stop();
+          rethrow;
+        }
+      } else {
+        try {
+          await _mcpExposurePreferences.saveEnabled(false);
+        } finally {
+          await VibekitsLmcpExposureServer.instance.stop();
+        }
+      }
+      if (mounted) {
+        setState(
+          () =>
+              _mcpExposureEnabled = VibekitsLmcpExposureServer.instance.running,
+        );
+      }
     } on Object catch (error) {
-      await LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
-      if (mounted) setState(() => _mcpExposureEnabled = !enabled);
       if (mounted) _show('保存 MCP 开关失败：$error');
+    } finally {
+      if (mounted) setState(() => _mcpExposureChanging = false);
     }
   }
-
-  Future<bool> _confirmMcpExposureRisk() async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('开启本机 MCP？'),
-          content: const SizedBox(
-            width: 520,
-            child: Text(
-              '开启后，本 APP 会在本机和局域网发布设备名称、硬件识别码、'
-              '版本、连接端点和 MCP 工具清单。\n\n'
-              '被发现的 Harness 可以读取工具参数并调用普通 MCP 工具，'
-              '工具可能按其功能读取数据、写入文件或控制设备，后续不再逐次弹窗。'
-              '远程 Harness 任务控制仍使用独立的授权流程。\n\n'
-              '请仅在可信的本机和局域网中开启。关闭后会发送 goodbye，'
-              '并从其他 VibeKits 的动态列表中消失。',
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('确认开启'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
 
   Future<void> _showMcpDevices(McpCapabilityTier tier) async {
     final McpCapabilitySnapshot snapshot = await McpCapabilityDirectory.instance
         .snapshotForTask();
+    final Map<String, McpToolReputation> reputations =
+        await McpCapabilityDirectory.instance.loadReputations();
     if (!mounted) return;
-    final List<McpDeviceCapability> devices = tier == McpCapabilityTier.local
-        ? snapshot.local
-        : snapshot.lan;
+    final List<McpDeviceCapability> devices = switch (tier) {
+      McpCapabilityTier.app => snapshot.app,
+      McpCapabilityTier.local => snapshot.local,
+      McpCapabilityTier.lan => snapshot.lan,
+    };
+    int scoredToolCount(McpDeviceCapability device) =>
+        device.tools.where((McpToolInterface tool) {
+          final McpToolReputation? score = reputationForTool(
+            reputations,
+            device,
+            tool,
+          );
+          return score != null &&
+              (score.totalCalls > 0 || score.manualRating != null);
+        }).length;
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(
-          tier == McpCapabilityTier.local ? '本机 MCP 设备' : '局域网 MCP 设备',
-        ),
+        title: Text(switch (tier) {
+          McpCapabilityTier.app => '本 APP MCP 工具',
+          McpCapabilityTier.local => '本机 MCP 设备',
+          McpCapabilityTier.lan => '局域网 MCP 设备',
+        }),
         content: SizedBox(
           width: 620,
           height: 420,
@@ -1440,14 +2091,24 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       ExpansionTile(
                         title: Text(device.name),
                         subtitle: Text(
-                          '${device.hardwareCode} · ${device.tools.length} 个接口',
+                          '${device.hardwareCode} · ${device.tools.length} 个接口'
+                          '${scoredToolCount(device) == 0 ? '' : ' · ${scoredToolCount(device)} 个已评分'}',
                         ),
                         children: <Widget>[
                           for (final McpToolInterface tool in device.tools)
                             ListTile(
                               dense: true,
                               title: SelectableText(tool.name),
-                              subtitle: Text(tool.description),
+                              subtitle: Text(
+                                '${tool.description}\n风险：${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
+                              ),
+                              trailing: McpReputationBadge(
+                                reputation: reputationForTool(
+                                  reputations,
+                                  device,
+                                  tool,
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -1559,10 +2220,18 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     ),
   );
 
-  Widget _buildChatWorkbench(HarnessEnvironmentReport? environment) {
+  Widget _buildChatWorkbench(
+    HarnessEnvironmentReport? environment, {
+    required bool showSessionSidebar,
+    required bool sidebarCanFit,
+  }) {
     return Column(
       children: <Widget>[
-        _buildHeader(environment),
+        _buildHeader(
+          environment,
+          showSessionSidebar: showSessionSidebar,
+          sidebarCanFit: sidebarCanFit,
+        ),
         const SizedBox(height: 10),
         Expanded(
           child: Container(
@@ -1611,9 +2280,24 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Widget _buildSessionSidebar(HarnessEnvironmentReport? environment) {
     final String workspace = _workspace.text.trim();
-    final String workspaceName = workspace.isEmpty
-        ? '尚未选择项目'
-        : workspace.replaceAll('\\', '/').split('/').last;
+    final String query = _workspaceSearch.text.trim().toLowerCase();
+    final List<String> visibleWorkspaces = _workspaceCatalog
+        .where((String path) {
+          if (query.isEmpty) return true;
+          final String name = _workspaceDisplayName(path);
+          final Iterable<HarnessConversationSession> sessions =
+              path == workspace
+              ? _sessions
+              : _workspaceSessions[path] ??
+                    const <HarnessConversationSession>[];
+          return path.toLowerCase().contains(query) ||
+              name.toLowerCase().contains(query) ||
+              sessions.any(
+                (HarnessConversationSession session) =>
+                    session.title.toLowerCase().contains(query),
+              );
+        })
+        .toList(growable: false);
     return Material(
       key: const Key('agent-session-sidebar'),
       color: context.vibe.canvas,
@@ -1622,125 +2306,126 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            FilledButton.tonalIcon(
-              key: const Key('agent-new-session-sidebar'),
-              onPressed: workspace.isEmpty || _running ? null : _newTask,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('新建会话'),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    key: const Key('agent-new-session-sidebar'),
+                    onPressed: workspace.isEmpty || _running ? null : _newTask,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('新建会话'),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  key: const Key('agent-close-session-sidebar'),
+                  tooltip: '收起会话侧边栏',
+                  onPressed: () => setState(() => _sessionSidebarOpen = false),
+                  icon: const Icon(Icons.menu_open, size: 19),
+                ),
+              ],
             ),
             const SizedBox(height: 14),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                '项目',
-                style: TextStyle(
-                  color: context.vibe.muted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Text(
+                      '工作区',
+                      style: TextStyle(
+                        color: context.vibe.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  key: const Key('agent-search-workspaces'),
+                  tooltip: '搜索工作区和会话',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => setState(() {
+                    _workspaceSearchOpen = !_workspaceSearchOpen;
+                    if (!_workspaceSearchOpen) _workspaceSearch.clear();
+                  }),
+                  icon: const Icon(Icons.search, size: 18),
+                ),
+                IconButton(
+                  key: const Key('agent-manage-workspaces'),
+                  tooltip: '管理工作区',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _workspaceCatalog.isEmpty
+                      ? null
+                      : _showWorkspaceManager,
+                  icon: const Icon(Icons.tune, size: 18),
+                ),
+                IconButton(
+                  key: const Key('agent-add-workspace'),
+                  tooltip: '添加工作区',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _running ? null : _pickWorkspace,
+                  icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+                ),
+              ],
+            ),
+            if (_workspaceSearchOpen) ...<Widget>[
+              const SizedBox(height: 4),
+              TextField(
+                key: const Key('agent-workspace-search-field'),
+                controller: _workspaceSearch,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: '搜索项目或会话',
+                  prefixIcon: Icon(Icons.search, size: 17),
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            ListTile(
-              dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: const Icon(Icons.folder_outlined, size: 18),
-              title: Text(
-                workspaceName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: workspace.isEmpty ? const Text('点击选择工作区') : null,
-              onTap: _running ? null : _pickWorkspace,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(9),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                '会话',
-                style: TextStyle(
-                  color: context.vibe.muted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
+            ],
             const SizedBox(height: 6),
             Expanded(
-              child: _sessions.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: _workspaceCatalogLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : visibleWorkspaces.isEmpty
+                  ? Center(
                       child: Text(
-                        workspace.isEmpty ? '选择项目后开始会话' : '暂无会话',
+                        query.isEmpty ? '点击文件夹 + 添加工作区' : '没有匹配的工作区或会话',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: context.vibe.muted,
                           fontSize: 12,
                         ),
                       ),
                     )
-                  : ListView.separated(
+                  : ListView.builder(
                       padding: EdgeInsets.zero,
-                      itemCount: _sessions.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 3),
-                      itemBuilder: (BuildContext context, int index) {
-                        final HarnessConversationSession session =
-                            _sessions[index];
-                        final bool selected = session.id == _activeSessionId;
-                        return ListTile(
-                          key: Key('agent-session-${session.id}'),
-                          dense: true,
-                          selected: selected,
-                          selectedTileColor: Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withValues(alpha: 0.09),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8,
+                      itemCount: visibleWorkspaces.length,
+                      itemBuilder: (BuildContext context, int index) =>
+                          _buildWorkspaceGroup(
+                            visibleWorkspaces[index],
+                            query: query,
                           ),
-                          leading: Icon(
-                            selected
-                                ? Icons.chat_bubble
-                                : Icons.chat_bubble_outline,
-                            size: 15,
-                          ),
-                          title: Text(
-                            session.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          onTap: _running
-                              ? null
-                              : () => _switchSession(session.id),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                        );
-                      },
                     ),
             ),
             const SizedBox(height: 8),
             ListTile(
+              key: const Key('agent-sidebar-settings'),
               dense: true,
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Icon(
-                environment?.ready == true
-                    ? Icons.check_circle_outline
-                    : Icons.error_outline,
-                size: 17,
-              ),
-              title: Text(
-                environment?.ready == true ? 'Harness 已就绪' : '检查连接',
-                style: const TextStyle(fontSize: 12),
-              ),
+              leading: const Icon(Icons.settings_outlined, size: 17),
+              title: const Text('设置', style: TextStyle(fontSize: 12)),
               subtitle: Text(
-                _model.text,
+                '${environment?.ready == true ? 'Harness 已就绪' : '连接未就绪'} · ${_model.text}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 10),
+              ),
+              trailing: Icon(
+                environment?.ready == true
+                    ? Icons.check_circle_outline
+                    : Icons.error_outline,
+                size: 16,
               ),
               onTap: _running ? null : _showSettings,
               shape: RoundedRectangleBorder(
@@ -1753,7 +2438,252 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     );
   }
 
-  Widget _buildHeader(HarnessEnvironmentReport? environment) {
+  Widget _buildWorkspaceGroup(String workspace, {required String query}) {
+    final String current = _workspace.text.trim();
+    final bool activeWorkspace = workspace == current;
+    final String name = _workspaceDisplayName(workspace);
+    final List<HarnessConversationSession> sessions =
+        List<HarnessConversationSession>.of(
+          activeWorkspace
+              ? _sessions
+              : _workspaceSessions[workspace] ??
+                    const <HarnessConversationSession>[],
+        );
+    final List<HarnessConversationSession> visibleSessions = query.isEmpty
+        ? sessions
+        : sessions
+              .where(
+                (HarnessConversationSession session) =>
+                    session.title.toLowerCase().contains(query),
+              )
+              .toList(growable: false);
+    final bool collapsed =
+        query.isEmpty && _collapsedWorkspaces.contains(workspace);
+    return DragTarget<_HarnessSessionDragPayload>(
+      onWillAcceptWithDetails: (
+        DragTargetDetails<_HarnessSessionDragPayload> details,
+      ) => !_running && details.data.workspace != workspace,
+      onAcceptWithDetails:
+          (DragTargetDetails<_HarnessSessionDragPayload> details) => unawaited(
+            _requestMoveSession(
+              details.data.workspace,
+              details.data.session,
+              workspace,
+            ),
+          ),
+      builder:
+          (
+            BuildContext context,
+            List<_HarnessSessionDragPayload?> candidates,
+            List<dynamic> rejected,
+          ) {
+            final bool accepting = candidates.isNotEmpty;
+            return Container(
+              key: ValueKey<String>('agent-workspace-$workspace'),
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: accepting
+                    ? Theme.of(context).colorScheme.primary
+                          .withValues(alpha: 0.12)
+                    : null,
+                border: accepting
+                    ? Border.all(color: Theme.of(context).colorScheme.primary)
+                    : null,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Column(
+                children: <Widget>[
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onSecondaryTapDown: _running
+                        ? null
+                        : (TapDownDetails details) => unawaited(
+                            _showWorkspaceContextMenu(
+                              workspace,
+                              details.globalPosition,
+                            ),
+                          ),
+                    child: ListTile(
+                      key: ValueKey<String>(
+                        'agent-workspace-header-$workspace',
+                      ),
+                      dense: true,
+                      selected: activeWorkspace,
+                      contentPadding: const EdgeInsets.only(left: 8, right: 0),
+                      leading: Tooltip(
+                        message: collapsed ? '展开项目会话' : '折叠项目会话',
+                        child: Icon(
+                          collapsed
+                              ? Icons.folder_outlined
+                              : Icons.folder_open_outlined,
+                          size: 18,
+                        ),
+                      ),
+                      title: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: accepting ? const Text('松开以移动并重绑定权限') : null,
+                      onTap: () {
+                        if (activeWorkspace || _running) {
+                          setState(() {
+                            if (!_collapsedWorkspaces.remove(workspace)) {
+                              _collapsedWorkspaces.add(workspace);
+                            }
+                          });
+                          return;
+                        }
+                        setState(() => _collapsedWorkspaces.remove(workspace));
+                        unawaited(_adoptWorkspace(workspace));
+                      },
+                      trailing: Builder(
+                        builder: (BuildContext buttonContext) => IconButton(
+                          key: ValueKey<String>(
+                            'agent-workspace-menu-$workspace',
+                          ),
+                          tooltip: '项目操作',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _running
+                              ? null
+                              : () {
+                                  final RenderBox box =
+                                      buttonContext.findRenderObject()!
+                                          as RenderBox;
+                                  unawaited(
+                                    _showWorkspaceContextMenu(
+                                      workspace,
+                                      box.localToGlobal(
+                                        Offset(0, box.size.height),
+                                      ),
+                                    ),
+                                  );
+                                },
+                          icon: const Icon(Icons.more_horiz, size: 18),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!collapsed && visibleSessions.isEmpty && activeWorkspace)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(34, 0, 8, 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '暂无会话',
+                          style: TextStyle(
+                            color: context.vibe.muted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!collapsed)
+                    for (final HarnessConversationSession session
+                        in visibleSessions)
+                      _buildDraggableSession(
+                        workspace: workspace,
+                        session: session,
+                        activeWorkspace: activeWorkspace,
+                      ),
+                ],
+              ),
+            );
+          },
+    );
+  }
+
+  Widget _buildDraggableSession({
+    required String workspace,
+    required HarnessConversationSession session,
+    required bool activeWorkspace,
+  }) {
+    final bool selected = activeWorkspace && session.id == _activeSessionId;
+    final Widget tile = ListTile(
+      key: activeWorkspace
+          ? Key('agent-session-${session.id}')
+          : ValueKey<String>('agent-session-$workspace-${session.id}'),
+      dense: true,
+      selected: selected,
+      selectedTileColor: Theme.of(context).colorScheme.primary
+          .withValues(alpha: 0.09),
+      contentPadding: const EdgeInsets.only(left: 32, right: 0),
+      leading: Tooltip(
+        message: _workspaceCatalog.length < 2 ? '添加第二个工作区后可移动会话' : '按住并拖到目标工作区',
+        child: Icon(
+          Icons.drag_indicator,
+          size: 17,
+          color: selected ? Theme.of(context).colorScheme.primary : null,
+        ),
+      ),
+      title: Text(
+        session.title,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 11),
+      ),
+      onTap: _running
+          ? null
+          : () => _activateWorkspaceSession(workspace, session.id),
+      trailing: _workspaceCatalog.length < 2
+          ? null
+          : _SessionMoveMenuButton(
+              buttonKey: activeWorkspace
+                  ? Key('agent-session-menu-${session.id}')
+                  : ValueKey<String>(
+                      'agent-session-menu-$workspace-${session.id}',
+                    ),
+              sourceWorkspace: workspace,
+              session: session,
+              activeWorkspace: activeWorkspace,
+              workspaceNames: _workspaceNames,
+              targets: _workspaceCatalog
+                  .where((String candidate) => candidate != workspace)
+                  .toList(growable: false),
+              onSelected: (String target) =>
+                  _requestMoveSession(workspace, session, target),
+            ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+    );
+    if (_running) return tile;
+    return MouseRegion(
+      cursor: _workspaceCatalog.length < 2
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.grab,
+      child: Draggable<_HarnessSessionDragPayload>(
+        data: _HarnessSessionDragPayload(
+          workspace: workspace,
+          session: session,
+        ),
+        maxSimultaneousDrags: _workspaceCatalog.length < 2 ? 0 : 1,
+        rootOverlay: true,
+        feedback: Material(
+          elevation: 6,
+          borderRadius: BorderRadius.circular(9),
+          child: SizedBox(
+            width: 190,
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.drag_indicator, size: 17),
+              title: Text(session.title, maxLines: 1),
+            ),
+          ),
+        ),
+        childWhenDragging: Opacity(opacity: 0.35, child: tile),
+        child: tile,
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+    HarnessEnvironmentReport? environment, {
+    required bool showSessionSidebar,
+    required bool sidebarCanFit,
+  }) {
     final String workspace = _workspace.text.trim();
     final String workspaceName = workspace.isEmpty
         ? '选择工作区'
@@ -1762,6 +2692,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       height: 40,
       child: Row(
         children: <Widget>[
+          if (!showSessionSidebar)
+            IconButton(
+              key: const Key('agent-open-session-sidebar'),
+              tooltip: sidebarCanFit ? '打开会话侧边栏' : '窗口加宽后可打开会话侧边栏',
+              onPressed: sidebarCanFit
+                  ? () => setState(() => _sessionSidebarOpen = true)
+                  : null,
+              icon: const Icon(Icons.menu, size: 19),
+            ),
           Tooltip(
             message: workspace.isEmpty ? '选择智能体可操作的项目目录' : workspace,
             child: ConstrainedBox(
@@ -2560,6 +3499,259 @@ class _MessageBubble extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HarnessSessionDragPayload {
+  const _HarnessSessionDragPayload({
+    required this.workspace,
+    required this.session,
+  });
+
+  final String workspace;
+  final HarnessConversationSession session;
+}
+
+class _SessionMoveMenuButton extends StatefulWidget {
+  const _SessionMoveMenuButton({
+    required this.sourceWorkspace,
+    required this.session,
+    required this.activeWorkspace,
+    required this.workspaceNames,
+    required this.targets,
+    required this.onSelected,
+    this.buttonKey,
+  });
+
+  final Key? buttonKey;
+  final String sourceWorkspace;
+  final HarnessConversationSession session;
+  final bool activeWorkspace;
+  final Map<String, String> workspaceNames;
+  final List<String> targets;
+  final Future<void> Function(String target) onSelected;
+
+  @override
+  State<_SessionMoveMenuButton> createState() => _SessionMoveMenuButtonState();
+}
+
+class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
+  final MenuController _controller = MenuController();
+
+  String _workspaceName(String path) =>
+      widget.workspaceNames[path] ?? path.replaceAll('\\', '/').split('/').last;
+
+  String _updatedTime(DateTime value) =>
+      '${value.hour.toString().padLeft(2, '0')}:'
+      '${value.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    const Color foreground = Color(0xFF20231F);
+    const Color muted = Color(0xFF73776F);
+    const Color accent = Color(0xFF3B6655);
+    return MenuAnchor(
+      controller: _controller,
+      consumeOutsideTap: true,
+      alignmentOffset: const Offset(8, -8),
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll<EdgeInsetsGeometry>(
+          EdgeInsets.zero,
+        ),
+        backgroundColor: const WidgetStatePropertyAll<Color>(Colors.white),
+        elevation: const WidgetStatePropertyAll<double>(12),
+        shadowColor: const WidgetStatePropertyAll<Color>(Color(0x33000000)),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        ),
+      ),
+      menuChildren: <Widget>[
+        Semantics(
+          container: true,
+          label: '会话所属项目与移动目标',
+          child: SizedBox(
+            width: 336,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F0EB),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.folder_rounded,
+                          size: 19,
+                          color: accent,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              _workspaceName(widget.sourceWorkspace),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: foreground,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: <Widget>[
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: widget.activeWorkspace
+                                        ? const Color(0xFF38A169)
+                                        : const Color(0xFF97A09A),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  widget.activeWorkspace ? '当前项目' : '来源项目',
+                                  style: const TextStyle(
+                                    color: muted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        _updatedTime(widget.session.updatedAt),
+                        style: const TextStyle(color: muted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      const Icon(
+                        Icons.account_tree_outlined,
+                        size: 15,
+                        color: muted,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          widget.sourceWorkspace,
+                          key: const Key('agent-session-source-workspace-path'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: muted, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 13),
+                    child: Divider(height: 1, color: Color(0xFFE6E9E4)),
+                  ),
+                  const Text(
+                    '移动到项目',
+                    style: TextStyle(
+                      color: muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  for (final String target in widget.targets)
+                    Semantics(
+                      button: true,
+                      label: '移动会话到 ${_workspaceName(target)}',
+                      child: InkWell(
+                        key: ValueKey<String>(
+                          'agent-session-move-target-$target',
+                        ),
+                        borderRadius: BorderRadius.circular(11),
+                        onTap: () {
+                          _controller.close();
+                          unawaited(widget.onSelected(target));
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              const Icon(
+                                Icons.folder_outlined,
+                                size: 19,
+                                color: accent,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      _workspaceName(target),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: foreground,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      target,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: muted,
+                                        fontSize: 10.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: muted,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+      builder:
+          (BuildContext context, MenuController controller, Widget? child) =>
+              IconButton(
+                key: widget.buttonKey,
+                tooltip: '会话所属项目与移动',
+                visualDensity: VisualDensity.compact,
+                onPressed: controller.isOpen
+                    ? controller.close
+                    : controller.open,
+                icon: const Icon(Icons.more_horiz, size: 18),
+              ),
     );
   }
 }

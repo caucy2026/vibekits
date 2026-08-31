@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PointerDeviceKind;
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,9 +10,32 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 import 'package:vibekits/features/dev_tools/domain/harness_agent_preferences.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_conversation_store.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
+import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
+  tearDown(() async {
+    // The production discovery singleton intentionally lives for the whole
+    // application. Widget tests must release its socket and periodic timers
+    // explicitly because destroying one workspace does not end the app.
+    await LanPeerDiscoveryService.instance.stop();
+  });
+
+  test('macOS Harness runtime 从主程序或 App.framework 都能定位 App bundle', () {
+    const String bundle = '/Applications/Vibekits.app';
+    expect(
+      macOsAppBundleForExecutable('$bundle/Contents/MacOS/Vibekits')?.path,
+      bundle,
+    );
+    expect(
+      macOsAppBundleForExecutable(
+        '$bundle/Contents/Frameworks/App.framework/Versions/A/App',
+      )?.path,
+      bundle,
+    );
+    expect(macOsAppBundleForExecutable('/usr/bin/dart'), isNull);
+  });
+
   test('Harness 调试目录创建 logs screenshots temp 三个子目录', () async {
     final Directory root = Directory.systemTemp.createTempSync(
       'vibekits_harness_debug_',
@@ -377,9 +402,287 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('agent-session-sidebar')), findsOneWidget);
-    expect(find.text('项目'), findsOneWidget);
-    expect(find.text('会话'), findsOneWidget);
+    expect(find.text('工作区'), findsOneWidget);
+    expect(find.byKey(const Key('agent-add-workspace')), findsOneWidget);
+    expect(find.byKey(const Key('agent-manage-workspaces')), findsOneWidget);
+    expect(find.byKey(const Key('agent-sidebar-settings')), findsOneWidget);
+    expect(find.text('设置'), findsOneWidget);
     expect(find.text('新建会话'), findsOneWidget);
+  });
+
+  testWidgets('标准 Mac 窗口可打开和收起会话侧边栏', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 800);
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('agent-session-sidebar')), findsOneWidget);
+    expect(find.byKey(const Key('agent-new-session-sidebar')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-close-session-sidebar')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-session-sidebar')), findsNothing);
+    expect(find.byKey(const Key('agent-open-session-sidebar')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-open-session-sidebar')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-session-sidebar')), findsOneWidget);
+  });
+
+  testWidgets('点击当前项目可折叠并重新展开对应会话', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 800);
+    addTearDown(tester.view.reset);
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_workspace_collapse_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime.now();
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'collapse-one',
+          title: '第一条会话',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+        HarnessConversationSession(
+          id: 'collapse-two',
+          title: '第二条会话',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+      activeSessionId: 'collapse-one',
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            loadWorkspaceCatalog: () async => <String>[workspace.path],
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder header = find.byKey(
+      ValueKey<String>('agent-workspace-header-${workspace.path}'),
+    );
+    expect(header, findsOneWidget);
+    expect(find.byKey(const Key('agent-session-collapse-one')), findsOneWidget);
+    expect(find.byKey(const Key('agent-session-collapse-two')), findsOneWidget);
+
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-session-collapse-one')), findsNothing);
+    expect(find.byKey(const Key('agent-session-collapse-two')), findsNothing);
+    expect(find.byTooltip('展开项目会话'), findsOneWidget);
+
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-session-collapse-one')), findsOneWidget);
+    expect(find.byKey(const Key('agent-session-collapse-two')), findsOneWidget);
+    expect(find.byTooltip('折叠项目会话'), findsOneWidget);
+  });
+
+  testWidgets('可添加工作区并拖动会话后确认权限根目录重绑定', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 800);
+    addTearDown(tester.view.reset);
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vibekits_workspace_move_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    final Directory source = Directory('${root.path}/source')..createSync();
+    final Directory target = Directory('${root.path}/target')..createSync();
+    final DateTime now = DateTime.now();
+    final HarnessConversationSession movable = HarnessConversationSession(
+      id: 'move-me',
+      title: '移动到目标项目',
+      messages: const <HarnessConversationMessage>[
+        HarnessConversationMessage(text: '继续实现功能', user: true),
+      ],
+      createdAt: now,
+      updatedAt: now,
+    );
+    final Map<String, HarnessConversationProject> projects =
+        <String, HarnessConversationProject>{
+          source.path: HarnessConversationProject(
+            workspace: source.path,
+            sessions: <HarnessConversationSession>[movable],
+            activeSessionId: movable.id,
+            updatedAt: now,
+          ),
+        };
+    List<String> savedCatalog = <String>[];
+    String activeWorkspace = source.path;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: source.path,
+            onWorkspaceChanged: (String value) async {
+              activeWorkspace = value;
+            },
+            pickDirectory: () async => target.path,
+            loadWorkspaceCatalog: () async => <String>[source.path],
+            saveWorkspaceCatalog: (List<String> value) async {
+              savedCatalog = List<String>.of(value);
+            },
+            loadConversation: (String workspace) async => projects[workspace],
+            saveConversation: (HarnessConversationProject project) async {
+              projects[project.workspace] = project;
+            },
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('agent-add-workspace')));
+    await tester.pumpAndSettle();
+    expect(savedCatalog, containsAll(<String>[source.path, target.path]));
+    expect(activeWorkspace, target.path);
+    expect(find.text('source'), findsWidgets);
+    expect(find.text('target'), findsWidgets);
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${target.path}')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('编辑名称'), findsOneWidget);
+    expect(find.text('在 Finder 中显示'), findsOneWidget);
+    expect(find.text('在此新建会话'), findsOneWidget);
+    expect(find.text('移除项目'), findsOneWidget);
+    await tester.tap(find.text('编辑名称'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('agent-workspace-name-field')),
+      '目标项目别名',
+    );
+    await tester.tap(find.byKey(const Key('agent-save-workspace-name')));
+    await tester.pumpAndSettle();
+    expect(find.text('目标项目别名'), findsWidgets);
+
+    final Finder targetWorkspace = find.byKey(
+      ValueKey<String>('agent-workspace-${target.path}'),
+    );
+    final TestGesture secondaryMouse = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    final Offset targetCenter = tester.getCenter(targetWorkspace);
+    await secondaryMouse.addPointer(location: targetCenter);
+    await secondaryMouse.down(targetCenter);
+    await secondaryMouse.up();
+    await secondaryMouse.removePointer();
+    await tester.pumpAndSettle();
+    expect(find.text('编辑名称'), findsOneWidget);
+    expect(find.text('移除项目'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    final Finder session = find.byKey(
+      ValueKey<String>('agent-session-${source.path}-move-me'),
+    );
+    expect(session, findsOneWidget);
+    expect(targetWorkspace, findsOneWidget);
+
+    final Finder sessionMenu = find.byKey(
+      ValueKey<String>('agent-session-menu-${source.path}-move-me'),
+    );
+    await tester.tap(sessionMenu);
+    await tester.pumpAndSettle();
+    expect(find.text('移动到项目'), findsOneWidget);
+    expect(find.text('移动到…'), findsNothing);
+    expect(
+      find.byKey(const Key('agent-session-source-workspace-path')),
+      findsOneWidget,
+    );
+    expect(find.text(source.path), findsOneWidget);
+    expect(find.text(target.path), findsAtLeast(1));
+    expect(
+      find.byKey(ValueKey<String>('agent-session-move-target-${target.path}')),
+      findsOneWidget,
+    );
+    await tester.tap(sessionMenu);
+    await tester.pumpAndSettle();
+
+    final Offset start = tester.getCenter(session);
+    final Offset end = tester.getCenter(targetWorkspace);
+    final TestGesture mouse = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+    );
+    await mouse.addPointer(location: start);
+    await mouse.down(start);
+    await mouse.moveTo(end);
+    await mouse.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('移动会话并重新绑定工作区权限？'), findsOneWidget);
+    expect(find.textContaining('workspace-write'), findsOneWidget);
+    expect(find.textContaining(source.path), findsWidgets);
+    expect(find.textContaining(target.path), findsWidgets);
+    await tester.tap(find.byKey(const Key('agent-confirm-move-session')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      projects[source.path]!.sessions.any(
+        (HarnessConversationSession item) => item.id == movable.id,
+      ),
+      isFalse,
+    );
+    expect(
+      projects[target.path]!.sessions.any(
+        (HarnessConversationSession item) => item.id == movable.id,
+      ),
+      isTrue,
+    );
+    expect(activeWorkspace, target.path);
   });
 
   testWidgets('设置异步恢复后工作区和 Codex 风格输入框立即更新', (WidgetTester tester) async {

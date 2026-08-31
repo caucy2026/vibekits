@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ] || [ ! -d "$1/Contents" ]; then
+  echo "usage: sign_macos_release.sh <App bundle>" >&2
+  exit 2
+fi
+
+APP_BUNDLE="$(cd "$1" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+RUNTIME="$APP_BUNDLE/Contents/Resources/tools/harness"
+SIGNED_MACHO=0
+
+sign_file() {
+  ITEM="$1"
+  if codesign --display "$ITEM" >/dev/null 2>&1; then
+    codesign --force --sign - \
+      --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
+      "$ITEM" >/dev/null
+  else
+    codesign --force --sign - "$ITEM" >/dev/null
+  fi
+  SIGNED_MACHO=$((SIGNED_MACHO + 1))
+}
+
+while IFS= read -r -d '' ITEM; do
+  KIND="$(/usr/bin/file -b "$ITEM")"
+  case "$KIND" in
+    Mach-O*) sign_file "$ITEM" ;;
+  esac
+done < <(find "$RUNTIME" "$APP_BUNDLE/Contents/Frameworks" -type f -print0)
+
+# Re-seal framework bundles after their binaries have been signed.
+while IFS= read -r -d '' FRAMEWORK; do
+  codesign --force --sign - \
+    --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
+    "$FRAMEWORK" >/dev/null
+done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
+
+codesign --force --sign - \
+  --entitlements "$PROJECT_ROOT/macos/Runner/Release.entitlements" \
+  "$APP_BUNDLE" >/dev/null
+
+while IFS= read -r -d '' ITEM; do
+  KIND="$(/usr/bin/file -b "$ITEM")"
+  case "$KIND" in
+    Mach-O*) codesign --verify --strict "$ITEM" ;;
+  esac
+done < <(find "$RUNTIME" "$APP_BUNDLE/Contents/Frameworks" -type f -print0)
+codesign --verify --strict "$APP_BUNDLE"
+echo "Signed and verified $SIGNED_MACHO Mach-O files: $APP_BUNDLE"

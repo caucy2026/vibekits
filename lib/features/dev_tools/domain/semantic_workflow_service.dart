@@ -188,8 +188,9 @@ class SemanticWorkflowService {
     for (final Object? raw in variables) {
       if (raw is! Map) continue;
       final String name = '${raw['name'] ?? ''}';
-      if (raw['required'] == true && !inputs.containsKey(name))
+      if (raw['required'] == true && !inputs.containsKey(name)) {
         missing.add(name);
+      }
     }
     if (missing.isNotEmpty) {
       throw FormatException('缺少回放输入：${missing.join(', ')}');
@@ -260,8 +261,9 @@ class SemanticWorkflowService {
           '${entry.key}': _bind(entry.value, inputs),
       };
     }
-    if (value is List)
+    if (value is List) {
       return <Object?>[for (final Object? item in value) _bind(item, inputs)];
+    }
     if (value is! String) return value;
     String result = value;
     for (final MapEntry<String, Object?> input in inputs.entries) {
@@ -381,10 +383,11 @@ class _RecordedStep {
           '${entry.key}': _template(entry.value, variables),
       };
     }
-    if (value is List)
+    if (value is List) {
       return <Object?>[
         for (final Object? item in value) _template(item, variables),
       ];
+    }
     if (value is! String) return value;
     String result = value;
     for (final _WorkflowVariable variable in variables) {

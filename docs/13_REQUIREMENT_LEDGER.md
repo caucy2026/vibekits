@@ -71,17 +71,17 @@
 | DEV-110 | 文件搜索 | 文件搜索工作区 | 名称/类型/大小/时间/内容；后台、可取消；结果可定位/哈希/压缩/批处理 | 名称/内容/类型/大小/时间、独立 Isolate、取消、定位/复制/哈希已闭环；压缩/批处理转交待补 |
 | DEV-111 | 系统截图 | 截图工作区 | 全屏/窗口/区域；预览、复制、保存、OCR/标注；遵循平台权限与快捷键 | Windows/macOS 区域截图后自动 OCR 已接入；完整保存/标注待实现 |
 | DEV-112 | GitHub 加速 | 网络工作台 | 诊断 DNS/TLS/HTTPS/SSH/代理；可信镜像/代理/SSH443；变更可预览、备份、恢复；不 MITM | 基础诊断已有，加速与恢复待实现 |
-| DEV-113 | 智能代理 | DeepSeek Harness | 直接嵌入固定版本的官方 Web UI；官方工作区/会话/对话/模型/权限/任务/工具为唯一事实源 | Windows 生产入口已切换为 `dsh web` + WebView2，旧 Flutter 壳仅保留为测试/非 Windows 过渡；macOS 待移植 |
-| DEV-114 | 输入 Key 即可工作 | Harness 运行时、Node、依赖、profile 和默认模型配置在编译阶段完成并随 Release 发布；运行时禁止 npm 下载/初始化；Key 验证后直接运行 | Windows 内置 Node、固定 dsh、profile、MCP 与启动配置已完成；官方 Key 输入框可直接 Ctrl+V/Cmd+V；冷启动启用 Node 编译缓存、存活等待和可诊断日志，不执行 npm 下载；待真实 DeepSeek Key 端到端实启 |
+| DEV-113 | 智能代理 | DeepSeek Harness | 直接嵌入固定版本的官方 Web UI；官方工作区/会话/对话/模型/权限/任务/工具为唯一事实源 | Windows 使用 `dsh web` + WebView2；macOS 原生 Flutter Harness 工作区已用随包官方 DSH 完成真实会话、MCP 工具调用和退出码验收 |
+| DEV-114 | 输入 Key 即可工作 | Harness 运行时、Node、依赖、profile 和默认模型配置在编译阶段完成并随 Release 发布；运行时禁止 npm 下载/初始化；Key 验证后直接运行 | Windows 与 macOS 均内置 Node、固定 DSH、profile、MCP 与启动配置；macOS 已用既有官方凭据真实调用 `capability_check` 成功，Key 不进入命令行、普通设置或日志；仍需补断网/错误 Key 和正式签名包矩阵 |
 | DEV-115 | Harness 调用 APP 全部工具 | 统一版本化工具目录；JSON 参数/结果；风险分级；一次性审批；后台执行、进度、取消、超时；对应工具显示可删除调用记录；ADB 等手工与智能体入口共用服务 | `vibekits.tools.v1` + 随机令牌回环 + 内置 MCP 已闭环；工具日志默认开启且可在设置关闭，开发工具按当前工具查看/删除；ADB 日志由真实进程层写入；微工具、程序员计算器、文件/SQLite/Git/HTTP/GitHub、串口和 ADB 已接；需长期会话或安全凭据别名的 SSH/SFTP/远程数据库继续按专用接口接入 |
 | DEV-116 | 硬件调试 | 串口调试 | 端口枚举/手输、波特率、数据位、校验、停止位、流控、文本/HEX、行尾、日志/历史；后台会话且关闭释放 | Windows 原生枚举、无效端口失败、后台响应、Widget 收发/关闭已闭环；真实 USB 串口与 macOS 待补证 |
 | DEV-117 | 工具必须可独立完成核心任务 | 禁止仅展示状态或仅连接；进入工具后可用最少操作完成核心输入、执行、结果查看、复制/清理；长任务后台运行且可取消 | ADB 已补选中设备命令终端、退出码/耗时/stdout/stderr、复制/清空；其他工具按此合同逐项体验审查 |
 | DEV-118 | 调用记录紧凑可读 | 默认使用小字号紧凑列表；展示人类可读的目标、命令、退出码和输出摘要，不把原始 JSON 当主界面 | ADB 专属记录和所有工具共用 Harness 记录弹窗已统一；原始证据仍保存在日志中 |
 | DEV-119 | Codex 式工具权限 | 输入区提供“请求批准 / 帮我批准 / 完全访问权限”；默认“帮我批准”且跨重启保存；普通注册工具不重复打断，破坏性操作仍询问；完全访问保存后跨页面/重启仍直接执行注册工具 | 三档状态机、持久化、官方 Harness 沙箱模式和原生授权回环桥已接通；MCP 与原生工具共用同一审批器，底层命令白名单不因完全访问而取消 |
 | DEV-120 | 展示可核对的推理中间态 | 运行回复中可展开查看“理解任务、规划操作、工具目标、真实结果、继续分析、生成回复”；不展示私有逐字思维链 | 已接入 Harness 生命周期与真实工具完成回调，成功/失败和耗时进入进度时间线 |
-| DEV-121 | 项目绑定多会话 | 完整复制官方 Workspace → ordered sessions 关系；支持添加/重命名/排序/移除工作区和重命名/排序/Fork/Archive/Delete 会话；持久化由官方 Host 拥有 | Windows 已改为官方 Web 单一数据源；归档保留数据可恢复，删除有独立菜单和二次确认，并移除会话目录、工作区索引和投影缓存；删除服务夹具已闭环 |
+| DEV-121 | 项目绑定多会话 | Workspace → ordered sessions 一对多关系；支持添加、搜索、切换、折叠和移出工作区；会话可移动到其他项目并重新绑定 workspace-write 权限；Windows 官方 Host 继续支持重命名/排序/Fork/Archive/Delete | Windows 使用官方 Web 单一数据源；macOS 原生工作区已持久化多项目目录、按项目显示会话、项目标题单击折叠/展开、搜索时临时展开匹配项、长按拖动/菜单移动和权限确认，移动不搬项目文件、运行中禁止移动；macOS 的 Fork/Archive/Delete 仍待与官方 Host 对齐 |
 | DEV-122 | Harness 调试目录 | 设置中指定日志、截图和临时文件根目录；默认 EXE 同级 `tmp`；跨重启保存；实际分流到 `logs/screenshots/temp`；日志不得含 Key | AppSettings 持久化、目录选择/创建、OCR 截图路由、Harness TEMP/TMP/日志环境与 stdout/stderr 文件落盘已接入；Windows 构建和实机目录检查见 dev.16 验收 |
-| DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows Git/ADB/7-Zip/Harness/Node 已随包；SSH/SFTP/转发为编译依赖；Release 对 Git/Harness 缺失执行构建失败；macOS Git/Harness/OCR 运行时仍待准备和实机验收 |
+| DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows Git/ADB/7-Zip/Harness/Node 已随包；macOS Universal Node/Harness 已随包且 Release 缺失时构建失败；macOS Git/OCR、正式签名公证仍待闭环 |
 | DEV-124 | 下载目录可配置 | 设置中显示并可选择工具与模型下载目录；默认 `%LOCALAPPDATA%\Vibekits\downloads`；下载使用 `.part` 暂存、哈希通过后原子改名；设置跨重启保存 | Windows 设置、持久化和模型下载路由已接入；随包工具固定在 Release 同级 `tools`，不与运行时下载混用 |
 | NODE-001～010 | Windows 真机成为局域网测试节点 | 只读体检、幂等计划、窄权限 UAC、D 盘门禁、OpenSSH/LAN 防火墙、独立设备公钥、真实跨设备验收与精确回滚 | NODE-001/002/004 的领域、Harness、UI、真实 Windows 只读探测已闭环；签名 helper、设备登记/撤销、跨设备验证仍为阻断项，不伪报完成 |
 | NET-201～204 | 诊断真实代理端口并仅修复 GitHub Git | 分层区分凭据/网络/代理/Git；loopback 候选；host-scoped 配置；失败自动恢复旧值 | NET-001～003 已实现并自动测试：真实监听发现、HTTPS/Git 候选验证、计划、host-scoped 应用和失败恢复；系统代理/TUN 按边界未开放 |

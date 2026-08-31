@@ -46,4 +46,8 @@ for (const directory of await packageDirectories()) {
 const specs = [...missing.entries()]
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([name, ranges]) => `${name}@${[...ranges][0]}`);
-process.stdout.write(JSON.stringify(specs));
+if (process.argv.includes('--null')) {
+  process.stdout.write(specs.join('\0'));
+} else {
+  process.stdout.write(JSON.stringify(specs));
+}

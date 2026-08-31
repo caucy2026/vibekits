@@ -91,12 +91,113 @@ typedef HarnessConversationLoader =
 typedef HarnessConversationSaver = Future<void> Function(
   HarnessConversationProject project,
 );
+typedef HarnessWorkspaceCatalogLoader = Future<List<String>> Function();
+typedef HarnessWorkspaceCatalogSaver = Future<void> Function(
+  List<String> workspaces,
+);
 
 abstract final class HarnessConversationStore {
   static const int maxSessions = 40;
   static const int maxMessages = 80;
   static const int maxMessageCharacters = 65536;
   static const int maxFileBytes = 8 * 1024 * 1024;
+  static const int maxWorkspaces = 40;
+
+  static Future<List<String>> loadWorkspaceCatalog() async {
+    final File file = _catalogFile();
+    if (!await file.exists()) return const <String>[];
+    try {
+      if (await file.length() > 64 * 1024) return const <String>[];
+      final Object? decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map || decoded['workspaces'] is! List) {
+        return const <String>[];
+      }
+      return List<String>.unmodifiable(
+        _normalizeWorkspaceList(
+          (decoded['workspaces']! as List).whereType<String>(),
+        ),
+      );
+    } on Object {
+      return const <String>[];
+    }
+  }
+
+  static Future<void> saveWorkspaceCatalog(List<String> workspaces) async {
+    final List<String> normalized = _normalizeWorkspaceList(workspaces);
+    final File file = _catalogFile();
+    final Map<String, String> names = await loadWorkspaceNames();
+    await file.parent.create(recursive: true);
+    final File temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(
+      jsonEncode(<String, Object?>{
+        'version': 2,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'workspaces': normalized,
+        'names': <String, String>{
+          for (final String workspace in normalized)
+            if (names[workspace]?.isNotEmpty == true)
+              workspace: names[workspace]!,
+        },
+      }),
+      flush: true,
+    );
+    if (await file.exists()) await file.delete();
+    await temporary.rename(file.path);
+  }
+
+  static Future<Map<String, String>> loadWorkspaceNames() async {
+    final File file = _catalogFile();
+    if (!await file.exists()) return const <String, String>{};
+    try {
+      if (await file.length() > 64 * 1024) return const <String, String>{};
+      final Object? decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map || decoded['names'] is! Map) {
+        return const <String, String>{};
+      }
+      final Map<String, String> result = <String, String>{};
+      for (final MapEntry<Object?, Object?> entry
+          in (decoded['names']! as Map).entries) {
+        if (entry.key is! String || entry.value is! String) continue;
+        final String workspace = _normalizeWorkspace(entry.key! as String);
+        final String name = (entry.value! as String).trim();
+        if (workspace.isNotEmpty && name.isNotEmpty && name.length <= 80) {
+          result[workspace] = name;
+        }
+      }
+      return Map<String, String>.unmodifiable(result);
+    } on Object {
+      return const <String, String>{};
+    }
+  }
+
+  static Future<void> saveWorkspaceName(String workspace, String? name) async {
+    final String normalized = _normalizeWorkspace(workspace);
+    if (normalized.isEmpty) return;
+    final List<String> workspaces = await loadWorkspaceCatalog();
+    final Map<String, String> names = Map<String, String>.of(
+      await loadWorkspaceNames(),
+    );
+    final String value = name?.trim() ?? '';
+    if (value.isEmpty) {
+      names.remove(normalized);
+    } else {
+      names[normalized] = value.length <= 80 ? value : value.substring(0, 80);
+    }
+    final File file = _catalogFile();
+    await file.parent.create(recursive: true);
+    final File temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(
+      jsonEncode(<String, Object?>{
+        'version': 2,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'workspaces': workspaces,
+        'names': names,
+      }),
+      flush: true,
+    );
+    if (await file.exists()) await file.delete();
+    await temporary.rename(file.path);
+  }
 
   static Future<HarnessConversationProject?> load(String workspace) async {
     final String normalized = _normalizeWorkspace(workspace);
@@ -308,14 +409,40 @@ abstract final class HarnessConversationStore {
   }
 
   static File _fileFor(String workspace) {
+    final String id = sha256.convert(utf8.encode(workspace)).toString();
+    return File(
+      '${_harnessStoreDirectory().path}${Platform.pathSeparator}conversations'
+      '${Platform.pathSeparator}$id.json',
+    );
+  }
+
+  static File _catalogFile() => File(
+    '${_harnessStoreDirectory().path}${Platform.pathSeparator}workspace-catalog.json',
+  );
+
+  static Directory _harnessStoreDirectory() {
     final String base = Platform.isWindows
         ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
         : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
-    final String id = sha256.convert(utf8.encode(workspace)).toString();
-    return File(
-      '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness'
-      '${Platform.pathSeparator}conversations${Platform.pathSeparator}$id.json',
+    return Directory(
+      '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
     );
+  }
+
+  static List<String> _normalizeWorkspaceList(Iterable<String> values) {
+    final Set<String> seen = <String>{};
+    final List<String> result = <String>[];
+    for (final String raw in values) {
+      final String workspace = _normalizeWorkspace(raw);
+      if (workspace.isEmpty || !Directory(workspace).isAbsolute) continue;
+      final String identity = Platform.isWindows
+          ? workspace.toLowerCase()
+          : workspace;
+      if (!seen.add(identity)) continue;
+      result.add(workspace);
+      if (result.length == maxWorkspaces) break;
+    }
+    return result;
   }
 
   static String _normalizeWorkspace(String value) {

@@ -43,6 +43,12 @@ migrate_working_dir/
 # not 32k npm files or the 92 MiB Node executable.
 /native/harness/windows/runtime/
 
+# Prepared macOS Harness runtime is also reproduced by the pinned preparation
+# script. It contains about 30k npm files and a Universal Node binary larger
+# than GitHub's single-file limit, so only the recipe and verification scripts
+# belong in source control.
+/native/harness/macos/runtime/
+
 # Prepared official MinGit runtime. The pinned, hash-verified recipe is kept in
 # Git while the extracted redistributable is supplied to Windows packaging.
 /native/git/windows/runtime/
@@ -56,6 +62,11 @@ migrate_working_dir/
 /tmp/
 /.cache/
 /dev*.png
+
+# Explicitly gated, environment-specific production E2E probes contain local
+# fixture paths and device identities. Keep them local; portable contract and
+# integration tests remain tracked.
+/test/_live_*
 
 # Symbolication related
 app.*.symbols

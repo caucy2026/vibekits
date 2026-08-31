@@ -146,8 +146,9 @@ class LanMcpToolServer {
       }
     }
     final Object? decoded = jsonDecode(utf8.decode(bytes));
-    if (decoded is! Map)
+    if (decoded is! Map) {
       throw const FormatException('MCP request is not an object');
+    }
     return Map<String, Object?>.from(decoded);
   }
 

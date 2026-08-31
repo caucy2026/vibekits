@@ -170,10 +170,8 @@ abstract interface class RemoteSftpSessionHandle
   Future<SftpClient> openSftp();
 }
 
-typedef RemoteHostKeyVerifier = Future<bool> Function(
-  String type,
-  String fingerprint,
-);
+typedef RemoteHostKeyVerifier =
+    Future<bool> Function(String type, String fingerprint);
 
 class RemoteCommandResult {
   const RemoteCommandResult({
@@ -423,11 +421,11 @@ abstract final class RemoteSshConnector {
       final SSHSession session = await client.execute(source);
       final Future<String> stdout = session.stdout
           .cast<List<int>>()
-          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const Utf8Decoder())
           .join();
       final Future<String> stderr = session.stderr
           .cast<List<int>>()
-          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const Utf8Decoder())
           .join();
       await session.done.timeout(const Duration(seconds: 30));
       return RemoteCommandResult(
@@ -448,11 +446,11 @@ class _DartSshRemoteSession implements RemoteSftpSessionHandle {
   _DartSshRemoteSession._(this._client, this._session) {
     _stdout = _session.stdout
         .cast<List<int>>()
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add, onError: _output.addError);
     _stderr = _session.stderr
         .cast<List<int>>()
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add, onError: _output.addError);
     _exit = _session.done.then((_) async {
       _running = false;
@@ -537,10 +535,10 @@ class _DartSshRemoteSession implements RemoteSftpSessionHandle {
 class _ProcessRemoteSession implements RemoteSessionHandle {
   _ProcessRemoteSession(this._process) {
     _stdout = _process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add);
     _stderr = _process.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add);
     _exit = _process.exitCode.then((int code) async {
       _running = false;

@@ -41,7 +41,7 @@
 - Flutter：`3.47.0`；Dart：`3.13`。
 - `flutter analyze --no-pub`：0 issue。
 - Harness/ADB 核心定向测试：42/42；新增的两条 Harness 远端 ADB endpoint 用例分别通过。
-- macOS Release 构建成功：`build/macos/Build/Products/Release/Vibekits.app`，约 135.5 MB。
+- macOS Release 已在 2026-08-31 重新构建为自包含 Harness 包：`build/macos/Build/Products/Release/Vibekits.app`，磁盘占用约 645 MiB，其中 `Contents/Resources/tools/harness` 约 505 MiB。
 - Release App 已实际启动，界面显示 `v1.9.0-dev.137+2137`、系统就绪。
 - 正式 socket 实际解析为 `/var/folders/rz/9rnd37v141l9hbwmd4j4l_1h0000gn/T/vkh/v1.sock`；实际权限为目录 `0700`、socket `0600`。
 - 独立本机客户端已对 Release App 完成 `helloAck → subscribe → snapshot → unsubscribe`，nonce/protocol/version/schema 均匹配。
@@ -55,10 +55,11 @@
 
 1. 当前没有第二台运行兼容候选版本、且远端 `127.0.0.1:5037` 可用的已连接 RustDesk peer；因此尚不能真实执行 `devices/getprop/logcat/push/pull/install` 和断线清理验收。
 2. 尚未在两端兼容版本上取得 RustDesk 远端 Harness 只读面板截图并验证 busy/idle/stale/disconnected。
-3. 当前 macOS 包没有自包含 DSH/Node Harness 运行时。仓库文档已明确 macOS 自包含运行时尚未生成；Release UI 因而显示“内置 Harness 运行时缺失或损坏”。状态 publisher 本身可用，但 macOS 上真正启动 Harness 仍需单独完成运行时资产打包。
-4. Windows 安全 Named Pipe Harness transport 尚未交付，当前明确 fail-closed；不得以 TCP 临时替代。
+3. Windows 安全 Named Pipe Harness transport 尚未交付，当前明确 fail-closed；不得以 TCP 临时替代。
 
-以上四项都是发布范围/外部环境门槛，不应由模拟测试替代。当前没有安装覆盖 `/Applications` 中正在使用的正式 App，也没有提交或推送代码。
+原第 3 项 macOS 自包含 Harness 阻塞已于 2026-08-31 消除：Universal Node 24.20.0、`@deepseek-ai/dsh@0.1.1-rc.2`、生产依赖和 Vibekits MCP sidecar 已进入 `Contents/Resources/tools/harness`；新 Release 实际显示“Harness 就绪”，并真实完成一次 `vibekits.system.capability_check`（日志 `exitCode=0`）。详细证据见 `docs/56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md`。
+
+以上三项是发布范围/外部环境门槛，不应由模拟测试替代。当前没有安装覆盖 `/Applications` 中正在使用的正式 App，也没有提交或推送代码。
 
 ## 5. 相关契约
 

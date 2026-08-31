@@ -180,17 +180,13 @@ abstract interface class HarnessAgentHandle {
 }
 
 typedef HarnessEnvironmentChecker = Future<HarnessEnvironmentReport> Function();
-typedef HarnessSessionStarter = Future<HarnessSessionHandle> Function(
-  HarnessLaunchSpec spec,
-);
+typedef HarnessSessionStarter =
+    Future<HarnessSessionHandle> Function(HarnessLaunchSpec spec);
 typedef HarnessBrowserOpener = Future<void> Function(Uri url);
-typedef HarnessAgentRunner = Future<HarnessAgentHandle> Function(
-  HarnessAgentRequest request,
-);
-typedef HarnessModelLister = Future<List<String>> Function(
-  String apiKey,
-  String baseUrl,
-);
+typedef HarnessAgentRunner =
+    Future<HarnessAgentHandle> Function(HarnessAgentRequest request);
+typedef HarnessModelLister =
+    Future<List<String>> Function(String apiKey, String baseUrl);
 
 abstract final class DeepSeekHarnessService {
   /// Official DSH ships optional multi-provider, telemetry and HMR plugins.
@@ -212,6 +208,8 @@ abstract final class DeepSeekHarnessService {
 你运行在 VibeKits 内部。询问 APP 功能时，先调用只读工具 `vibekits.system.capability_check`，并分别报告 5 个产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
+
+需要从多个 MCP 实例选择同类能力时，必须先调用 `vibekits.mcp.catalog_list`，固定按本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网 MCP（lan）选择；评分不能跨层抢占。同一层内优先 `reputation.score` 更高的工具，`poor/garbage` 降权但不得假装不存在。多个设备提供同名工具时共享工具类型全局分，同时逐台核对在线状态、证书和当前端点。调用后尊重自动完成质量记录；需要查看或人工评价时使用 `vibekits.mcp.reputation_list/reputation_rate`。任何评分均不得绕过参数 Schema、TLS、目录认证和写入/控制审批。
 
 统一采用“自动发现、自动配置、证据验证”原则：能由 `list/inspect/status`、保存会话、设备枚举或安全试探得到的参数不得询问用户。仅在没有保存记录时询问账号/登录身份；密码、API Key、Token、私钥口令等秘密必须由用户输入；破坏性操作仍需用户确认。失败时先尝试安全候选并返回证据，不把实现细节转嫁给用户。
 
@@ -401,14 +399,21 @@ abstract final class DeepSeekHarnessService {
         model: defaultModel,
         message: 'Harness 环境检查超时',
       );
-    } on Object {
-      return const HarnessEnvironmentReport(
+    } on Object catch (error) {
+      final String detail = '$error'
+          .replaceAll(RegExp(r'[\r\n]+'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      return HarnessEnvironmentReport(
         ready: false,
         nodeVersion: null,
         npxVersion: null,
         baseUrl: defaultBaseUrl,
         model: defaultModel,
-        message: '内置 Harness 运行时缺失或损坏，请重新安装 Vibekits',
+        message: detail.isEmpty
+            ? '内置 Harness 运行时缺失或损坏，请重新安装 Vibekits'
+            : '内置 Harness 运行时不可用：'
+                  '${detail.length <= 240 ? detail : detail.substring(0, 240)}',
       );
     }
   }
@@ -890,10 +895,20 @@ class _HarnessRuntime {
 }
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
-  final String executableDirectory = File(Platform.resolvedExecutable)
-      .parent
-      .path;
+  final String executableDirectory = File(
+    Platform.resolvedExecutable,
+  ).parent.path;
+  final Directory? appBundle = Platform.isMacOS
+      ? macOsAppBundleForExecutable(Platform.resolvedExecutable)
+      : null;
   final List<Directory> candidates = <Directory>[
+    if (appBundle != null)
+      Directory(
+        '${appBundle.path}${Platform.pathSeparator}Contents'
+        '${Platform.pathSeparator}Resources${Platform.pathSeparator}tools'
+        '${Platform.pathSeparator}harness',
+      ),
+    // Retain the legacy Windows/sideload layout for existing installations.
     Directory(
       '$executableDirectory${Platform.pathSeparator}tools${Platform.pathSeparator}harness',
     ),
@@ -962,6 +977,20 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');
+}
+
+/// Flutter may report either Contents/MacOS/Vibekits or the AOT
+/// App.framework binary as [Platform.resolvedExecutable]. Walk ancestors
+/// instead of assuming one layout.
+Directory? macOsAppBundleForExecutable(String resolvedExecutable) {
+  Directory cursor = File(resolvedExecutable).absolute.parent;
+  for (int depth = 0; depth < 12; depth++) {
+    if (cursor.path.toLowerCase().endsWith('.app')) return cursor;
+    final Directory parent = cursor.parent;
+    if (parent.path == cursor.path) break;
+    cursor = parent;
+  }
+  return null;
 }
 
 class _MobileHarnessAgent implements HarnessAgentHandle {
@@ -1202,10 +1231,10 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
   ) {
     _log = logFile.openWrite(mode: FileMode.append);
     _stdout = _process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen((String chunk) => _forward('stdout', chunk));
     _stderr = _process.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen((String chunk) => _forward('stderr', chunk));
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
@@ -1262,10 +1291,10 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
 class _ProcessHarnessSession implements HarnessSessionHandle {
   _ProcessHarnessSession(this._process, this.url) {
     _stdout = _process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add);
     _stderr = _process.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen(_output.add);
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
@@ -1315,18 +1344,20 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
       unawaited(_log.flush());
     });
     _stdout = _process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen((String chunk) => _forward('stdout', chunk));
     _stdoutDone = _stdout.asFuture<void>();
     _stderr = _process.stderr
-        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const Utf8Decoder())
         .listen((String chunk) => _forward('stderr', chunk));
     _stderrDone = _stderr.asFuture<void>();
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
       try {
-        await Future.wait<void>(<Future<void>>[_stdoutDone, _stderrDone])
-            .timeout(const Duration(seconds: 2));
+        await Future.wait<void>(<Future<void>>[
+          _stdoutDone,
+          _stderrDone,
+        ]).timeout(const Duration(seconds: 2));
       } on Object {
         await _stdout.cancel();
         await _stderr.cancel();

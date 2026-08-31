@@ -118,6 +118,9 @@
 111. [Vibekits × RustDesk 联调验收报告](53_VIBEKITS_RUSTDESK_INTEGRATION_REVIEW_2026-08-30.md)——macOS 构建、本机真实握手、双方测试结果、最终产物和仍需远端设备完成的硬门槛
 112. [macOS 最近 Windows 功能对齐与实机验收](54_MACOS_RECENT_WINDOWS_FEATURE_PARITY.md)——MCP工具轨、设备身份、三层目录、组播复用、沙箱权限和Mac Release验收步骤
 113. [Harness 语义 Record & Replay](55_HARNESS_SEMANTIC_RECORD_AND_REPLAY.md)——一次示教生成参数化 Skill，按实时三层 MCP 重新规划、逐步验证和安全恢复，禁止坐标宏回放
+114. [VibeKits × KEMI传书 LMCP/2 联调记录](55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md)——协议代际根因、TLS指纹固定、真实目录与工具调用、滚动升级边界
+115. [macOS 自包含 Harness 运行时验收](56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md)——Key 已配置仍启动失败的根因、Universal Node/DSH 打包签名、真实工具调用证据和剩余发布门槛
+116. [MCP 全局信誉、长期记忆与 Harness 路由验收规范](57_MCP_GLOBAL_REPUTATION_AND_ROUTING_ACCEPTANCE_2026-08-31.md)——本机/本地/局域网固定优先级、跨设备工具类型评分、垃圾工具降权、UI 标识和安全验收
 
 ## 完成定义
 

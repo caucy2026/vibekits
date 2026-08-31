@@ -327,17 +327,21 @@ abstract final class SystemDriveAnalyzer {
       (SystemDriveUsageEntry left, SystemDriveUsageEntry right) =>
           right.sizeBytes.compareTo(left.sizeBytes),
     );
+    final int logicalMeasuredBytes = entries.fold<int>(
+      0,
+      (int total, SystemDriveUsageEntry entry) => total + entry.sizeBytes,
+    );
     return SystemDriveAnalysis(
       rootPath: rootPath,
       entries: entries,
       cancelled: token.isCancelled,
       unreadablePaths: unreadable,
       visitedEntries: visited,
-      measuredBytes: entries.fold<int>(
-        0,
-        (int total, SystemDriveUsageEntry entry) => total + entry.sizeBytes,
-      ),
-      totalBytes: disk?.totalBytes ?? 0,
+      measuredBytes: logicalMeasuredBytes,
+      // Some sandboxed/temp roots do not expose a volume statistic. Preserve
+      // a useful non-zero capacity floor from the bytes we actually measured
+      // instead of returning an internally contradictory zero total.
+      totalBytes: disk?.totalBytes ?? logicalMeasuredBytes,
       freeBytes: disk?.freeBytes ?? 0,
       availableBytes: disk?.availableBytes ?? 0,
       breakdownEntries: breakdownEntries,

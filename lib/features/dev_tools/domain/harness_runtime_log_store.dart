@@ -92,10 +92,9 @@ abstract final class HarnessRuntimeLogStore {
     String path, {
     int maxBytes = 256 * 1024,
   }) async {
-    final String logsRoot = Directory('$rootPath${Platform.pathSeparator}logs')
-        .absolute
-        .path
-        .toLowerCase();
+    final String logsRoot = Directory(
+      '$rootPath${Platform.pathSeparator}logs',
+    ).absolute.path.toLowerCase();
     final File file = File(path).absolute;
     if (!file.path.toLowerCase().startsWith(
       '$logsRoot${Platform.pathSeparator}',
@@ -108,7 +107,7 @@ abstract final class HarnessRuntimeLogStore {
       final int start = length > maxBytes ? length - maxBytes : 0;
       await reader.setPosition(start);
       final List<int> bytes = await reader.read(length - start);
-      String text = const Utf8Decoder(allowMalformed: true).convert(bytes);
+      String text = const Utf8Decoder().convert(bytes);
       if (start > 0) {
         final int firstLine = text.indexOf('\n');
         if (firstLine >= 0) text = text.substring(firstLine + 1);

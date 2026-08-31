@@ -59,9 +59,9 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 
 - 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；2026-08-27 通过官方 npm registry 查询并固定的 CLI 版本：`@deepseek-ai/dsh@0.1.1-rc.2`。
 - 状态：官方仍是 Developer Preview，存在破坏性变更风险；Vibekits 保留可替换进程适配层，并将固定的 Node、CLI 与生产依赖打入安装包。
-- 发布前由 `tool/prepare_harness_runtime.ps1` 固定安装 `@deepseek-ai/dsh@0.1.1-rc.2`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。Windows 通过内置 `node` 启动内置 `dsh web`，再用 WebView2 嵌入其官方生产界面；不调用 npm/npx、不联网安装，也不依赖用户 PATH。
+- 发布前 Windows 由 `tool/prepare_harness_runtime.ps1`、macOS 由 `tool/prepare_harness_runtime_macos.sh` 固定安装 `@deepseek-ai/dsh@0.1.1-rc.2`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。macOS 脚本从 nodejs.org 下载 Node 24.20.0 arm64/x64 官方归档并逐项核对官方 `SHASUMS256.txt`，使用 `lipo` 生成 Universal Node，同时显式补齐 sharp、libvips、koffi 和 node-addon-require-builtin 的 x64/arm64 原生包。运行时不调用 npm/npx、不联网安装，也不依赖用户 PATH。
 - DeepSeek API Key 由官方 Harness 的 Settings → Models 页面录入，写入 `$DSH_HOME/.credentials.yaml`；Web 子进程不注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` 或 `DEEPSEEK_BASE_URL`，避免把官方字段锁成只读并确保设置热更新。旧版系统凭据只做一次迁移，密钥不进入源码、安装包、普通设置或日志。
-- Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。macOS 真启动、WebView 容器和停止后无残留进程仍待验收。
+- Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。2026-08-31 macOS Universal Release 也已完成真实启动：界面显示“Harness 就绪”，官方 DSH 实际调用 `vibekits.system.capability_check` 成功并以 `exitCode=0` 结束；详见 `56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md`。正式 Developer ID 签名、公证及 Intel 实机仍是发布门槛。
 
 ## 开源借鉴边界
 
@@ -80,6 +80,6 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 ## 当前供应链缺口
 
 - macOS ONNX Runtime arm64/x64 原生库和桥接尚未固定版本与哈希，因此 macOS OCR 不得标记完成。
-- macOS 自包含 Git 与 Harness 运行时尚未生成和实机验收，因此本轮“无外部依赖”只对 Windows 发布路径闭环。
+- macOS 自包含 Harness/Node 已生成并完成 Apple Silicon Release 实机验收；macOS 自包含 Git、Developer ID 签名/公证及 Intel 实机仍未闭环，不能把 ad-hoc 联调包当成正式外发包。
 - 正式安装器还需汇总完整 NOTICE/SBOM，并在安装目录提供所有必须随附的许可证文本。
 - HEIF/AVIF/JXL/RAW 解码器尚未选型；许可证和二进制供应链评审前不得只注册扩展名假装支持。

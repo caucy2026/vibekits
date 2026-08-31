@@ -1156,3 +1156,21 @@
 - 官方 Harness 界面新增独立“运行日志”入口，可刷新、选择文件并滚动查看有界尾部；新增 `vibekits.harness.diagnostics` 只读接口，供 Harness 自查最近运行日志和工具调用记录。
 - 目录容量、24 小时保留策略、低磁盘不自动选择、日志可读取与敏感字段脱敏等针对性回归 34/34 通过；本次改动文件静态检查无问题。
 - Windows Release 构建与 29 项随包运行时检查通过；最新 APP 实启后 9.2 秒进入 Harness ready，`harness-work.jsonl` 真实写入 starting/ready，现场调试目录识别 469 个日志文件、47,226 B 总量、24,214 B 达到可清理保留期。
+
+# 2026-08-31 · macOS Harness、LMCP/2 与 MCP 长期信誉收口
+
+- macOS Release 内置 Universal Node 24.20.0、固定 DSH、MCP sidecar 和全部 Darwin 原生依赖；运行时既支持从 `Contents/MacOS` 也支持从 `App.framework` 反查 App bundle。20 个 Mach-O 逐项 ad-hoc 签名后，App 深度签名验证通过。
+- Harness 左侧项目树完成多工作区添加、搜索、重命名、右键信息卡、会话拖动/菜单移动和 `workspace-write` 权限重绑定；项目名称 12.5px、会话 11px。单击当前项目标题可折叠其全部会话，再次单击恢复；点击其他项目仍切换并展开，搜索会临时显示匹配会话。
+- VibeKits 和 KEMI传书可共享 UDP 47831 并双向发现；VibeKits 作为 LMCP/2 客户端完成 TLS 指纹固定、目录校验和真实工具调用，作为服务端打开 MCP 前必须展示完整权限与风险确认，关闭时不监听 HTTPS 调用端口。
+- 新增 MCP 全局长期信誉：固定 `app → local → lan` 路由层级，同层候选按评分排序；同名工具跨设备共享分数，成功、失败、超时和完成度自动加权，人工 0–5 分可覆盖倾向，0 分/低于 30 标记为“垃圾”但不隐藏或绕过审批。无真实历史的工具保持原 UI。
+- 本地其他进程 MCP 已接入无 shell 的 stdio `initialize → tools/list → tools/call`；局域网 MCP 继续要求 LMCP/2、TLS pinning、目录摘要和副作用审批。新增 `vibekits.mcp.reputation_list` 与 `vibekits.mcp.reputation_rate`。
+- 最终验证：Flutter 3.47.0 `analyze --no-pub` 0 issue；Harness 界面 17/17、Harness/MCP 联合 36/36、MCP 评分与路由 8/8、Harness 工具桥 28/28（另 1 项按平台条件跳过）；macOS Release 592.8 MB，最终 App executable SHA-256 `3ac39c2456748cb148dbf232dae11aa9ea0bc4904a999812572c2003d415433b`，App.framework SHA-256 `e635c49cba36c0202e5c869cd83c414d2770d84e4fe35ea65b0436b994aebb3d`。
+- 最终 Release 已作为唯一 VibeKits 实例运行并监听 UDP 47831；MCP 暴露开关保持关闭，未绕过用户授权强制开启 9443。专题证据见 `55_KEMI_SEND_LMCP2_INTEROP_2026-08-30.md`、`56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md` 和 `57_MCP_GLOBAL_REPUTATION_AND_ROUTING_ACCEPTANCE_2026-08-31.md`。
+
+# 2026-08-31 · 云端主线同步与 GitHub 备份复核
+
+- 在推送前先同步 `origin/main` 新增的语义工作流录制/回放、MCP 设置入口和开启确认改动，再将本地 macOS Harness、严格 LMCP/2、工作区/会话交互和 MCP 信誉路由提交 rebase 到最新主线；没有覆盖或丢弃云端功能。
+- 合并时统一发现模型的端点字段：`VibekitsLanPeer.port` 同时承载旧 LMCP/1 `ssh-stdio` 端口与 LMCP/2 HTTPS 端口；旧公告仍可读取顶层 `sshPort`，新公告固定从 endpoint `port` 读取。LMCP/2 继续强制 TLS 指纹、目录/调用双端点一致和 `/mcp`，未退回无证书的 HTTP JSON-RPC。
+- 云端紧凑 MCP 设置弹窗与本地 60px 工具轨同时保留；开启动作仍必须先生成实例证书并展示完整工具清单、权限和风险，取消时不会保存开关或启动 HTTPS 服务。
+- 修复合并后 `consentVersion` 重复写入、异步测试桩签名和 Dart 风格问题。最终 `flutter analyze --no-pub` 为 0 issue；Harness、设备身份/开关持久化、LAN 发现、LMCP/2 服务端、开启确认、全局评分/路由、能力目录及工具桥定向测试 69 项通过，另 1 项按平台条件跳过。
+- 本节验证的是同步后的源码提交。上一节所列 Release 哈希属于同步前已构建产物；未重新构建时不得声称该二进制包含本节云端合并内容。

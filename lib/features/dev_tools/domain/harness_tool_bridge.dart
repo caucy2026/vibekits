@@ -123,26 +123,26 @@ class HarnessToolCallResult {
   };
 }
 
-typedef HarnessToolApproval = Future<bool> Function(
-  HarnessToolApprovalRequest request,
-);
-typedef HarnessToolHandler = Future<Map<String, Object?>> Function(
-  Map<String, Object?> arguments,
-);
+typedef HarnessToolApproval =
+    Future<bool> Function(HarnessToolApprovalRequest request);
+typedef HarnessToolHandler =
+    Future<Map<String, Object?>> Function(Map<String, Object?> arguments);
 typedef HarnessRemoteProfileLoader =
     Future<List<RemoteConnectionRecord>> Function();
 typedef HarnessCredentialReader = Future<String?> Function(String key);
-typedef HarnessRemoteCommandRunner = Future<RemoteCommandResult> Function(
-  RemoteConnectionProfile profile,
-  String command,
-  String? secret,
-  RemoteHostKeyVerifier verifyHostKey,
-);
-typedef HarnessRemoteFileConnector = Future<RemoteFileClient> Function(
-  RemoteConnectionProfile profile,
-  String? secret,
-  RemoteHostKeyVerifier verifyHostKey,
-);
+typedef HarnessRemoteCommandRunner =
+    Future<RemoteCommandResult> Function(
+      RemoteConnectionProfile profile,
+      String command,
+      String? secret,
+      RemoteHostKeyVerifier verifyHostKey,
+    );
+typedef HarnessRemoteFileConnector =
+    Future<RemoteFileClient> Function(
+      RemoteConnectionProfile profile,
+      String? secret,
+      RemoteHostKeyVerifier verifyHostKey,
+    );
 typedef HarnessRemoteDatabaseProfileLoader =
     Future<List<RemoteDatabaseProfile>> Function();
 typedef HarnessRemoteDatabaseInspector =
@@ -150,18 +150,32 @@ typedef HarnessRemoteDatabaseInspector =
       RemoteDatabaseProfile profile,
       String password,
     );
-typedef HarnessRemoteDatabaseQuerier = Future<SqliteResultPage> Function(
-  RemoteDatabaseProfile profile,
-  String password,
-  String sql,
-);
-typedef HarnessRemoteWorkspaceLauncher = Future<void> Function(
-  RemoteWorkspaceIntent intent,
-);
+typedef HarnessRemoteDatabaseQuerier =
+    Future<SqliteResultPage> Function(
+      RemoteDatabaseProfile profile,
+      String password,
+      String sql,
+    );
+typedef HarnessRemoteWorkspaceLauncher =
+    Future<void> Function(RemoteWorkspaceIntent intent);
 typedef HarnessScreenshotOcrRunner = Future<Map<String, Object?>> Function();
-typedef HarnessSerialOpener = Future<SerialPortSession> Function(
-  SerialConnectionSettings settings,
-);
+typedef HarnessSerialOpener =
+    Future<SerialPortSession> Function(SerialConnectionSettings settings);
+typedef HarnessMcpCatalogLoader = Future<Map<String, Object?>> Function();
+typedef HarnessMcpToolInvoker =
+    Future<Map<String, Object?>> Function(
+      String instanceId,
+      String toolName,
+      Map<String, Object?> arguments,
+    );
+typedef HarnessMcpReputationLoader = Future<Map<String, Object?>> Function();
+typedef HarnessMcpReputationRater =
+    Future<Map<String, Object?>> Function(
+      String tier,
+      String instanceId,
+      String toolName,
+      int rating,
+    );
 
 /// Harness 只能通过此桥接调用 Vibekits 能力。
 ///
@@ -192,6 +206,10 @@ class VibekitsHarnessToolBridge {
     String? downloadDirectory,
     Future<void> Function(int processId)? runtimeBindProcessTree,
     Future<void> Function(int processId)? runtimeReleaseProcessTree,
+    HarnessMcpCatalogLoader? mcpCatalogLoader,
+    HarnessMcpToolInvoker? mcpToolInvoker,
+    HarnessMcpReputationLoader? mcpReputationLoader,
+    HarnessMcpReputationRater? mcpReputationRater,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -215,6 +233,10 @@ class VibekitsHarnessToolBridge {
     downloadDirectory,
     runtimeBindProcessTree,
     runtimeReleaseProcessTree,
+    mcpCatalogLoader,
+    mcpToolInvoker,
+    mcpReputationLoader,
+    mcpReputationRater,
   );
 
   VibekitsHarnessToolBridge._(
@@ -240,6 +262,10 @@ class VibekitsHarnessToolBridge {
     this._downloadDirectory,
     this._runtimeBindProcessTree,
     this._runtimeReleaseProcessTree,
+    this._mcpCatalogLoader,
+    this._mcpToolInvoker,
+    this._mcpReputationLoader,
+    this._mcpReputationRater,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -283,6 +309,10 @@ class VibekitsHarnessToolBridge {
   static const String larkCliSchemaId = 'vibekits.feishu.schema';
   static const String larkCliExecuteId = 'vibekits.feishu.execute';
   static const String lanPeersListId = 'vibekits.peers.list';
+  static const String mcpCatalogListId = 'vibekits.mcp.catalog_list';
+  static const String mcpToolCallId = 'vibekits.mcp.tool_call';
+  static const String mcpReputationListId = 'vibekits.mcp.reputation_list';
+  static const String mcpReputationRateId = 'vibekits.mcp.reputation_rate';
   static const String githubDiagnosticsId = 'vibekits.github.diagnose';
   static const String githubProxyCandidatesId =
       'vibekits.github.proxy_candidates';
@@ -386,6 +416,10 @@ class VibekitsHarnessToolBridge {
   final String? _downloadDirectory;
   final Future<void> Function(int processId)? _runtimeBindProcessTree;
   final Future<void> Function(int processId)? _runtimeReleaseProcessTree;
+  final HarnessMcpCatalogLoader? _mcpCatalogLoader;
+  final HarnessMcpToolInvoker? _mcpToolInvoker;
+  final HarnessMcpReputationLoader? _mcpReputationLoader;
+  final HarnessMcpReputationRater? _mcpReputationRater;
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
   final PacketCaptureService _packetCaptureService =
       PacketCaptureService.instance;
@@ -422,7 +456,8 @@ class VibekitsHarnessToolBridge {
     systemResourcesId: _definition(
       id: systemResourcesId,
       name: '检查系统资源',
-      description: '只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。',
+      description:
+          '只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。',
       properties: <String, Object?>{
         'adbSerial': _string('可选；已连接 Android 设备序列号，留空分析本机'),
         'samples': const <String, Object?>{
@@ -442,7 +477,8 @@ class VibekitsHarnessToolBridge {
     capabilityCheckId: _definition(
       id: capabilityCheckId,
       name: '检查智能体工具链',
-      description: '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
+      description:
+          '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
       properties: const <String, Object?>{},
     ),
     describeToolId: _definition(
@@ -458,7 +494,8 @@ class VibekitsHarnessToolBridge {
     harnessDiagnosticsId: _definition(
       id: harnessDiagnosticsId,
       name: '查询 Harness 诊断日志',
-      description: '只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。',
+      description:
+          '只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。',
       properties: <String, Object?>{
         'limit': const <String, Object?>{
           'type': 'integer',
@@ -471,6 +508,60 @@ class VibekitsHarnessToolBridge {
           'description': '是否附带最新运行日志尾部，默认 true',
         },
       },
+    ),
+    mcpCatalogListId: _definition(
+      id: mcpCatalogListId,
+      name: '列出三层 MCP 工具目录',
+      description:
+          '读取 VibeKits、本机其他进程和局域网设备当前经过认证的完整 MCP 工具目录。返回每个实例、连接状态、真实工具名、用途和 inputSchema；调用远端工具前必须先读取本目录，不得猜测工具名或参数。',
+      properties: const <String, Object?>{},
+    ),
+    mcpToolCallId: _definition(
+      id: mcpToolCallId,
+      name: '调用本地或局域网 MCP 工具',
+      description:
+          '按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。文件传输、写入、设备控制及其他副作用会在执行前显示目标与参数并请求批准。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'instanceId': _string('catalog_list 返回的目标 MCP 实例 ID'),
+        'toolName': _string('目标 tools/list 中的真实工具名'),
+        'arguments': const <String, Object?>{
+          'type': 'object',
+          'description': '严格符合目标工具 inputSchema 的参数对象',
+          'additionalProperties': true,
+        },
+      },
+      required: const <String>['instanceId', 'toolName', 'arguments'],
+    ),
+    mcpReputationListId: _definition(
+      id: mcpReputationListId,
+      name: '查看 MCP 工具全局评分',
+      description:
+          '只读返回跨项目、跨会话、跨重启保留的 MCP 工具类型评分。固定路由顺序为本机 VibeKits MCP、再本地其他进程 MCP、再局域网 MCP；同名工具的多台设备共享一个分数。',
+      properties: const <String, Object?>{},
+    ),
+    mcpReputationRateId: _definition(
+      id: mcpReputationRateId,
+      name: '人工评价 MCP 工具',
+      description:
+          '为一个 MCP 工具类型写入全局 0–5 分评价；0 表示垃圾并强力降权。评分跨设备共享但不删除工具，也不绕过 TLS、目录和风险审批。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'tier': <String, Object?>{
+          'type': 'string',
+          'enum': <String>['app', 'local', 'lan'],
+          'description': '当前目录层级，用于审计；评分本身按 toolName 全局共享',
+        },
+        'instanceId': _string('当前目录中的实例 ID，用于审计，不作为评分主键'),
+        'toolName': _string('tools/list 中的真实工具名；同名工具跨设备共享评分'),
+        'rating': <String, Object?>{
+          'type': 'integer',
+          'minimum': 0,
+          'maximum': 5,
+          'description': '0=垃圾，1=很差，2=较差，3=一般，4=好用，5=非常好用',
+        },
+      },
+      required: const <String>['tier', 'instanceId', 'toolName', 'rating'],
     ),
     projectIterationInspectId: _definition(
       id: projectIterationInspectId,
@@ -485,7 +576,8 @@ class VibekitsHarnessToolBridge {
     projectBuildId: _definition(
       id: projectBuildId,
       name: '验证并编译 Vibekits APP',
-      description: '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
+      description:
+          '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'workspace': _string('Vibekits Flutter 工作区绝对路径'),
@@ -507,7 +599,8 @@ class VibekitsHarnessToolBridge {
     captureStartId: _definition(
       id: captureStartId,
       name: '开始网络抓包',
-      description: '使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。',
+      description:
+          '使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'outputPath': _string('可选；PCAP 输出绝对路径，留空写入 APP tmp/network-capture'),
@@ -550,7 +643,8 @@ class VibekitsHarnessToolBridge {
     audioInspectId: _definition(
       id: audioInspectId,
       name: '分析 PCM / WAV 质量',
-      description: '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性，并返回谐波和噪声最明显的时间段。复杂音乐的单音指标仅作诊断参考。',
+      description:
+          '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性，并返回谐波和噪声最明显的时间段。复杂音乐的单音指标仅作诊断参考。',
       properties: _audioProperties(includePath: true),
       required: const <String>['path'],
     ),
@@ -631,7 +725,8 @@ class VibekitsHarnessToolBridge {
     adbConnectId: const HarnessToolDefinition(
       id: adbConnectId,
       name: '连接 ADB 设备',
-      description: '连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。',
+      description:
+          '连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。',
       risk: HarnessToolRisk.controlsDevice,
       inputSchema: <String, Object?>{
         'type': 'object',
@@ -752,7 +847,8 @@ class VibekitsHarnessToolBridge {
     adbSessionOpenId: _definition(
       id: adbSessionOpenId,
       name: '保持 ADB 长连接',
-      description: '为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。',
+      description:
+          '为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -788,13 +884,15 @@ class VibekitsHarnessToolBridge {
     serialAutoDetectId: _definition(
       id: serialAutoDetectId,
       name: '自动探测串口配置',
-      description: '自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。',
+      description:
+          '自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'port': _string('可选串口名；留空时按 USB VID/PID、描述和端口名自动选择'),
         'baudRates': <String, Object?>{
           'type': 'array',
-          'description': '可选候选波特率；默认依次尝试 115200、921600、460800、230400、57600、38400、19200、9600',
+          'description':
+              '可选候选波特率；默认依次尝试 115200、921600、460800、230400、57600、38400、19200、9600',
           'items': <String, Object?>{
             'type': 'integer',
             'minimum': 1,
@@ -1182,7 +1280,8 @@ class VibekitsHarnessToolBridge {
     networkDownloadId: _definition(
       id: networkDownloadId,
       name: '下载网络文件',
-      description: '把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。',
+      description:
+          '把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'url': _string('完整 HTTP/HTTPS URL'),
@@ -1217,7 +1316,8 @@ class VibekitsHarnessToolBridge {
     larkCliAuthStatusId: _definition(
       id: larkCliAuthStatusId,
       name: '检查飞书授权状态',
-      description: '调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。',
+      description:
+          '调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。',
       properties: const <String, Object?>{},
     ),
     larkCliSchemaId: _definition(
@@ -1232,12 +1332,14 @@ class VibekitsHarnessToolBridge {
     larkCliExecuteId: _definition(
       id: larkCliExecuteId,
       name: '执行官方飞书CLI命令',
-      description: '以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。',
+      description:
+          '以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'arguments': const <String, Object?>{
           'type': 'array',
-          'description': '逐项参数数组，例如 ["calendar","events","get","--calendar-id","...","--event-id","..."]；不得拼成shell字符串',
+          'description':
+              '逐项参数数组，例如 ["calendar","events","get","--calendar-id","...","--event-id","..."]；不得拼成shell字符串',
           'items': <String, Object?>{'type': 'string'},
           'minItems': 1,
           'maxItems': 64,
@@ -1254,7 +1356,8 @@ class VibekitsHarnessToolBridge {
     lanPeersListId: _definition(
       id: lanPeersListId,
       name: '发现局域网MCP协同节点',
-      description: '按LMCP/1列出同一私网内VibeKits或第三方应用主动上报的SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。',
+      description:
+          '按LMCP/1列出同一私网内VibeKits或第三方应用主动上报的SSH MCP入口。发现不等于授权；未由主机批准公钥前不得调用或分派任务。',
       properties: const <String, Object?>{},
     ),
     githubDiagnosticsId: _definition(
@@ -1512,7 +1615,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeId: _definition(
       id: systemDriveAnalyzeId,
       name: '分析磁盘占用',
-      description: '同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。',
+      description:
+          '同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。',
       properties: <String, Object?>{
         'root': _string('磁盘或待分析目录的绝对路径'),
         'maxResults': <String, Object?>{
@@ -1528,7 +1632,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeStartId: _definition(
       id: systemDriveAnalyzeStartId,
       name: '启动磁盘占用分析',
-      description: '启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。',
+      description:
+          '启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。',
       properties: <String, Object?>{
         'root': _string('磁盘或待分析目录的绝对路径'),
         'maxResults': <String, Object?>{
@@ -1544,7 +1649,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeStatusId: _definition(
       id: systemDriveAnalyzeStatusId,
       name: '查询磁盘分析状态',
-      description: '按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。',
+      description:
+          '按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。',
       properties: <String, Object?>{
         'taskId': _string('analyze_drive_start 返回的任务 ID'),
         'waitSeconds': const <String, Object?>{
@@ -2048,6 +2154,10 @@ class VibekitsHarnessToolBridge {
     if (toolId == larkCliSchemaId) return _larkCliSchema;
     if (toolId == larkCliExecuteId) return _executeLarkCli;
     if (toolId == lanPeersListId) return _listLanPeers;
+    if (toolId == mcpCatalogListId) return _listMcpCatalog;
+    if (toolId == mcpToolCallId) return _callMcpTool;
+    if (toolId == mcpReputationListId) return _listMcpReputations;
+    if (toolId == mcpReputationRateId) return _rateMcpTool;
     if (toolId == githubDiagnosticsId) return _diagnoseGithub;
     if (toolId == githubProxyCandidatesId) return _githubProxyCandidates;
     if (toolId == githubProxyPlanId) return _githubProxyPlan;
@@ -2227,16 +2337,15 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _inspectBundledRuntimes(
     Map<String, Object?> arguments,
   ) async {
-    final List<BundledRuntimeStatus> runtimes = await Future.wait(
-      <Future<BundledRuntimeStatus>>[
-        NetworkVirtualizationService.inspectMihomo(
-          executable: _mihomoRuntimeExecutable,
-        ),
-        NetworkVirtualizationService.inspectQemu(
-          executable: _qemuRuntimeExecutable,
-        ),
-      ],
-    );
+    final List<BundledRuntimeStatus> runtimes =
+        await Future.wait(<Future<BundledRuntimeStatus>>[
+          NetworkVirtualizationService.inspectMihomo(
+            executable: _mihomoRuntimeExecutable,
+          ),
+          NetworkVirtualizationService.inspectQemu(
+            executable: _qemuRuntimeExecutable,
+          ),
+        ]);
     return <String, Object?>{
       'runtimes': runtimes
           .map((BundledRuntimeStatus value) => value.toJson())
@@ -2415,8 +2524,9 @@ class VibekitsHarnessToolBridge {
       'platform': <String, Object?>{
         'name': Platform.operatingSystem,
         'storageLocations': PlatformStorageLayout.current().toJson(),
-        'cleanup': CleanupPlatformPolicy.capabilities(CleanupPlatform.current)
-            .toJson(),
+        'cleanup': CleanupPlatformPolicy.capabilities(
+          CleanupPlatform.current,
+        ).toJson(),
         'allToolsVisibleToHarness': true,
         'desktopNodeToolCount': executable
             .where((HarnessToolDefinition tool) => requiresDesktopNode(tool.id))
@@ -3556,9 +3666,9 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _windowsNodeHelperStatus(
     Map<String, Object?> arguments,
   ) async {
-    final String executableDirectory = File(Platform.resolvedExecutable)
-        .parent
-        .path;
+    final String executableDirectory = File(
+      Platform.resolvedExecutable,
+    ).parent.path;
     final File helper = File(
       '$executableDirectory${Platform.pathSeparator}tools'
       '${Platform.pathSeparator}windows-node${Platform.pathSeparator}vibekits-node-helper.exe',
@@ -4193,11 +4303,10 @@ class VibekitsHarnessToolBridge {
     return value;
   }
 
-  String _normalizedAnalysisRoot(String root) =>
-      Directory(root).absolute.path
-          .replaceAll('/', Platform.pathSeparator)
-          .replaceAll(RegExp(r'[\\/]+$'), '')
-          .toLowerCase();
+  String _normalizedAnalysisRoot(String root) => Directory(root).absolute.path
+      .replaceAll('/', Platform.pathSeparator)
+      .replaceAll(RegExp(r'[\\/]+$'), '')
+      .toLowerCase();
 
   Future<Map<String, Object?>> _serializeSystemDriveAnalysis(
     SystemDriveAnalysis analysis, {
@@ -4333,6 +4442,65 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+  Future<Map<String, Object?>> _listMcpCatalog(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessMcpCatalogLoader? loader = _mcpCatalogLoader;
+    if (loader == null) {
+      throw StateError('当前 Harness 尚未连接 MCP 能力目录');
+    }
+    return loader();
+  }
+
+  Future<Map<String, Object?>> _callMcpTool(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessMcpToolInvoker? invoker = _mcpToolInvoker;
+    if (invoker == null) {
+      throw StateError('当前 Harness 尚未连接 MCP 调用路由器');
+    }
+    final String instanceId = '${arguments['instanceId'] ?? ''}'.trim();
+    final String toolName = '${arguments['toolName'] ?? ''}'.trim();
+    final Object? rawArguments = arguments['arguments'];
+    if (instanceId.isEmpty || toolName.isEmpty || rawArguments is! Map) {
+      throw const FormatException('instanceId、toolName 和 arguments 对象均为必填项');
+    }
+    return invoker(instanceId, toolName, rawArguments.cast<String, Object?>());
+  }
+
+  Future<Map<String, Object?>> _listMcpReputations(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessMcpReputationLoader? loader = _mcpReputationLoader;
+    if (loader == null) {
+      throw StateError('当前 Harness 尚未连接 MCP 信誉存储');
+    }
+    return loader();
+  }
+
+  Future<Map<String, Object?>> _rateMcpTool(
+    Map<String, Object?> arguments,
+  ) async {
+    final HarnessMcpReputationRater? rater = _mcpReputationRater;
+    if (rater == null) {
+      throw StateError('当前 Harness 尚未连接 MCP 信誉存储');
+    }
+    final String tier = '${arguments['tier'] ?? ''}'.trim();
+    final String instanceId = '${arguments['instanceId'] ?? ''}'.trim();
+    final String toolName = '${arguments['toolName'] ?? ''}'.trim();
+    final int rating = _integer(arguments['rating'], -1);
+    if (tier.isEmpty ||
+        instanceId.isEmpty ||
+        toolName.isEmpty ||
+        rating < 0 ||
+        rating > 5) {
+      throw const FormatException(
+        'tier、instanceId、toolName 必填，rating 必须为 0–5 整数',
+      );
+    }
+    return rater(tier, instanceId, toolName, rating);
+  }
+
   static Map<String, Object?> _pageJson(SqliteResultPage page) =>
       <String, Object?>{
         'columns': page.columns,
@@ -4450,6 +4618,12 @@ class VibekitsHarnessToolBridge {
   };
 
   static String _targetSummary(String toolId, Map<String, Object?> arguments) {
+    if (toolId == mcpToolCallId) {
+      return '${arguments['instanceId'] ?? ''} · ${arguments['toolName'] ?? ''}';
+    }
+    if (toolId == mcpReputationRateId) {
+      return '${arguments['toolName'] ?? ''} · ${arguments['rating'] ?? ''}/5';
+    }
     if (toolId == systemResourcesId) {
       final String serial = (arguments['adbSerial'] ?? '').toString().trim();
       return serial.isEmpty ? '本机' : serial;

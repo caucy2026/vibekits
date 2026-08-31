@@ -13,14 +13,19 @@ import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
+import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/lan_peer_discovery_service.dart';
+import '../../dev_tools/domain/lmcp_exposure_server.dart';
 import '../../dev_tools/domain/mcp_capability_directory.dart';
 import '../../dev_tools/domain/mcp_capability_models.dart';
 import '../../dev_tools/domain/mcp_device_identity.dart';
+import '../../dev_tools/domain/mcp_tool_reputation_store.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
+import 'mcp_exposure_consent_dialog.dart';
+import 'mcp_reputation_badge.dart';
 
 typedef OfficialHarnessCredentialReader = Future<String?> Function(String key);
 typedef OfficialHarnessCredentialDeleter = Future<void> Function(String key);
@@ -97,7 +102,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
   final McpExposurePreferences _mcpExposurePreferences =
       McpExposurePreferences();
-  bool _mcpExposureEnabled = true;
+  bool _mcpExposureEnabled = false;
+  bool _mcpExposureChanging = false;
+  bool _restoreMcpExposureOnStart = false;
+  VibekitsHarnessToolBridge? _mcpExposureBridge;
   bool _quickActionsExpanded = false;
 
   @override
@@ -122,15 +130,18 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
-      _mcpExposureEnabled = await _mcpExposurePreferences.loadEnabled();
-      await LanPeerDiscoveryService.instance.start(
-        instanceId: _mcpIdentity.instanceId,
-        name: _mcpIdentity.displayName,
-        capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
-        appId: _mcpIdentity.appId,
-        hardwareCode: _mcpIdentity.hardwareCode,
-        exposureEnabled: _mcpExposureEnabled,
-      );
+      _restoreMcpExposureOnStart = await _mcpExposurePreferences.loadEnabled();
+      if (Platform.environment['FLUTTER_TEST'] != 'true') {
+        await LanPeerDiscoveryService.instance.start(
+          instanceId: _mcpIdentity.instanceId,
+          name: _mcpIdentity.displayName,
+          capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+          appId: _mcpIdentity.appId,
+          appVersion: VibekitsLmcpExposureServer.currentAppVersion,
+          hardwareCode: _mcpIdentity.hardwareCode,
+          exposureEnabled: false,
+        );
+      }
       _permissionMode = await HarnessAgentPreferencesStore.loadPermissionMode();
       final Future<void> webviewInitialization = _webview.initialize();
       await _start(webviewInitialization: webviewInitialization);
@@ -198,11 +209,37 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         setState(() => _status = '正在启动本地 DSH…');
       }
       final VibekitsHarnessToolBridge toolBridge = VibekitsHarnessToolBridge(
+        activityRecorder: _recordHarnessToolActivity,
         remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
         screenshotOcrRunner: widget.screenshotOcrRunner,
         downloadDirectory: widget.initialDownloadDirectory,
+        mcpCatalogLoader: McpCapabilityDirectory.instance.exportForHarness,
+        mcpToolInvoker:
+            (
+              String instanceId,
+              String toolName,
+              Map<String, Object?> arguments,
+            ) => McpCapabilityDirectory.instance.invokeTool(
+              instanceId: instanceId,
+              toolName: toolName,
+              arguments: arguments,
+            ),
+        mcpReputationLoader: McpCapabilityDirectory.instance.exportReputations,
+        mcpReputationRater:
+            (String tier, String instanceId, String toolName, int rating) =>
+                McpCapabilityDirectory.instance.rateTool(
+                  tierName: tier,
+                  instanceId: instanceId,
+                  toolName: toolName,
+                  rating: rating,
+                ),
       );
       await McpCapabilityDirectory.instance.start(appBridge: toolBridge);
+      _mcpExposureBridge = toolBridge;
+      if (_restoreMcpExposureOnStart) {
+        await _startMcpExposure(toolBridge);
+      }
+      _mcpExposureEnabled = VibekitsLmcpExposureServer.instance.running;
       final HarnessSessionHandle session = await widget.startWeb(
         HarnessWebRequest(
           workspace: workspace,
@@ -438,6 +475,17 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     }
     return decision == _ToolApprovalDecision.allowOnce;
   }
+
+  Future<void> _startMcpExposure(VibekitsHarnessToolBridge bridge) =>
+      VibekitsLmcpExposureServer.instance.start(
+        instanceId: _mcpIdentity.instanceId,
+        displayName: _mcpIdentity.displayName,
+        appId: _mcpIdentity.appId,
+        appVersion: VibekitsLmcpExposureServer.currentAppVersion,
+        hardwareCode: _mcpIdentity.hardwareCode,
+        bridge: bridge,
+        approve: _approveVibekitsTool,
+      );
 
   Future<void> _waitUntilReady(Uri url) async {
     const Duration startupLimit = Duration(minutes: 3);
@@ -741,6 +789,41 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     } finally {
       _deletingSessionIds.remove(sessionId);
     }
+  }
+
+  Future<void> _recordHarnessToolActivity({
+    required String toolId,
+    required String toolName,
+    required String target,
+    required Map<String, Object?> arguments,
+    required Object? result,
+    required HarnessToolActivityStatus status,
+    required DateTime startedAt,
+  }) async {
+    await HarnessToolActivityStore.record(
+      toolId: toolId,
+      toolName: toolName,
+      target: target,
+      arguments: arguments,
+      result: result,
+      status: status,
+      startedAt: startedAt,
+    );
+    if (status == HarnessToolActivityStatus.denied ||
+        Platform.environment['FLUTTER_TEST'] == 'true') {
+      return;
+    }
+    final double quality = status == HarnessToolActivityStatus.succeeded
+        ? result is Map
+              ? inferMcpCompletionQuality(Map<String, Object?>.from(result))
+              : 1
+        : 0;
+    await McpCapabilityDirectory.instance.recordAppToolResult(
+      toolName: toolId,
+      succeeded: status == HarnessToolActivityStatus.succeeded && quality > 0,
+      completionQuality: quality,
+      latencyMs: DateTime.now().difference(startedAt).inMilliseconds,
+    );
   }
 
   @override
@@ -1153,6 +1236,25 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                 BuildContext context,
                 AsyncSnapshot<McpCapabilitySnapshot> snapshot,
               ) => _railAction(
+                key: const Key('rail-app-mcp'),
+                icon: Icons.apps_rounded,
+                badge:
+                    snapshot.data?.app
+                        .expand((McpDeviceCapability item) => item.tools)
+                        .length ??
+                    0,
+                tooltip: '本 APP MCP：查看 VibeKits 对外公开的全部工具和参数',
+                onPressed: () => _showMcpDevices(McpCapabilityTier.app),
+              ),
+        ),
+        StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+              ) => _railAction(
                 key: const Key('rail-local-mcp'),
                 icon: Icons.memory_outlined,
                 badge: snapshot.data?.local.length ?? 0,
@@ -1366,7 +1468,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   );
 
   Widget _buildMcpExposureControl() => Material(
-    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+    color:
+        (_mcpExposureEnabled
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Theme.of(context).colorScheme.surfaceContainerHighest)
+            .withValues(alpha: 0.96),
     elevation: 2,
     borderRadius: BorderRadius.circular(22),
     child: Tooltip(
@@ -1378,10 +1484,18 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         child: Row(
           children: <Widget>[
             const SizedBox(width: 7),
-            const Icon(Icons.api_outlined, size: 17),
+            Icon(
+              _mcpExposureEnabled ? Icons.api_rounded : Icons.api_outlined,
+              size: 17,
+              color: _mcpExposureEnabled
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.outline,
+            ),
             const SizedBox(width: 4),
             Text(
-              'MCP',
+              _mcpExposureChanging
+                  ? '处理中'
+                  : 'MCP ${_mcpExposureEnabled ? '开' : '关'}',
               key: const Key('harness-mcp-device-name'),
               style: const TextStyle(fontSize: 11),
             ),
@@ -1392,8 +1506,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                 child: Switch(
                   key: const Key('harness-mcp-exposure-switch'),
                   value: _mcpExposureEnabled,
-                  onChanged: (bool enabled) =>
-                      unawaited(_setMcpExposure(enabled)),
+                  onChanged: _mcpExposureChanging
+                      ? null
+                      : (bool enabled) => unawaited(_setMcpExposure(enabled)),
                 ),
               ),
             ),
@@ -1404,51 +1519,73 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   );
 
   Future<void> _setMcpExposure(bool enabled) async {
-    if (_mcpExposureEnabled == enabled) return;
-    if (enabled && !await _confirmMcpExposureRisk()) return;
-    setState(() => _mcpExposureEnabled = enabled);
+    if (_mcpExposureEnabled == enabled || _mcpExposureChanging) return;
+    final VibekitsHarnessToolBridge? bridge = _mcpExposureBridge;
+    if (bridge == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('MCP 工具目录尚未就绪，请稍后重试')));
+      return;
+    }
+    if (enabled) {
+      late final LmcpInstanceCertificate identity;
+      try {
+        identity = await VibekitsLmcpExposureServer.instance.prepareIdentity(
+          displayName: _mcpIdentity.displayName,
+        );
+      } on Object catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text('准备 MCP 实例证书失败：$error')));
+        }
+        return;
+      }
+      if (!mounted) return;
+      final List<McpToolInterface> tools = McpCapabilityDirectory
+          .instance
+          .snapshot
+          .app
+          .expand((McpDeviceCapability device) => device.tools)
+          .toList(growable: false);
+      final bool allowed = await showMcpExposureConsentDialog(
+        context: context,
+        deviceName: _mcpIdentity.displayName,
+        tools: tools,
+        certificateFingerprint: identity.fingerprint,
+      );
+      if (!mounted || !allowed) return;
+    }
+    setState(() => _mcpExposureChanging = true);
     try {
-      await LanPeerDiscoveryService.instance.setExposureEnabled(enabled);
-      await _mcpExposurePreferences.saveEnabled(enabled);
+      if (enabled) {
+        await _startMcpExposure(bridge);
+        try {
+          await _mcpExposurePreferences.saveEnabled(true);
+        } on Object {
+          await VibekitsLmcpExposureServer.instance.stop();
+          rethrow;
+        }
+      } else {
+        try {
+          await _mcpExposurePreferences.saveEnabled(false);
+        } finally {
+          await VibekitsLmcpExposureServer.instance.stop();
+        }
+      }
+      _restoreMcpExposureOnStart = enabled;
+      if (mounted) {
+        setState(
+          () =>
+              _mcpExposureEnabled = VibekitsLmcpExposureServer.instance.running,
+        );
+      }
     } on Object catch (error) {
       if (!mounted) return;
-      await LanPeerDiscoveryService.instance.setExposureEnabled(!enabled);
-      setState(() => _mcpExposureEnabled = !enabled);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('保存 MCP 开关失败：$error')));
+    } finally {
+      if (mounted) setState(() => _mcpExposureChanging = false);
     }
   }
-
-  Future<bool> _confirmMcpExposureRisk() async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('开启本机 MCP？'),
-          content: const SizedBox(
-            width: 520,
-            child: Text(
-              '开启后，本 APP 会在本机和局域网发布设备名称、硬件识别码、'
-              '版本、连接端点和 MCP 工具清单。\n\n'
-              '被发现的 Harness 可以读取工具参数并调用普通 MCP 工具，'
-              '工具可能按其功能读取数据、写入文件或控制设备，后续不再逐次弹窗。'
-              '远程 Harness 任务控制仍使用独立的授权流程。\n\n'
-              '请仅在可信的本机和局域网中开启。关闭后会发送 goodbye，'
-              '并从其他 VibeKits 的动态列表中消失。',
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('确认开启'),
-            ),
-          ],
-        ),
-      ) ??
-      false;
 
   Widget _mcpDeviceButton({
     required Key key,
@@ -1505,75 +1642,118 @@ class _McpDeviceListDialog extends StatelessWidget {
   final McpCapabilityTier tier;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(tier == McpCapabilityTier.local ? '本机 MCP 设备' : '局域网 MCP 设备'),
-    content: SizedBox(
-      width: 680,
-      height: 440,
-      child: StreamBuilder<McpCapabilitySnapshot>(
-        stream: McpCapabilityDirectory.instance.changes,
-        initialData: McpCapabilityDirectory.instance.snapshot,
-        builder:
-            (
-              BuildContext context,
-              AsyncSnapshot<McpCapabilitySnapshot> snapshot,
-            ) {
-              final McpCapabilitySnapshot catalog =
-                  snapshot.data ?? McpCapabilityDirectory.instance.snapshot;
-              final List<McpDeviceCapability> devices =
-                  tier == McpCapabilityTier.local ? catalog.local : catalog.lan;
-              if (devices.isEmpty) {
-                return Center(
-                  child: Text(
-                    tier == McpCapabilityTier.local
-                        ? '尚未发现本机其他 MCP 进程。提供者上线并发布注册文件后会自动出现。'
-                        : '尚未发现局域网 MCP 设备。设备上线、离线和接口变化会实时更新。',
-                    textAlign: TextAlign.center,
-                  ),
-                );
-              }
-              return ListView.separated(
-                itemCount: devices.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (BuildContext context, int index) {
-                  final McpDeviceCapability device = devices[index];
-                  return ListTile(
-                    key: Key('mcp-device-${device.id}'),
-                    leading: Icon(
-                      tier == McpCapabilityTier.local
-                          ? Icons.memory_outlined
-                          : Icons.computer_outlined,
-                    ),
-                    title: Text(device.name),
-                    subtitle: Text(
-                      '${device.appId} ${device.appVersion} · ${device.transport} · '
-                      '${device.tools.length} 个接口',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => showDialog<void>(
-                      context: context,
-                      builder: (BuildContext context) =>
-                          _McpDeviceDetailsDialog(device: device),
-                    ),
+  Widget build(
+    BuildContext context,
+  ) => FutureBuilder<Map<String, McpToolReputation>>(
+    future: McpCapabilityDirectory.instance.loadReputations(),
+    builder: (BuildContext context, reputationSnapshot) => AlertDialog(
+      title: Text(switch (tier) {
+        McpCapabilityTier.app => '本 APP MCP 工具',
+        McpCapabilityTier.local => '本机 MCP 设备',
+        McpCapabilityTier.lan => '局域网 MCP 设备',
+      }),
+      content: SizedBox(
+        width: 680,
+        height: 440,
+        child: StreamBuilder<McpCapabilitySnapshot>(
+          stream: McpCapabilityDirectory.instance.changes,
+          initialData: McpCapabilityDirectory.instance.snapshot,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+              ) {
+                final McpCapabilitySnapshot catalog =
+                    snapshot.data ?? McpCapabilityDirectory.instance.snapshot;
+                final List<McpDeviceCapability> devices = switch (tier) {
+                  McpCapabilityTier.app => catalog.app,
+                  McpCapabilityTier.local => catalog.local,
+                  McpCapabilityTier.lan => catalog.lan,
+                };
+                if (devices.isEmpty) {
+                  return Center(
+                    child: Text(switch (tier) {
+                      McpCapabilityTier.app => '本 APP 工具目录尚未初始化。',
+                      McpCapabilityTier.local =>
+                        '尚未发现本机其他 MCP 进程。提供者上线并发布注册文件后会自动出现。',
+                      McpCapabilityTier.lan =>
+                        '尚未发现局域网 MCP 设备。设备上线、离线和接口变化会实时更新。',
+                    }, textAlign: TextAlign.center),
                   );
-                },
-              );
-            },
+                }
+                return ListView.separated(
+                  itemCount: devices.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (BuildContext context, int index) {
+                    final McpDeviceCapability device = devices[index];
+                    final Map<String, McpToolReputation> reputations =
+                        reputationSnapshot.data ??
+                        const <String, McpToolReputation>{};
+                    final int scoredTools = device.tools.where((
+                      McpToolInterface tool,
+                    ) {
+                      final McpToolReputation? score = reputationForTool(
+                        reputations,
+                        device,
+                        tool,
+                      );
+                      return score != null &&
+                          (score.totalCalls > 0 || score.manualRating != null);
+                    }).length;
+                    return ListTile(
+                      key: Key('mcp-device-${device.id}'),
+                      leading: Icon(switch (tier) {
+                        McpCapabilityTier.app => Icons.apps_rounded,
+                        McpCapabilityTier.local => Icons.memory_outlined,
+                        McpCapabilityTier.lan => Icons.computer_outlined,
+                      }),
+                      title: Text(device.name),
+                      subtitle: Text(
+                        '${device.appId} ${device.appVersion} · ${device.transport} · '
+                        '${device.tools.length} 个接口'
+                        '${scoredTools == 0 ? '' : ' · $scoredTools 个已评分'}',
+                      ),
+                      trailing: Chip(
+                        avatar: Icon(
+                          device.callable
+                              ? Icons.check_circle_outline
+                              : Icons.visibility_outlined,
+                          size: 16,
+                        ),
+                        label: Text(device.callable ? '可调用' : '仅发现'),
+                      ),
+                      onTap: () => showDialog<void>(
+                        context: context,
+                        builder: (BuildContext context) =>
+                            _McpDeviceDetailsDialog(
+                              device: device,
+                              reputations: reputations,
+                            ),
+                      ),
+                    );
+                  },
+                );
+              },
+        ),
       ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
     ),
-    actions: <Widget>[
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('关闭'),
-      ),
-    ],
   );
 }
 
 class _McpDeviceDetailsDialog extends StatelessWidget {
-  const _McpDeviceDetailsDialog({required this.device});
+  const _McpDeviceDetailsDialog({
+    required this.device,
+    required this.reputations,
+  });
 
   final McpDeviceCapability device;
+  final Map<String, McpToolReputation> reputations;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -1588,6 +1768,7 @@ class _McpDeviceDetailsDialog extends StatelessWidget {
             '实例：${device.id}\n应用：${device.appId} ${device.appVersion}\n'
             '硬件识别码：${device.hardwareCode.isEmpty ? '未提供' : device.hardwareCode}\n'
             '连接：${device.transport} · ${device.endpoint}\n'
+            '调用状态：${device.callable ? '可调用' : '仅发现，不可调用'}\n'
             '目录版本：${device.catalogRevision.isEmpty ? '未提供' : device.catalogRevision}',
           ),
           const SizedBox(height: 12),
@@ -1607,7 +1788,14 @@ class _McpDeviceDetailsDialog extends StatelessWidget {
                         key: Key('mcp-tool-${device.id}-${tool.name}'),
                         title: SelectableText(tool.name),
                         subtitle: Text(
-                          tool.title.isEmpty ? tool.description : tool.title,
+                          '${tool.title.isEmpty ? tool.description : tool.title} · 风险 ${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
+                        ),
+                        trailing: McpReputationBadge(
+                          reputation: reputationForTool(
+                            reputations,
+                            device,
+                            tool,
+                          ),
                         ),
                         childrenPadding: const EdgeInsets.fromLTRB(
                           16,

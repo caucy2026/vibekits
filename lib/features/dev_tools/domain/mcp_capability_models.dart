@@ -6,12 +6,16 @@ class McpToolInterface {
     required this.title,
     required this.description,
     required this.inputSchema,
+    this.risk = '',
+    this.annotations = const <String, Object?>{},
   });
 
   final String name;
   final String title;
   final String description;
   final Map<String, Object?> inputSchema;
+  final String risk;
+  final Map<String, Object?> annotations;
 
   factory McpToolInterface.fromJson(Map<Object?, Object?> json) {
     final Object? rawSchema = json['inputSchema'];
@@ -21,6 +25,10 @@ class McpToolInterface {
           '${json['title'] ?? json['displayName'] ?? json['name'] ?? json['id'] ?? ''}'
               .trim(),
       description: '${json['description'] ?? ''}'.trim(),
+      risk: '${json['risk'] ?? ''}'.trim(),
+      annotations: json['annotations'] is Map
+          ? Map<String, Object?>.from(json['annotations']! as Map)
+          : const <String, Object?>{},
       inputSchema: rawSchema is Map
           ? Map<String, Object?>.from(rawSchema)
           : const <String, Object?>{'type': 'object'},
@@ -32,6 +40,8 @@ class McpToolInterface {
     'title': title,
     'description': description,
     'inputSchema': inputSchema,
+    if (risk.isNotEmpty) 'risk': risk,
+    if (annotations.isNotEmpty) 'annotations': annotations,
   };
 }
 
@@ -49,6 +59,7 @@ class McpDeviceCapability {
     this.online = true,
     this.catalogRevision = '',
     this.hardwareCode = '',
+    this.launchArguments = const <String>[],
   });
 
   final String id;
@@ -63,6 +74,17 @@ class McpDeviceCapability {
   final bool online;
   final String catalogRevision;
   final String hardwareCode;
+  final List<String> launchArguments;
+
+  bool get callable =>
+      tier == McpCapabilityTier.app ||
+      (tier == McpCapabilityTier.local &&
+          transport == 'stdio' &&
+          endpoint.isNotEmpty &&
+          tools.isNotEmpty) ||
+      (tier == McpCapabilityTier.lan &&
+          transport == 'https-streamable-http' &&
+          tools.isNotEmpty);
 }
 
 class McpCapabilitySnapshot {

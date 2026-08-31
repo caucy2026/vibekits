@@ -80,6 +80,16 @@ String buildHarnessCapabilityCatalog() {
       '不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。',
     )
     ..writeln()
+    ..writeln('## MCP 开关、授权和动态远端目录')
+    ..writeln()
+    ..writeln(
+      'MCP 关闭、启动中、开启、排空中和异常必须显示为不同状态。从关闭切换到开启时，APP 必须先展示不可跳过的授权对话框：说明局域网可发现性、证书身份、下列完整工具目录、读取/写入/文件外发/设备控制风险和撤销方法；用户取消时保持关闭。打开开关只授权发布接口，不等于预先批准每次高风险调用。',
+    )
+    ..writeln()
+    ..writeln(
+      'VibeKits Harness 通过 `vibekits.mcp.catalog_list` 获取本 APP、本机进程和局域网设备的实时完整目录，通过 `vibekits.mcp.tool_call` 调用本地 stdio 或已完成 TLS 指纹固定和目录摘要校验的局域网工具。固定查找顺序为本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网 MCP（lan），评分只能调整同层候选，不能让远端越级。`vibekits.mcp.reputation_list` 返回跨项目、会话和重启的全局工具类型评分，`vibekits.mcp.reputation_rate` 允许经写权限审批给出 0–5 分；同名工具跨设备共享评分。副作用调用执行前展示实例、真实工具名和参数并进入统一审批、审计；离线、仅发现或目录中不存在的工具不能调用。',
+    )
+    ..writeln()
     ..writeln('## 外部智能体接入')
     ..writeln()
     ..writeln(

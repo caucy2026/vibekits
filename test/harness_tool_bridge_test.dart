@@ -16,6 +16,123 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('Harness 可查看并经写权限审批人工评价 MCP 全局信誉', () async {
+    int approvals = 0;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      mcpReputationLoader: () async => <String, Object?>{
+        'tierOrder': <String>['app', 'local', 'lan'],
+        'entries': <Object?>[],
+      },
+      mcpReputationRater:
+          (String tier, String instanceId, String toolName, int rating) async =>
+              <String, Object?>{
+                'tier': tier,
+                'instanceId': '*',
+                'toolName': toolName,
+                'manualRating': rating,
+                'scope': 'global-tool-type',
+              },
+    );
+
+    final HarnessToolCallResult listed = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.mcpReputationListId,
+      arguments: const <String, Object?>{},
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+    expect(listed.ok, isTrue);
+    expect(approvals, 0);
+
+    final HarnessToolCallResult rated = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.mcpReputationRateId,
+      arguments: const <String, Object?>{
+        'tier': 'lan',
+        'instanceId': 'kemi-device-a',
+        'toolName': 'kemi.files.send',
+        'rating': 0,
+      },
+      approve: (HarnessToolApprovalRequest request) async {
+        approvals++;
+        expect(request.tool.risk, HarnessToolRisk.writesData);
+        expect(request.target, contains('kemi.files.send'));
+        return true;
+      },
+    );
+    expect(rated.ok, isTrue);
+    expect(approvals, 1);
+    expect(rated.data?['manualRating'], 0);
+    expect(rated.data?['scope'], 'global-tool-type');
+  });
+
+  test('Harness 可读取完整 MCP 目录并经审批调用局域网工具', () async {
+    int approvals = 0;
+    Map<String, Object?>? routedArguments;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      mcpCatalogLoader: () async => <String, Object?>{
+        'tiers': <String, Object?>{
+          'lan': <Object?>[
+            <String, Object?>{
+              'instanceId': 'org.kemi.send:TEST',
+              'callable': true,
+              'tools': <Object?>[
+                <String, Object?>{'name': 'kemi.files.send'},
+              ],
+            },
+          ],
+        },
+      },
+      mcpToolInvoker:
+          (
+            String instanceId,
+            String toolName,
+            Map<String, Object?> arguments,
+          ) async {
+            expect(instanceId, 'org.kemi.send:TEST');
+            expect(toolName, 'kemi.files.send');
+            routedArguments = arguments;
+            return <String, Object?>{
+              'instanceId': instanceId,
+              'tool': toolName,
+              'ok': true,
+            };
+          },
+    );
+
+    final HarnessToolCallResult catalog = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.mcpCatalogListId,
+      arguments: const <String, Object?>{},
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+    expect(catalog.ok, isTrue);
+    expect(approvals, 0);
+
+    final HarnessToolCallResult call = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.mcpToolCallId,
+      arguments: const <String, Object?>{
+        'instanceId': 'org.kemi.send:TEST',
+        'toolName': 'kemi.files.send',
+        'arguments': <String, Object?>{
+          'sourcePath': '/tmp/harmless.txt',
+          'targetDeviceId': 'receiver',
+        },
+      },
+      approve: (HarnessToolApprovalRequest request) async {
+        approvals++;
+        expect(request.tool.risk, HarnessToolRisk.controlsDevice);
+        expect(request.target, contains('org.kemi.send:TEST'));
+        return true;
+      },
+    );
+    expect(call.ok, isTrue);
+    expect(approvals, 1);
+    expect(routedArguments?['sourcePath'], '/tmp/harmless.txt');
+  });
+
   test('移动端保留完整工具目录并明确桌面节点边界', () {
     expect(
       VibekitsHarnessToolBridge.requiresDesktopNode(
@@ -330,8 +447,9 @@ void main() {
       'vibekits_harness_structure_',
     );
     addTearDown(() => root.delete(recursive: true));
-    await File('${root.path}${Platform.pathSeparator}agent.dart')
-        .writeAsString('class ToolAgent {}\n');
+    await File(
+      '${root.path}${Platform.pathSeparator}agent.dart',
+    ).writeAsString('class ToolAgent {}\n');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
 
@@ -736,8 +854,9 @@ void main() {
       'vibekits_harness_search_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File('${sandbox.path}${Platform.pathSeparator}hello.dart')
-        .writeAsString('void main() {}');
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}hello.dart',
+    ).writeAsString('void main() {}');
     final HarnessToolCallResult result = await VibekitsHarnessToolBridge()
         .invoke(
           toolId: VibekitsHarnessToolBridge.fileSearchId,
@@ -865,11 +984,12 @@ void main() {
               stderr: '',
             );
           },
-      remoteFileConnector: (
-        RemoteConnectionProfile connection,
-        String? secret,
-        RemoteHostKeyVerifier verifier,
-      ) async => _FakeHarnessRemoteFileClient(transfers),
+      remoteFileConnector:
+          (
+            RemoteConnectionProfile connection,
+            String? secret,
+            RemoteHostKeyVerifier verifier,
+          ) async => _FakeHarnessRemoteFileClient(transfers),
     );
 
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1147,8 +1267,9 @@ void main() {
     final File first = await File(
       '${sandbox.path}${Platform.pathSeparator}first.bin',
     ).writeAsString('same-content');
-    await File('${sandbox.path}${Platform.pathSeparator}second.bin')
-        .writeAsString('same-content');
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}second.bin',
+    ).writeAsString('same-content');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1190,8 +1311,9 @@ void main() {
       'vibekits_harness_drive_task_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File('${sandbox.path}${Platform.pathSeparator}sample.bin')
-        .writeAsBytes(List<int>.filled(4096, 7));
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}sample.bin',
+    ).writeAsBytes(List<int>.filled(4096, 7));
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     Future<bool> approve(HarnessToolApprovalRequest request) async => true;
 
