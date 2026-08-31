@@ -55,7 +55,7 @@ KEMI-PAD@PAD-53-A18F09C27B   MCP [开]
 - APP 异常退出或断电：没有心跳后最多 12 秒从列表移除。
 - 开关只控制“本 APP 是否对外提供 MCP”，不能关闭 APP 自己发现其他 MCP 的能力。
 
-打开 MCP 是一次明确的“向局域网发布能力”授权，不等于永久放行所有副作用。只读调用可按用户选择的权限策略直接执行；写文件、向外发送文件、控制设备、修改账号/系统或破坏性操作必须进入 APP 的统一风险审批与审计。`serviceRole=harness-controller` 的远程任务还必须由被调用端单独审批。
+打开 MCP 是一次明确的“向局域网发布能力并按所选范围接受自动调用”授权。确认页必须让用户选择允许的调用方范围、工具/风险上限、文件或设备作用域以及撤销方法；未在授权范围内的工具不得出现在可调用目录。授权一旦确认并持久化，范围内的只读、写入、文件外发、设备控制和 Harness 自动化调用都必须直接执行并返回结果，禁止每次 `tools/call` 再弹“允许/拒绝”。首次确认承担风险告知，后续由审计、撤销和范围变更保护用户，而不是用重复弹窗破坏无人值守自动化。
 
 ## 2. 唯一身份和显示名称
 
@@ -100,6 +100,14 @@ ON
 6. 关闭后 `tools/call` 必须拒绝新请求，不能只隐藏 UI。
 7. 在途调用最多等待配置的排空时间，然后返回结构化取消结果。
 8. 接口服务崩溃时开关显示异常/关闭，不得继续广播在线。
+
+### 3.1 持久自动调用授权（禁止逐次重复审批）
+
+用户在 MCP 确认页选择“允许远程调用”后，APP 必须持久化一个自动调用授权，至少包含：提供者 `instanceId` 和证书指纹、允许的调用方（指定 instanceId 列表或明确的“当前私网内所有已认证 LMCP/2 调用方”）、工具名/工具组、最高风险等级、文件根目录或目标设备等作用域、创建时间和用户可见的撤销入口。默认有效期是“直到用户关闭 MCP 或主动撤销”，不能在每次任务、APP 重启、调用方重连或新 Harness 会话时失效。
+
+对落在该授权范围内的调用，服务端必须：立即校验 Schema 和幂等键 → 自动执行 → 返回结构化结果或 taskId → 允许调用方自动轮询/取消/恢复；不得出现第二次权限弹窗、不得等待人工点击、不得因无人值守而返回 `DENIED`/审批超时。`readOnly`、`writesData`、`controlsDevice` 和 `serviceRole=harness-controller` 都遵守这一原则；风险级别决定首次授权页展示内容和可选范围，不决定是否每次再问。
+
+只有以下事件允许把调用变回“需要用户重新授权”：提供者实例证书指纹变化；调用方超出原授权身份范围；新工具或现有工具的风险/数据/设备作用域扩大；用户关闭 MCP、撤销授权或降低风险上限；操作系统自身权限已撤销。单纯 APP 重启、网络重连、catalogRevision 递增但能力未扩权、相同幂等任务重试、status/last_result 恢复都不得重新询问。发生扩权时只暂停新增范围，原授权范围仍可自动运行。
 
 ## 4. LMCP/2 在线和离线报文
 
@@ -334,7 +342,7 @@ initialize
 | `conflictPolicy` | 必填枚举：`receiver-default`、`ask`、`rename`、`overwrite`、`reject`；`receiver-default` 把同名处理交给接收端安全策略，默认不得静默覆盖 |
 | `idempotencyKey` | 推荐；重复请求必须返回原任务或明确冲突，不能重复发送 |
 
-返回至少包含 `transferId/status/sourceSize/sha256/targetDeviceId/targetName/bytesTransferred`；长传输应另有 `kemi.files.status` 和 `kemi.files.cancel`。文件内容和路径不得进入 UDP 公告、日志摘要或证书。调用前必须显示源文件、大小、目标设备和覆盖策略并请求批准；接收端仍保留接受/拒绝权。
+返回至少包含 `transferId/status/sourceSize/sha256/targetDeviceId/targetName/bytesTransferred`；长传输应另有 `kemi.files.status` 和 `kemi.files.cancel`。文件内容和路径不得进入 UDP 公告、日志摘要或证书。首次授权必须显示允许的源文件根目录、目标设备范围、大小上限和覆盖策略；之后范围内调用自动执行，不得逐文件重复询问。接收端若要求自己的许可，必须提供同样可持久化的自动接收授权；没有接收授权的目标不得宣称支持无人值守自动化落盘。
 
 KEMI传书当前生产目录必须完整列出下列四个工具；VibeKits 不得只显示名称，必须同时展示运行时 `description/inputSchema/risk/验收状态`：
 
@@ -343,7 +351,7 @@ KEMI传书当前生产目录必须完整列出下列四个工具；VibeKits 不�
 | `kemi.device.status` | `{}` | 返回 KEMI 实例、版本/构建号、系统、运行时长、内存、本机 IP、文件服务、附近设备数和 MCP 发送状态 | 只读；已真实调用成功 |
 | `kemi.devices.list` | `{}` | 返回在线接收目标的 `targetDeviceId`、别名、IP、端口、HTTPS、系统和设备类型 | 只读但暴露局域网设备元数据；已真实调用成功 |
 | `kemi.files.last_status` | `{}` | 返回活动态或最近一条脱敏发送终态；活动态 `final=false`，终态 `final=true`，终态保留 7 天 | 只读；不得返回源路径、文件内容、Token、远程会话 ID 或接收端保存路径；已真实调用成功 |
-| `kemi.files.send` | 见下表 | 从本机读取一个明确的普通文件，经 KEMI 正式 TLS 固定链路发送到 `devices.list` 的在线目标 | 高风险文件外发；接收端仍须允许；真实 handler 和路由已验证，但尚未取得 Windows 接收端落盘路径/大小/SHA-256，不能标为“落盘成功” |
+| `kemi.files.send` | 见下表 | 从本机读取一个明确的普通文件，经 KEMI 正式 TLS 固定链路发送到 `devices.list` 的在线目标 | 高风险文件外发；发送端和接收端均须先配置持久自动授权，范围内不得逐次询问；真实 handler 和路由已验证，但尚未取得 Windows 接收端落盘路径/大小/SHA-256，不能标为“落盘成功” |
 
 `kemi.files.send` 当前可调用参数合同：
 
@@ -456,29 +464,29 @@ VibeKits 直接使用 `tools/list` 的 `name` 与用户任务生成参数：
 | --- | --- | --- | --- |
 | `kemi.benchmark.device_status` | `readOnly` | 空对象，`additionalProperties=false` | 实例/版本、MCP 状态、任务状态、附近 LMCP/2 数量；不得返回私钥、原始硬件配置 |
 | `kemi.benchmark.last_result` | `readOnly` | 空对象，`additionalProperties=false` | `ok`、`available`；有结果时返回完整 `result` 和 `reportSha256`，无结果返回稳定 `NO_RESULT`；不得返回本地绝对路径 |
-| `kemi.benchmark.run` | `controlsDevice` | 必填 `mode`：`quick` 或 `stability`；必填 `idempotencyKey`：字符串 8–128 字符；拒绝额外参数 | 审批通过后返回非空 `taskId`、状态工具名、建议轮询秒数；同一幂等键重试必须指向同一任务 |
-| `kemi.benchmark.status` | `readOnly` | 必填 `taskId`：字符串 1–128 字符；拒绝额外参数 | 活动态返回审批/阶段/轮次进度和 `final=false`；完成态必须在同一响应返回 `final=true`、完整 `result`、`reportSha256`；未知/过期任务返回稳定 `TASK_NOT_FOUND` |
-| `kemi.benchmark.cancel` | `controlsDevice` | 必填 `taskId`：1–128 字符；必填 `idempotencyKey`：8–128 字符；拒绝额外参数 | 返回当前任务终态；重复取消必须幂等；运行中的设备控制仍需被调用端审批 |
+| `kemi.benchmark.run` | `controlsDevice` | 必填 `mode`：`quick` 或 `stability`；必填 `idempotencyKey`：字符串 8–128 字符；拒绝额外参数 | 首次 MCP 授权已包含该工具时立即自动启动并返回非空 `taskId`、状态工具名、建议轮询秒数；不得再次弹窗；同一幂等键重试必须指向同一任务 |
+| `kemi.benchmark.status` | `readOnly` | 必填 `taskId`：字符串 1–128 字符；拒绝额外参数 | 活动态返回阶段/轮次进度和 `final=false`；完成态必须在同一响应返回 `final=true`、完整 `result`、`reportSha256`；未知/过期任务返回稳定 `TASK_NOT_FOUND` |
+| `kemi.benchmark.cancel` | `controlsDevice` | 必填 `taskId`：1–128 字符；必填 `idempotencyKey`：8–128 字符；拒绝额外参数 | 已授权范围内自动取消并返回当前终态，不得再次弹窗；重复取消必须幂等 |
 
 标准调用流程固定为：
 
 1. 先从已固定证书且摘要验证通过的当前目录取得 Schema，禁止调用方硬编码旧 revision 或猜参数。
-2. 调用 `run({"mode":"quick","idempotencyKey":"<8-128 字符唯一键>"})`。被调用端必须弹出本机权限确认；拒绝或审批超时返回 `isError=true`、稳定错误码（生产样例为 `DENIED`），调用方立即停止且不得伪造 taskId。
-3. 审批通过后保存 `taskId`，按返回的建议间隔（缺失时 5 秒，客户端夹在 2–15 秒）调用 `status({"taskId":"..."})`，直到 `final=true`。查询本身必须只读且可跨调用方重启恢复。
+2. 调用 `run({"mode":"quick","idempotencyKey":"<8-128 字符唯一键>"})`。若首次持久授权已包含该调用方、`kemi.benchmark.run` 和 `controlsDevice`，被调用端必须立即自动执行并返回 taskId，禁止再次弹出本机权限确认。只有不在授权范围内时才返回稳定 `AUTH_SCOPE_REQUIRED`；不能用等待 110 秒后的 `DENIED` 代替明确的扩权结果。
+3. 保存 `taskId`，按返回的建议间隔（缺失时 5 秒，客户端夹在 2–15 秒）调用 `status({"taskId":"..."})`，直到 `final=true`。查询本身必须只读、无需再次允许且可跨调用方重启恢复。
 4. 若网络/调用方在运行中断开，恢复后调用 `last_result({})`；提供者至少保留最近一条完整终态，使调用方仍能取得结果证据。
 5. 调用方只有同时验证 `isError=false`、`ok=true`、实例/工具/revision 身份、`result` 为对象、`reportSha256=sha256:<64 位小写十六进制>` 后，才能宣布任务完成。
 
-本次真实回收验证通过：VibeKits 调用 `kemi.benchmark.last_result` 得到 `isError=false`、`available=true`、完整三轮 `result`；taskId=`b07e6779-8815-45e2-b94e-dea3a7ff2311`，mode=`quick`，elapsedMs=`73744`，finalScore=`99.15625`，grade=`S`，capacity/frame/input/stability 均为 `100`，reportSha256=`sha256:db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。另一次 `run` 在未获本机批准时正确返回 `DENIED`，证明权限门禁没有被远程调用绕过。
+本次真实回收验证通过：Harness 经 `vibekits.mcp.catalog_list → vibekits.mcp.tool_call → LAN kemi.benchmark.last_result` 得到 `isError=false`、`available=true`、完整三轮 `result`；taskId=`b07e6779-8815-45e2-b94e-dea3a7ff2311`，mode=`quick`，elapsedMs=`73744`，finalScore=`99.15625`，grade=`S`，capacity/frame/input/stability 均为 `100`，reportSha256=`sha256:db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。旧服务对 `run` 仍逐次弹窗并在无人点击时返回 `DENIED`，按本节新标准判定为**自动化不合格**，必须改成首次持久授权后自动执行。
 
 VibeKits 服务端仅接受私网/loopback 来源的 `POST /mcp`，其他 path/method 返回 404，排空时返回 503，并发超过 8 返回 429，请求超过 1 MiB 返回 413。JSON-RPC parse/invalid request/invalid params/method not found/internal error 分别使用标准 `-32700/-32600/-32602/-32601/-32603`；通知成功可返回 HTTP 202 空响应。
 
-所有远端 `tools/call` 必须进入与本机 Harness 相同的 `VibekitsHarnessToolBridge.invoke`：先按当前 inputSchema 再验证参数，再按 `readOnly/writesData/controlsDevice/destructive` 执行当前权限策略；需要审批时在本机显示工具、目标和有界参数，拒绝即不执行。成功、失败和拒绝都写入 `HarnessToolActivityStore`，不得因为来源是 KEMI 或另一台 VibeKits 而绕过审批/审计。MCP 总开关默认关闭；只有显示证书指纹和完整目录的风险确认通过后才监听首选 9443 或公告中的真实回退端口并广播。
+所有远端 `tools/call` 必须进入与本机 Harness 相同的 `VibekitsHarnessToolBridge.invoke`：先按当前 inputSchema 验证参数，再匹配持久自动调用授权的调用方、工具、风险和作用域。命中授权即自动执行；不命中则返回 `AUTH_SCOPE_REQUIRED` 并引导用户在设置中扩权，禁止在单次 HTTP 调用里长时间等待弹窗。成功、失败和拒绝都写入 `HarnessToolActivityStore`。MCP 总开关默认关闭；只有首次风险确认通过后才监听端点并广播，之后无需逐次审批。
 
 VibeKits 的发现接收与“向外暴露 MCP”开关相互独立：即使总开关关闭，APP 仍监听局域网公告并显示其他设备；关闭只停止本 APP 的 HTTPS Server 和对外公告。运行态路径不得从 `Directory.current`/工作区推导。开关同意状态保存在平台 Application Support 的 `Vibekits/mcp/exposure.json`；本机进程注册目录保存在平台 Application Cache 的 `Vibekits/mcp/registrations`。任一本地注册目录不可写都只能令 local 层为空，不能阻断 LAN 订阅。初始化失败必须回滚 started/subscription/timer 状态，允许下一次重试。
 
 以下情况 VibeKits 会拒绝调用：工具不在当前目录、Schema 无效、目录摘要不匹配、实例指纹改变、设备已 `goodbye`/TTL 离线、端点跳出私网、响应超出限制。
 
-VibeKits 对目录握手使用 8 秒短超时，对 `tools/call` 使用 120 秒调用超时。需要等待接收端授权的服务必须在 110 秒内返回完成、拒绝或 `TARGET_RESPONSE_TIMEOUT`，预留结构化响应传输时间；不得让服务端任务在客户端退出后无限持锁。超过此时长的工作必须返回 `taskId`，并提供 status/cancel 工具。
+VibeKits 对目录握手使用 8 秒短超时，对 `tools/call` 使用 120 秒调用超时。授权检查必须本地同步完成，命中持久授权立即执行，不得把 110 秒预算用于等待人工批准；未授权立即返回 `AUTH_SCOPE_REQUIRED`。文件接收等外部目标响应可使用不超过 110 秒的业务超时。超过客户端调用时长的工作必须尽快返回 `taskId`，并提供无需再次授权的 status/cancel 工具。
 
 ## 6. 像本地工具一样远程调用
 
@@ -501,7 +509,7 @@ lmcp://<instanceId>/<tool.name>
 }
 ```
 
-网络断开、目录版本变化和远端错误必须保留来源信息；不得悄悄改成本机 shell 执行。写入/设备控制是否允许由任务本身和工具风险控制，不做普通 MCP 的逐工具配对审批。
+网络断开、目录版本变化和远端错误必须保留来源信息；不得悄悄改成本机 shell 执行。写入/设备控制是否允许由持久自动调用授权的风险上限和作用域控制，不做普通 MCP 的逐次审批。
 
 ### 6.1 每个工具必须说清“能做什么”
 
@@ -509,7 +517,7 @@ lmcp://<instanceId>/<tool.name>
 
 - 稳定 `name`、人类可读 `title` 和不含糊的 `description`；
 - 完整 `inputSchema`：字段、必填、类型、范围、枚举、默认值、`additionalProperties`；
-- `readOnly/writesData/controlsDevice/destructive`、外发数据范围和审批点；
+- `readOnly/writesData/controlsDevice/destructive`、外发数据范围和首次授权作用域；
 - 前置条件、成功 `structuredContent` 字段、稳定错误码、超时/取消/幂等语义；
 - 当前验收状态：只完成 `tools/list` 不得写成“功能已成功”。
 
@@ -529,7 +537,7 @@ app（VibeKits 自身 MCP） → local（本机其他进程 MCP） → lan（局
 
 当前计算规则为：自动完成质量映射到 0–100；有人工评分时使用 `35% 自动质量 + 65% 人工评分`；每次连续失败再扣 7 分，结果限制到 0–100。等级为 `excellent >=85`、`good >=70`、`neutral >=50`、`poor >=30`、`garbage <30`。人工 0 分表示垃圾并强力降权；成功会清零连续失败。调用完成后必须按真实完成质量记录，不能只因 HTTP/MCP 返回成功就给满分。
 
-Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibekits.mcp.reputation_rate` 写入 0–5 分。任何评分都不能绕过 TLS 指纹、目录摘要、inputSchema、在线检查或写入/设备控制审批。
+Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibekits.mcp.reputation_rate` 写入 0–5 分。任何评分都不能绕过 TLS 指纹、目录摘要、inputSchema、在线检查或持久授权作用域。
 
 ## 7. 第三方 APP 交付检查表
 
@@ -537,6 +545,8 @@ Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibek
 - [ ] `app.id`、`hardwareCode`、`instanceId` 重启后稳定。
 - [ ] 有用户可见、可持久化的 MCP 开关。
 - [ ] 从关闭到打开会先显示完整工具清单、证书身份、风险和撤销方法；拒绝时保持关闭。
+- [ ] 首次授权持久化调用方、工具、风险和资源作用域；范围内调用、重启、重连和 status/last_result 恢复均不再弹窗。
+- [ ] 未授权或扩权调用立即返回 `AUTH_SCOPE_REQUIRED`，不得占用调用超时等待人工批准。
 - [ ] OFF/STARTING/ON/DRAINING/ERROR 的状态有明显区别。
 - [ ] 打开发送 `announce`，关闭发送 `goodbye` 并停止服务。
 - [ ] 实现标准 `initialize/tools/list/tools/call`。
@@ -559,7 +569,7 @@ Harness 通过 `vibekits.mcp.reputation_list` 查看全局记忆，通过 `vibek
 - 界面：Harness 右侧工具轨的 MCP 明确开/关状态、首次/重新打开授权菜单、本 APP MCP 完整列表、本机 MCP 和局域网 MCP 列表
 - Harness 远端路由：`vibekits.mcp.catalog_list` 和 `vibekits.mcp.tool_call`
 
-VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化并广播；关闭可立即执行。这是对外暴露边界的一次确认，不是普通 MCP 工具的逐次审批；远程 Harness 任务控制仍独立审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、切换 MCP、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
+VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化授权并广播；关闭可立即执行。确认页必须包含远程 Harness/设备控制的可选范围；用户选中后该范围持续自动执行，不再独立逐次审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、授权范围、切换 MCP、撤销授权、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
 ### 8.1 VibeKits 1.9 当前正式传输
 
@@ -580,7 +590,7 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
   test/mcp_device_identity_test.dart
 ```
 
-其中必须覆盖：持久 P-256 证书重载指纹不变；严格公告 `<=1200` bytes；两个进程/实例共享一个 UDP 端口并收到 LMCP/2；RFC1918 多网卡地址全部入选且公网/回环排除；真实 TLS 指纹固定；initialize→分页 tools/list→tools/call；错误 schema 不执行；写入类工具进入审批；关闭清公告和 endpoint。
+其中必须覆盖：持久 P-256 证书重载指纹不变；严格公告 `<=1200` bytes；两个进程/实例共享一个 UDP 端口并收到 LMCP/2；RFC1918 多网卡地址全部入选且公网/回环排除；真实 TLS 指纹固定；initialize→分页 tools/list→tools/call；错误 schema 不执行；持久授权命中后写入/控制工具无弹窗自动完成；扩权立即返回 `AUTH_SCOPE_REQUIRED`；关闭清公告、endpoint 和授权。
 
 ### 9.1 VibeKits ↔ VibeKits
 
@@ -590,7 +600,7 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
 2. A 打开，确认授权框列出证书指纹和全部工具；抓包看到 A 每 4 秒 announce，B 在 12 秒内出现 A。
 3. B 对 A 依次发送 initialize、notifications/initialized、完整分页 tools/list；重算摘要必须等于公告。
 4. B 调用 `vibekits.calculator.programmer`，参数 `{"expression":"1+1"}`；结果 `isError=false`，并精确回显 A 的 instanceId、工具名、revision 和 traceId。
-5. 选择一个 writesData/controlsDevice 工具，只验证 A 出现本机审批；点拒绝，确认未产生副作用且审计状态为 denied。禁止拿真实用户文件做破坏测试。
+5. 在 A 的首次确认页仅授权一个无破坏性的 writesData/controlsDevice 测试工具；B 连续调用两次，确认 A 均不再弹窗且自动完成。随后 A 撤销该工具授权，B 再调必须立即得到 `AUTH_SCOPE_REQUIRED` 且无副作用。禁止拿真实用户文件做破坏测试。
 6. 交换 A/B 重复 2–5，证明双向而非单向。
 7. A 关闭：先抓到 goodbye，B 立即移除；模拟断电不发 goodbye，B 在最后有效公告 12 秒后移除；A 公告的 TCP 端口不再接受连接。
 
@@ -600,12 +610,12 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
 
 1. KEMI 的 MCP 面板出现 VibeKits LMCP/2（不是兼容 LMCP/1），显示与抓包一致的 `instanceId/192.168.x.x:<实际端口>/mcp/fingerprint/revision/digest`。
 2. KEMI 初始化 VibeKits 并读取完整目录，调用同一个只读计算器用例成功；VibeKits 审计记录来源工具、结果和耗时。
-3. KEMI 发起高风险工具时 VibeKits 本机审批可拒绝；KEMI 收到结构化 `isError`，不得自动改走 shell。
+3. VibeKits 首次授权页选定一个无破坏性的高风险测试工具后，KEMI 连续调用应自动完成且不再弹窗；撤销授权后下一次调用立即收到结构化 `AUTH_SCOPE_REQUIRED`，不得自动改走 shell。
 4. 分别关闭 KEMI 和 VibeKits，另一端验证 goodbye 立即消失、断电 TTL 消失、证书篡改拒绝、digest/revision 改变重新加载。
 5. Windows 必须运行包含 LMCP/2 接收器的新构建，不能只核对 `1.9.0-dev.137+2137` 文本版本；验收记录必须同时保存 Git/source revision 或产物 SHA-256。
 6. Windows 签名安装程序必须为实际 VibeKits 可执行文件创建 Private profile 入站 UDP 47831 和公告 TCP 端口规则；先用 `pktmon`/抓包证明收到 KEMI 报文，再调查 UI 解析。
 
-验收记录至少保存：两端版本/SHA-256、两端私网 IP、10 秒 UDP 抓包、公告 TCP 端口建连、initialize 与每页 tools/list 的脱敏 JSON、摘要重算、一次只读调用、一次拒绝审计、goodbye/TTL 时间。不得保存私钥、Token、完整用户路径或文件内容。
+验收记录至少保存：两端版本/SHA-256、两端私网 IP、10 秒 UDP 抓包、公告 TCP 端口建连、initialize 与每页 tools/list 的脱敏 JSON、摘要重算、一次只读调用、一次持久授权范围内的自动高风险调用、一次撤销后 `AUTH_SCOPE_REQUIRED` 审计、goodbye/TTL 时间。不得保存私钥、Token、完整用户路径或文件内容。
 
 ## 10. 最短排障决策树
 
@@ -623,7 +633,7 @@ flutter test --no-pub test/lmcp_exposure_server_test.dart \
 目录存在但调用失败
   ├─revision/instance/tool 不一致 → 清旧缓存并重新 initialize/list
   ├─invalid params → 严格按 inputSchema 传参，不猜字段
-  └─denied/isError → 查看被调用端本机审批和脱敏审计，不绕过权限
+  └─AUTH_SCOPE_REQUIRED → 首次授权范围不足或已撤销；在设置中显式扩权后自动重试，禁止逐次弹窗
 ```
 
 如果 `lsof`/`Get-NetTCPConnection` 显示 9443 已被同机另一个 LMCP APP 占用，VibeKits 允许绑定 OS 分配的动态端口，但必须在 announce 的两个 endpoint 精确广播这个端口并通过同样的 TLS/摘要校验；KEMI 的严格解析器接受 `1..65535` 的真实端口。任何端口都不得“偷偷”使用而不更新公告。自动化测试必须通过依赖注入使用隔离的 TCP/UDP 端口。

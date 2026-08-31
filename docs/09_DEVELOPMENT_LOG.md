@@ -1197,3 +1197,4 @@
 - Harness 对话向上滚动离开底部超过 72px 后显示圆形向下箭头；点击平滑滚动到最新消息，到底自动隐藏，并提供键盘焦点与无障碍名称。
 - 真机 Release 复测发现 Finder/App Bundle 启动时 `Directory.current` 不指向仓库，旧实现创建 `.runtime-cache/mcp/registrations` 失败后提前遗留 `_started=true`，导致 UDP 47831 已绑定但 UI 未订阅，表现为对端持续广播而列表为 0。注册缓存和开关状态现改用 `PlatformStorageLayout` 的 Cache/Application Support 稳定路径；local 缓存不可写不再阻断 LAN，初始化异常会完整回滚以便重试。
 - 修复后重新构建并从 App Bundle 启动 Release，右侧“局域网 MCP 设备”角标实际显示 `1`。真实读取 `192.168.3.62` APP 2.1.5/revision 3 的 5 个完整 Schema；`run` 未获本机批准时返回 `DENIED`，未绕过权限。随后只读调用 `last_result` 成功回收完整三轮结果：99.15625/S、四项 100、报告 SHA-256 `db6d5ff14dd3a060469a5c5d21804a0c6f196b3e967a4a6c0760384f34cfc363`。唯一接入文档补齐异步 run/status/cancel/last_result 的参数、终态和断线恢复合同。
+- 自动化授权语义收口：首次 MCP 确认页必须持久化调用方、工具、风险和资源作用域；命中范围的 readOnly/writesData/controlsDevice/Harness 调用在重启、重连和新会话后均自动执行，不得逐次弹窗。只有证书/调用方/风险或资源扩权、主动撤销、关闭 MCP、系统权限撤销才重新授权；未授权立即返回 `AUTH_SCOPE_REQUIRED`，不能等待审批超时。KEMI-BM 旧 `run` 每次弹窗并返回 `DENIED` 现明确判定为自动化不合格。
