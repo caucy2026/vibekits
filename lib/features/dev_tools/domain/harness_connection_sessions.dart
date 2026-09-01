@@ -17,16 +17,13 @@ typedef HarnessAdbHealthRunner = Future<AdbCommandResult> Function(
 /// manager is disposed with its Harness bridge so no COM handle, timer or ADB
 /// heartbeat survives the APP process.
 class HarnessConnectionSessions {
-  HarnessConnectionSessions({
-    HarnessSerialOpener? openSerial,
-    HarnessAdbHealthRunner? checkAdb,
-  }) : _openSerial = openSerial ?? SerialPortService.open,
-       _checkAdb = checkAdb;
+  HarnessConnectionSessions({HarnessSerialOpener? openSerial, this.checkAdb})
+    : _openSerial = openSerial ?? SerialPortService.open;
 
   static const int maxSerialBufferBytes = 2 * 1024 * 1024;
 
   final HarnessSerialOpener _openSerial;
-  final HarnessAdbHealthRunner? _checkAdb;
+  final HarnessAdbHealthRunner? checkAdb;
   final Map<String, _SerialHandle> _serial = <String, _SerialHandle>{};
   final Map<String, _AdbHandle> _adb = <String, _AdbHandle>{};
   int _nextId = 1;
@@ -93,12 +90,12 @@ class HarnessConnectionSessions {
     String serial, {
     int heartbeatSeconds = 10,
   }) async {
-    if (_checkAdb == null) throw StateError('ADB 长连接执行器不可用');
+    if (checkAdb == null) throw StateError('ADB 长连接执行器不可用');
     final String target = serial.trim();
     if (target.isEmpty || target.contains(RegExp(r'[\r\n\s]'))) {
       throw const FormatException('ADB 设备序列号无效');
     }
-    final AdbCommandResult initial = await _checkAdb(target);
+    final AdbCommandResult initial = await checkAdb!(target);
     if (initial.exitCode != 0 || initial.stdout.trim() != 'device') {
       throw StateError(
         initial.stderr.trim().isEmpty
@@ -121,7 +118,7 @@ class HarnessConnectionSessions {
     if (handle.checking || !_adb.containsKey(handle.id)) return;
     handle.checking = true;
     try {
-      handle.record(await _checkAdb!(handle.serial));
+      handle.record(await checkAdb!(handle.serial));
     } on Object catch (error) {
       handle.lastError = '$error';
       handle.connected = false;
