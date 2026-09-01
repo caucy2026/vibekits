@@ -56,5 +56,19 @@ for ITEM in 7zz License.txt readme.txt History.txt; do
   fi
 done
 chmod 755 "$DESTINATION/7zz"
+SEVEN_ZIP_SHA256="$(shasum -a 256 "$DESTINATION/7zz" | awk '{print $1}')"
+cat > "$DESTINATION/RUNTIME-INFO.txt" <<EOF
+7-Zip macOS Release Runtime
+Version: $VERSION
+Upstream: $URL
+Source archive SHA-256: $EXPECTED_SHA256
+Bundled 7zz SHA-256: $SEVEN_ZIP_SHA256
+Architectures: x86_64, arm64
+Minimum macOS: 12.0
+
+The pinned preparation recipe remains in tool/prepare_7zip_runtime_macos.sh.
+License.txt, readme.txt and History.txt are copied from the verified upstream
+archive and travel with this executable.
+EOF
 "$DESTINATION/7zz" i | grep -F "7-Zip $VERSION" >/dev/null
 echo "Prepared official 7-Zip $VERSION runtime ($ARCHS): $DESTINATION"

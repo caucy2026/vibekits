@@ -1,0 +1,11 @@
+7-Zip macOS Release Runtime
+Version: 25.01
+Upstream: https://github.com/ip7z/7zip/releases/download/25.01/7z2501-mac.tar.xz
+Source archive SHA-256: 26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0
+Bundled 7zz SHA-256: 5c2fd36f00a66f7787dcf1badd977d44a02b50063fe5678e1f19ff64797432ed
+Architectures: x86_64, arm64
+Minimum macOS: 12.0
+
+The pinned preparation recipe remains in tool/prepare_7zip_runtime_macos.sh.
+License.txt, readme.txt and History.txt are copied from the verified upstream
+archive and travel with this executable.

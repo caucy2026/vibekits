@@ -55,7 +55,6 @@ migrate_working_dir/
 # Git while the extracted redistributable is supplied to Windows packaging.
 /native/git/windows/runtime/
 /native/git/macos/runtime/
-/native/7zip/macos/runtime/
 /native/lark_cli/windows/runtime/
 
 # Local verification output

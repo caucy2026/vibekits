@@ -85,7 +85,7 @@ rm -rf "$SEVEN_ZIP_DESTINATION"
 mkdir -p "$SEVEN_ZIP_DESTINATION"
 ditto "$SEVEN_ZIP_SOURCE/7zz" "$SEVEN_ZIP_DESTINATION/7zz"
 chmod 755 "$SEVEN_ZIP_DESTINATION/7zz"
-for SEVEN_ZIP_METADATA in License.txt readme.txt History.txt; do
+for SEVEN_ZIP_METADATA in License.txt readme.txt History.txt RUNTIME-INFO.txt; do
   if [ -f "$SEVEN_ZIP_SOURCE/$SEVEN_ZIP_METADATA" ]; then
     ditto "$SEVEN_ZIP_SOURCE/$SEVEN_ZIP_METADATA" \
       "$SEVEN_ZIP_DESTINATION/$SEVEN_ZIP_METADATA"

@@ -5,3 +5,4 @@ native/mihomo/windows/runtime/*.mmdb binary
 # Audited upstream packages are preserved byte-for-byte (including upstream
 # CRLF and whitespace); review the small local hook deltas before vendoring.
 third_party/** -diff -text
+native/7zip/macos/runtime/** -diff -text

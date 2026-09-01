@@ -9,7 +9,7 @@
 | 组件 | 固定版本 | 用途 | 许可证 | 来源与完整性 |
 |---|---|---|---|---|
 | 7-Zip Windows x64 | 26.02 | RAR/7z/ZIP/ISO/ZSTD/CAB/WIM/DMG 等列表与解压 | LGPL-2.1-or-later；RAR 解码另受 unRAR 限制 | 官方安装器；安装器 SHA-256 `6745fa76...2ef0`；`native/7zip` 保留原始许可证、历史和二进制哈希 |
-| 7-Zip macOS Universal | 25.01 | RAR/7z/ZIP/ISO/ZSTD/CAB/WIM/DMG 等列表与解压 | LGPL-2.1-or-later；RAR 解码另受 unRAR 限制 | 官方 `7z2501-mac.tar.xz`，SHA-256 `26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0`；`x86_64/arm64` 均 `minos=12.0`；26.02 因官方二进制最低系统过高不进入 dev.146 |
+| 7-Zip macOS Universal | 25.01 | RAR/7z/ZIP/ISO/ZSTD/CAB/WIM/DMG 等列表与解压 | LGPL-2.1-or-later；RAR 解码另受 unRAR 限制 | 官方 `7z2501-mac.tar.xz`，SHA-256 `26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0`；固定 `7zz`、许可证和 `RUNTIME-INFO.txt` 已纳入 Git，二进制 SHA-256 `5c2fd36f00a66f7787dcf1badd977d44a02b50063fe5678e1f19ff64797432ed`；`x86_64/arm64` 均 `minos=12.0`；26.02 因官方二进制最低系统过高不进入 dev.146 |
 | ONNX Runtime C API | 随 sherpa-onnx Windows 运行时 | PP-OCRv6 tiny CPU 推理 | MIT | 官方头文件；Release 运行库由已锁定依赖提供，Vibekits 桥接只调用公开 C API |
 | `sherpa_onnx` | 1.13.6 | Silero VAD 与 Windows/macOS ONNX Runtime 分发 | Apache-2.0 | pub.dev 锁文件 SHA-256 `5d6cd57eca94caf4b3ce3b07d9affb11ad68d14c37e1e7aa3f60e63b59aee361` |
 | `sqlite3` | 3.5.2 | SQLite 只读数据库管理和原生资产 | MIT | 审计副本位于 `third_party/dart/sqlite3`；macOS 使用系统 `libsqlite3` 以满足官方支持和 macOS 12 部署门禁，其他平台保留上游默认 native-asset 行为；上游 pub.dev SHA-256 `4c7fe79840389aaeaf05fd093f795b631b5a98e2bd28d54e555c100f4a9c7a1c` |
