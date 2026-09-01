@@ -1,6 +1,6 @@
 # LMCP/2 APP 设备身份、MCP 开关与远程等价调用标准
 
-版本：2.3
+版本：2.4
 状态：VibeKits、KEMI传书和第三方 APP 唯一可执行互通规范
 目标：另一台机器只需完整实现本文，即可让 VibeKits 与对端双向发现、固定实例证书、读取目录，并像调用本机工具一样互相调用。
 
@@ -1005,6 +1005,107 @@ Harness 完成工程任务后至少输出：
 文件内容、远程会话密码不得进入报告；需要关联时使用稳定资源 ID、basename、大小和
 哈希。
 
+### 6.9 指挥官—作战单位架构与大规模实时调度
+
+LMCP/2 把角色明确分成两类：Harness/Codex 等任务规划器是“指挥官
+（commander）”；完整遵守本文、接受已授权自动调用并能返回可验证结果的 MCP
+Provider 是“作战单位（worker）”。同一局域网允许多个指挥官和至少 100 个同类型
+作战单位同时存在。发现在线只代表“看见”，满足身份、能力、授权、负载、租约、取消、
+结果和验真合同后才可标记为 `schedulable=true` 并接受调度。
+
+#### 6.9.1 作战单位必须实时声明的运行状态
+
+每个 LMCP/2 `announce` 除身份和目录摘要外必须携带以下有界 `runtime` 摘要；状态变化
+时立即发送一次，稳定时仍按 4 秒周期发送，连续变化最多每 250 ms 合并一次，整个 UDP
+包仍不得超过 1200 bytes：
+
+```json
+{
+  "runtime": {
+    "state": "idle",
+    "capacity": 4,
+    "inFlight": 0,
+    "queueDepth": 0,
+    "availableSlots": 4,
+    "loadRevision": 318,
+    "oldestTaskAgeMs": 0,
+    "draining": false,
+    "acceptingReservations": true
+  }
+}
+```
+
+`state` 只能是 `idle/busy/saturated/draining/error`。`capacity` 是该实例允许同时执行的
+副作用任务数；`availableSlots` 必须由 Provider 权威计算，不能由调用方用
+`capacity-inFlight` 猜测。状态查询、目录读取和租约控制不占业务槽位。负载变化必须
+递增 `loadRevision`；数值矛盾、版本倒退或超过 TTL 的状态视为未知，不进入自动选择。
+详细任务、资源类型和预计释放时间通过强制只读工具 `lmcp.node.status` 获取，不塞进 UDP。
+
+#### 6.9.2 四个强制调度控制工具
+
+每个可调度 Provider 必须实现下列保留工具，并在 `tools/list` 提供完整 Schema：
+
+| 工具 | 必填参数 | 成功结果 | 语义 |
+|---|---|---|---|
+| `lmcp.node.status` | `{}` | runtime、各 capabilityGroup 槽位、活动租约数、服务时间 | 只读、快速、不得弹窗 |
+| `lmcp.capacity.reserve` | `toolName,idempotencyKey,commanderId,requestedSlots,ttlSeconds,scopeDigest` | `leaseId,leaseToken,expiresAt,slot,loadRevision` | 在执行前原子占位；容量不足返回 `CAPACITY_BUSY` |
+| `lmcp.capacity.renew` | `leaseId,leaseToken,ttlSeconds` | 新 `expiresAt` | 长任务续租；身份和原 commander 必须匹配 |
+| `lmcp.capacity.release` | `leaseId,leaseToken,reason` | `released=true` | 完成、失败、取消或放弃时幂等释放 |
+
+`reserve` 的 Provider 处理必须是原子的：多个指挥官同时抢最后一个槽位时最多一个成功。
+租约默认 30 秒、允许范围 10～120 秒；未续租自动释放。`leaseToken` 是短期随机秘密，
+只在签名 HTTPS 响应/请求中出现，绝不进入 UDP、日志或最终报告。后续业务
+`tools/call` 必须携带 `leaseId` 和同一 `idempotencyKey`；租约的 tool、作用域摘要、
+调用方身份不匹配时返回 `LEASE_SCOPE_MISMATCH`。Provider 崩溃恢复后未完成租约进入
+`unknown/interrupted`，不得静默重做副作用。
+
+#### 6.9.3 指挥官的节点表与最优选择
+
+每个指挥官维护 `instanceId + fingerprint` 为键的实时节点表。无论 Provider 先启动还是
+指挥官后启动，指挥官都必须加入组播、主动发送一次 `discover`，Provider 收到后在
+0～500 ms 随机抖动内重发 `announce`；8 秒内必须收齐当前局域网在线节点。节点表按
+TTL 自动下线，并保留有界历史健康数据但不得把历史节点伪装在线。
+
+执行任务时固定按以下顺序：
+
+1. 先过滤：在线、LMCP/2 严格验签、证书固定、`callable/schedulable=true`、工具与
+   Schema/风险/作用域匹配、持久授权有效、非 draining/error、至少一个可预约槽位；
+2. 再保持既有层级：本机 VibeKits MCP（app）→ 本地其他进程 MCP（local）→ 局域网
+   MCP（lan）；低层级不能只靠高分越级抢占；
+3. 同一层、同一工具类型按加权值排序：空闲槽位 35%、工具类型全局质量分 25%、
+   节点近期可靠性 15%、预计排队/延迟 15%、状态新鲜度 5%、公平性 5%；
+4. 用户对同一工具类型的评分是全局共享分，多台设备显示相同评分；节点掉线率、超时率、
+   当前负载只形成独立健康权重，不篡改用户给工具类型的评价；
+5. 对最高候选调用 `reserve`。若返回 `CAPACITY_BUSY/REVISION_STALE`，立即刷新该节点
+   并尝试下一候选；成功后才调用业务工具。不得仅凭 UDP 的 `idle` 直接开工；
+6. 同分使用 `hash(taskId + instanceId)` 稳定打散，避免多个指挥官永远冲击同一台设备。
+
+“垃圾/错误 MCP”、结构化结果不合规、完成质量低、频繁超时或无物理证据时必须降权并
+触发有界熔断；身份异常、Schema 欺骗或凭据泄漏直接隔离。熔断只影响该节点健康权重，
+工具类型全局评分仍按用户规则共享。半开探测只能执行只读健康检查，不用真实副作用试错。
+
+#### 6.9.4 任务编排、失败转移与完成判定
+
+指挥官可以把一个工程目标拆给多个作战单位并行执行，但每个子任务必须有全局
+`taskId/traceId/idempotencyKey`、输入/输出 Schema、资源作用域、deadline、取消策略、
+前置依赖和完成证据。只有无副作用或 Provider 明确声明可幂等恢复的任务才能自动换队；
+副作用结果处于 `unknown` 时必须先用 status/last_result 对账，禁止直接在另一节点重做。
+
+业务完成后，指挥官先取得 Provider 的标准结果信封，再按 6.6 独立验真；HTTP 200、
+`accepted=true`、租约释放或进度 100% 都不等于物理目标完成。最终报告必须列出候选数、
+被选节点与选择理由、租约、重试/换队、每个 traceId/taskId、结果摘要、独立证据和
+`executed/partial/verified` 等级。任何阶段都必须在 finally 路径释放租约；指挥官掉线则
+由 TTL 回收，Provider 的用户“强制关闭”仍可立即终止并记为 `USER_TERMINATED`。
+
+#### 6.9.5 100 节点、多指挥官强制验收
+
+上线前必须用至少 100 个同名工具 Provider 和 10 个并发指挥官完成真实或协议级压力
+验收：晚启动指挥官 8 秒内发现全部节点；空闲/忙/饱和变化 1 秒内进入节点表；100 次
+同时争抢单槽位从不超卖；同类型全局评分一致；空闲节点优先且负载分散；节点断电在
+12 秒内剔除；租约到期回收；幂等重试不重复副作用；取消释放槽位；最终结果可恢复并
+验真。报告必须保存每次选择、reserve 冲突、峰值槽位、P50/P95 调度延迟、重复执行数
+和泄漏租约数；后两项必须为 0。
+
 ## 7. 第三方 APP 交付检查表
 
 - [ ] 显示名称包含 APP 名、主机名和 10 位硬件识别码。
@@ -1033,6 +1134,9 @@ Harness 完成工程任务后至少输出：
 - [ ] 已用一个包含至少三个工具的真实工程任务验证自动选型、编排、终态轮询、物理验真、失败恢复和最终报告。
 - [ ] 每个工具已写明用途、全部参数、风险、成功结果、错误码和实际验收状态。
 - [ ] 接口变化更新目录版本并发出通知。
+- [ ] announce 携带自洽的 runtime/capacity/loadRevision；状态变化立即公告，过期状态不参与调度。
+- [ ] 实现 `lmcp.node.status` 与 reserve/renew/release，多个指挥官竞争时原子占位、不超卖、不泄漏租约。
+- [ ] 100 个同类型节点和 10 个并发指挥官验收通过：晚启动发现、空闲优先、公平分散、熔断换队、幂等和验真均有机器报告。
 - [ ] 广播不包含秘密或业务数据。
 - [ ] 两台真实设备验证上线、调用、关闭立即消失、断电 TTL 消失。
 - [ ] 通过 VibeKits 的第三方 LMCP 合规测试后才标记完成。

@@ -314,6 +314,7 @@ class HarnessTaskStateRegistry {
   final int maxSnapshotBytes;
   final Map<HarnessTaskKey, HarnessTaskSnapshot> _tasks =
       <HarnessTaskKey, HarnessTaskSnapshot>{};
+  final Set<HarnessTaskKey> _workspaceInventoryKeys = <HarnessTaskKey>{};
   final StreamController<HarnessWorkRegistrySnapshot> _changes =
       StreamController<HarnessWorkRegistrySnapshot>.broadcast();
   int _streamSequence = 0;
@@ -435,6 +436,49 @@ class HarnessTaskStateRegistry {
     );
   }
 
+  /// Replaces the read-only inventory projected by the official DSH project
+  /// tree. This is current UI state, not retained task history.
+  void syncWorkspaceInventory(Iterable<HarnessWorkspaceSummary> workspaces) {
+    final DateTime now = _clock().toUtc();
+    final Set<HarnessTaskKey> nextKeys = <HarnessTaskKey>{};
+    for (final HarnessWorkspaceSummary workspace in workspaces) {
+      final String label = _publicText(workspace.label, 120);
+      if (label.isEmpty) continue;
+      final HarnessTaskKey key = HarnessTaskKey(
+        workspaceRef: _publicRef(workspace.workspaceRef, 'workspace'),
+        sessionRef: 'workspace-inventory',
+        taskId: 'workspace-status',
+      );
+      nextKeys.add(key);
+      final HarnessTaskSnapshot? current = _tasks[key];
+      _tasks[key] = HarnessTaskSnapshot(
+        deviceRef: current?.deviceRef ?? 'opaque-device',
+        workspaceRef: key.workspaceRef,
+        workspaceLabel: label,
+        sessionRef: key.sessionRef,
+        taskId: key.taskId,
+        streamSequence: ++_streamSequence,
+        taskRevision: (current?.taskRevision ?? 0) + 1,
+        phase: workspace.active
+            ? HarnessWorkPhase.ready
+            : HarnessWorkPhase.idle,
+        message: workspace.active ? '当前工作区已就绪' : '工作区空闲',
+        startedAt: current?.startedAt ?? now,
+        updatedAt: now,
+      );
+    }
+    for (final HarnessTaskKey stale in _workspaceInventoryKeys.difference(
+      nextKeys,
+    )) {
+      _tasks.remove(stale);
+    }
+    _workspaceInventoryKeys
+      ..clear()
+      ..addAll(nextKeys);
+    _pruneRetainedTasks();
+    _emit(now);
+  }
+
   /// Restores persisted latest states after process restart.
   ///
   /// Previously running tasks become terminal `interrupted` tasks. Global
@@ -493,32 +537,63 @@ class HarnessTaskStateRegistry {
     String toolId = '',
     String toolName = '',
     String target = '',
+    String workspaceRef = 'legacy-workspace',
+    String workspaceLabel = '工作区',
+    String sessionRef = 'legacy-session',
   }) {
-    const String workspaceRef = 'legacy-workspace';
-    const String sessionRef = 'legacy-session';
+    final String publicWorkspaceRef = _publicRef(workspaceRef, 'workspace');
+    final String publicSessionRef = _publicRef(sessionRef, 'session');
     HarnessTaskSnapshot? current;
     for (final HarnessTaskSnapshot task in _tasks.values) {
-      if (task.workspaceRef == workspaceRef &&
-          task.sessionRef == sessionRef &&
+      if (task.workspaceRef == publicWorkspaceRef &&
+          task.sessionRef == publicSessionRef &&
           (current == null || task.streamSequence > current.streamSequence)) {
         current = task;
       }
     }
     final HarnessWorkPhase next = phase.canonical;
-    if (current == null ||
-        current.terminal ||
-        next == HarnessWorkPhase.starting &&
-            current.phase.canonical != HarnessWorkPhase.starting) {
-      return beginTask(
-        workspaceRef: workspaceRef,
-        sessionRef: sessionRef,
-        taskId: 'legacy-task-${++_generatedTaskId}',
+    final bool scopedWorkspace = workspaceRef != 'legacy-workspace';
+    if (current != null && current.terminal && next.terminal) {
+      return current;
+    }
+    if (scopedWorkspace && current != null && current.terminal) {
+      return _replaceTask(
+        current,
         phase: next == HarnessWorkPhase.idle ? HarnessWorkPhase.ready : next,
         message: message,
         toolId: toolId,
         toolName: toolName,
         target: target,
       );
+    }
+    if (current == null ||
+        current.terminal ||
+        next == HarnessWorkPhase.starting &&
+            current.phase.canonical != HarnessWorkPhase.starting) {
+      final HarnessTaskSnapshot started = beginTask(
+        workspaceRef: workspaceRef,
+        workspaceLabel: workspaceLabel,
+        sessionRef: sessionRef,
+        taskId: 'legacy-task-${++_generatedTaskId}',
+        phase: next == HarnessWorkPhase.idle || next.terminal
+            ? HarnessWorkPhase.ready
+            : next,
+        message: message,
+        toolId: toolId,
+        toolName: toolName,
+        target: target,
+      );
+      if (next.terminal) {
+        return _replaceTask(
+          started,
+          phase: next,
+          message: message,
+          toolId: toolId,
+          toolName: toolName,
+          target: target,
+        );
+      }
+      return started;
     }
     // Compatibility calls may skip lifecycle phases, but a terminal task is
     // never reopened: the branch above creates a new task instead.
@@ -717,12 +792,39 @@ abstract final class HarnessWorkStatusHub {
       StreamController<HarnessWorkSnapshot>.broadcast();
   static final HarnessTaskStateRegistry _registry = HarnessTaskStateRegistry();
   static HarnessWorkSnapshot _latest = HarnessWorkSnapshot.idle();
+  static HarnessWorkspaceStatusContext? _activeWorkspace;
 
   static HarnessWorkSnapshot get latest => _latest;
   static Stream<HarnessWorkSnapshot> get changes => _changes.stream;
   static HarnessWorkRegistrySnapshot get registryLatest => _registry.latest;
   static Stream<HarnessWorkRegistrySnapshot> get registryChanges =>
       _registry.changes;
+
+  /// Routes backward-compatible Harness/tool status into a real VibeKits
+  /// workspace instead of the reserved global legacy row.
+  static HarnessWorkspaceStatusContext activateWorkspace({
+    required String workspaceRef,
+    required String workspaceLabel,
+    required String sessionRef,
+  }) {
+    final HarnessWorkspaceStatusContext context = HarnessWorkspaceStatusContext(
+      workspaceRef: workspaceRef,
+      workspaceLabel: workspaceLabel,
+      sessionRef: sessionRef,
+    );
+    _activeWorkspace = context;
+    return context;
+  }
+
+  static void clearWorkspace(HarnessWorkspaceStatusContext context) {
+    if (identical(_activeWorkspace, context)) _activeWorkspace = null;
+  }
+
+  static void syncWorkspaceInventory(
+    Iterable<HarnessWorkspaceSummary> workspaces,
+  ) {
+    _registry.syncWorkspaceInventory(workspaces);
+  }
 
   static HarnessTaskSnapshot beginTask({
     String deviceRef = 'opaque-device',
@@ -820,12 +922,16 @@ abstract final class HarnessWorkStatusHub {
     String toolName = '',
     String target = '',
   }) {
+    final HarnessWorkspaceStatusContext? context = _activeWorkspace;
     final HarnessTaskSnapshot task = _registry.publishCompatibility(
       phase: phase,
       message: message,
       toolId: toolId,
       toolName: toolName,
       target: target,
+      workspaceRef: context?.workspaceRef ?? 'legacy-workspace',
+      workspaceLabel: context?.workspaceLabel ?? '工作区',
+      sessionRef: context?.sessionRef ?? 'legacy-session',
     );
     _project(task, legacyPhase: phase);
   }
@@ -845,6 +951,30 @@ abstract final class HarnessWorkStatusHub {
     _changes.add(_latest);
     unawaited(HarnessRuntimeLogStore.appendWorkEvent(_latest.toJson()));
   }
+}
+
+class HarnessWorkspaceStatusContext {
+  const HarnessWorkspaceStatusContext({
+    required this.workspaceRef,
+    required this.workspaceLabel,
+    required this.sessionRef,
+  });
+
+  final String workspaceRef;
+  final String workspaceLabel;
+  final String sessionRef;
+}
+
+class HarnessWorkspaceSummary {
+  const HarnessWorkspaceSummary({
+    required this.workspaceRef,
+    required this.label,
+    this.active = false,
+  });
+
+  final String workspaceRef;
+  final String label;
+  final bool active;
 }
 
 HarnessWorkProgress? _sanitizeProgress(HarnessWorkProgress? progress) {

@@ -120,6 +120,61 @@
   }
 
   localizeOfficialActions();
+
+  const publishWorkspaceSnapshot = () => {
+    const workspaces = [];
+    for (const row of document.querySelectorAll(
+      '[role="treeitem"][aria-expanded]',
+    )) {
+      if (!(row instanceof HTMLElement)) continue;
+      const labelHost = row.children.item(2);
+      const label = labelHost?.textContent?.trim() || '';
+      if (!label) continue;
+      let section = row.parentElement;
+      let active = false;
+      for (let depth = 0; section && depth < 6; depth += 1) {
+        if (section.querySelector(
+          '[role="treeitem"][aria-selected="true"]',
+        )) {
+          active = true;
+          break;
+        }
+        section = section.parentElement;
+      }
+      workspaces.push({
+        workspaceRef: `dsh-workspace:${label}`,
+        label,
+        active,
+      });
+    }
+    const signature = JSON.stringify(workspaces);
+    if (!workspaces.length || signature === window.__vibekitsWorkspaceSignature) {
+      return;
+    }
+    window.__vibekitsWorkspaceSignature = signature;
+    window.chrome?.webview?.postMessage(JSON.stringify({
+      type: 'vibekits.workspaceSnapshot',
+      workspaces,
+    }));
+  };
+
+  if (!window.__vibekitsWorkspaceObserverInstalled) {
+    window.__vibekitsWorkspaceObserverInstalled = true;
+    let workspaceTimer = 0;
+    const scheduleWorkspaceSnapshot = () => {
+      clearTimeout(workspaceTimer);
+      workspaceTimer = setTimeout(publishWorkspaceSnapshot, 80);
+    };
+    const workspaceObserver = new MutationObserver(scheduleWorkspaceSnapshot);
+    workspaceObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['aria-expanded', 'aria-selected'],
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+  publishWorkspaceSnapshot();
   if (!window.__vibekitsConversationLocalizationInstalled) {
     window.__vibekitsConversationLocalizationInstalled = true;
     const observer = new MutationObserver(localizeOfficialActions);

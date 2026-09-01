@@ -198,6 +198,7 @@ class LanPeerDiscoveryService {
     InternetAddress? group,
     Duration? peerTtl,
     bool? reusePort,
+    this.socketFactory,
   }) : group = group ?? InternetAddress('239.255.42.99'),
        peerTtl = peerTtl ?? const Duration(seconds: 12),
        reusePort = reusePort ?? !Platform.isWindows;
@@ -214,10 +215,12 @@ class LanPeerDiscoveryService {
   /// macOS/BSD require SO_REUSEPORT in addition to SO_REUSEADDR when several
   /// independent APPs listen on the shared LMCP discovery port.
   final bool reusePort;
+  final Future<RawDatagramSocket> Function()? socketFactory;
   final Map<String, VibekitsLanPeer> _peers = <String, VibekitsLanPeer>{};
   final StreamController<List<VibekitsLanPeer>> _changes =
       StreamController<List<VibekitsLanPeer>>.broadcast();
   RawDatagramSocket? _socket;
+  Future<void>? _startFuture;
   List<NetworkInterface> _interfaces = const <NetworkInterface>[];
   Timer? _announceTimer;
   Timer? _pruneTimer;
@@ -248,6 +251,35 @@ class LanPeerDiscoveryService {
     String hardwareCode = '',
   }) async {
     if (_socket != null) return;
+    final Future<void>? pending = _startFuture;
+    if (pending != null) return pending;
+    final Future<void> future = _startInternal(
+      instanceId: instanceId,
+      name: name,
+      capabilityDigest: capabilityDigest,
+      appId: appId,
+      appVersion: appVersion,
+      exposureEnabled: exposureEnabled,
+      hardwareCode: hardwareCode,
+    );
+    _startFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_startFuture, future)) _startFuture = null;
+    }
+  }
+
+  Future<void> _startInternal({
+    required String instanceId,
+    required String name,
+    required String capabilityDigest,
+    required String appId,
+    required String appVersion,
+    required bool exposureEnabled,
+    required String hardwareCode,
+  }) async {
+    if (_socket != null) return;
     _instanceId = _safe(instanceId, 80);
     final String normalizedName = _safe(name, 80);
     final String normalizedAppId = _safe(appId, 120);
@@ -259,12 +291,14 @@ class LanPeerDiscoveryService {
       throw const FormatException('局域网节点发现参数无效');
     }
     _exposureEnabled = exposureEnabled;
-    final RawDatagramSocket socket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      port,
-      reuseAddress: true,
-      reusePort: reusePort,
-    );
+    final RawDatagramSocket socket =
+        await (socketFactory?.call() ??
+            RawDatagramSocket.bind(
+              InternetAddress.anyIPv4,
+              port,
+              reuseAddress: true,
+              reusePort: reusePort,
+            ));
     final List<NetworkInterface> interfaces = await _privateIpv4Interfaces();
     final List<NetworkInterface> joined = <NetworkInterface>[];
     for (final NetworkInterface interface in interfaces) {

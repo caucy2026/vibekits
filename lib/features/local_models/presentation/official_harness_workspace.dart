@@ -107,6 +107,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _restoreMcpExposureOnStart = false;
   VibekitsHarnessToolBridge? _mcpExposureBridge;
   bool _quickActionsExpanded = false;
+  HarnessWorkspaceStatusContext? _workStatusContext;
 
   @override
   void initState() {
@@ -166,6 +167,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             Directory(preferredWorkspace).existsSync()
         ? preferredWorkspace
         : Directory.current.absolute.path;
+    _workStatusContext ??= HarnessWorkStatusHub.activateWorkspace(
+      workspaceRef: workspace,
+      workspaceLabel: _workspaceLabel(workspace),
+      sessionRef: 'vibekits-harness-${identityHashCode(this)}',
+    );
     setState(() {
       _sessionApprovedToolIds.clear();
       _sessionApprovedToolIds.addAll(widget.preapprovedToolIds);
@@ -355,6 +361,15 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         message: 'Harness 启动失败',
       );
     }
+  }
+
+  static String _workspaceLabel(String workspace) {
+    final String normalized = workspace.replaceAll('\\', '/');
+    final List<String> segments = normalized
+        .split('/')
+        .where((String segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    return segments.isEmpty ? '工作区' : segments.last;
   }
 
   void _flushPendingDiagnostics() {
@@ -723,6 +738,25 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         : message is String
         ? (jsonDecode(message) as Map?)?.cast<String, dynamic>()
         : null;
+    if (payload?['type'] == 'vibekits.workspaceSnapshot') {
+      final Object? rawWorkspaces = payload?['workspaces'];
+      if (rawWorkspaces is! List) return;
+      final List<HarnessWorkspaceSummary> workspaces =
+          <HarnessWorkspaceSummary>[
+            for (final Object? raw in rawWorkspaces)
+              if (raw is Map &&
+                  (raw['label'] as String? ?? '').trim().isNotEmpty)
+                HarnessWorkspaceSummary(
+                  workspaceRef:
+                      (raw['workspaceRef'] as String? ?? raw['label'] as String)
+                          .trim(),
+                  label: (raw['label'] as String).trim(),
+                  active: raw['active'] == true,
+                ),
+          ];
+      HarnessWorkStatusHub.syncWorkspaceInventory(workspaces);
+      return;
+    }
     if (payload?['type'] != 'vibekits.deleteSession') return;
     final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
     final String title = (payload?['title'] as String? ?? '').trim();
@@ -838,6 +872,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       phase: HarnessWorkPhase.stopped,
       message: 'Harness 工作区已关闭',
     );
+    final HarnessWorkspaceStatusContext? workStatusContext = _workStatusContext;
+    if (workStatusContext != null) {
+      HarnessWorkStatusHub.clearWorkspace(workStatusContext);
+    }
     _webview.dispose();
     super.dispose();
   }

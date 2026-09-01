@@ -116,6 +116,26 @@ await replaceOnce(
 \t\t}`,
 );
 
+await replaceOneOf(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  [`\t\t\t(0, react.useEffect)(() => {
+\t\t\t\tif (inputState.draft === "" && storedDraft !== "") inputActions.setDraft(storedDraft);
+\t\t\t\tconst unmirror = bindDraftMirror(actions.setDraft);
+\t\t\t\treturn () => {
+\t\t\t\t\tunmirror();
+\t\t\t\t};
+\t\t\t}, [inputActions]);`],
+  `\t\t\t(0, react.useEffect)(() => {
+\t\t\t\tif (inputState.draft === "" && storedDraft !== "") inputActions.setDraft(storedDraft);
+\t\t\t}, [inputActions, inputState.draft, storedDraft]);
+\t\t\t(0, react.useEffect)(() => {
+\t\t\t\tconst unmirror = bindDraftMirror(actions.setDraft);
+\t\t\t\treturn () => {
+\t\t\t\t\tunmirror();
+\t\t\t\t};
+\t\t\t}, [actions, bindDraftMirror, inputActions]);`,
+);
+
 await replaceOnce(
   'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
   `\t\t\t\t{

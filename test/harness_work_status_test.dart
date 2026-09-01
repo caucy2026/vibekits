@@ -38,6 +38,78 @@ void main() {
     );
   });
 
+  test('工作区上下文把兼容工具状态登记为真实项目且不生成全局行', () {
+    final HarnessWorkspaceStatusContext context =
+        HarnessWorkStatusHub.activateWorkspace(
+          workspaceRef: '/Volumes/private/repository/vibekits',
+          workspaceLabel: 'vibekits',
+          sessionRef: 'vibekits-harness-test',
+        );
+    try {
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.starting,
+        message: '正在启动本地 Harness',
+      );
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.ready,
+        message: 'Harness 已就绪',
+      );
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.toolRunning,
+        message: '正在执行 MCP 目录刷新',
+        toolId: 'vibekits.mcp.catalog_list',
+        toolName: 'MCP 目录刷新',
+      );
+
+      final HarnessTaskSnapshot task =
+          HarnessWorkStatusHub.registryLatest.tasks.first;
+      expect(task.workspaceLabel, 'vibekits');
+      expect(task.workspaceRef, startsWith('workspace-'));
+      expect(task.workspaceRef, isNot(contains('/Volumes/private')));
+      expect(task.sessionRef, 'vibekits-harness-test');
+      expect(task.phase, HarnessWorkPhase.toolRunning);
+      expect(task.toolId, 'vibekits.mcp.catalog_list');
+      expect(task.workspaceRef, isNot('legacy-workspace'));
+    } finally {
+      HarnessWorkStatusHub.clearWorkspace(context);
+    }
+  });
+
+  test('DSH 工作区清单逐项目同步、重命名并移除过期项目', () {
+    final HarnessTaskStateRegistry registry = HarnessTaskStateRegistry();
+    registry.syncWorkspaceInventory(const <HarnessWorkspaceSummary>[
+      HarnessWorkspaceSummary(
+        workspaceRef: 'dsh-workspace:rustdesk',
+        label: 'rustdesk',
+        active: true,
+      ),
+      HarnessWorkspaceSummary(
+        workspaceRef: 'dsh-workspace:vibekits',
+        label: 'vibekits',
+      ),
+    ]);
+    expect(registry.latest.tasks, hasLength(2));
+    expect(
+      registry.latest.tasks
+          .firstWhere(
+            (HarnessTaskSnapshot task) => task.workspaceLabel == 'rustdesk',
+          )
+          .phase,
+      HarnessWorkPhase.ready,
+    );
+
+    registry.syncWorkspaceInventory(const <HarnessWorkspaceSummary>[
+      HarnessWorkspaceSummary(
+        workspaceRef: 'dsh-workspace:vibekits-new',
+        label: 'vibekits-new',
+        active: true,
+      ),
+    ]);
+    expect(registry.latest.tasks, hasLength(1));
+    expect(registry.latest.tasks.single.workspaceLabel, 'vibekits-new');
+    expect(registry.latest.tasks.single.phase, HarnessWorkPhase.ready);
+  });
+
   test('并行任务使用全局 sequence 和各自 task revision', () {
     final _MutableClock clock = _MutableClock();
     final HarnessTaskStateRegistry registry = HarnessTaskStateRegistry(

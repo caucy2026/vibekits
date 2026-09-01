@@ -1029,6 +1029,79 @@ void main() {
     expect(composer.controller?.text, '解释 ESTLOG 是否合理');
   });
 
+  testWidgets('每个 Harness 会话保留自己的未发送输入草稿', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_session_draft_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime.now();
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'draft-one',
+          title: '会话一',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+        HarnessConversationSession(
+          id: 'draft-two',
+          title: '会话二',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+      ],
+      activeSessionId: 'draft-one',
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '111');
+    await tester.tap(find.byKey(const Key('agent-session-draft-two')));
+    await tester.pumpAndSettle();
+    TextField composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.controller?.text, isEmpty);
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '222');
+    await tester.tap(find.byKey(const Key('agent-session-draft-one')));
+    await tester.pumpAndSettle();
+    composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.controller?.text, '111');
+
+    await tester.tap(find.byKey(const Key('agent-session-draft-two')));
+    await tester.pumpAndSettle();
+    composer = tester.widget<TextField>(
+      find.byKey(const Key('agent-composer')),
+    );
+    expect(composer.controller?.text, '222');
+  });
+
   testWidgets('向上滚动显示圆形向下箭头并可回到最新消息', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1000, 700);
     tester.view.devicePixelRatio = 1;

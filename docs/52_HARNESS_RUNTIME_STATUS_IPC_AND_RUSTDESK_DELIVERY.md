@@ -54,6 +54,14 @@ workspaceRef + sessionRef + taskId
 因此 v1 不新增跨应用 `source` 字段；若未来确需统一聚合，必须升级独立协议版本，
 同时保留按应用隔离的原始计数和展示入口。
 
+VibeKits 正式工作区必须逐项目登记，不能只发布 `legacy-workspace` 全局工具行：
+
+1. `workspaceLabel` 使用当前 VibeKits 项目/工作区显示名，供远端逐项展示；字体、颜色和状态灯由接收端负责。
+2. `workspaceRef` 由真实工作区标识不可逆派生，禁止发送本机绝对路径；`sessionRef` 使用本次 VibeKits Harness UI 会话的稳定公开引用。
+3. Harness 启动、就绪、等待授权、工具执行、失败与关闭都更新该项目条目；兼容工具桥调用自动路由到当前项目，不能另建全局 MCP 评分条目。
+4. 同一工作区状态发生终态后再次启动或调用工具时复用该项目状态行，避免远端出现同一项目的历史重复行。
+5. RustDesk 按 `workspaceLabel` 渲染，空值才依次回退 `workspaceRef`、`taskId`；绿/蓝灯必须依据 `phase`/`busy`，不得从消息文案猜测。
+
 公开 phase：
 
 ```text

@@ -5,6 +5,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
 
 void main() {
+  test('同一实例并发 start 只绑定一个 UDP socket', () async {
+    int bindCount = 0;
+    final LanPeerDiscoveryService service = LanPeerDiscoveryService(
+      socketFactory: () async {
+        bindCount += 1;
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        return RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      },
+    );
+    addTearDown(service.stop);
+
+    await Future.wait(<Future<void>>[
+      service.start(
+        instanceId: 'com.vibekits.desktop:1111111111',
+        name: 'VibeKits@single-flight-1111111111',
+        capabilityDigest: 'first',
+        exposureEnabled: false,
+      ),
+      service.start(
+        instanceId: 'com.vibekits.desktop:1111111111',
+        name: 'VibeKits@single-flight-1111111111',
+        capabilityDigest: 'second',
+        exposureEnabled: false,
+      ),
+    ]);
+
+    expect(bindCount, 1);
+    expect(service.running, isTrue);
+  }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
+
   test('未配置 LMCP/2 HTTPS 端点时不再回退发送 LMCP/1', () async {
     final int port = 48000 + pid % 1000;
     final LanPeerDiscoveryService first = LanPeerDiscoveryService(port: port);

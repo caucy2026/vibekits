@@ -12,6 +12,7 @@ import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
+import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/lan_harness_key_receiver.dart';
@@ -138,7 +139,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   final Map<String, List<HarnessConversationSession>> _workspaceSessions =
       <String, List<HarnessConversationSession>>{};
   final Set<String> _collapsedWorkspaces = <String>{};
+  final Map<String, String> _sessionDrafts = <String, String>{};
   String? _activeSessionId;
+  HarnessWorkspaceStatusContext? _workStatusContext;
+  bool _restoringComposerDraft = false;
   HarnessEnvironmentReport? _environment;
   HarnessAgentHandle? _handle;
   StreamSubscription<String>? _outputSubscription;
@@ -167,6 +171,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   @override
   void initState() {
     super.initState();
+    _composer.addListener(_captureComposerDraft);
     _scroll.addListener(_updateScrollToLatest);
     _adoptExternalPrompt();
     unawaited(_loadSettings());
@@ -281,12 +286,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   @override
   void dispose() {
+    _captureComposerDraft();
     unawaited(_persistConversation());
     _conversationEpoch++;
     _outputSubscription?.cancel();
     _handle?.stop();
     _workspace.dispose();
-    _composer.dispose();
+    _composer
+      ..removeListener(_captureComposerDraft)
+      ..dispose();
     _apiKey.dispose();
     _baseUrl.dispose();
     _model.dispose();
@@ -296,7 +304,51 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ..removeListener(_updateScrollToLatest)
       ..dispose();
     _workspaceSearch.dispose();
+    final HarnessWorkspaceStatusContext? workStatusContext = _workStatusContext;
+    if (workStatusContext != null) {
+      HarnessWorkStatusHub.clearWorkspace(workStatusContext);
+    }
     super.dispose();
+  }
+
+  String get _composerDraftKey =>
+      '${_workspace.text.trim()}::${_activeSessionId ?? 'new-session'}';
+
+  void _captureComposerDraft() {
+    if (_restoringComposerDraft) return;
+    _sessionDrafts[_composerDraftKey] = _composer.text;
+  }
+
+  void _restoreComposerDraft() {
+    final String draft = _sessionDrafts[_composerDraftKey] ?? '';
+    _restoringComposerDraft = true;
+    _composer
+      ..text = draft
+      ..selection = TextSelection.collapsed(offset: draft.length);
+    _restoringComposerDraft = false;
+  }
+
+  void _syncHarnessWorkspaceStatus() {
+    final String current = _workspace.text.trim();
+    HarnessWorkStatusHub.syncWorkspaceInventory(<HarnessWorkspaceSummary>[
+      for (final String workspace in _workspaceCatalog)
+        HarnessWorkspaceSummary(
+          workspaceRef: workspace,
+          label: _workspaceDisplayName(workspace),
+          active: workspace == current,
+        ),
+    ]);
+    final HarnessWorkspaceStatusContext? previous = _workStatusContext;
+    if (previous != null) HarnessWorkStatusHub.clearWorkspace(previous);
+    if (current.isEmpty) {
+      _workStatusContext = null;
+      return;
+    }
+    _workStatusContext = HarnessWorkStatusHub.activateWorkspace(
+      workspaceRef: current,
+      workspaceLabel: _workspaceDisplayName(current),
+      sessionRef: 'workspace-inventory',
+    );
   }
 
   void _setRunning(bool value) {
@@ -354,6 +406,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ..addAll(<String>[if (current.isNotEmpty) current]);
         _workspaceCatalogLoading = false;
       });
+      _syncHarnessWorkspaceStatus();
       return;
     }
     List<String> workspaces;
@@ -397,6 +450,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ..addAll(projects);
       _workspaceCatalogLoading = false;
     });
+    _syncHarnessWorkspaceStatus();
     if (current.isNotEmpty && !workspaces.contains(current)) {
       await _saveWorkspaceCatalog();
     }
@@ -415,6 +469,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _workspaceSessions.remove(removed);
     }
     if (mounted) setState(() {});
+    _syncHarnessWorkspaceStatus();
     await _saveWorkspaceCatalog();
   }
 
@@ -488,6 +543,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       return;
     }
     setState(() => _workspaceNames[workspace] = name);
+    _syncHarnessWorkspaceStatus();
     try {
       if (widget.saveWorkspaceCatalog ==
           HarnessConversationStore.saveWorkspaceCatalog) {
@@ -550,6 +606,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _workspaceNames.remove(workspace);
       _collapsedWorkspaces.remove(workspace);
     });
+    _syncHarnessWorkspaceStatus();
     await _saveWorkspaceCatalog();
     if (widget.saveWorkspaceCatalog ==
         HarnessConversationStore.saveWorkspaceCatalog) {
@@ -645,6 +702,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       if (mounted) _show('工作区不存在或无法访问：$target');
       return;
     }
+    _captureComposerDraft();
     await _persistConversation();
     if (!mounted) return;
     await _registerWorkspace(target);
@@ -658,6 +716,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     });
     if (notify) await widget.onWorkspaceChanged?.call(target);
     await _restoreConversation(target);
+    if (mounted) {
+      _syncHarnessWorkspaceStatus();
+      _restoreComposerDraft();
+    }
   }
 
   Future<void> _restoreConversation(String workspace) async {
@@ -707,6 +769,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               const <_AgentMessage>[],
         );
     });
+    _syncHarnessWorkspaceStatus();
+    _restoreComposerDraft();
     _scrollToEnd(force: true);
   }
 
@@ -861,6 +925,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         );
       _progressExpanded = true;
     });
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.reasoning,
+      message: 'Harness 正在处理当前项目任务',
+    );
     unawaited(_persistConversation());
     _scrollToEnd(force: true);
     try {
@@ -943,6 +1011,18 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           stopped: _stopRequested,
         );
       });
+      HarnessWorkStatusHub.publish(
+        phase: code == 0
+            ? HarnessWorkPhase.completed
+            : _stopRequested
+            ? HarnessWorkPhase.stopped
+            : HarnessWorkPhase.failed,
+        message: _stopRequested
+            ? 'Harness 任务已停止'
+            : code == 0
+            ? 'Harness 任务已完成'
+            : 'Harness 任务执行失败',
+      );
       await _persistConversation();
     } on Object catch (error) {
       if (!mounted) return;
@@ -958,6 +1038,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           exitCode: -1,
         );
       });
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.failed,
+        message: 'Harness 启动失败',
+      );
       await _persistConversation();
     }
     _scrollToEnd(force: true);
@@ -1194,6 +1278,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   Future<void> _newTask() async {
     if (_running || _workspace.text.trim().isEmpty) return;
     if (_messages.isEmpty && _activeSessionId != null) return;
+    _captureComposerDraft();
     await _persistConversation();
     if (!mounted) return;
     final DateTime now = DateTime.now();
@@ -1211,12 +1296,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _messages.clear();
       _progressSteps.clear();
     });
+    _restoreComposerDraft();
     await _persistConversation();
     _composerFocus.requestFocus();
   }
 
   Future<void> _switchSession(String sessionId) async {
     if (_running || sessionId == _activeSessionId) return;
+    _captureComposerDraft();
     await _persistConversation();
     if (!mounted) return;
     final HarnessConversationSession? session = _sessions
@@ -1244,6 +1331,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         );
       _progressSteps.clear();
     });
+    _restoreComposerDraft();
     await _persistConversation();
     _scrollToEnd(force: true);
   }

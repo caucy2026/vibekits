@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-01 · Harness 项目状态、会话草稿与 LMCP 调度架构
+
+- `vibekits.harness.status/v1` 保持协议不变，正式 publisher 改为同步官方 DSH 左侧真实项目名与状态；工作区引用不可逆脱敏，Codex/VS Code 继续使用 RustDesk 独立通道。
+- 修复同一 `LanPeerDiscoveryService` 并发启动产生两个 UDP 47831 socket、旧 read 事件错误读取新 socket并让主线程 100% 自旋的问题；启动改为 single-flight。
+- 官方 DSH 会话 composer 草稿恢复拆成异步水合恢复与镜像绑定两个 effect，确保 A/B 会话未发送草稿互不串写。
+- 唯一 LMCP 规范升级到 2.4，加入 100+ 作战单位实时容量、四个租约控制工具、多指挥官原子抢占、分层加权选择、幂等换队、物理验真和压力验收合同。
+
 ## 2026-08-31 · APP 级实时 MCP 发现、更新与调用
 
 - 三层 MCP 能力目录、局域网监听和 Harness 工具桥提升为桌面 APP 全生命周期服务；用户无需先进入 Harness 工作区，每个新任务都可实时读取 `app → local → lan` 目录并按当前实例、工具名和 Schema 调用。
