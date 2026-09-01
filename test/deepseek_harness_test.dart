@@ -295,6 +295,7 @@ void main() {
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             initialWorkspace: workspace.path,
+            saveConversation: (_) async {},
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.18.0',
@@ -316,7 +317,7 @@ void main() {
     expect(find.byKey(const Key('agent-reasoning-progress')), findsOneWidget);
     expect(find.text('规划操作'), findsWidgets);
     await tester.tap(find.byKey(const Key('agent-stop')));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(handle.running, isFalse);
     expect(find.text('任务已停止。'), findsOneWidget);
     expect(find.byKey(const Key('agent-progress')), findsNothing);
@@ -381,9 +382,8 @@ void main() {
       isTrue,
     );
     expect(
-      Directory(
-        '${selected.path}${Platform.pathSeparator}screenshots',
-      ).existsSync(),
+      Directory('${selected.path}${Platform.pathSeparator}screenshots')
+          .existsSync(),
       isTrue,
     );
     expect(
@@ -580,8 +580,16 @@ void main() {
             updatedAt: now,
           ),
         };
-    final _FakeAgentHandle handle = _FakeAgentHandle();
-    addTearDown(handle.dispose);
+    final List<_FakeAgentHandle> handles = <_FakeAgentHandle>[
+      _FakeAgentHandle(),
+      _FakeAgentHandle(),
+    ];
+    addTearDown(() async {
+      for (final _FakeAgentHandle handle in handles) {
+        await handle.dispose();
+      }
+    });
+    int launchedCount = 0;
     final List<String> workspaceChanges = <String>[];
 
     await tester.pumpWidget(
@@ -608,12 +616,20 @@ void main() {
               npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
               message: 'Harness 已就绪',
             ),
-            runAgent: (_) async => handle,
+            runAgent: (_) async => handles[launchedCount++],
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${source.path}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${target.path}')),
+      findsNothing,
+    );
 
     await tester.enterText(find.byKey(const Key('agent-composer')), '后台运行');
     await tester.ensureVisible(find.byKey(const Key('agent-send')));
@@ -632,12 +648,28 @@ void main() {
     await tester.pump();
     expect(workspaceChanges.last, target.path);
     expect(find.text('目标项目内容'), findsOneWidget);
-    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+    expect(find.byKey(const Key('agent-stop')), findsNothing);
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('agent-composer'))).enabled,
+      isNot(false),
+    );
     expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.reasoning);
     expect(
       find.byKey(
         ValueKey<String>('agent-session-running-${source.path}-source-session'),
       ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-running-${source.path}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${source.path}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${target.path}')),
       findsOneWidget,
     );
     expect(
@@ -651,10 +683,22 @@ void main() {
       findsOneWidget,
     );
 
-    handle.add('后台任务已完成');
+    await tester.enterText(find.byKey(const Key('agent-composer')), '第二会话并行任务');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    expect(launchedCount, 2);
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+    handles[1].add('第二会话已完成');
+    await tester.pump();
+    expect(find.text('第二会话已完成'), findsOneWidget);
+    await handles[1].complete(0);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('agent-stop')), findsNothing);
+
+    handles[0].add('后台任务已完成');
     await tester.pump();
     expect(find.text('后台任务已完成'), findsNothing);
-    await handle.complete(0);
+    await handles[0].complete(0);
     await tester.pumpAndSettle();
     expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.ready);
     expect(
@@ -1268,6 +1312,110 @@ void main() {
       find.byKey(const Key('agent-composer')),
     );
     expect(composer.controller?.text, '222');
+  });
+
+  testWidgets('同一项目的两个 Harness 会话可独立并行运行', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_session_parallel_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime.now();
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'parallel-one',
+          title: '任务一',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+        HarnessConversationSession(
+          id: 'parallel-two',
+          title: '任务二',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+      ],
+      activeSessionId: 'parallel-one',
+      updatedAt: now,
+    );
+    final List<_FakeAgentHandle> handles = <_FakeAgentHandle>[
+      _FakeAgentHandle(),
+      _FakeAgentHandle(),
+    ];
+    addTearDown(() async {
+      for (final _FakeAgentHandle handle in handles) {
+        await handle.dispose();
+      }
+    });
+    final List<String> prompts = <String>[];
+    final List<bool> runningChanges = <bool>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '已就绪',
+            ),
+            runAgent: (HarnessAgentRequest request) async {
+              prompts.add(request.prompt);
+              return handles[prompts.length - 1];
+            },
+            onRunningChanged: runningChanges.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '111');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    expect(prompts, <String>['111']);
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('agent-session-parallel-two')));
+    await tester.pump();
+    expect(find.byKey(const Key('agent-stop')), findsNothing);
+    expect(
+      tester.widget<TextField>(find.byKey(const Key('agent-composer'))).enabled,
+      isNot(false),
+    );
+    await tester.enterText(find.byKey(const Key('agent-composer')), '222');
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    expect(prompts, <String>['111', '222']);
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+
+    handles[1].add('任务二结果');
+    await tester.pump();
+    await handles[1].complete(0);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('任务二结果'), findsOneWidget);
+    expect(find.byKey(const Key('agent-stop')), findsNothing);
+    expect(runningChanges, <bool>[true]);
+
+    await tester.tap(find.byKey(const Key('agent-session-parallel-one')));
+    await tester.pump();
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+    handles[0].add('任务一结果');
+    await tester.pump();
+    expect(find.text('任务一结果'), findsOneWidget);
+    await handles[0].complete(0);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('agent-stop')), findsNothing);
+    expect(runningChanges, <bool>[true, false]);
   });
 
   testWidgets('向上滚动显示圆形向下箭头并可回到最新消息', (WidgetTester tester) async {

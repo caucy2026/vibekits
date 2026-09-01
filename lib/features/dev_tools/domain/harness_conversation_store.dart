@@ -102,11 +102,13 @@ class HarnessConversationProject {
 
 typedef HarnessConversationLoader =
     Future<HarnessConversationProject?> Function(String workspace);
-typedef HarnessConversationSaver =
-    Future<void> Function(HarnessConversationProject project);
+typedef HarnessConversationSaver = Future<void> Function(
+  HarnessConversationProject project,
+);
 typedef HarnessWorkspaceCatalogLoader = Future<List<String>> Function();
-typedef HarnessWorkspaceCatalogSaver =
-    Future<void> Function(List<String> workspaces);
+typedef HarnessWorkspaceCatalogSaver = Future<void> Function(
+  List<String> workspaces,
+);
 
 abstract final class HarnessConversationStore {
   static const int maxSessions = 40;
@@ -115,6 +117,7 @@ abstract final class HarnessConversationStore {
   static const int maxExecutionTraceCharacters = 32768;
   static const int maxFileBytes = 8 * 1024 * 1024;
   static const int maxWorkspaces = 40;
+  static final Map<String, Future<void>> _saveQueues = <String, Future<void>>{};
 
   static Future<List<String>> loadWorkspaceCatalog() async {
     final File file = _catalogFile();
@@ -277,6 +280,25 @@ abstract final class HarnessConversationStore {
   static Future<void> save(HarnessConversationProject project) async {
     final String normalized = _normalizeWorkspace(project.workspace);
     if (normalized.isEmpty) return;
+    final Future<void> previous =
+        _saveQueues[normalized] ?? Future<void>.value();
+    final Future<void> operation = previous
+        .catchError((Object _) {})
+        .then((_) => _saveProject(normalized, project));
+    _saveQueues[normalized] = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_saveQueues[normalized], operation)) {
+        _saveQueues.remove(normalized);
+      }
+    }
+  }
+
+  static Future<void> _saveProject(
+    String normalized,
+    HarnessConversationProject project,
+  ) async {
     final List<HarnessConversationSession> sessions =
         project.sessions
             .where(
