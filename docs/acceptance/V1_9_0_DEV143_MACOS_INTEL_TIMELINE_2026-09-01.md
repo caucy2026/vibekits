@@ -39,7 +39,7 @@ codesign --verify --deep --strict --verbose=2 build/macos/Build/Products/Release
 
 ## 签名/公证门禁
 
-本机 `security find-identity -v -p codesigning` 当前为 0 个有效身份。因此 dev.143 可产出 ad-hoc 本机验收包，但不得标注“Apple 已认证”。对外发布时执行：
+本机已恢复 `Developer ID Application: zhen ji (26T5WV4GLP)` 身份和 `KEMI_NOTARY` profile。dev.143 已完成 Developer ID 签名，但在用户明确授权将 App 上传 Apple 前，不得标注“Apple 已公证”。对外发布时执行：
 
 ```bash
 VIBEKITS_DEVELOPER_ID_APPLICATION='Developer ID Application: ...' \
@@ -56,7 +56,7 @@ VIBEKITS_NOTARY_PROFILE='vibekits-notary' \
 - Harness UI/状态/工具桥/GitHub 代理/ADB 会话联合回归：74 通过，1 项按平台条件跳过，0 失败。
 - 时间线 Widget 回归单独执行：21/21 通过，覆盖运行中与历史默认折叠、展开和停止。
 - Release：`bin/Vibekits.app`，版本 `1.9.0.143 (2143)`，606.6 MB。
-- 签名：24 个 Mach-O 逐项 ad-hoc 重签及严格验证通过，App `codesign --verify --deep --strict` 通过。
+- 签名：主程序、ADB、Harness 原生件和 frameworks 均使用 `Developer ID Application: zhen ji (26T5WV4GLP)`、hardened runtime 和 Apple 时间戳；App `codesign --verify --deep --strict` 通过。
 - Intel 真运行：最终 `bin` 产物以 Rosetta 启动，PID 28071，`Code Type: X86-64 (translated)`，版本 1.9.0.143 (2143)，UDP `*:47831` 监听正常。验收后已恢复原生模式运行。
 - 随包 DSH：ARM 和 `arch -x86_64` 两种模式的 `--help` 均返回成功。
-- SHA-256：App executable `6f62a1ed3e9887515d8e9d403df64cc0cf78d96f2f24aa111036cae27f87febf`；App.framework `dadcc0b53aed00a2aa989cf9ebaac08d60f18c91c858e5a65b72237efbf1a703`；Harness Node `f4d6217abbcde695bd4c7a5957a32a6f39e56e210975334c48495645fe809d2b`。
+- Developer ID 签名后 SHA-256：App executable `97b01383adb9b56b751d6be1970c0e823febe8c97455295a091f401b298ec066`；App.framework `26fc41e5fdb153d6a58e97187cd1a6ec329669c19e73aa2e712ad0a20cdc0691`；Harness Node `f0500090154ec38e536d0b39a99648db72f78ba174fa5ae3015801f5223ee7c1`。

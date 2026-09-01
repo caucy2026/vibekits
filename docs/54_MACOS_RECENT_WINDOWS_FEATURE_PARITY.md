@@ -1,6 +1,6 @@
 # macOS 最近 Windows 功能对齐与实机验收
 
-状态：Apple Silicon Release 和 Rosetta Intel 运行已验证；App 外壳支持 Intel macOS 10.15+，当前官方 DSH/Harness 因 Node 22.19 限制需要 macOS 11.0+。Developer ID 签名和 Apple 公证仍因本机无证书而保持发布阻断。
+状态：Apple Silicon Release 和 Rosetta Intel 运行已验证；App 外壳支持 Intel macOS 10.15+，当前官方 DSH/Harness 因 Node 22.19 限制需要 macOS 11.0+。dev.143 已完成 Developer ID 签名和时间戳，Apple 公证上传需用户对“将此 App 发送给 Apple”单独明确授权。
 
 ## 1. 本次进入 macOS 的能力
 
@@ -83,4 +83,4 @@ Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运�
 
 必须区分两个边界：VibeKits 主程序可在 Intel macOS 10.15 启动；官方 DSH 0.1.1-rc.2 的依赖使用 Node 22 API，因此内置 Harness 使用最低可行 Node 22.19.0，其官方 Intel/ARM 二进制均以 macOS 11.0 为下限。禁止换成 Node 18 伪造 10.15 全功能：真实 CLI 会因缺失 `node:util.parseEnv` 立即失败。
 
-当前机器 `security find-identity -p codesigning` 返回 0 个有效身份，所以只能交付 ad-hoc 本机验收包，不得声称 Developer ID/公证已完成。导入有效证书和 notary profile 后必须重跑正式脚本。
+当前机器已恢复 `Developer ID Application: zhen ji (26T5WV4GLP)` 和可连接 Apple 的 `KEMI_NOTARY` profile。`bin/Vibekits.app` 的主程序、ADB、Harness 及全部 frameworks 已用该身份逐项签名，hardened runtime、时间戳和深度严格验签通过。尚未将 606.6 MB App 上传 Apple，所以不得声称 notarization/staple 已完成。

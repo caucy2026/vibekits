@@ -19,30 +19,8 @@ if [ -z "$NOTARY_PROFILE" ]; then
   echo "Set VIBEKITS_NOTARY_PROFILE to a notarytool keychain profile." >&2
   exit 3
 fi
-if ! security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
-  echo "Developer ID Application identity is not installed: $IDENTITY" >&2
-  exit 4
-fi
-
-while IFS= read -r -d '' ITEM; do
-  KIND="$(/usr/bin/file -b "$ITEM")"
-  case "$KIND" in
-    Mach-O*) codesign --force --timestamp --options runtime --sign "$IDENTITY" "$ITEM" ;;
-  esac
-done < <(find \
-  "$APP_BUNDLE/Contents/MacOS" \
-  "$APP_BUNDLE/Contents/Resources/tools/harness" \
-  "$APP_BUNDLE/Contents/Frameworks" \
-  -type f -print0)
-
-while IFS= read -r -d '' FRAMEWORK; do
-  codesign --force --timestamp --options runtime --sign "$IDENTITY" "$FRAMEWORK"
-done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
-
-codesign --force --timestamp --options runtime --sign "$IDENTITY" \
-  --entitlements "$PROJECT_ROOT/macos/Runner/Release.entitlements" \
-  "$APP_BUNDLE"
-codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+VIBEKITS_DEVELOPER_ID_APPLICATION="$IDENTITY" \
+  "$PROJECT_ROOT/tool/sign_macos_developer_id.sh" "$APP_BUNDLE"
 
 ARCHIVE="${APP_BUNDLE%.app}-notarization.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ARCHIVE"
