@@ -92,15 +92,13 @@ if [ "$GIT_MACHO_COUNT" -lt 2 ]; then
 fi
 
 SEVEN_ZIP_ROOT="$APP_BUNDLE/Contents/Resources/tools/7zip"
-SEVEN_ZIP_EXPECTED_SHA256="5c2fd36f00a66f7787dcf1badd977d44a02b50063fe5678e1f19ff64797432ed"
-SEVEN_ZIP_ACTUAL_SHA256="$(shasum -a 256 "$SEVEN_ZIP_ROOT/7zz" | awk '{print $1}')"
-if [ "$SEVEN_ZIP_ACTUAL_SHA256" != "$SEVEN_ZIP_EXPECTED_SHA256" ]; then
-  echo "Bundled 7zz SHA-256 mismatch: $SEVEN_ZIP_ACTUAL_SHA256" >&2
-  exit 5
-fi
 for SEVEN_ZIP_METADATA in License.txt readme.txt History.txt RUNTIME-INFO.txt; do
   require_file "$SEVEN_ZIP_ROOT/$SEVEN_ZIP_METADATA"
 done
+if ! "$SEVEN_ZIP_ROOT/7zz" i | grep -F '7-Zip 25.01' >/dev/null; then
+  echo "Bundled 7-Zip runtime version is not 25.01." >&2
+  exit 5
+fi
 
 for ARCH in x86_64 arm64; do
   SEVEN_ZIP_MINIMUM="$(minos_for_arch \

@@ -79,9 +79,15 @@ echo "Packaged ADB runtime: $ADB_DESTINATION/adb"
 # official App-private 7-Zip executable is present. Never fall back to PATH.
 SEVEN_ZIP_SOURCE="$PROJECT_ROOT/native/7zip/macos/runtime"
 SEVEN_ZIP_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/7zip"
+SEVEN_ZIP_EXPECTED_SHA256="5c2fd36f00a66f7787dcf1badd977d44a02b50063fe5678e1f19ff64797432ed"
 if [ ! -x "$SEVEN_ZIP_SOURCE/7zz" ]; then
   echo "Official macOS 7-Zip runtime is missing." >&2
   echo "Run tool/prepare_7zip_runtime_macos.sh before Release packaging." >&2
+  exit 5
+fi
+SEVEN_ZIP_SOURCE_SHA256="$(shasum -a 256 "$SEVEN_ZIP_SOURCE/7zz" | awk '{print $1}')"
+if [ "$SEVEN_ZIP_SOURCE_SHA256" != "$SEVEN_ZIP_EXPECTED_SHA256" ]; then
+  echo "Official macOS 7-Zip source SHA-256 mismatch: $SEVEN_ZIP_SOURCE_SHA256" >&2
   exit 5
 fi
 rm -rf "$SEVEN_ZIP_DESTINATION"
