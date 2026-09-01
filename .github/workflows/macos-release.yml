@@ -27,7 +27,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.47.0'
+          flutter-version: '3.41.9'
           cache: true
 
       - name: Resolve dependencies
@@ -50,6 +50,16 @@ jobs:
 
       - name: Build unsigned macOS Release
         run: flutter build macos --release --no-pub
+
+      - name: Verify Intel, Apple Silicon and macOS 10.15 compatibility
+        run: >-
+          ./tool/verify_macos_release_compat.sh
+          build/macos/Build/Products/Release/Vibekits.app
+
+      - name: Ad-hoc sign local validation artifact
+        run: >-
+          ./tool/sign_macos_release.sh
+          build/macos/Build/Products/Release/Vibekits.app
 
       - name: Package and checksum
         shell: bash

@@ -1,6 +1,6 @@
 # macOS 最近 Windows 功能对齐与实机验收
 
-状态：Apple Silicon macOS Release、内置 Harness 和本机 MCP 已实机验收；局域网双机、Intel 实机、Developer ID 签名与公证仍待完成。
+状态：Apple Silicon Release 和 Rosetta Intel 运行已验证；App 外壳支持 Intel macOS 10.15+，当前官方 DSH/Harness 因 Node 22.19 限制需要 macOS 11.0+。Developer ID 签名和 Apple 公证仍因本机无证书而保持发布阻断。
 
 ## 1. 本次进入 macOS 的能力
 
@@ -51,10 +51,11 @@ flutter test test/mcp_device_identity_test.dart \
   test/lan_peer_discovery_service_test.dart
 ./tool/prepare_harness_runtime_macos.sh
 flutter build macos --release
+./tool/verify_macos_release_compat.sh build/macos/Build/Products/Release/Vibekits.app
 ./tool/sign_macos_release.sh build/macos/Build/Products/Release/Vibekits.app
 ```
 
-Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运行时复制到 `Contents/Resources/tools/harness`；源运行时缺失或不完整时必须构建失败。`sign_macos_release.sh` 是本机联调使用的 ad-hoc 签名门禁，不替代 Developer ID 签名和公证。
+Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运行时复制到 `Contents/Resources/tools/harness`；源运行时缺失或不完整时必须构建失败。`sign_macos_release.sh` 是本机联调使用的 ad-hoc 签名门禁，不替代 Developer ID 签名和公证。对外发布必须设置 `VIBEKITS_DEVELOPER_ID_APPLICATION` 和 `VIBEKITS_NOTARY_PROFILE`，再执行 `tool/sign_and_notarize_macos_release.sh`；脚本会验证 Developer ID、hardened runtime、notarytool Accepted、staple 和 Gatekeeper，任一失败都禁止外发。
 
 产物：`build/macos/Build/Products/Release/Vibekits.app`。
 
@@ -78,4 +79,8 @@ Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运�
 
 ## 5. 当前验证边界
 
-2026-08-31 已在 Apple Silicon Mac 上完成 Universal Release、ad-hoc 完整签名、Harness UI 与一次真实工具调用。系统本地网络权限、组播多实例和双机发现仍需保留独立证据；Intel 必须在 x86_64 Mac 或 Rosetta 下复核，不能只由 `file` 显示 Universal 就宣称 Intel 完成。失败时记录 macOS 版本、芯片、签名类型、网卡、socket 错误码和 `flutter doctor -v`。
+2026-09-01 已用 Flutter 3.41.9/Dart 3.11.5 生成 Universal Release；主程序 Intel slice 的 deployment target 为 10.15，并在 Rosetta 下实际启动为 `X86-64 (translated)`。ADB、Node、ripgrep、node-pty 和 sharp 均核对双架构/对应原生包。
+
+必须区分两个边界：VibeKits 主程序可在 Intel macOS 10.15 启动；官方 DSH 0.1.1-rc.2 的依赖使用 Node 22 API，因此内置 Harness 使用最低可行 Node 22.19.0，其官方 Intel/ARM 二进制均以 macOS 11.0 为下限。禁止换成 Node 18 伪造 10.15 全功能：真实 CLI 会因缺失 `node:util.parseEnv` 立即失败。
+
+当前机器 `security find-identity -p codesigning` 返回 0 个有效身份，所以只能交付 ad-hoc 本机验收包，不得声称 Developer ID/公证已完成。导入有效证书和 notary profile 后必须重跑正式脚本。

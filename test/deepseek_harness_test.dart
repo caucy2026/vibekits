@@ -242,6 +242,16 @@ void main() {
       find.byKey(const Key('agent-persisted-execution-trace')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const Key('agent-persisted-trace-details')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const Key('agent-persisted-trace-toggle')));
+    await tester.pump();
+    expect(
+      find.byKey(const Key('agent-persisted-trace-details')),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byKey(const Key('agent-composer')), '再检查一次改动');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -315,7 +325,11 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('agent-progress')), findsOneWidget);
     expect(find.byKey(const Key('agent-reasoning-progress')), findsOneWidget);
+    expect(find.byKey(const Key('agent-progress-details')), findsNothing);
     expect(find.text('规划操作'), findsWidgets);
+    await tester.tap(find.byKey(const Key('agent-progress-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('agent-progress-details')), findsOneWidget);
     await tester.tap(find.byKey(const Key('agent-stop')));
     await tester.pump(const Duration(milliseconds: 300));
     expect(handle.running, isFalse);
@@ -382,8 +396,9 @@ void main() {
       isTrue,
     );
     expect(
-      Directory('${selected.path}${Platform.pathSeparator}screenshots')
-          .existsSync(),
+      Directory(
+        '${selected.path}${Platform.pathSeparator}screenshots',
+      ).existsSync(),
       isTrue,
     );
     expect(

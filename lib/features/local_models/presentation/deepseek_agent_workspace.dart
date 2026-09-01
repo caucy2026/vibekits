@@ -151,7 +151,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _reportedAnyRunning = false;
   HarnessAgentPermissionMode _permissionMode =
       HarnessAgentPermissionMode.assisted;
-  bool _progressExpanded = true;
+  bool _progressExpanded = false;
   int _idleProgressSequence = 0;
   int _conversationEpoch = 0;
   final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
@@ -1115,7 +1115,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ..clear()
         ..addAll(run.messages);
       _composer.clear();
-      _progressExpanded = true;
+      _progressExpanded = false;
       _sessionRuns[runKey] = run;
       _syncRunningSessionCache(run);
       _notifyRunningState();
@@ -1551,7 +1551,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           _AgentProgressState.active => '◌',
           _AgentProgressState.completed => '✓',
           _AgentProgressState.failed => '!',
-        }} **${step.title}** — ${step.detail}',
+        }} **${step.title}** — ${_readableTimelineDetail(step.detail)}',
     ].join('\n');
   }
 
@@ -1938,8 +1938,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   void _show(String message) {
     if (Scaffold.maybeOf(context) == null) return;
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _receiveKeyOverLan() async {
@@ -2979,8 +2980,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               margin: const EdgeInsets.only(bottom: 6),
               decoration: BoxDecoration(
                 color: accepting
-                    ? Theme.of(context).colorScheme.primary
-                          .withValues(alpha: 0.12)
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.12)
                     : null,
                 border: accepting
                     ? Border.all(color: Theme.of(context).colorScheme.primary)
@@ -3118,8 +3120,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           : ValueKey<String>('agent-session-$workspace-${session.id}'),
       dense: true,
       selected: selected,
-      selectedTileColor: Theme.of(context).colorScheme.primary
-          .withValues(alpha: 0.09),
+      selectedTileColor: Theme.of(
+        context,
+      ).colorScheme.primary.withValues(alpha: 0.09),
       contentPadding: const EdgeInsets.only(left: 32, right: 0),
       leading: Tooltip(
         message: _workspaceCatalog.length < 2 ? '添加第二个工作区后可移动会话' : '按住并拖到目标工作区',
@@ -3375,8 +3378,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               color: context.vibe.panelRaised,
               border: Border.all(
                 color: _composerFocus.hasFocus
-                    ? Theme.of(context).colorScheme.primary
-                          .withValues(alpha: 0.55)
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.55)
                     : context.vibe.border,
               ),
               borderRadius: BorderRadius.circular(16),
@@ -3588,8 +3592,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       width: 46,
                       height: 46,
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary
-                            .withValues(alpha: 0.10),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.10),
                         borderRadius: BorderRadius.circular(13),
                       ),
                       child: const Icon(Icons.terminal, size: 25),
@@ -3788,6 +3793,37 @@ IconData _permissionModeIcon(HarnessAgentPermissionMode mode) => switch (mode) {
 
 enum _AgentProgressState { active, completed, failed }
 
+String _readableTimelineDetail(String detail, {int maxLines = 4}) {
+  final List<String> source = detail
+      .split('\n')
+      .map((String line) => line.trim().replaceAll(RegExp(r'\s+'), ' '))
+      .where((String line) => line.isNotEmpty)
+      .toList(growable: false);
+  if (source.isEmpty) return '已记录';
+
+  String? firstWith(String prefix) =>
+      source.where((String line) => line.startsWith(prefix)).firstOrNull;
+  String compact(String line, {int limit = 128}) =>
+      line.length <= limit ? line : '${line.substring(0, limit - 1)}…';
+
+  final String? target = firstWith('目标：');
+  final String? status = firstWith('状态：');
+  final String? elapsed = firstWith('耗时：');
+  final String? arguments = firstWith('参数：');
+  final String? result = firstWith('结果：');
+  final List<String> readable = <String>[
+    if (target != null) compact(target),
+    if (status != null || elapsed != null)
+      <String>[?status, ?elapsed].join(' · '),
+    if (arguments != null) compact(arguments),
+    if (result != null) result.length <= 128 ? result : '结果：已保存完整输出，点击这一步查看',
+  ];
+  if (readable.isEmpty) {
+    readable.addAll(source.map((String line) => compact(line)));
+  }
+  return readable.take(maxLines).join('\n');
+}
+
 class _AgentProgressStep {
   const _AgentProgressStep({
     required this.id,
@@ -3932,7 +3968,7 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     this.progressSteps = const <_AgentProgressStep>[],
-    this.progressExpanded = true,
+    this.progressExpanded = false,
     this.onToggleProgress,
   });
 
@@ -3944,8 +3980,9 @@ class _MessageBubble extends StatelessWidget {
   Future<void> _copy(BuildContext context) async {
     await Clipboard.setData(ClipboardData(text: message.text));
     if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('回复已复制')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('回复已复制')));
     }
   }
 
@@ -3982,8 +4019,9 @@ class _MessageBubble extends StatelessWidget {
           height: 27,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary
-                .withValues(alpha: 0.10),
+            color: Theme.of(
+              context,
+            ).colorScheme.primary.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(8),
           ),
           child: const Icon(Icons.terminal, size: 16),
@@ -4005,20 +4043,7 @@ class _MessageBubble extends StatelessWidget {
                         onToggle: onToggleProgress,
                       )
                     else if (message.executionTrace.isNotEmpty)
-                      Container(
-                        key: const Key('agent-persisted-execution-trace'),
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: context.vibe.canvas,
-                          border: Border.all(color: context.vibe.border),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: MarkdownBody(
-                          data: message.executionTrace,
-                          selectable: false,
-                        ),
-                      ),
+                      _PersistedExecutionTrace(trace: message.executionTrace),
                     if (message.text.isNotEmpty)
                       MarkdownBody(
                         data: message.text,
@@ -4351,6 +4376,98 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
   }
 }
 
+class _PersistedExecutionTrace extends StatefulWidget {
+  const _PersistedExecutionTrace({required this.trace});
+
+  final String trace;
+
+  @override
+  State<_PersistedExecutionTrace> createState() =>
+      _PersistedExecutionTraceState();
+}
+
+class _PersistedExecutionTraceState extends State<_PersistedExecutionTrace> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final int stepCount = RegExp(
+      r'^[◌✓!] \*\*',
+      multiLine: true,
+    ).allMatches(widget.trace).length;
+    return Container(
+      key: const Key('agent-persisted-execution-trace'),
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: context.vibe.canvas,
+        border: Border.all(color: context.vibe.border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          InkWell(
+            key: const Key('agent-persisted-trace-toggle'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.account_tree_outlined,
+                    size: 16,
+                    color: context.vibe.muted,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '执行时间线${stepCount == 0 ? '' : ' · $stepCount 步'}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    _expanded ? '收起' : '展开',
+                    style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                  ),
+                  const SizedBox(width: 3),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              key: const Key('agent-persisted-trace-details'),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
+              child: MarkdownBody(
+                data: widget.trace,
+                selectable: false,
+                styleSheet: MarkdownStyleSheet(
+                  h3: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  p: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.45,
+                    color: context.vibe.muted,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AgentProgressView extends StatelessWidget {
   const _AgentProgressView({
     required this.steps,
@@ -4365,83 +4482,164 @@ class _AgentProgressView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final _AgentProgressStep latest = steps.last;
+    final int finished = steps
+        .where(
+          (_AgentProgressStep step) => step.state != _AgentProgressState.active,
+        )
+        .length;
     return Container(
       key: const Key('agent-reasoning-progress'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: context.vibe.canvas,
         border: Border.all(color: context.vibe.border),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           InkWell(
+            key: const Key('agent-progress-toggle'),
+            borderRadius: BorderRadius.circular(10),
             onTap: onToggle,
-            child: Row(
-              children: <Widget>[
-                _ProgressStateIcon(state: latest.state),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    latest.title,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                children: <Widget>[
+                  _ProgressStateIcon(state: latest.state),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '执行时间线 · $finished/${steps.length} 步',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          latest.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: context.vibe.muted,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                Icon(
-                  expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                ),
-              ],
+                  Text(
+                    expanded ? '收起' : '展开',
+                    style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                  ),
+                  const SizedBox(width: 3),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18,
+                  ),
+                ],
+              ),
             ),
           ),
-          if (expanded) ...<Widget>[
-            const SizedBox(height: 7),
-            for (int index = 0; index < steps.length; index++)
-              Padding(
-                key: Key('agent-progress-step-${steps[index].id}'),
-                padding: EdgeInsets.only(
-                  left: 2,
-                  bottom: index == steps.length - 1 ? 0 : 7,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: _ProgressStateIcon(state: steps[index].state),
-                    ),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            steps[index].title,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
+          if (expanded)
+            Padding(
+              key: const Key('agent-progress-details'),
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
+              child: Column(
+                children: <Widget>[
+                  Divider(height: 1, color: context.vibe.border),
+                  const SizedBox(height: 9),
+                  for (int index = 0; index < steps.length; index++)
+                    InkWell(
+                      key: Key('agent-progress-step-${steps[index].id}'),
+                      borderRadius: BorderRadius.circular(7),
+                      onTap: steps[index].detail.length <= 180
+                          ? null
+                          : () => showDialog<void>(
+                              context: context,
+                              builder: (BuildContext dialogContext) =>
+                                  AlertDialog(
+                                    title: Text(steps[index].title),
+                                    content: SizedBox(
+                                      width: 620,
+                                      child: SingleChildScrollView(
+                                        child: SelectableText(
+                                          steps[index].detail,
+                                          style: const TextStyle(
+                                            fontFamily: 'Cascadia Mono',
+                                            fontSize: 12,
+                                            height: 1.45,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    actions: <Widget>[
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext),
+                                        child: const Text('关闭'),
+                                      ),
+                                    ],
+                                  ),
                             ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            steps[index].detail,
-                            style: TextStyle(
-                              fontSize: 11,
-                              height: 1.3,
-                              color: context.vibe.muted,
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == steps.length - 1 ? 0 : 10,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: _ProgressStateIcon(
+                                state: steps[index].state,
+                              ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    steps[index].title,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _readableTimelineDetail(
+                                      steps[index].detail,
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      height: 1.4,
+                                      color: context.vibe.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (steps[index].detail.length > 180)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6, top: 1),
+                                child: Icon(
+                                  Icons.open_in_new,
+                                  size: 12,
+                                  color: context.vibe.muted,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
-          ],
+            ),
         ],
       ),
     );

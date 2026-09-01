@@ -2,7 +2,10 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-NODE_VERSION="${NODE_VERSION:-24.20.0}"
+# DSH requires Node >=22.19. Node 22.19 is the lowest compatible official
+# runtime and its Intel binary targets macOS 11.0. The Flutter application shell
+# still targets macOS 10.15; the release verifier reports both boundaries.
+NODE_VERSION="${NODE_VERSION:-22.19.0}"
 DSH_VERSION="${DSH_VERSION:-0.1.1-rc.2}"
 TARGET="${1:-$PROJECT_ROOT/native/harness/macos/runtime}"
 DOWNLOADS="$PROJECT_ROOT/.tmp/harness-runtime-macos-downloads"
@@ -128,6 +131,7 @@ NODE="$NODE_DIST/bin/node"
   install_x64_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
   install_x64_package '@koromix/koffi-darwin-x64@3.1.6' '@koromix/koffi-darwin-x64'
   install_x64_package 'node-addon-require-builtin-darwin-x64@0.1.5' 'node-addon-require-builtin-darwin-x64'
+  install_x64_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
 
   # node-pty ships every platform in one package. A macOS runtime needs only
   # its two Darwin slices; keeping PE/ELF addons complicates signing audits.
@@ -180,4 +184,6 @@ test -f "$TARGET/node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.nod
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node"
 test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node"
 test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node"
+test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-arm64/bin/rg"
+test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-x64/bin/rg"
 echo "Prepared macOS Harness runtime: $TARGET"

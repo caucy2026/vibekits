@@ -17,8 +17,11 @@ typedef HarnessAdbHealthRunner = Future<AdbCommandResult> Function(
 /// manager is disposed with its Harness bridge so no COM handle, timer or ADB
 /// heartbeat survives the APP process.
 class HarnessConnectionSessions {
-  HarnessConnectionSessions({HarnessSerialOpener? openSerial, this._checkAdb})
-    : _openSerial = openSerial ?? SerialPortService.open;
+  HarnessConnectionSessions({
+    HarnessSerialOpener? openSerial,
+    HarnessAdbHealthRunner? checkAdb,
+  }) : _openSerial = openSerial ?? SerialPortService.open,
+       _checkAdb = checkAdb;
 
   static const int maxSerialBufferBytes = 2 * 1024 * 1024;
 

@@ -1317,3 +1317,11 @@
 - 多会话并行保存对同一工作区串行化，避免多个任务同时替换同一临时文件。Harness 全局 BUSY 只在最后一个任务结束时恢复空闲。
 - 定向 Widget 回归覆盖跨项目并行、同项目双会话并行、草稿隔离、选中菜单、未选中转圈和最后任务结束才发布全局空闲。
 - macOS Release 已发布并运行于 `bin/Vibekits.app`，版本 `1.9.0-dev.142+2142`；20 个 Mach-O ad-hoc 重签后通过启动后深度验签，UDP `*:47831` 监听正常。旧 dev.141 保存在 `build/previous/Vibekits-dev141-before-dev142.app`。
+
+# 2026-09-01 · dev.143 Codex 式执行时间线与 Intel Mac 发布门禁
+
+- 运行中和历史执行时间线统一默认折叠，顶部只显示完成步数和当前动作；展开后按“理解→规划→工具→继续分析→结果”阅读，不再把整块 JSON 直接铺在主会话。
+- 工具步骤优先显示目标、成功/失败、耗时和有界参数；超长结果显示“已保存完整输出”，用户点击该步骤才打开可选择的完整详情。停止入口和完整审计保留。
+- macOS 构建链固定 Flutter 3.41.9/Dart 3.11.5，App Intel deployment target 为 10.15，ARM 为 11.0；增加 Universal 架构、原生依赖和最低系统二进制门禁。
+- DSH 真实运行证明 Node 18 不可用（缺失 `node:util.parseEnv`）；最低可用内置运行时为 Universal Node 22.19.0，ARM/Intel CLI 均已执行 `--help`，官方最低系统为 macOS 11.0。因此 10.15 可启动 App 外壳，完整 Harness 明确需要 11.0+。
+- 新增 Developer ID + hardened runtime + notarytool + staple + Gatekeeper 的一键正式发布脚本。当前机器无有效 Developer ID 身份，所以只能构建 ad-hoc 本机验收包，公证正式包继续被门禁阻止。
