@@ -1849,6 +1849,125 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     if (mounted) _show('会话已移动，权限根目录已切换到目标工作区');
   }
 
+  Future<void> _requestDeleteSession(
+    String workspace,
+    HarnessConversationSession session,
+  ) async {
+    if (_isSessionRunning(workspace, session.id)) {
+      _show('任务运行中，请先停止任务再删除会话');
+      return;
+    }
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('永久删除会话？'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: Text(
+            '“${session.title}”的全部聊天消息、推理过程、规划步骤、工具调用时间线和未发送草稿都将被永久删除。\n\n'
+            '项目目录、项目文件和其他会话不受影响。此操作不可恢复。',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('agent-confirm-delete-session'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB42318),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('永久删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _deleteSession(workspace, session);
+  }
+
+  Future<void> _deleteSession(
+    String workspace,
+    HarnessConversationSession session,
+  ) async {
+    if (_isSessionRunning(workspace, session.id)) {
+      if (mounted) _show('任务仍在运行，未删除会话');
+      return;
+    }
+    if (workspace == _workspace.text.trim()) {
+      _captureComposerDraft();
+      await _persistConversation();
+      if (!mounted) return;
+    }
+    final List<HarnessConversationSession> remaining =
+        List<HarnessConversationSession>.of(
+          _workspaceSessions[workspace] ??
+              (workspace == _workspace.text.trim()
+                  ? _sessions
+                  : const <HarnessConversationSession>[]),
+        )..removeWhere(
+          (HarnessConversationSession candidate) => candidate.id == session.id,
+        );
+    final String? nextActiveId = remaining.firstOrNull?.id;
+    try {
+      await widget.saveConversation(
+        HarnessConversationProject(
+          workspace: workspace,
+          sessions: remaining,
+          activeSessionId: nextActiveId,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) _show('删除会话失败，原记录仍保留：$error');
+      return;
+    }
+    if (!mounted) return;
+    _sessionDrafts.remove('$workspace::${session.id}');
+    _workspaceSessions[workspace] = remaining;
+    if (workspace == _workspace.text.trim()) {
+      final HarnessConversationSession? next = remaining.firstOrNull;
+      final _HarnessSessionRun? nextRun = next == null
+          ? null
+          : _sessionRuns[_sessionRunKey(workspace, next.id)];
+      setState(() {
+        _conversationEpoch++;
+        _sessions
+          ..clear()
+          ..addAll(remaining);
+        _activeSessionId = nextActiveId;
+        _messages
+          ..clear()
+          ..addAll(
+            nextRun?.messages ??
+                next?.messages.map(
+                  (HarnessConversationMessage message) => _AgentMessage._(
+                    text: message.text,
+                    user: message.user,
+                    elapsed: message.elapsedMs == null
+                        ? null
+                        : Duration(milliseconds: message.elapsedMs!),
+                    exitCode: message.exitCode,
+                    stopped: message.stopped,
+                    executionTrace: message.executionTrace,
+                  ),
+                ) ??
+                const <_AgentMessage>[],
+          );
+        if (nextRun == null) _idleProgressSteps.clear();
+      });
+      _restoreComposerDraft();
+      _scrollToEnd(force: true);
+    } else {
+      setState(() {});
+    }
+    _syncHarnessWorkspaceStatus();
+    _show('会话及全部聊天、推理记录已永久删除');
+  }
+
   Future<void> _showWorkspaceManager() async {
     await showDialog<void>(
       context: context,
@@ -3154,8 +3273,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                   .where((String candidate) => candidate != workspace)
                   .toList(growable: false),
               moveEnabled: !runningThisSession,
+              deleteEnabled: !runningThisSession,
               onSelected: (String target) =>
                   _requestMoveSession(workspace, session, target),
+              onDelete: () => _requestDeleteSession(workspace, session),
             )
           : runningThisSession
           ? SizedBox.square(
@@ -4235,7 +4356,9 @@ class _SessionMoveMenuButton extends StatefulWidget {
     required this.workspaceNames,
     required this.targets,
     required this.moveEnabled,
+    required this.deleteEnabled,
     required this.onSelected,
+    required this.onDelete,
     this.buttonKey,
   });
 
@@ -4246,7 +4369,9 @@ class _SessionMoveMenuButton extends StatefulWidget {
   final Map<String, String> workspaceNames;
   final List<String> targets;
   final bool moveEnabled;
+  final bool deleteEnabled;
   final Future<void> Function(String target) onSelected;
+  final Future<void> Function() onDelete;
 
   @override
   State<_SessionMoveMenuButton> createState() => _SessionMoveMenuButtonState();
@@ -4461,6 +4586,71 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
                         ),
                       ),
                     ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: Divider(height: 1, color: Color(0xFFE6E9E4)),
+                  ),
+                  Semantics(
+                    button: true,
+                    label: '永久删除会话及全部聊天和推理记录',
+                    child: InkWell(
+                      key: ValueKey<String>(
+                        'agent-session-delete-${widget.session.id}',
+                      ),
+                      borderRadius: BorderRadius.circular(11),
+                      onTap: widget.deleteEnabled
+                          ? () {
+                              _controller.close();
+                              unawaited(widget.onDelete());
+                            }
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 9,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Icon(
+                              Icons.delete_outline,
+                              size: 19,
+                              color: widget.deleteEnabled
+                                  ? const Color(0xFFB42318)
+                                  : muted,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    '删除会话',
+                                    style: TextStyle(
+                                      color: widget.deleteEnabled
+                                          ? const Color(0xFFB42318)
+                                          : muted,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    widget.deleteEnabled
+                                        ? '永久删除全部聊天与推理记录'
+                                        : '任务运行中，请先停止任务',
+                                    style: const TextStyle(
+                                      color: muted,
+                                      fontSize: 10.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -4471,7 +4661,7 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
           (BuildContext context, MenuController controller, Widget? child) =>
               IconButton(
                 key: widget.buttonKey,
-                tooltip: '会话所属项目与移动',
+                tooltip: '会话操作',
                 visualDensity: VisualDensity.compact,
                 onPressed: controller.isOpen
                     ? controller.close

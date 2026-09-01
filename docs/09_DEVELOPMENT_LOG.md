@@ -1339,3 +1339,13 @@
 - 修复远端标准结果信封使用 `toolName` 时被误判 `response_identity_mismatch`；继续兼容历史 `tool`，但冲突身份仍严格拒绝。
 - 新 Release 真实发现 `192.168.3.62` 的 KEMI-BM 2.4.0/revision 8，9 工具目录完成 TLS、摘要和身份校验；只读 `device_status` 196 ms 返回。对端当前以 `AUTH_SCOPE_REQUIRED` 拒绝未授权调用，需在 62 持久授权后才能取得业务成功终态，未绕过授权或伪报完成。
 - LMCP/Harness 定向回归 78/78、全项目 648 项通过（12 项环境跳过，3 项并发资源竞争失败隔离复测 5/5 通过）、analyze 0、Windows Release 和 29 项自包含运行时核验均通过；完整证据见 `docs/acceptance/V1_9_0_DEV144_WINDOWS_LMCP_62_2026-09-01.md`。
+
+# 2026-09-01 · dev.145 Harness 正式签名运行时与会话永久删除
+
+- 修复 dev.144 公证包中 Harness 一发送就退出的问题。根因是正式签名脚本给内置 Node 开启 Hardened Runtime 时没有保留 V8 所需的 JIT entitlement，进程在 `V8::Initialize()` 经 `pthread_jit_write_protect_np` 触发 `SIGTRAP`。新增独立 `HarnessNode.entitlements`，Developer ID 与 ad-hoc 两条签名链都必须给内置 Node 保留 `com.apple.security.cs.allow-jit=true`。
+- 新增两级发布门禁：`verify_macos_harness_signed_runtime.sh` 检查 Hardened Runtime、JIT entitlement、Node `--version` 和 DSH `--help`；正式公证脚本还会启动“精确同一路径”的候选 App，通过该 App 的真实工具桥和已保存密钥调用只读 `vibekits.mcp.catalog_list`。冒烟不通过时禁止上传 Apple，避免再次出现“能签名、公证但 Harness 不能工作”的包。
+- 会话选中菜单增加“删除会话”。该操作不是移出项目或归档：必须二次确认，确认后永久删除该会话的全部聊天消息、模型推理、规划、工具调用时间线、结果与未发送草稿；不删除项目目录、项目文件或其他会话。运行中的会话必须先停止，禁止在迟到回调仍可能写入时删除。
+- 定向验证：`flutter analyze --no-pub` 0 issue；Harness Widget 测试 23/23，其中永久删除测试确认目标会话及其消息/trace/draft 全部消失且其他会话保留；Universal Release 构建与兼容门禁通过，App 外壳 Intel macOS 10.15+，内置 Harness Node 22.19.0 为 Universal 且需要 macOS 11.0+。
+- Apple 公证返回 `Accepted`，Submission ID `9a0cddb1-41ce-4fe5-a231-7feb209fc128`；ticket 已 staple/validate，深度严格验签与 Gatekeeper `Notarized Developer ID` 均通过。正式 ZIP 为 `bin/Vibekits-1.9.0-dev.145+2145-macos-universal-notarized.zip`，SHA-256 `60dff7aec1ec2a4887d2f9d2819c5b3b043cc90c89570697389945918352392b`；App executable SHA-256 `939b12a9b1b950317f8cb96a08cd13f5bdee4fd287475fc94761860ea7205ceb`，App.framework SHA-256 `38d9f4a74db95830d962da9e1a8719ebc0900068baa9322264f60e5df0d9962a`。
+- 从最终 `bin/Vibekits.app` 再次执行真实 Harness 冒烟成功。只读目录返回 app=1、local=0、lan=1；先启动的 `192.168.3.62` KEMI-BM（`com.newlink.kemiscrollbench:41B8C7FDF4`）被后启动的 VibeKits 发现，状态为 online、`catalogState=verified`、`callable=true`，并有 1 个空闲执行槽。
+- 架构复核同时确认一个未完成项：dev.145 的 Windows 仍使用 `OfficialHarnessWorkspace + DSH WebView`，macOS 使用 `DeepSeekAgentWorkspace`。文档 54 已把“官方 DSH 作为可替换执行内核、跨平台共用单一 Flutter 交互/会话/状态机”设为下一版本硬门禁；在移除 `Platform.isWindows` 的双页面分流并完成 Windows Release 回归前，不得宣称这项跨平台统一已经完成。

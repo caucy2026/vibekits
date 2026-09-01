@@ -9,6 +9,7 @@ fi
 APP_BUNDLE="$(cd "$1" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RUNTIME="$APP_BUNDLE/Contents/Resources/tools/harness"
+HARNESS_NODE="$RUNTIME/bin/node"
 SIGNED_MACHO=0
 
 sign_file() {
@@ -36,6 +37,10 @@ while IFS= read -r -d '' FRAMEWORK; do
     --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
     "$FRAMEWORK" >/dev/null
 done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
+
+codesign --force --sign - \
+  --entitlements "$PROJECT_ROOT/macos/Runner/HarnessNode.entitlements" \
+  "$HARNESS_NODE" >/dev/null
 
 codesign --force --sign - \
   --entitlements "$PROJECT_ROOT/macos/Runner/Release.entitlements" \

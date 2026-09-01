@@ -9,6 +9,8 @@ fi
 APP_BUNDLE="$(cd "$1" && pwd)"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IDENTITY="${VIBEKITS_DEVELOPER_ID_APPLICATION:-}"
+HARNESS_NODE="$APP_BUNDLE/Contents/Resources/tools/harness/bin/node"
+HARNESS_NODE_ENTITLEMENTS="$PROJECT_ROOT/macos/Runner/HarnessNode.entitlements"
 
 if [ -z "$IDENTITY" ]; then
   echo "Set VIBEKITS_DEVELOPER_ID_APPLICATION to a Developer ID Application identity." >&2
@@ -34,8 +36,15 @@ while IFS= read -r -d '' FRAMEWORK; do
   codesign --force --timestamp --options runtime --sign "$IDENTITY" "$FRAMEWORK"
 done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
 
+# A generic Hardened Runtime signature strips the JIT exception required by
+# V8. Re-sign the embedded Node explicitly before sealing the outer App.
+codesign --force --timestamp --options runtime --sign "$IDENTITY" \
+  --entitlements "$HARNESS_NODE_ENTITLEMENTS" \
+  "$HARNESS_NODE"
+
 codesign --force --timestamp --options runtime --sign "$IDENTITY" \
   --entitlements "$PROJECT_ROOT/macos/Runner/Release.entitlements" \
   "$APP_BUNDLE"
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+"$PROJECT_ROOT/tool/verify_macos_harness_signed_runtime.sh" "$APP_BUNDLE"
 echo "Developer ID signed and verified: $APP_BUNDLE"

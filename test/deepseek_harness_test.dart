@@ -999,6 +999,100 @@ void main() {
     expect(activeWorkspace, target.path);
   });
 
+  testWidgets('会话菜单永久删除聊天推理时间线和未发送草稿', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 800);
+    addTearDown(tester.view.reset);
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_delete_session_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime.now();
+    final HarnessConversationSession doomed = HarnessConversationSession(
+      id: 'delete-me',
+      title: '需要永久删除的会话',
+      messages: <HarnessConversationMessage>[
+        const HarnessConversationMessage(text: '秘密聊天内容', user: true),
+        const HarnessConversationMessage(
+          text: 'Harness 回复',
+          user: false,
+          executionTrace: '理解任务\n规划操作\n调用只读工具\n继续分析',
+        ),
+      ],
+      createdAt: now.subtract(const Duration(minutes: 2)),
+      updatedAt: now,
+    );
+    final HarnessConversationSession kept = HarnessConversationSession(
+      id: 'keep-me',
+      title: '保留的会话',
+      messages: const <HarnessConversationMessage>[
+        HarnessConversationMessage(text: '保留内容', user: true),
+      ],
+      createdAt: now.subtract(const Duration(minutes: 4)),
+      updatedAt: now.subtract(const Duration(minutes: 1)),
+    );
+    HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[doomed, kept],
+      activeSessionId: doomed.id,
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            loadWorkspaceCatalog: () async => <String>[workspace.path],
+            loadConversation: (_) async => project,
+            saveConversation: (HarnessConversationProject value) async {
+              project = value;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v22.19.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('秘密聊天内容'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('agent-composer')),
+      '也必须删除的未发送草稿',
+    );
+    await tester.tap(find.byKey(const Key('agent-session-menu-delete-me')));
+    await tester.pumpAndSettle();
+    expect(find.text('删除会话'), findsOneWidget);
+    expect(find.text('永久删除全部聊天与推理记录'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('agent-session-delete-delete-me')));
+    await tester.pumpAndSettle();
+    expect(find.text('永久删除会话？'), findsOneWidget);
+    expect(find.textContaining('全部聊天消息、推理过程'), findsOneWidget);
+    expect(find.textContaining('此操作不可恢复'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-confirm-delete-session')));
+    await tester.pumpAndSettle();
+
+    expect(project.sessions.map((item) => item.id), <String>['keep-me']);
+    expect(project.activeSessionId, 'keep-me');
+    expect(find.text('需要永久删除的会话'), findsNothing);
+    expect(find.text('秘密聊天内容'), findsNothing);
+    expect(find.text('保留内容'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('agent-composer')))
+          .controller
+          ?.text,
+      isEmpty,
+    );
+  });
+
   testWidgets('设置异步恢复后工作区和 Codex 风格输入框立即更新', (WidgetTester tester) async {
     final Directory workspace = Directory.systemTemp.createTempSync(
       'vibekits_restore_workspace_',
