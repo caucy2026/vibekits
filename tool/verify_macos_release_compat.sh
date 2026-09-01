@@ -95,7 +95,7 @@ SEVEN_ZIP_ROOT="$APP_BUNDLE/Contents/Resources/tools/7zip"
 for SEVEN_ZIP_METADATA in License.txt readme.txt History.txt RUNTIME-INFO.txt; do
   require_file "$SEVEN_ZIP_ROOT/$SEVEN_ZIP_METADATA"
 done
-if ! "$SEVEN_ZIP_ROOT/7zz" i | grep -F '7-Zip 25.01' >/dev/null; then
+if ! "$SEVEN_ZIP_ROOT/7zz" i | grep -E '^7-Zip( \([^)]*\))? 25\.01 \(' >/dev/null; then
   echo "Bundled 7-Zip runtime version is not 25.01." >&2
   exit 5
 fi

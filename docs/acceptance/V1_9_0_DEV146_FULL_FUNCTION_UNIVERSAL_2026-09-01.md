@@ -58,5 +58,6 @@
 7. 拆分门禁确认 Harness 冷生成成功，而 7-Zip 下载/准备步骤在云端失败。25.01 Universal `7zz` 及上游 License/readme/History 总计约 5.6 MiB，现作为固定、可审计的 Release 输入纳入 Git；准备脚本及上游压缩包 SHA-256 仍保留用于显式升级，构建不再依赖 GitHub runner 临时下载该二进制。兼容验证仍会独立检查两个切片和 `minos=12.0`，不能靠跳过下载绕过架构门禁。
 8. 云端完整日志确认下一处失败不是编译器：Xcode 在最终签名时把 `Contents/MacOS/tools/adb/package.xml` 判定为未签名 code object。ADB 可执行文件继续固定在 `Contents/MacOS/tools/adb/adb`，NOTICE/source.properties/package.xml 改放 `Contents/Resources/tools/adb`；兼容门禁同时禁止在 ADB 可执行目录混入任何非 `adb` 文件，避免不同 Xcode 版本出现签名结果分叉。
 9. 云端 App 已成功构建后，兼容脚本误把签名前官方 `7zz` SHA-256 用于比较签名后的 Mach-O；ad-hoc/Developer ID 签名会合法改变二进制字节，因此产生假失败。固定 SHA 现于复制和签名前验证 Git 输入；签名后的 App 继续独立验证 25.01 版本、许可证、双架构、两个切片 `minos=12.0` 和代码签名，既不误报，也不放弃供应链校验。
+10. 官方 25.01 信息首行实际是 `7-Zip (z) 25.01 (...)`，旧版本断言错误地假定名称与版本连续。准备和兼容脚本现用锚定表达式同时接受官方可选产品标记，但仍严格固定版本 25.01，避免把显示格式差异误判为版本错误。
 
 在本节剩余门禁全部变绿前，`bin/Vibekits.app` 继续保留 dev.145 已公证回退基线。

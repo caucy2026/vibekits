@@ -70,5 +70,5 @@ The pinned preparation recipe remains in tool/prepare_7zip_runtime_macos.sh.
 License.txt, readme.txt and History.txt are copied from the verified upstream
 archive and travel with this executable.
 EOF
-"$DESTINATION/7zz" i | grep -F "7-Zip $VERSION" >/dev/null
+"$DESTINATION/7zz" i | grep -E "^7-Zip( \\([^)]*\\))? $VERSION \\(" >/dev/null
 echo "Prepared official 7-Zip $VERSION runtime ($ARCHS): $DESTINATION"
