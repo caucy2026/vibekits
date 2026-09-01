@@ -1255,3 +1255,5 @@
 - 关闭顺序改为：先标记关闭并取得输入取消 Future，再立即释放唯一订阅名额、取消状态流、销毁连接、移除客户端，最后等待输入取消完成。这样即使底层取消 Future 延迟或不完成，也不会阻塞新的 RustDesk Host 订阅。
 - 新增阻塞输入取消 Future 的专门回归，确认断线后 `activeSubscriptionCount` 与 `activeConnectionCount` 立即归零；Harness IPC 定向测试 9/9、Flutter analyze 0 issue、macOS Release 构建通过。旧 PID 92810 已用 SIGTERM 优雅退出，新 Release PID 7515 已启动并监听 `${TMPDIR}/vkh/v1.sock`。
 - 重启后的已接受 FD 不是孤儿：内核 endpoint 精确配对确认 VibeKits PID 7515 FD16 对端为 KEMI传书内嵌旧 `S1-远程桌面 --server` PID 35983 FD16。该进程是当前合法唯一订阅者；它存活期间第二诊断客户端返回 `subscription_busy` 属于预期门禁。要做“两次生产订阅”验收，必须先由用户明确允许短时停止该旧服务，不能把合法占用误判为释放失败。
+- 用户明确授权后正常 TERM 旧 PID 35983，63 端的 KEMI远程办公会话立即成为唯一订阅者：VibeKits PID 63701 FD9 与 KEMI远程办公 PID 68076 FD71 内核 endpoint 精确配对。63 工具栏真实出现 VibeKits，远端面板显示来源 `260262802`、状态 `idle`、更新时间 `08:03:44`，任务/运行/等待/失败计数均为 0；截图保存在 RustDesk 联调记录中。
+- 63 正常断开后 VibeKits 的 accepted FD9 立即释放，仅保留 listener FD3，生产现场证明 unsubscribe/disconnect 清理有效。随后 KEMI传书 supervisor 自动启动新的 `S1-远程桌面 --kemi-permissions` PID 71409 并占用新 FD9（对端 FD32），所以之后的 `subscription_busy` 是新合法订阅，不是旧 FD 泄漏。未获对 PID 71409 的单独授权前不停止；若需独立两轮测试，还必须避免 supervisor 在两轮之间自动拉起。
