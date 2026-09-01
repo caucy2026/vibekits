@@ -1257,3 +1257,8 @@
 - 重启后的已接受 FD 不是孤儿：内核 endpoint 精确配对确认 VibeKits PID 7515 FD16 对端为 KEMI传书内嵌旧 `S1-远程桌面 --server` PID 35983 FD16。该进程是当前合法唯一订阅者；它存活期间第二诊断客户端返回 `subscription_busy` 属于预期门禁。要做“两次生产订阅”验收，必须先由用户明确允许短时停止该旧服务，不能把合法占用误判为释放失败。
 - 用户明确授权后正常 TERM 旧 PID 35983，63 端的 KEMI远程办公会话立即成为唯一订阅者：VibeKits PID 63701 FD9 与 KEMI远程办公 PID 68076 FD71 内核 endpoint 精确配对。63 工具栏真实出现 VibeKits，远端面板显示来源 `260262802`、状态 `idle`、更新时间 `08:03:44`，任务/运行/等待/失败计数均为 0；截图保存在 RustDesk 联调记录中。
 - 63 正常断开后 VibeKits 的 accepted FD9 立即释放，仅保留 listener FD3，生产现场证明 unsubscribe/disconnect 清理有效。随后 KEMI传书 supervisor 自动启动新的 `S1-远程桌面 --kemi-permissions` PID 71409 并占用新 FD9（对端 FD32），所以之后的 `subscription_busy` 是新合法订阅，不是旧 FD 泄漏。未获对 PID 71409 的单独授权前不停止；若需独立两轮测试，还必须避免 supervisor 在两轮之间自动拉起。
+
+# 2026-09-01 · VibeKits 与 Codex 状态通道边界纠正
+
+- “RustDesk 开发任务仍在运行但 Codex 显示 idle”属于 RustDesk 独立 Codex/VS Code 状态通道，不属于 `vibekits.harness.status/v1`。现场交叉联调发现，把 Codex writer lock 合并到 VibeKits registry 会污染远端“VibeKits”面板及其聚合计数，因此该实验性接入未进入最终源码和 Release。
+- 最终契约明确：VibeKits publisher 只发布本进程内部 Harness 生命周期和工具桥任务；Codex/VS Code 由 RustDesk 的独立通道识别、展示和统计，禁止使用 `toolName=Codex Desktop` 等展示字符串猜来源。RustDesk 开发任务已收到修复通知，VibeKits 不修改 RustDesk 源码。

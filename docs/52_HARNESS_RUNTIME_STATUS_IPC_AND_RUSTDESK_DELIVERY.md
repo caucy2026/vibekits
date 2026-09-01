@@ -47,6 +47,13 @@ workspaceRef + sessionRef + taskId
 4. 保持现有 `HarnessWorkStatusHub.latest/changes/publish` API 兼容，同时提供完整 registry snapshot。
 5. 至少支持 10 个并行任务；完整快照超限时保留聚合计数和最新任务，不形成无界历史。
 
+状态来源边界固定如下：本协议 registry 只接受 VibeKits 进程自身的 Harness
+生命周期和经 VibeKits 工具桥执行的任务；不得采集或合并 Codex Desktop、VS Code
+或其他应用的任务。RustDesk 对 Codex/VS Code 使用各自独立的状态通道和面板，不能
+从 `toolName/message` 猜来源，也不能把它们计入 VibeKits 的 `taskCount/busyCount`。
+因此 v1 不新增跨应用 `source` 字段；若未来确需统一聚合，必须升级独立协议版本，
+同时保留按应用隔离的原始计数和展示入口。
+
 公开 phase：
 
 ```text

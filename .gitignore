@@ -34,6 +34,8 @@ migrate_working_dir/
 .pub/
 /build/
 /release/
+/bin/*
+!/bin/README.md
 /coverage/
 /.runtime-cache/
 /windows/flutter/ephemeral/
