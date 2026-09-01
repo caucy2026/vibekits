@@ -10,6 +10,7 @@ class HarnessConversationMessage {
     this.elapsedMs,
     this.exitCode,
     this.stopped = false,
+    this.executionTrace = '',
   });
 
   final String text;
@@ -17,6 +18,7 @@ class HarnessConversationMessage {
   final int? elapsedMs;
   final int? exitCode;
   final bool stopped;
+  final String executionTrace;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'text': text,
@@ -24,6 +26,7 @@ class HarnessConversationMessage {
     if (elapsedMs != null) 'elapsedMs': elapsedMs,
     if (exitCode != null) 'exitCode': exitCode,
     if (stopped) 'stopped': true,
+    if (executionTrace.isNotEmpty) 'executionTrace': executionTrace,
   };
 
   static HarnessConversationMessage? fromJson(Object? value) {
@@ -34,12 +37,23 @@ class HarnessConversationMessage {
         text.length > HarnessConversationStore.maxMessageCharacters) {
       return null;
     }
+    final String rawTrace = item['executionTrace'] is String
+        ? item['executionTrace']! as String
+        : '';
+    final String executionTrace =
+        rawTrace.length <= HarnessConversationStore.maxExecutionTraceCharacters
+        ? rawTrace
+        : rawTrace.substring(
+            0,
+            HarnessConversationStore.maxExecutionTraceCharacters,
+          );
     return HarnessConversationMessage(
       text: text,
       user: item['user'] == true,
       elapsedMs: item['elapsedMs'] is int ? item['elapsedMs']! as int : null,
       exitCode: item['exitCode'] is int ? item['exitCode']! as int : null,
       stopped: item['stopped'] == true,
+      executionTrace: executionTrace,
     );
   }
 }
@@ -88,18 +102,17 @@ class HarnessConversationProject {
 
 typedef HarnessConversationLoader =
     Future<HarnessConversationProject?> Function(String workspace);
-typedef HarnessConversationSaver = Future<void> Function(
-  HarnessConversationProject project,
-);
+typedef HarnessConversationSaver =
+    Future<void> Function(HarnessConversationProject project);
 typedef HarnessWorkspaceCatalogLoader = Future<List<String>> Function();
-typedef HarnessWorkspaceCatalogSaver = Future<void> Function(
-  List<String> workspaces,
-);
+typedef HarnessWorkspaceCatalogSaver =
+    Future<void> Function(List<String> workspaces);
 
 abstract final class HarnessConversationStore {
   static const int maxSessions = 40;
   static const int maxMessages = 80;
   static const int maxMessageCharacters = 65536;
+  static const int maxExecutionTraceCharacters = 32768;
   static const int maxFileBytes = 8 * 1024 * 1024;
   static const int maxWorkspaces = 40;
 
@@ -364,6 +377,7 @@ abstract final class HarnessConversationStore {
             elapsedMs: message.elapsedMs,
             exitCode: message.exitCode,
             stopped: message.stopped,
+            executionTrace: message.executionTrace,
           ),
         )
         .toList(growable: false);

@@ -1284,3 +1284,11 @@
 
 - “RustDesk 开发任务仍在运行但 Codex 显示 idle”属于 RustDesk 独立 Codex/VS Code 状态通道，不属于 `vibekits.harness.status/v1`。现场交叉联调发现，把 Codex writer lock 合并到 VibeKits registry 会污染远端“VibeKits”面板及其聚合计数，因此该实验性接入未进入最终源码和 Release。
 - 最终契约明确：VibeKits publisher 只发布本进程内部 Harness 生命周期和工具桥任务；Codex/VS Code 由 RustDesk 的独立通道识别、展示和统计，禁止使用 `toolName=Codex Desktop` 等展示字符串猜来源。RustDesk 开发任务已收到修复通知，VibeKits 不修改 RustDesk 源码。
+
+# 2026-09-01 · dev.139 Harness 可审计交互时间线重构
+
+- dev.138 不再作为验收基线：它可以显示粗粒度步骤，但工具的目标、参数、结果与外部资源清理不足，且已终止任务的迟到工具回调可以把 READY 错误覆盖为 REASONING。
+- dev.139 把每次执行整理为可展开时间线：理解任务、规划、每个工具、继续分析、回复、停止和清理均有独立状态。工具项展示工具名、目标、最多 1024 字符的脱敏参数/结果、成功/失败/拒绝与耗时；Token、密码、Cookie、API Key、Authorization 和配对码固定隐藏。时间线随会话持久化，重启后仍可审计。
+- 顶部运行态不再统一写“Harness 就绪”：分为推理中、调用工具、停止并清理、就绪与未就绪。选中会话才显示 `…`；未选中但正在运行的会话只显示转圈；任务运行时可切换其他项目，原会话继续运行并保留自己的输入草稿和输出。
+- “停止”不再只终止模型进程。Harness 会跟踪本任务通过 `adb shell am start -n` 启动的 Android 包，停止时逐个执行 `am force-stop`，再用 `pidof` 复核进程已退出；清理成功或失败会写入当前时间线。
+- 状态终态加入生命周期门禁：当任务已停止或结束时，迟到的工具成功/失败不再发布状态，因此 RustDesk 不会在 VibeKits 已终止后继续显示 BUSY。

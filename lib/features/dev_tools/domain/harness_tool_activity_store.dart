@@ -76,20 +76,20 @@ class HarnessToolActivity {
   }
 }
 
-typedef HarnessToolActivityLoader = Future<List<HarnessToolActivity>> Function(
-  Set<String> toolIds,
-);
+typedef HarnessToolActivityLoader =
+    Future<List<HarnessToolActivity>> Function(Set<String> toolIds);
 typedef HarnessToolActivityDeleter = Future<void> Function(String id);
 typedef HarnessToolActivityClearer = Future<void> Function(Set<String> toolIds);
-typedef HarnessToolActivityRecorder = Future<void> Function({
-  required String toolId,
-  required String toolName,
-  required String target,
-  required Map<String, Object?> arguments,
-  required Object? result,
-  required HarnessToolActivityStatus status,
-  required DateTime startedAt,
-});
+typedef HarnessToolActivityRecorder =
+    Future<void> Function({
+      required String toolId,
+      required String toolName,
+      required String target,
+      required Map<String, Object?> arguments,
+      required Object? result,
+      required HarnessToolActivityStatus status,
+      required DateTime startedAt,
+    });
 
 class HarnessToolLoggingPolicy {
   const HarnessToolLoggingPolicy({
@@ -250,6 +250,11 @@ abstract final class HarnessToolActivityStore {
       await _write(entries.take(maxEntries).toList(growable: false));
     });
   }
+
+  /// Produces the same bounded, credential-redacted representation used by
+  /// the persistent audit log. The Harness execution timeline uses this so
+  /// visible tool details never expose raw tokens, passwords, or cookies.
+  static String summarizeForDisplay(Object? value) => _summarize(value);
 
   static Future<void> delete(String id) => _enqueue(() async {
     final List<HarnessToolActivity> entries = await _readAll();

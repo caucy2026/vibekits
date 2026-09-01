@@ -238,6 +238,10 @@ void main() {
     await handles.first.complete(0);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agent-send')), findsOneWidget);
+    expect(
+      find.byKey(const Key('agent-persisted-execution-trace')),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byKey(const Key('agent-composer')), '再检查一次改动');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -260,6 +264,15 @@ void main() {
     expect(find.text('今天要开发什么？'), findsOneWidget);
     expect(find.text('已定位并修复测试。'), findsNothing);
     expect(savedConversation?.sessions, hasLength(2));
+    expect(
+      savedConversation?.sessions
+          .expand((HarnessConversationSession session) => session.messages)
+          .any(
+            (HarnessConversationMessage message) =>
+                !message.user && message.executionTrace.contains('执行时间线'),
+          ),
+      isTrue,
+    );
     expect(
       savedConversation?.sessions.any(
         (HarnessConversationSession session) => session.title == '修复失败的测试',
@@ -602,6 +615,10 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pump();
     expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.reasoning);
+    expect(
+      find.byKey(const Key('agent-session-menu-source-session')),
+      findsOneWidget,
+    );
 
     await tester.tap(
       find.byKey(ValueKey<String>('agent-workspace-header-${target.path}')),
@@ -612,6 +629,22 @@ void main() {
     expect(find.text('目标项目内容'), findsOneWidget);
     expect(find.byKey(const Key('agent-stop')), findsOneWidget);
     expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.reasoning);
+    expect(
+      find.byKey(
+        ValueKey<String>('agent-session-running-${source.path}-source-session'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        ValueKey<String>('agent-session-menu-${source.path}-source-session'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('agent-session-menu-target-session')),
+      findsOneWidget,
+    );
 
     handle.add('后台任务已完成');
     await tester.pump();
@@ -619,6 +652,12 @@ void main() {
     await handle.complete(0);
     await tester.pumpAndSettle();
     expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.ready);
+    expect(
+      find.byKey(
+        ValueKey<String>('agent-session-running-${source.path}-source-session'),
+      ),
+      findsNothing,
+    );
 
     await tester.tap(
       find.byKey(ValueKey<String>('agent-workspace-header-${source.path}')),
@@ -737,14 +776,24 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
-    final Finder session = find.byKey(
+    Finder session = find.byKey(
       ValueKey<String>('agent-session-${source.path}-move-me'),
     );
     expect(session, findsOneWidget);
     expect(targetWorkspace, findsOneWidget);
+    expect(
+      find.byKey(ValueKey<String>('agent-session-menu-${source.path}-move-me')),
+      findsNothing,
+    );
+
+    await tester.tap(session);
+    await tester.pumpAndSettle();
+    expect(activeWorkspace, source.path);
+    session = find.byKey(const Key('agent-session-move-me'));
+    expect(session, findsOneWidget);
 
     final Finder sessionMenu = find.byKey(
-      ValueKey<String>('agent-session-menu-${source.path}-move-me'),
+      const Key('agent-session-menu-move-me'),
     );
     await tester.tap(sessionMenu);
     await tester.pumpAndSettle();
@@ -754,7 +803,10 @@ void main() {
       find.byKey(const Key('agent-session-source-workspace-path')),
       findsOneWidget,
     );
-    expect(find.text(source.path), findsOneWidget);
+    expect(
+      find.byKey(const Key('agent-session-source-workspace-path')),
+      findsOneWidget,
+    );
     expect(find.text(target.path), findsAtLeast(1));
     expect(
       find.byKey(ValueKey<String>('agent-session-move-target-${target.path}')),

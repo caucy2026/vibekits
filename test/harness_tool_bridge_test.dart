@@ -18,6 +18,27 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('Harness 可见参数和结果摘要保留工程细节且脱敏凭据', () {
+    final String summary = HarnessToolActivityStore.summarizeForDisplay(
+      <String, Object?>{
+        'serial': '192.168.3.63:5555',
+        'arguments': <String>['shell', 'getprop', 'ro.product.model'],
+        'apiKey': 'must-not-leak',
+        'nested': <String, Object?>{
+          'password': 'also-secret',
+          'result': 'KEMI-E668',
+        },
+      },
+    );
+
+    expect(summary, contains('192.168.3.63:5555'));
+    expect(summary, contains('ro.product.model'));
+    expect(summary, contains('KEMI-E668'));
+    expect(summary, contains('<已隐藏>'));
+    expect(summary, isNot(contains('must-not-leak')));
+    expect(summary, isNot(contains('also-secret')));
+  });
+
   test('Harness 编排中的工具结束后回到 reasoning 而不是误报 ready', () async {
     final Completer<void> release = Completer<void>();
     const String workspaceRef = 'test-agent-orchestrated-workspace';
@@ -59,6 +80,114 @@ void main() {
     expect(task.phase, HarnessWorkPhase.reasoning);
     expect(task.busy, isTrue);
     expect(task.message, contains('继续分析'));
+  });
+
+  test('Harness 结束后的迟到工具结果不得覆盖 ready 终态', () async {
+    final Completer<void> release = Completer<void>();
+    bool agentActive = true;
+    const String workspaceRef = 'test-agent-late-tool-workspace';
+    final HarnessWorkspaceStatusContext context =
+        HarnessWorkStatusHub.activateWorkspace(
+          workspaceRef: workspaceRef,
+          workspaceLabel: '迟到工具项目',
+          sessionRef: 'late-tool-session',
+        );
+    addTearDown(() => HarnessWorkStatusHub.clearWorkspace(context));
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      agentOrchestrated: true,
+      agentActive: () => agentActive,
+      handlers: <String, HarnessToolHandler>{
+        'vibekits.file_hash': (_) async {
+          await release.future;
+          return <String, Object?>{'digest': 'late'};
+        },
+      },
+    );
+
+    final Future<HarnessToolCallResult> pending = bridge.invoke(
+      toolId: 'vibekits.file_hash',
+      arguments: const <String, Object?>{'input': '/tmp/late'},
+      approve: (_) async => true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    agentActive = false;
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.ready,
+      message: 'Harness 任务完成，工作区就绪',
+    );
+    final int terminalSequence =
+        HarnessWorkStatusHub.registryLatest.streamSequence;
+
+    release.complete();
+    expect((await pending).ok, isTrue);
+    final HarnessTaskSnapshot task = HarnessWorkStatusHub.registryLatest.tasks
+        .lastWhere(
+          (HarnessTaskSnapshot value) => value.key.workspaceRef == workspaceRef,
+        );
+    expect(task.phase, HarnessWorkPhase.ready);
+    expect(task.message, contains('工作区就绪'));
+    expect(
+      HarnessWorkStatusHub.registryLatest.streamSequence,
+      terminalSequence,
+    );
+  });
+
+  test('Harness 停止时清理并验证任务启动的 Android 应用', () async {
+    final List<List<String>> adbCalls = <List<String>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      agentOrchestrated: true,
+      agentActive: () => true,
+      adbExecutable: '/test/adb',
+      adbRunner: (String executable, List<String> arguments) async {
+        adbCalls.add(List<String>.of(arguments));
+        if (arguments.contains('pidof')) {
+          return const AdbCommandResult(exitCode: 1, stdout: '', stderr: '');
+        }
+        return const AdbCommandResult(exitCode: 0, stdout: 'ok', stderr: '');
+      },
+    );
+
+    final HarnessToolCallResult launched = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.adbShellId,
+      arguments: const <String, Object?>{
+        'serial': '192.168.3.63:5555',
+        'arguments': <String>[
+          'am',
+          'start',
+          '--display',
+          '0',
+          '-n',
+          'com.kemi.whackamole/.MainActivity',
+        ],
+      },
+      approve: (_) async => true,
+    );
+    expect(launched.ok, isTrue);
+    expect(launched.data?['agentOwnedActivity'], isA<Map<String, Object?>>());
+
+    final List<Map<String, Object?>> cleaned = await bridge
+        .stopAgentOwnedActivities();
+
+    expect(cleaned, hasLength(1));
+    expect(cleaned.single['package'], 'com.kemi.whackamole');
+    expect(cleaned.single['stopped'], isTrue);
+    expect(cleaned.single['verified'], isTrue);
+    expect(
+      adbCalls.any(
+        (List<String> call) =>
+            call.join(' ') ==
+            '-s 192.168.3.63:5555 shell am force-stop com.kemi.whackamole',
+      ),
+      isTrue,
+    );
+    expect(
+      adbCalls.any(
+        (List<String> call) =>
+            call.join(' ') ==
+            '-s 192.168.3.63:5555 shell pidof com.kemi.whackamole',
+      ),
+      isTrue,
+    );
   });
 
   test('Harness 可查看并经写权限审批人工评价 MCP 全局信誉', () async {

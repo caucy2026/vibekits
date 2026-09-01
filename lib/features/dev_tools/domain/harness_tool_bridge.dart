@@ -123,26 +123,26 @@ class HarnessToolCallResult {
   };
 }
 
-typedef HarnessToolApproval = Future<bool> Function(
-  HarnessToolApprovalRequest request,
-);
-typedef HarnessToolHandler = Future<Map<String, Object?>> Function(
-  Map<String, Object?> arguments,
-);
+typedef HarnessToolApproval =
+    Future<bool> Function(HarnessToolApprovalRequest request);
+typedef HarnessToolHandler =
+    Future<Map<String, Object?>> Function(Map<String, Object?> arguments);
 typedef HarnessRemoteProfileLoader =
     Future<List<RemoteConnectionRecord>> Function();
 typedef HarnessCredentialReader = Future<String?> Function(String key);
-typedef HarnessRemoteCommandRunner = Future<RemoteCommandResult> Function(
-  RemoteConnectionProfile profile,
-  String command,
-  String? secret,
-  RemoteHostKeyVerifier verifyHostKey,
-);
-typedef HarnessRemoteFileConnector = Future<RemoteFileClient> Function(
-  RemoteConnectionProfile profile,
-  String? secret,
-  RemoteHostKeyVerifier verifyHostKey,
-);
+typedef HarnessRemoteCommandRunner =
+    Future<RemoteCommandResult> Function(
+      RemoteConnectionProfile profile,
+      String command,
+      String? secret,
+      RemoteHostKeyVerifier verifyHostKey,
+    );
+typedef HarnessRemoteFileConnector =
+    Future<RemoteFileClient> Function(
+      RemoteConnectionProfile profile,
+      String? secret,
+      RemoteHostKeyVerifier verifyHostKey,
+    );
 typedef HarnessRemoteDatabaseProfileLoader =
     Future<List<RemoteDatabaseProfile>> Function();
 typedef HarnessRemoteDatabaseInspector =
@@ -150,31 +150,33 @@ typedef HarnessRemoteDatabaseInspector =
       RemoteDatabaseProfile profile,
       String password,
     );
-typedef HarnessRemoteDatabaseQuerier = Future<SqliteResultPage> Function(
-  RemoteDatabaseProfile profile,
-  String password,
-  String sql,
-);
-typedef HarnessRemoteWorkspaceLauncher = Future<void> Function(
-  RemoteWorkspaceIntent intent,
-);
+typedef HarnessRemoteDatabaseQuerier =
+    Future<SqliteResultPage> Function(
+      RemoteDatabaseProfile profile,
+      String password,
+      String sql,
+    );
+typedef HarnessRemoteWorkspaceLauncher =
+    Future<void> Function(RemoteWorkspaceIntent intent);
 typedef HarnessScreenshotOcrRunner = Future<Map<String, Object?>> Function();
-typedef HarnessSerialOpener = Future<SerialPortSession> Function(
-  SerialConnectionSettings settings,
-);
+typedef HarnessSerialOpener =
+    Future<SerialPortSession> Function(SerialConnectionSettings settings);
 typedef HarnessMcpCatalogLoader = Future<Map<String, Object?>> Function();
-typedef HarnessMcpToolInvoker = Future<Map<String, Object?>> Function(
-  String instanceId,
-  String toolName,
-  Map<String, Object?> arguments,
-);
+typedef HarnessMcpToolInvoker =
+    Future<Map<String, Object?>> Function(
+      String instanceId,
+      String toolName,
+      Map<String, Object?> arguments,
+    );
 typedef HarnessMcpReputationLoader = Future<Map<String, Object?>> Function();
-typedef HarnessMcpReputationRater = Future<Map<String, Object?>> Function(
-  String tier,
-  String instanceId,
-  String toolName,
-  int rating,
-);
+typedef HarnessMcpReputationRater =
+    Future<Map<String, Object?>> Function(
+      String tier,
+      String instanceId,
+      String toolName,
+      int rating,
+    );
+typedef HarnessAgentActivityProbe = bool Function();
 
 /// Harness 只能通过此桥接调用 Vibekits 能力。
 ///
@@ -210,6 +212,7 @@ class VibekitsHarnessToolBridge {
     HarnessMcpReputationLoader? mcpReputationLoader,
     HarnessMcpReputationRater? mcpReputationRater,
     bool agentOrchestrated = false,
+    HarnessAgentActivityProbe? agentActive,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -238,6 +241,7 @@ class VibekitsHarnessToolBridge {
     mcpReputationLoader,
     mcpReputationRater,
     agentOrchestrated,
+    agentActive,
   );
 
   VibekitsHarnessToolBridge._(
@@ -268,6 +272,7 @@ class VibekitsHarnessToolBridge {
     this._mcpReputationLoader,
     this._mcpReputationRater,
     this._agentOrchestrated,
+    this._agentActive,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -423,6 +428,8 @@ class VibekitsHarnessToolBridge {
   final HarnessMcpReputationLoader? _mcpReputationLoader;
   final HarnessMcpReputationRater? _mcpReputationRater;
   final bool _agentOrchestrated;
+  final HarnessAgentActivityProbe? _agentActive;
+  final Map<String, String> _agentOwnedAndroidPackages = <String, String>{};
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
   final PacketCaptureService _packetCaptureService =
       PacketCaptureService.instance;
@@ -459,7 +466,8 @@ class VibekitsHarnessToolBridge {
     systemResourcesId: _definition(
       id: systemResourcesId,
       name: '检查系统资源',
-      description: '只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。',
+      description:
+          '只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。',
       properties: <String, Object?>{
         'adbSerial': _string('可选；已连接 Android 设备序列号，留空分析本机'),
         'samples': const <String, Object?>{
@@ -479,7 +487,8 @@ class VibekitsHarnessToolBridge {
     capabilityCheckId: _definition(
       id: capabilityCheckId,
       name: '检查智能体工具链',
-      description: '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
+      description:
+          '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
       properties: const <String, Object?>{},
     ),
     describeToolId: _definition(
@@ -495,7 +504,8 @@ class VibekitsHarnessToolBridge {
     harnessDiagnosticsId: _definition(
       id: harnessDiagnosticsId,
       name: '查询 Harness 诊断日志',
-      description: '只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。',
+      description:
+          '只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。',
       properties: <String, Object?>{
         'limit': const <String, Object?>{
           'type': 'integer',
@@ -512,13 +522,15 @@ class VibekitsHarnessToolBridge {
     mcpCatalogListId: _definition(
       id: mcpCatalogListId,
       name: '列出三层 MCP 工具目录',
-      description: '读取 VibeKits、本机其他进程和局域网设备当前经过认证的完整 MCP 工具目录。返回每个实例、连接状态、真实工具名、用途和 inputSchema；调用远端工具前必须先读取本目录，不得猜测工具名或参数。',
+      description:
+          '读取 VibeKits、本机其他进程和局域网设备当前经过认证的完整 MCP 工具目录。返回每个实例、连接状态、真实工具名、用途和 inputSchema；调用远端工具前必须先读取本目录，不得猜测工具名或参数。',
       properties: const <String, Object?>{},
     ),
     mcpToolCallId: _definition(
       id: mcpToolCallId,
       name: '调用本地或局域网 MCP 工具',
-      description: '按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。调用方服从当前 Harness 权限模式；被调用 APP 首次建立工具/风险/资源授权，后续命中持久范围时自动执行并显示可强制关闭的运行提示，不得逐次重复审批。',
+      description:
+          '按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。调用方服从当前 Harness 权限模式；被调用 APP 首次建立工具/风险/资源授权，后续命中持久范围时自动执行并显示可强制关闭的运行提示，不得逐次重复审批。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'instanceId': _string('catalog_list 返回的目标 MCP 实例 ID'),
@@ -534,13 +546,15 @@ class VibekitsHarnessToolBridge {
     mcpReputationListId: _definition(
       id: mcpReputationListId,
       name: '查看 MCP 工具全局评分',
-      description: '只读返回跨项目、跨会话、跨重启保留的 MCP 工具类型评分。固定路由顺序为本机 VibeKits MCP、再本地其他进程 MCP、再局域网 MCP；同名工具的多台设备共享一个分数。',
+      description:
+          '只读返回跨项目、跨会话、跨重启保留的 MCP 工具类型评分。固定路由顺序为本机 VibeKits MCP、再本地其他进程 MCP、再局域网 MCP；同名工具的多台设备共享一个分数。',
       properties: const <String, Object?>{},
     ),
     mcpReputationRateId: _definition(
       id: mcpReputationRateId,
       name: '人工评价 MCP 工具',
-      description: '为一个 MCP 工具类型写入全局 0–5 分评价；0 表示垃圾并强力降权。评分跨设备共享但不删除工具，也不绕过 TLS、目录和风险审批。',
+      description:
+          '为一个 MCP 工具类型写入全局 0–5 分评价；0 表示垃圾并强力降权。评分跨设备共享但不删除工具，也不绕过 TLS、目录和风险审批。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'tier': <String, Object?>{
@@ -572,7 +586,8 @@ class VibekitsHarnessToolBridge {
     projectBuildId: _definition(
       id: projectBuildId,
       name: '验证并编译 Vibekits APP',
-      description: '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
+      description:
+          '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'workspace': _string('Vibekits Flutter 工作区绝对路径'),
@@ -594,7 +609,8 @@ class VibekitsHarnessToolBridge {
     captureStartId: _definition(
       id: captureStartId,
       name: '开始网络抓包',
-      description: '使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。',
+      description:
+          '使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'outputPath': _string('可选；PCAP 输出绝对路径，留空写入 APP tmp/network-capture'),
@@ -637,7 +653,8 @@ class VibekitsHarnessToolBridge {
     audioInspectId: _definition(
       id: audioInspectId,
       name: '分析 PCM / WAV 质量',
-      description: '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性，并返回谐波和噪声最明显的时间段。复杂音乐的单音指标仅作诊断参考。',
+      description:
+          '后台分析 PCM/WAV 的格式、波形、峰值、RMS、直流偏置、削波、静音、主频、谐波、THD、THD+N、SNR、噪声底、有效位数和声道相关性，并返回谐波和噪声最明显的时间段。复杂音乐的单音指标仅作诊断参考。',
       properties: _audioProperties(includePath: true),
       required: const <String>['path'],
     ),
@@ -718,7 +735,8 @@ class VibekitsHarnessToolBridge {
     adbConnectId: const HarnessToolDefinition(
       id: adbConnectId,
       name: '连接 ADB 设备',
-      description: '连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。',
+      description:
+          '连接用户明确指定的 Android 无线调试地址；1..254 的主机别名自动映射到 192.168.3.x:5555，并在连接后核验设备身份。',
       risk: HarnessToolRisk.controlsDevice,
       inputSchema: <String, Object?>{
         'type': 'object',
@@ -752,7 +770,8 @@ class VibekitsHarnessToolBridge {
     adbShellId: _definition(
       id: adbShellId,
       name: '执行 Android Shell',
-      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。',
+      description:
+          '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -839,7 +858,8 @@ class VibekitsHarnessToolBridge {
     adbSessionOpenId: _definition(
       id: adbSessionOpenId,
       name: '保持 ADB 长连接',
-      description: '为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。',
+      description:
+          '为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -875,13 +895,15 @@ class VibekitsHarnessToolBridge {
     serialAutoDetectId: _definition(
       id: serialAutoDetectId,
       name: '自动探测串口配置',
-      description: '自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。',
+      description:
+          '自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'port': _string('可选串口名；留空时按 USB VID/PID、描述和端口名自动选择'),
         'baudRates': <String, Object?>{
           'type': 'array',
-          'description': '可选候选波特率；默认依次尝试 115200、921600、460800、230400、57600、38400、19200、9600',
+          'description':
+              '可选候选波特率；默认依次尝试 115200、921600、460800、230400、57600、38400、19200、9600',
           'items': <String, Object?>{
             'type': 'integer',
             'minimum': 1,
@@ -1269,7 +1291,8 @@ class VibekitsHarnessToolBridge {
     networkDownloadId: _definition(
       id: networkDownloadId,
       name: '下载网络文件',
-      description: '把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。',
+      description:
+          '把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'url': _string('完整 HTTP/HTTPS URL'),
@@ -1304,7 +1327,8 @@ class VibekitsHarnessToolBridge {
     larkCliAuthStatusId: _definition(
       id: larkCliAuthStatusId,
       name: '检查飞书授权状态',
-      description: '调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。',
+      description:
+          '调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。',
       properties: const <String, Object?>{},
     ),
     larkCliSchemaId: _definition(
@@ -1319,12 +1343,14 @@ class VibekitsHarnessToolBridge {
     larkCliExecuteId: _definition(
       id: larkCliExecuteId,
       name: '执行官方飞书CLI命令',
-      description: '以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。',
+      description:
+          '以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'arguments': const <String, Object?>{
           'type': 'array',
-          'description': '逐项参数数组，例如 ["calendar","events","get","--calendar-id","...","--event-id","..."]；不得拼成shell字符串',
+          'description':
+              '逐项参数数组，例如 ["calendar","events","get","--calendar-id","...","--event-id","..."]；不得拼成shell字符串',
           'items': <String, Object?>{'type': 'string'},
           'minItems': 1,
           'maxItems': 64,
@@ -1341,7 +1367,8 @@ class VibekitsHarnessToolBridge {
     lanPeersListId: _definition(
       id: lanPeersListId,
       name: '发现局域网MCP协同节点',
-      description: '按 LMCP/2 列出同一私网内 VibeKits 或第三方 APP 主动广播的 HTTPS MCP 节点；仅通过 TLS 指纹、双端点和目录摘要校验的节点可调用。旧 LMCP/1 ssh-stdio 节点只显示“仅发现、不可调用”；第三方实现必须遵循 docs/50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md。',
+      description:
+          '按 LMCP/2 列出同一私网内 VibeKits 或第三方 APP 主动广播的 HTTPS MCP 节点；仅通过 TLS 指纹、双端点和目录摘要校验的节点可调用。旧 LMCP/1 ssh-stdio 节点只显示“仅发现、不可调用”；第三方实现必须遵循 docs/50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md。',
       properties: const <String, Object?>{},
     ),
     githubDiagnosticsId: _definition(
@@ -1599,7 +1626,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeId: _definition(
       id: systemDriveAnalyzeId,
       name: '分析磁盘占用',
-      description: '同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。',
+      description:
+          '同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。',
       properties: <String, Object?>{
         'root': _string('磁盘或待分析目录的绝对路径'),
         'maxResults': <String, Object?>{
@@ -1615,7 +1643,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeStartId: _definition(
       id: systemDriveAnalyzeStartId,
       name: '启动磁盘占用分析',
-      description: '启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。',
+      description:
+          '启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。',
       properties: <String, Object?>{
         'root': _string('磁盘或待分析目录的绝对路径'),
         'maxResults': <String, Object?>{
@@ -1631,7 +1660,8 @@ class VibekitsHarnessToolBridge {
     systemDriveAnalyzeStatusId: _definition(
       id: systemDriveAnalyzeStatusId,
       name: '查询磁盘分析状态',
-      description: '按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。',
+      description:
+          '按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。',
       properties: <String, Object?>{
         'taskId': _string('analyze_drive_start 返回的任务 ID'),
         'waitSeconds': const <String, Object?>{
@@ -1911,11 +1941,10 @@ class VibekitsHarnessToolBridge {
         status: HarnessToolActivityStatus.failed,
         startedAt: startedAt,
       );
-      HarnessWorkStatusHub.publish(
-        phase: _agentOrchestrated
-            ? HarnessWorkPhase.reasoning
-            : HarnessWorkPhase.ready,
-        message: '${definition.name}需要桌面节点',
+      _publishToolSettledStatus(
+        directPhase: HarnessWorkPhase.ready,
+        directMessage: '${definition.name}需要桌面节点',
+        orchestratedMessage: '${definition.name}需要桌面节点，Harness 继续分析',
         toolId: toolId,
         toolName: definition.name,
         target: target,
@@ -1947,11 +1976,10 @@ class VibekitsHarnessToolBridge {
           status: HarnessToolActivityStatus.denied,
           startedAt: startedAt,
         );
-        HarnessWorkStatusHub.publish(
-          phase: _agentOrchestrated
-              ? HarnessWorkPhase.reasoning
-              : HarnessWorkPhase.ready,
-          message: '已拒绝 ${definition.name}',
+        _publishToolSettledStatus(
+          directPhase: HarnessWorkPhase.ready,
+          directMessage: '已拒绝 ${definition.name}',
+          orchestratedMessage: '已拒绝 ${definition.name}，Harness 继续分析',
           toolId: toolId,
           toolName: definition.name,
           target: target,
@@ -1959,13 +1987,15 @@ class VibekitsHarnessToolBridge {
         return const HarnessToolCallResult.cancelled();
       }
     }
-    HarnessWorkStatusHub.publish(
-      phase: HarnessWorkPhase.runningTool,
-      message: '正在执行 ${definition.name}',
-      toolId: toolId,
-      toolName: definition.name,
-      target: target,
-    );
+    if (!_agentOrchestrated || _agentIsActive) {
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.runningTool,
+        message: '正在执行 ${definition.name}',
+        toolId: toolId,
+        toolName: definition.name,
+        target: target,
+      );
+    }
     try {
       final Map<String, Object?> data = await handler(arguments);
       if (!_adbExecutionIsAuditedByService(toolId)) {
@@ -1979,13 +2009,10 @@ class VibekitsHarnessToolBridge {
           startedAt: startedAt,
         );
       }
-      HarnessWorkStatusHub.publish(
-        phase: _agentOrchestrated
-            ? HarnessWorkPhase.reasoning
-            : HarnessWorkPhase.ready,
-        message: _agentOrchestrated
-            ? '${definition.name} 执行成功，Harness 继续分析'
-            : '${definition.name} 执行成功',
+      _publishToolSettledStatus(
+        directPhase: HarnessWorkPhase.ready,
+        directMessage: '${definition.name} 执行成功',
+        orchestratedMessage: '${definition.name} 执行成功，Harness 继续分析',
         toolId: toolId,
         toolName: definition.name,
         target: target,
@@ -2003,19 +2030,36 @@ class VibekitsHarnessToolBridge {
           startedAt: startedAt,
         );
       }
-      HarnessWorkStatusHub.publish(
-        phase: _agentOrchestrated
-            ? HarnessWorkPhase.reasoning
-            : HarnessWorkPhase.failed,
-        message: _agentOrchestrated
-            ? '${definition.name} 执行失败，Harness 正在调整方案'
-            : '${definition.name} 执行失败',
+      _publishToolSettledStatus(
+        directPhase: HarnessWorkPhase.failed,
+        directMessage: '${definition.name} 执行失败',
+        orchestratedMessage: '${definition.name} 执行失败，Harness 正在调整方案',
         toolId: toolId,
         toolName: definition.name,
         target: target,
       );
       return HarnessToolCallResult.failure('$error');
     }
+  }
+
+  bool get _agentIsActive => _agentActive?.call() ?? true;
+
+  void _publishToolSettledStatus({
+    required HarnessWorkPhase directPhase,
+    required String directMessage,
+    required String orchestratedMessage,
+    required String toolId,
+    required String toolName,
+    required String target,
+  }) {
+    if (_agentOrchestrated && !_agentIsActive) return;
+    HarnessWorkStatusHub.publish(
+      phase: _agentOrchestrated ? HarnessWorkPhase.reasoning : directPhase,
+      message: _agentOrchestrated ? orchestratedMessage : directMessage,
+      toolId: toolId,
+      toolName: toolName,
+      target: target,
+    );
   }
 
   /// Tools that remain visible to the mobile agent but must execute on a
@@ -2335,16 +2379,15 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _inspectBundledRuntimes(
     Map<String, Object?> arguments,
   ) async {
-    final List<BundledRuntimeStatus> runtimes = await Future.wait(
-      <Future<BundledRuntimeStatus>>[
-        NetworkVirtualizationService.inspectMihomo(
-          executable: _mihomoRuntimeExecutable,
-        ),
-        NetworkVirtualizationService.inspectQemu(
-          executable: _qemuRuntimeExecutable,
-        ),
-      ],
-    );
+    final List<BundledRuntimeStatus> runtimes =
+        await Future.wait(<Future<BundledRuntimeStatus>>[
+          NetworkVirtualizationService.inspectMihomo(
+            executable: _mihomoRuntimeExecutable,
+          ),
+          NetworkVirtualizationService.inspectQemu(
+            executable: _qemuRuntimeExecutable,
+          ),
+        ]);
     return <String, Object?>{
       'runtimes': runtimes
           .map((BundledRuntimeStatus value) => value.toJson())
@@ -2545,8 +2588,9 @@ class VibekitsHarnessToolBridge {
       'platform': <String, Object?>{
         'name': Platform.operatingSystem,
         'storageLocations': PlatformStorageLayout.current().toJson(),
-        'cleanup': CleanupPlatformPolicy.capabilities(CleanupPlatform.current)
-            .toJson(),
+        'cleanup': CleanupPlatformPolicy.capabilities(
+          CleanupPlatform.current,
+        ).toJson(),
         'allToolsVisibleToHarness': true,
         'desktopNodeToolCount': executable
             .where((HarnessToolDefinition tool) => requiresDesktopNode(tool.id))
@@ -2839,7 +2883,93 @@ class VibekitsHarnessToolBridge {
         'adbServer': latest?['adbServer'] ?? _activeAdbEndpoint.toAuditFields(),
       };
     }
-    return _executeSemanticAdb(arguments, <String>['shell', ...values]);
+    final Map<String, Object?> result = await _executeSemanticAdb(
+      arguments,
+      <String>['shell', ...values],
+    );
+    final String? launchedPackage = _launchedAndroidPackage(values);
+    if (_agentOrchestrated && launchedPackage != null) {
+      final String serial = (arguments['serial'] ?? '').toString().trim();
+      _agentOwnedAndroidPackages['$serial\u0000$launchedPackage'] =
+          launchedPackage;
+      result['agentOwnedActivity'] = <String, Object?>{
+        'serial': serial,
+        'package': launchedPackage,
+        'cleanup': 'am force-stop',
+      };
+    }
+    return result;
+  }
+
+  static String? _launchedAndroidPackage(List<String> values) {
+    if (values.length < 3 ||
+        values[0].toLowerCase() != 'am' ||
+        values[1].toLowerCase() != 'start') {
+      return null;
+    }
+    final int componentIndex = values.indexOf('-n');
+    if (componentIndex < 0 || componentIndex + 1 >= values.length) return null;
+    final String component = values[componentIndex + 1];
+    final String package = component.split('/').first.trim();
+    return RegExp(r'^[A-Za-z][A-Za-z0-9_.]{2,127}$').hasMatch(package)
+        ? package
+        : null;
+  }
+
+  Future<List<Map<String, Object?>>> stopAgentOwnedActivities() async {
+    final List<Map<String, Object?>> cleaned = <Map<String, Object?>>[];
+    final List<String> owned = _agentOwnedAndroidPackages.keys.toList();
+    for (final String identity in owned) {
+      final int separator = identity.indexOf('\u0000');
+      if (separator <= 0) continue;
+      final String serial = identity.substring(0, separator);
+      final String package = identity.substring(separator + 1);
+      try {
+        await _executeSemanticAdb(
+          <String, Object?>{'serial': serial},
+          <String>['shell', 'am', 'force-stop', package],
+        );
+        final AdbCommandResult probe = await _runSemanticAdbRaw(
+          serial,
+          <String>['shell', 'pidof', package],
+        );
+        final bool verifiedStopped =
+            probe.exitCode != 0 || probe.stdout.trim().isEmpty;
+        cleaned.add(<String, Object?>{
+          'serial': serial,
+          'package': package,
+          'stopped': verifiedStopped,
+          'verified': verifiedStopped,
+          if (!verifiedStopped) 'remainingPids': probe.stdout.trim(),
+        });
+        if (verifiedStopped) _agentOwnedAndroidPackages.remove(identity);
+      } on Object catch (error) {
+        cleaned.add(<String, Object?>{
+          'serial': serial,
+          'package': package,
+          'stopped': false,
+          'error': '$error',
+        });
+      }
+    }
+    return cleaned;
+  }
+
+  Future<AdbCommandResult> _runSemanticAdbRaw(
+    String serial,
+    List<String> command,
+  ) {
+    final String executable =
+        _adbExecutable ?? AdbService.bundledExecutablePath();
+    final List<String> adbArguments = <String>['-s', serial, ...command];
+    return _adbRunner == null
+        ? AdbService.runCommand(
+            executable,
+            adbArguments,
+            endpoint: _activeAdbEndpoint,
+            timeout: const Duration(seconds: 30),
+          )
+        : _adbRunner(executable, _activeAdbEndpoint.applyTo(adbArguments));
   }
 
   static bool _isAndroidPropertyName(String value) =>
@@ -3716,9 +3846,9 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _windowsNodeHelperStatus(
     Map<String, Object?> arguments,
   ) async {
-    final String executableDirectory = File(Platform.resolvedExecutable)
-        .parent
-        .path;
+    final String executableDirectory = File(
+      Platform.resolvedExecutable,
+    ).parent.path;
     final File helper = File(
       '$executableDirectory${Platform.pathSeparator}tools'
       '${Platform.pathSeparator}windows-node${Platform.pathSeparator}vibekits-node-helper.exe',
@@ -4353,11 +4483,10 @@ class VibekitsHarnessToolBridge {
     return value;
   }
 
-  String _normalizedAnalysisRoot(String root) =>
-      Directory(root).absolute.path
-          .replaceAll('/', Platform.pathSeparator)
-          .replaceAll(RegExp(r'[\\/]+$'), '')
-          .toLowerCase();
+  String _normalizedAnalysisRoot(String root) => Directory(root).absolute.path
+      .replaceAll('/', Platform.pathSeparator)
+      .replaceAll(RegExp(r'[\\/]+$'), '')
+      .toLowerCase();
 
   Future<Map<String, Object?>> _serializeSystemDriveAnalysis(
     SystemDriveAnalysis analysis, {

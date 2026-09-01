@@ -145,6 +145,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _restoringComposerDraft = false;
   HarnessEnvironmentReport? _environment;
   HarnessAgentHandle? _handle;
+  VibekitsHarnessToolBridge? _runningToolBridge;
+  Completer<void>? _stopCleanup;
   StreamSubscription<String>? _outputSubscription;
   String? _runningWorkspace;
   String? _runningSessionId;
@@ -233,6 +235,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               rating: rating,
             ),
     agentOrchestrated: agentOrchestrated,
+    agentActive: agentOrchestrated ? () => _running && !_stopRequested : null,
   );
 
   Future<void> _startMcpExposure(VibekitsHarnessToolBridge bridge) =>
@@ -789,6 +792,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       : Duration(milliseconds: message.elapsedMs!),
                   exitCode: message.exitCode,
                   stopped: message.stopped,
+                  executionTrace: message.executionTrace,
                 ),
               ) ??
               const <_AgentMessage>[],
@@ -812,6 +816,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               elapsedMs: message.elapsed?.inMilliseconds,
               exitCode: message.exitCode,
               stopped: message.stopped,
+              executionTrace: message.executionTrace,
             ),
         ];
     final String? activeId = _activeSessionId;
@@ -868,6 +873,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         elapsedMs: message.elapsed?.inMilliseconds,
         exitCode: message.exitCode,
         stopped: message.stopped,
+        executionTrace: message.executionTrace,
       ),
   ];
 
@@ -992,6 +998,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   Future<void> _run() async {
     final String prompt = _composer.text.trim();
     if (_running || prompt.isEmpty) return;
+    final VibekitsHarnessToolBridge toolBridge = _createMcpBridge(
+      agentOrchestrated: true,
+    );
     final HarnessAgentRequest request = HarnessAgentRequest(
       workspace: _workspace.text.trim(),
       prompt: _contextualPrompt(prompt),
@@ -1001,7 +1010,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       debugDirectory: _debugDirectory.text.trim(),
       permissionMode: _permissionMode,
       approveTool: _approveHarnessTool,
-      toolBridge: _createMcpBridge(agentOrchestrated: true),
+      toolBridge: toolBridge,
     );
     if (request.apiKey.isEmpty) {
       _show('请先点右上角设置并填写 DeepSeek API Key');
@@ -1039,6 +1048,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _runningWorkspace = request.workspace;
       _runningSessionId = _activeSessionId;
       _runningMessages = List<_AgentMessage>.of(_messages);
+      _runningToolBridge = toolBridge;
+      _stopCleanup = null;
       _syncRunningSessionCache();
     });
     _syncHarnessWorkspaceStatus();
@@ -1106,6 +1117,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         }
       });
       final int code = await handle.exitCode;
+      final Completer<void>? stopCleanup = _stopCleanup;
+      if (_stopRequested && stopCleanup != null) await stopCleanup.future;
       final Future<void>? cancelOutput = _outputSubscription?.cancel();
       if (cancelOutput != null) unawaited(cancelOutput);
       if (!mounted) return;
@@ -1143,6 +1156,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           elapsed: _runClock?.elapsed,
           exitCode: code,
           stopped: _stopRequested,
+          executionTrace: _formatExecutionTrace(),
         );
         if (_viewingRunningSession) {
           _messages
@@ -1180,6 +1194,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               text: '启动失败：$error',
               elapsed: _runClock?.elapsed,
               exitCode: -1,
+              executionTrace: _formatExecutionTrace(),
             );
         if (_viewingRunningSession) {
           _messages
@@ -1197,6 +1212,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _runningWorkspace = null;
     _runningSessionId = null;
     _runningMessages = null;
+    _runningToolBridge = null;
+    _stopCleanup = null;
     _syncHarnessWorkspaceStatus();
     if (_workspace.text.trim() == request.workspace) {
       _scrollToEnd(force: true);
@@ -1207,11 +1224,63 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   Future<void> _stop() async {
     final HarnessAgentHandle? handle = _handle;
     if (handle == null || _stopping) return;
+    final VibekitsHarnessToolBridge? toolBridge = _runningToolBridge;
+    final Completer<void> cleanup = Completer<void>();
     setState(() {
       _stopping = true;
       _stopRequested = true;
+      _stopCleanup = cleanup;
+      _upsertProgress(
+        const _AgentProgressStep(
+          id: 'stop',
+          title: '停止任务',
+          detail: '正在停止模型并清理任务启动的外部动作',
+          state: _AgentProgressState.active,
+        ),
+      );
     });
-    await handle.stop();
+    Object? modelStopError;
+    try {
+      await handle.stop();
+    } on Object catch (error) {
+      modelStopError = error;
+    }
+    try {
+      final List<Map<String, Object?>> cleaned =
+          await toolBridge?.stopAgentOwnedActivities() ??
+          const <Map<String, Object?>>[];
+      if (mounted) {
+        setState(() {
+          _replaceProgress(
+            'stop',
+            state:
+                modelStopError != null ||
+                    cleaned.any(
+                      (Map<String, Object?> item) => item['stopped'] == false,
+                    )
+                ? _AgentProgressState.failed
+                : _AgentProgressState.completed,
+            detail: <String>[
+              if (modelStopError == null)
+                '模型进程：已停止'
+              else
+                '模型进程：停止异常 $modelStopError',
+              if (cleaned.isEmpty)
+                '外部资源：未发现由本任务启动的 Android 应用'
+              else
+                ...cleaned.map(
+                  (Map<String, Object?> item) =>
+                      '外部资源：${item['package']}@${item['serial']} '
+                      '${item['stopped'] == true ? '已停止并验证' : '清理失败'}',
+                ),
+            ].join('\n'),
+          );
+          _syncExecutionTraceToRunningMessage();
+        });
+      }
+    } finally {
+      if (!cleanup.isCompleted) cleanup.complete();
+    }
   }
 
   Future<bool> _approveHarnessTool(HarnessToolApprovalRequest request) async {
@@ -1224,9 +1293,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           id: progressId,
           toolId: request.tool.id,
           title: '调用 ${request.tool.name}',
-          detail: request.target.isEmpty
-              ? _approvalScope(request)
-              : '${request.target} · ${_approvalScope(request)}',
+          detail: <String>[
+            if (request.target.isNotEmpty) '目标：${request.target}',
+            '参数：${HarnessToolActivityStore.summarizeForDisplay(request.arguments)}',
+            '授权：${_approvalScope(request)}',
+          ].join('\n'),
           state: _AgentProgressState.active,
         ),
       );
@@ -1263,12 +1334,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               ),
               const SizedBox(height: 8),
               SelectableText(
-                request.arguments.entries
-                    .map(
-                      (MapEntry<String, Object?> item) =>
-                          '${item.key}: ${item.value}',
-                    )
-                    .join('\n'),
+                HarnessToolActivityStore.summarizeForDisplay(request.arguments),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -1348,14 +1414,16 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         HarnessToolActivityStatus.denied => _AgentProgressState.failed,
       };
       final String detail = <String>[
-        if (target.isNotEmpty) target,
+        if (target.isNotEmpty) '目标：$target',
+        '参数：${HarnessToolActivityStore.summarizeForDisplay(arguments)}',
+        '结果：${HarnessToolActivityStore.summarizeForDisplay(result)}',
         switch (status) {
-          HarnessToolActivityStatus.succeeded => '执行成功',
-          HarnessToolActivityStatus.failed => '执行失败',
-          HarnessToolActivityStatus.denied => '未获批准',
+          HarnessToolActivityStatus.succeeded => '状态：执行成功',
+          HarnessToolActivityStatus.failed => '状态：执行失败',
+          HarnessToolActivityStatus.denied => '状态：未获批准',
         },
-        '${DateTime.now().difference(startedAt).inMilliseconds} ms',
-      ].join(' · ');
+        '耗时：${DateTime.now().difference(startedAt).inMilliseconds} ms',
+      ].join('\n');
       if (index >= 0) {
         _progressSteps[index] = _progressSteps[index].copyWith(
           state: state,
@@ -1372,15 +1440,44 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ),
         );
       }
-      _upsertProgress(
-        const _AgentProgressStep(
-          id: 'continue',
-          title: '继续分析',
-          detail: '正在根据工具结果决定下一步',
-          state: _AgentProgressState.active,
-        ),
-      );
+      if (_running && !_stopRequested) {
+        _upsertProgress(
+          const _AgentProgressStep(
+            id: 'continue',
+            title: '继续分析',
+            detail: '正在根据工具结果决定下一步',
+            state: _AgentProgressState.active,
+          ),
+        );
+      }
+      _syncExecutionTraceToRunningMessage();
     });
+  }
+
+  String _formatExecutionTrace() {
+    if (_progressSteps.isEmpty) return '';
+    return <String>[
+      '### 执行时间线',
+      for (final _AgentProgressStep step in _progressSteps)
+        '${switch (step.state) {
+          _AgentProgressState.active => '◌',
+          _AgentProgressState.completed => '✓',
+          _AgentProgressState.failed => '!',
+        }} **${step.title}** — ${step.detail}',
+    ].join('\n');
+  }
+
+  void _syncExecutionTraceToRunningMessage() {
+    final List<_AgentMessage>? messages = _runningMessages;
+    if (messages == null) return;
+    final int index = messages.lastIndexWhere(
+      (_AgentMessage message) => !message.user,
+    );
+    if (index < 0) return;
+    messages[index] = messages[index].copyWith(
+      executionTrace: _formatExecutionTrace(),
+    );
+    _syncRunningSessionCache();
   }
 
   void _upsertProgress(_AgentProgressStep step) {
@@ -1482,6 +1579,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                   : Duration(milliseconds: message.elapsedMs!),
               exitCode: message.exitCode,
               stopped: message.stopped,
+              executionTrace: message.executionTrace,
             ),
           ),
         );
@@ -1638,6 +1736,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                     : Duration(milliseconds: message.elapsedMs!),
                 exitCode: message.exitCode,
                 stopped: message.stopped,
+                executionTrace: message.executionTrace,
               ),
             ),
           );
@@ -2893,6 +2992,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     required bool activeWorkspace,
   }) {
     final bool selected = activeWorkspace && session.id == _activeSessionId;
+    final bool runningThisSession =
+        _running &&
+        workspace == _runningWorkspace &&
+        session.id == _runningSessionId;
     final Widget tile = ListTile(
       key: activeWorkspace
           ? Key('agent-session-${session.id}')
@@ -2917,9 +3020,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         style: const TextStyle(fontSize: 11),
       ),
       onTap: () => _activateWorkspaceSession(workspace, session.id),
-      trailing: _running || _workspaceCatalog.length < 2
-          ? null
-          : _SessionMoveMenuButton(
+      trailing: selected
+          ? _SessionMoveMenuButton(
               buttonKey: activeWorkspace
                   ? Key('agent-session-menu-${session.id}')
                   : ValueKey<String>(
@@ -2932,9 +3034,19 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               targets: _workspaceCatalog
                   .where((String candidate) => candidate != workspace)
                   .toList(growable: false),
+              moveEnabled: !_running,
               onSelected: (String target) =>
                   _requestMoveSession(workspace, session, target),
-            ),
+            )
+          : runningThisSession
+          ? SizedBox.square(
+              key: ValueKey<String>(
+                'agent-session-running-$workspace-${session.id}',
+              ),
+              dimension: 14,
+              child: const CircularProgressIndicator(strokeWidth: 1.8),
+            )
+          : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
     );
     if (_running) return tile;
@@ -2976,6 +3088,21 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     final String workspaceName = workspace.isEmpty
         ? '选择工作区'
         : workspace.replaceAll('\\', '/').split('/').last;
+    final bool runningTool = _progressSteps.any(
+      (_AgentProgressStep step) =>
+          step.toolId != null && step.state == _AgentProgressState.active,
+    );
+    final String runtimeLabel = _stopping
+        ? 'Harness 停止并清理中'
+        : runningTool
+        ? 'Harness 正在调用工具'
+        : _running
+        ? 'Harness 推理中'
+        : _checking
+        ? '检查中'
+        : environment?.ready == true
+        ? 'Harness 就绪'
+        : '连接未就绪';
     return SizedBox(
       height: 40,
       child: Row(
@@ -2992,7 +3119,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           Tooltip(
             message: workspace.isEmpty ? '选择智能体可操作的项目目录' : workspace,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 180),
+              constraints: const BoxConstraints(maxWidth: 150),
               child: TextButton.icon(
                 key: const Key('agent-pick-workspace'),
                 onPressed: _running ? null : _pickWorkspace,
@@ -3017,35 +3144,37 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             ),
           ] else
             const Spacer(),
-          Tooltip(
-            message: environment?.message ?? '正在检查环境',
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                if (_checking)
-                  const SizedBox(
-                    width: 13,
-                    height: 13,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(
-                    Icons.circle,
-                    size: 8,
-                    color: environment?.ready == true
-                        ? context.vibe.success
-                        : VibekitsColors.warning,
+          Flexible(
+            child: Tooltip(
+              message: '$runtimeLabel\n${environment?.message ?? '正在检查环境'}',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (_checking || _running)
+                    const SizedBox(
+                      width: 13,
+                      height: 13,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      Icons.circle,
+                      size: 8,
+                      color: environment?.ready == true
+                          ? context.vibe.success
+                          : VibekitsColors.warning,
+                    ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      runtimeLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
-                const SizedBox(width: 6),
-                Text(
-                  _checking
-                      ? '检查中'
-                      : environment?.ready == true
-                      ? 'Harness 就绪'
-                      : '连接未就绪',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           IconButton(
@@ -3628,6 +3757,7 @@ class _AgentMessage {
     this.elapsed,
     this.exitCode,
     this.stopped = false,
+    this.executionTrace = '',
   });
 
   const _AgentMessage.user(String text) : this._(text: text, user: true);
@@ -3638,18 +3768,21 @@ class _AgentMessage {
   final Duration? elapsed;
   final int? exitCode;
   final bool stopped;
+  final String executionTrace;
 
   _AgentMessage copyWith({
     String? text,
     Duration? elapsed,
     int? exitCode,
     bool? stopped,
+    String? executionTrace,
   }) => _AgentMessage._(
     text: text ?? this.text,
     user: user,
     elapsed: elapsed ?? this.elapsed,
     exitCode: exitCode ?? this.exitCode,
     stopped: stopped ?? this.stopped,
+    executionTrace: executionTrace ?? this.executionTrace,
   );
 }
 
@@ -3720,30 +3853,32 @@ class _MessageBubble extends StatelessWidget {
             children: <Widget>[
               SelectionArea(
                 key: const Key('agent-response'),
-                child: message.text.isEmpty
-                    ? progressSteps.isEmpty
-                          ? Row(
-                              children: <Widget>[
-                                const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  '正在分析…',
-                                  style: TextStyle(color: context.vibe.muted),
-                                ),
-                              ],
-                            )
-                          : _AgentProgressView(
-                              steps: progressSteps,
-                              expanded: progressExpanded,
-                              onToggle: onToggleProgress,
-                            )
-                    : MarkdownBody(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (progressSteps.isNotEmpty)
+                      _AgentProgressView(
+                        steps: progressSteps,
+                        expanded: progressExpanded,
+                        onToggle: onToggleProgress,
+                      )
+                    else if (message.executionTrace.isNotEmpty)
+                      Container(
+                        key: const Key('agent-persisted-execution-trace'),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: context.vibe.canvas,
+                          border: Border.all(color: context.vibe.border),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: MarkdownBody(
+                          data: message.executionTrace,
+                          selectable: false,
+                        ),
+                      ),
+                    if (message.text.isNotEmpty)
+                      MarkdownBody(
                         data: message.text,
                         selectable: false,
                         styleSheet: MarkdownStyleSheet(
@@ -3759,7 +3894,25 @@ class _MessageBubble extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
+                      )
+                    else if (progressSteps.isEmpty &&
+                        message.executionTrace.isEmpty)
+                      Row(
+                        children: <Widget>[
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '正在分析…',
+                            style: TextStyle(color: context.vibe.muted),
+                          ),
+                        ],
                       ),
+                  ],
+                ),
               ),
               if (message.text.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 5),
@@ -3808,6 +3961,7 @@ class _SessionMoveMenuButton extends StatefulWidget {
     required this.activeWorkspace,
     required this.workspaceNames,
     required this.targets,
+    required this.moveEnabled,
     required this.onSelected,
     this.buttonKey,
   });
@@ -3818,6 +3972,7 @@ class _SessionMoveMenuButton extends StatefulWidget {
   final bool activeWorkspace;
   final Map<String, String> workspaceNames;
   final List<String> targets;
+  final bool moveEnabled;
   final Future<void> Function(String target) onSelected;
 
   @override
@@ -3960,6 +4115,14 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
                     ),
                   ),
                   const SizedBox(height: 7),
+                  if (!widget.moveEnabled)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 7),
+                      child: Text(
+                        '任务运行中，可查看归属；结束后可移动会话',
+                        style: TextStyle(color: muted, fontSize: 10.5),
+                      ),
+                    ),
                   for (final String target in widget.targets)
                     Semantics(
                       button: true,
@@ -3969,10 +4132,12 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
                           'agent-session-move-target-$target',
                         ),
                         borderRadius: BorderRadius.circular(11),
-                        onTap: () {
-                          _controller.close();
-                          unawaited(widget.onSelected(target));
-                        },
+                        onTap: widget.moveEnabled
+                            ? () {
+                                _controller.close();
+                                unawaited(widget.onSelected(target));
+                              }
+                            : null,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 9,
