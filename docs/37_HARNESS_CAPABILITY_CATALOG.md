@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：79。
 - 开发工具独立工作区入口：19。
-- Harness 定义接口：184。
-- Harness 当前可执行接口：162。
+- Harness 定义接口：186。
+- Harness 当前可执行接口：164。
 - 当前不可公开接口：22。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -77,7 +77,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 
 | 模块 | 定义接口数 |
 | --- | ---: |
-| 系统诊断 | 43 |
+| 系统诊断 | 45 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
@@ -92,7 +92,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 版本控制 | 10 |
 | 虚拟化 | 3 |
 
-## 系统诊断（定义 43）
+## 系统诊断（定义 45）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -113,9 +113,11 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.git_workspace` | `git_workspace` | 版本控制（Git） | 否（环境/接线门禁） | 查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。 适合：用户明确需要“版本控制（Git）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.github_diagnostics` | `github_diagnostics` | 网络诊断（GitHub） | 否（环境/接线门禁） | 分层检查 GitHub 凭据与网络，发现真实回环代理并可回滚地只修复 GitHub Git。 适合：用户明确需要“网络诊断（GitHub）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.harness.diagnostics` | `harness__diagnostics` | 查询 Harness 诊断日志 | 是 | 只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。 | `readOnly` | `limit` (integer；最小=1；最大=50), `includeLogTail` (boolean) |
+| `vibekits.mcp.auto_call` | `mcp__auto_call` | 自动调度并调用 MCP 作战单位 | 是 | 读取实时目录，在最高优先层选择有空闲容量且评分最优的同类节点，先原子预约，再执行真实业务工具，最后释放租约；节点忙碌会自动尝试下一候选。返回选择理由、脱敏租约 ID、完整业务结果和失败尝试，不返回 leaseToken。 | `controlsDevice` | `toolName`* (string), `taskId`* (string), `idempotencyKey`* (string), `scopeDigest`* (string), `arguments`* (object), `requestedSlots` (integer；默认=1；最小=1), `ttlSeconds` (integer；默认=45；最小=10；最大=120) |
 | `vibekits.mcp.catalog_list` | `mcp__catalog_list` | 列出三层 MCP 工具目录 | 是 | 读取 VibeKits、本机其他进程和局域网设备当前经过认证的完整 MCP 工具目录。返回每个实例、连接状态、真实工具名、用途和 inputSchema；调用远端工具前必须先读取本目录，不得猜测工具名或参数。 | `readOnly` | `{}` |
 | `vibekits.mcp.reputation_list` | `mcp__reputation_list` | 查看 MCP 工具全局评分 | 是 | 只读返回跨项目、跨会话、跨重启保留的 MCP 工具类型评分。固定路由顺序为本机 VibeKits MCP、再本地其他进程 MCP、再局域网 MCP；同名工具的多台设备共享一个分数。 | `readOnly` | `{}` |
 | `vibekits.mcp.reputation_rate` | `mcp__reputation_rate` | 人工评价 MCP 工具 | 是 | 为一个 MCP 工具类型写入全局 0–5 分评价；0 表示垃圾并强力降权。评分跨设备共享但不删除工具，也不绕过 TLS、目录和风险审批。 | `writesData` | `tier`* (string；枚举=app/local/lan), `instanceId`* (string), `toolName`* (string), `rating`* (integer；最小=0；最大=5) |
+| `vibekits.mcp.schedule_plan` | `mcp__schedule_plan` | 规划 MCP 作战单位调度 | 是 | 按 LMCP/2 指挥官标准过滤当前在线、可调用、有实时空闲槽并实现租约控制的同类 MCP 节点；保持 app→local→lan 层级，同层按容量、全局质量、可靠性、延迟、新鲜度和稳定打散评分。本工具只生成可审计计划，不占用容量也不执行业务工具。 | `readOnly` | `toolName`* (string), `taskId`* (string) |
 | `vibekits.mcp.tool_call` | `mcp__tool_call` | 调用本地或局域网 MCP 工具 | 是 | 按最新目录把调用路由到指定的本地其他进程或经过认证的局域网 MCP 实例。必须先遵循 app → local → lan 的固定层级，只在同层按全局工具评分降序选择；原样使用 catalog_list 返回的 instanceId、toolName 和 inputSchema。调用方服从当前 Harness 权限模式；被调用 APP 首次建立工具/风险/资源授权，后续命中持久范围时自动执行并显示可强制关闭的运行提示，不得逐次重复审批。 | `controlsDevice` | `instanceId`* (string), `toolName`* (string), `arguments`* (object) |
 | `vibekits.network.download` | `network__download` | 下载网络文件 | 是 | 把 HTTP/HTTPS 文件流式下载到 APP 配置的下载目录，完成后返回绝对路径、大小、SHA-256 和 HTTP 证据。APK 会校验 ZIP/APK 签名，适合随后调用 adb.install_apk。 | `writesData` | `url`* (string), `fileName` (string), `outputDirectory` (string), `overwrite` (boolean；默认=false), `expectedSha256` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=1800), `maxBytes` (integer；默认=2147483648；最小=1；最大=8589934592) |
 | `vibekits.network_virtualization` | `network_virtualization` | 网络代理（Clash Verge） | 否（环境/接线门禁） | 使用内置 Mihomo 管理订阅、节点、测速、连接、规则、日志与系统代理。 适合：用户明确需要“网络代理（Clash Verge）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |

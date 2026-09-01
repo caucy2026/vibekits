@@ -384,6 +384,91 @@ void main() {
     );
   });
 
+  test('协议端点完成 reserve→绑定业务调用→release 且状态不泄露 token', () async {
+    int executions = 0;
+    final VibekitsLmcpProtocol protocol = VibekitsLmcpProtocol(
+      instanceId: 'com.vibekits.desktop:WORKER0001',
+      serverVersion: '1.9.0-dev.140',
+      bridge: VibekitsHarnessToolBridge(
+        handlers: <String, HarnessToolHandler>{
+          VibekitsHarnessToolBridge.programmerCalculatorId:
+              (Map<String, Object?> arguments) async {
+                executions++;
+                return <String, Object?>{'value': 2};
+              },
+        },
+      ),
+    );
+    const LmcpCallerIdentity caller = LmcpCallerIdentity(
+      appId: 'com.vibekits.desktop',
+      instanceId: 'com.vibekits.desktop:COMMANDER1',
+      address: '192.168.3.65',
+    );
+    Future<Map<String, Object?>> call(
+      int id,
+      String name,
+      Map<String, Object?> arguments, {
+      Map<String, Object?>? scheduling,
+    }) async => (await protocol.handle(<String, Object?>{
+      'jsonrpc': '2.0',
+      'id': id,
+      'method': 'tools/call',
+      'params': <String, Object?>{
+        'name': name,
+        'arguments': arguments,
+        'scheduling': ?scheduling,
+      },
+    }, caller: caller))!;
+
+    final Map<String, Object?> reserved = await call(
+      1,
+      'lmcp.capacity.reserve',
+      const <String, Object?>{
+        'toolName': VibekitsHarnessToolBridge.programmerCalculatorId,
+        'idempotencyKey': 'calc-001',
+        'commanderId': 'com.vibekits.desktop:COMMANDER1',
+        'requestedSlots': 1,
+        'ttlSeconds': 45,
+        'scopeDigest': 'sha256:calculator',
+      },
+    );
+    final Map<Object?, Object?> reserveResult =
+        reserved['result']! as Map<Object?, Object?>;
+    final Map<Object?, Object?> lease =
+        reserveResult['structuredContent']! as Map<Object?, Object?>;
+    expect(lease['ok'], isTrue);
+
+    final Map<String, Object?> executed = await call(
+      2,
+      VibekitsHarnessToolBridge.programmerCalculatorId,
+      const <String, Object?>{'expression': '1+1'},
+      scheduling: <String, Object?>{
+        'leaseId': lease['leaseId'],
+        'leaseToken': lease['leaseToken'],
+        'idempotencyKey': 'calc-001',
+      },
+    );
+    expect((executed['result']! as Map)['isError'], isFalse);
+    expect(executions, 1);
+
+    final Map<String, Object?> status = await call(
+      3,
+      'lmcp.node.status',
+      const <String, Object?>{},
+    );
+    expect(status.toString(), isNot(contains('${lease['leaseToken']}')));
+    final Map<String, Object?> released = await call(
+      4,
+      'lmcp.capacity.release',
+      <String, Object?>{
+        'leaseId': lease['leaseId'],
+        'leaseToken': lease['leaseToken'],
+        'reason': 'completed',
+      },
+    );
+    expect((released['result']! as Map)['isError'], isFalse);
+  });
+
   test('强制关闭使运行中的 tools/call 快速返回 USER_TERMINATED', () async {
     final LmcpInboundCallHub hub = LmcpInboundCallHub(
       minimumVisibleDuration: Duration.zero,

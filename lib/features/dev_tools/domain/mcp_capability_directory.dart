@@ -7,7 +7,10 @@ import 'harness_tool_bridge.dart';
 import 'lan_peer_discovery_service.dart';
 import 'local_mcp_stdio_client.dart';
 import 'lmcp_remote_client.dart';
+import 'lmcp_capacity_manager.dart';
 import 'mcp_capability_models.dart';
+import 'mcp_commander_scheduler.dart';
+import 'mcp_device_identity.dart';
 import 'mcp_tool_reputation_store.dart';
 
 /// Maintains the live MCP catalog shared by the Harness planner and its UI.
@@ -41,6 +44,10 @@ class McpCapabilityDirectory {
   final LanPeerDiscoveryService _discoveryService;
   final McpToolReputationStore _reputationStore;
   final LocalMcpStdioClient _localClient;
+  final LmcpCapacityLeaseManager _appCapacity = LmcpCapacityLeaseManager(
+    capacity: 8,
+  );
+  VibekitsHarnessToolBridge? _appBridge;
   final StreamController<McpCapabilitySnapshot> _changes =
       StreamController<McpCapabilitySnapshot>.broadcast();
   StreamSubscription<List<VibekitsLanPeer>>? _lanSubscription;
@@ -70,6 +77,7 @@ class McpCapabilityDirectory {
   );
 
   Future<void> start({required VibekitsHarnessToolBridge appBridge}) async {
+    _appBridge = appBridge;
     _app = <McpDeviceCapability>[
       McpDeviceCapability(
         id: 'vibekits-app',
@@ -88,8 +96,10 @@ class McpCapabilityDirectory {
               inputSchema: tool.inputSchema,
               risk: tool.risk.name,
             ),
+          ..._schedulingToolInterfaces,
         ],
         lastUpdated: DateTime.now(),
+        runtime: _appCapacity.runtime,
       ),
     ];
     if (!_started) {
@@ -183,6 +193,8 @@ class McpCapabilityDirectory {
         'endpoint': device.endpoint,
         'catalogRevision': device.catalogRevision,
         'callable': device.callable,
+        'schedulable': device.schedulable,
+        'runtime': device.runtime.toJson(),
         if (device.tier == McpCapabilityTier.lan) ...<String, Object?>{
           'discoveryAlive': device.online,
           'endpointReachable': endpointReachable,
@@ -358,6 +370,380 @@ class McpCapabilityDirectory {
     };
   }
 
+  Future<Map<String, Object?>> planScheduledTool({
+    required String toolName,
+    required String taskId,
+  }) async {
+    final String normalizedTool = toolName.trim();
+    final String normalizedTask = taskId.trim();
+    if (normalizedTool.isEmpty || normalizedTask.isEmpty) {
+      throw const FormatException('toolName 和 taskId 均为必填项');
+    }
+    final McpCapabilitySnapshot current = await snapshotForTask();
+    final Map<String, McpToolReputation> reputations = await _reputationStore
+        .load();
+    final List<McpSchedulingCandidate> ranked = McpCommanderScheduler.rank(
+      devices: current.inHarnessSearchOrder,
+      toolName: normalizedTool,
+      taskId: normalizedTask,
+      reputations: reputations,
+    );
+    return <String, Object?>{
+      'schemaVersion': 1,
+      'toolName': normalizedTool,
+      'taskId': normalizedTask,
+      'candidateCount': ranked.length,
+      'selected': ranked.isEmpty ? null : ranked.first.toJson(),
+      'candidates': ranked
+          .map((McpSchedulingCandidate item) => item.toJson())
+          .toList(growable: false),
+      'reservationRequired': true,
+      'nextAction': ranked.isEmpty
+          ? '没有同时满足身份、目录、实时容量和租约工具合同的作战单位'
+          : '必须先对 selected 调用 lmcp.capacity.reserve；不得凭 UDP idle 直接执行',
+    };
+  }
+
+  /// Performs the commander protocol end-to-end: rank, atomically reserve,
+  /// invoke with the lease binding, and always release. A busy candidate is
+  /// skipped without making the business call.
+  Future<Map<String, Object?>> scheduleAndInvoke({
+    required String toolName,
+    required String taskId,
+    required String idempotencyKey,
+    required String scopeDigest,
+    Map<String, Object?> arguments = const <String, Object?>{},
+    int requestedSlots = 1,
+    int ttlSeconds = 45,
+  }) async {
+    final String normalizedTool = toolName.trim();
+    final String normalizedTask = taskId.trim();
+    final String normalizedKey = idempotencyKey.trim();
+    final String normalizedScope = scopeDigest.trim();
+    if (normalizedTool.isEmpty ||
+        normalizedTask.isEmpty ||
+        normalizedKey.isEmpty ||
+        normalizedScope.isEmpty ||
+        requestedSlots < 1 ||
+        ttlSeconds < 10 ||
+        ttlSeconds > 120) {
+      throw const FormatException('自动调度参数无效');
+    }
+    if (normalizedTool == VibekitsHarnessToolBridge.mcpAutoCallId ||
+        normalizedTool.startsWith('lmcp.capacity.') ||
+        normalizedTool == 'lmcp.node.status') {
+      throw const FormatException('自动调度不能递归调用调度控制工具');
+    }
+    final McpCapabilitySnapshot current = await snapshotForTask();
+    final Map<String, McpToolReputation> reputations = await _reputationStore
+        .load();
+    final List<McpSchedulingCandidate> ranked = McpCommanderScheduler.rank(
+      devices: current.inHarnessSearchOrder,
+      toolName: normalizedTool,
+      taskId: normalizedTask,
+      reputations: reputations,
+    );
+    final String commanderId = McpDeviceIdentity.forVibekits().instanceId;
+    final List<Map<String, Object?>> attempts = <Map<String, Object?>>[];
+    for (final McpSchedulingCandidate candidate in ranked) {
+      if (candidate.device.tier == McpCapabilityTier.app) {
+        final VibekitsHarnessToolBridge? bridge = _appBridge;
+        if (bridge == null) continue;
+        Map<String, Object?>? lease;
+        try {
+          lease = _appCapacity.reserve(
+            toolName: normalizedTool,
+            idempotencyKey: normalizedKey,
+            commanderId: commanderId,
+            requestedSlots: requestedSlots,
+            ttlSeconds: ttlSeconds,
+            scopeDigest: normalizedScope,
+            callerInstanceId: commanderId,
+          );
+          final Stopwatch stopwatch = Stopwatch()..start();
+          final HarnessToolCallResult invoked = await bridge.invoke(
+            toolId: normalizedTool,
+            arguments: arguments,
+            preauthorized: true,
+            approve: (_) async => true,
+          );
+          final Map<String, Object?> business = <String, Object?>{
+            'isError': !invoked.ok,
+            'instanceId': 'vibekits-app',
+            'tool': normalizedTool,
+            'structuredContent': invoked.toJson(),
+          };
+          final double quality = inferMcpCompletionQuality(business);
+          await _reputationStore.record(
+            tier: McpCapabilityTier.app,
+            instanceId: 'vibekits-app',
+            toolName: normalizedTool,
+            succeeded: invoked.ok,
+            completionQuality: quality,
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+          final String leaseId = '${lease['leaseId']}';
+          attempts.add(<String, Object?>{
+            'instanceId': candidate.device.id,
+            'outcome': invoked.ok ? 'completed' : 'tool-error',
+            'leaseId': leaseId,
+          });
+          return <String, Object?>{
+            'schemaVersion': 1,
+            'ok': invoked.ok,
+            'toolName': normalizedTool,
+            'taskId': normalizedTask,
+            'selected': candidate.toJson(),
+            'leaseId': leaseId,
+            'attempts': attempts,
+            'result': business,
+            'redactedFields': const <String>['leaseToken'],
+          };
+        } finally {
+          if (lease != null) {
+            _appCapacity.release(
+              leaseId: '${lease['leaseId']}',
+              leaseToken: '${lease['leaseToken']}',
+              callerInstanceId: commanderId,
+              reason: 'caller-finished',
+            );
+            _app = <McpDeviceCapability>[
+              for (final McpDeviceCapability device in _app)
+                McpDeviceCapability(
+                  id: device.id,
+                  name: device.name,
+                  appId: device.appId,
+                  appVersion: device.appVersion,
+                  tier: device.tier,
+                  transport: device.transport,
+                  endpoint: device.endpoint,
+                  tools: device.tools,
+                  lastUpdated: DateTime.now(),
+                  runtime: _appCapacity.runtime,
+                ),
+            ];
+            _emit();
+          }
+        }
+      }
+      if (candidate.device.tier == McpCapabilityTier.local) {
+        Map<String, Object?>? lease;
+        try {
+          final Map<String, Object?> reserve = await _localClient.callTool(
+            executable: candidate.device.endpoint,
+            launchArguments: candidate.device.launchArguments,
+            toolName: 'lmcp.capacity.reserve',
+            arguments: <String, Object?>{
+              'toolName': normalizedTool,
+              'idempotencyKey': normalizedKey,
+              'commanderId': commanderId,
+              'requestedSlots': requestedSlots,
+              'ttlSeconds': ttlSeconds,
+              'scopeDigest': normalizedScope,
+            },
+          );
+          final Map<String, Object?> reserveData = _structuredContent(reserve);
+          if (reserve['isError'] == true || reserveData['ok'] != true) {
+            attempts.add(<String, Object?>{
+              'instanceId': candidate.device.id,
+              'outcome': 'reserve-rejected',
+              'code': _structuredErrorCode(reserveData),
+            });
+            continue;
+          }
+          lease = reserveData;
+          final String leaseId = '${lease['leaseId'] ?? ''}';
+          final String leaseToken = '${lease['leaseToken'] ?? ''}';
+          if (leaseId.isEmpty || leaseToken.isEmpty) continue;
+          final Stopwatch stopwatch = Stopwatch()..start();
+          final Map<String, Object?> result = await _localClient.callTool(
+            executable: candidate.device.endpoint,
+            launchArguments: candidate.device.launchArguments,
+            toolName: normalizedTool,
+            arguments: arguments,
+            scheduling: <String, Object?>{
+              'leaseId': leaseId,
+              'leaseToken': leaseToken,
+              'idempotencyKey': normalizedKey,
+            },
+          );
+          final double quality = inferMcpCompletionQuality(result);
+          await _reputationStore.record(
+            tier: McpCapabilityTier.local,
+            instanceId: candidate.device.id,
+            toolName: normalizedTool,
+            succeeded: quality > 0,
+            completionQuality: quality,
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+          attempts.add(<String, Object?>{
+            'instanceId': candidate.device.id,
+            'outcome': result['isError'] == true ? 'tool-error' : 'completed',
+            'leaseId': leaseId,
+          });
+          return <String, Object?>{
+            'schemaVersion': 1,
+            'ok': result['isError'] != true,
+            'toolName': normalizedTool,
+            'taskId': normalizedTask,
+            'selected': candidate.toJson(),
+            'leaseId': leaseId,
+            'attempts': attempts,
+            'result': result,
+            'redactedFields': const <String>['leaseToken'],
+          };
+        } on Object catch (error) {
+          attempts.add(<String, Object?>{
+            'instanceId': candidate.device.id,
+            'outcome': 'transport-error',
+            'error': error.runtimeType.toString(),
+          });
+        } finally {
+          if (lease != null) {
+            try {
+              await _localClient.callTool(
+                executable: candidate.device.endpoint,
+                launchArguments: candidate.device.launchArguments,
+                toolName: 'lmcp.capacity.release',
+                arguments: <String, Object?>{
+                  'leaseId': lease['leaseId'],
+                  'leaseToken': lease['leaseToken'],
+                  'reason': 'caller-finished',
+                },
+              );
+            } on Object {
+              // TTL is the final cleanup boundary for a lost local response.
+            }
+          }
+        }
+        continue;
+      }
+      final VibekitsLanPeer? peer = _lanPeers[candidate.device.id];
+      if (peer == null) {
+        attempts.add(<String, Object?>{
+          'instanceId': candidate.device.id,
+          'outcome': 'offline-before-reserve',
+        });
+        continue;
+      }
+      Map<String, Object?>? lease;
+      try {
+        final Map<String, Object?> reserve = await _remoteClient.callTool(
+          peer: peer,
+          name: 'lmcp.capacity.reserve',
+          arguments: <String, Object?>{
+            'toolName': normalizedTool,
+            'idempotencyKey': normalizedKey,
+            'commanderId': commanderId,
+            'requestedSlots': requestedSlots,
+            'ttlSeconds': ttlSeconds,
+            'scopeDigest': normalizedScope,
+          },
+        );
+        final Map<String, Object?> reserveData = _structuredContent(reserve);
+        if (reserve['isError'] == true || reserveData['ok'] != true) {
+          attempts.add(<String, Object?>{
+            'instanceId': candidate.device.id,
+            'outcome': 'reserve-rejected',
+            'code': _structuredErrorCode(reserveData),
+          });
+          continue;
+        }
+        lease = reserveData;
+        final String leaseId = '${lease['leaseId'] ?? ''}';
+        final String leaseToken = '${lease['leaseToken'] ?? ''}';
+        if (leaseId.isEmpty || leaseToken.isEmpty) {
+          attempts.add(<String, Object?>{
+            'instanceId': candidate.device.id,
+            'outcome': 'invalid-reserve-response',
+          });
+          continue;
+        }
+        final Stopwatch stopwatch = Stopwatch()..start();
+        final Map<String, Object?> result = await _remoteClient.callTool(
+          peer: peer,
+          name: normalizedTool,
+          arguments: arguments,
+          scheduling: <String, Object?>{
+            'leaseId': leaseId,
+            'leaseToken': leaseToken,
+            'idempotencyKey': normalizedKey,
+          },
+        );
+        final double quality = inferMcpCompletionQuality(result);
+        await _reputationStore.record(
+          tier: candidate.device.tier,
+          instanceId: candidate.device.id,
+          toolName: normalizedTool,
+          succeeded: quality > 0,
+          completionQuality: quality,
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        attempts.add(<String, Object?>{
+          'instanceId': candidate.device.id,
+          'outcome': result['isError'] == true ? 'tool-error' : 'completed',
+          'leaseId': leaseId,
+        });
+        return <String, Object?>{
+          'schemaVersion': 1,
+          'ok': result['isError'] != true,
+          'toolName': normalizedTool,
+          'taskId': normalizedTask,
+          'selected': candidate.toJson(),
+          'leaseId': leaseId,
+          'attempts': attempts,
+          'result': result,
+          'redactedFields': const <String>['leaseToken'],
+        };
+      } on Object catch (error) {
+        attempts.add(<String, Object?>{
+          'instanceId': candidate.device.id,
+          'outcome': 'transport-error',
+          'error': error.runtimeType.toString(),
+        });
+      } finally {
+        if (lease != null) {
+          final String leaseId = '${lease['leaseId'] ?? ''}';
+          final String leaseToken = '${lease['leaseToken'] ?? ''}';
+          if (leaseId.isNotEmpty && leaseToken.isNotEmpty) {
+            try {
+              await _remoteClient.callTool(
+                peer: peer,
+                name: 'lmcp.capacity.release',
+                arguments: <String, Object?>{
+                  'leaseId': leaseId,
+                  'leaseToken': leaseToken,
+                  'reason': 'caller-finished',
+                },
+              );
+            } on Object {
+              // The short lease is the final cleanup boundary if the release
+              // response is lost. Credentials are intentionally not surfaced.
+            }
+          }
+        }
+      }
+    }
+    return <String, Object?>{
+      'schemaVersion': 1,
+      'ok': false,
+      'toolName': normalizedTool,
+      'taskId': normalizedTask,
+      'code': ranked.isEmpty ? 'NO_ELIGIBLE_NODE' : 'ALL_NODES_UNAVAILABLE',
+      'attempts': attempts,
+    };
+  }
+
+  static Map<String, Object?> _structuredContent(Map<String, Object?> result) =>
+      result['structuredContent'] is Map
+      ? Map<String, Object?>.from(result['structuredContent']! as Map)
+      : <String, Object?>{};
+
+  static String _structuredErrorCode(Map<String, Object?> structured) {
+    final Object? error = structured['error'];
+    return error is Map ? '${error['code'] ?? 'UNKNOWN'}' : 'UNKNOWN';
+  }
+
   Future<Map<String, McpToolReputation>> loadReputations() =>
       _reputationStore.load();
 
@@ -455,6 +841,7 @@ class McpCapabilityDirectory {
               ? peer.catalogRevision
               : peer.capabilityDigest,
           hardwareCode: peer.hardwareCode,
+          runtime: peer.runtime,
         ),
     ];
     if (_signature(next) != _signature(_lan)) {
@@ -537,6 +924,7 @@ class McpCapabilityDirectory {
                 .take(32)
                 .toList(growable: false)
           : const <String>[],
+      runtime: McpNodeRuntime.fromJson(json['runtime']),
     );
   }
 
@@ -553,6 +941,7 @@ class McpCapabilityDirectory {
             device.hardwareCode,
             device.catalogRevision,
             device.endpoint,
+            device.runtime.toJson(),
             for (final McpToolInterface tool in device.tools) tool.toJson(),
           ],
       ]);
@@ -566,4 +955,32 @@ class McpCapabilityDirectory {
     _loadingCatalogKeys.clear();
     _started = false;
   }
+
+  static const List<McpToolInterface> _schedulingToolInterfaces =
+      <McpToolInterface>[
+        McpToolInterface(
+          name: 'lmcp.node.status',
+          title: '查询作战单位实时容量',
+          description: '读取本机 in-process MCP 的实时槽位。',
+          inputSchema: <String, Object?>{'type': 'object'},
+        ),
+        McpToolInterface(
+          name: 'lmcp.capacity.reserve',
+          title: '预约容量',
+          description: '原子预约本机执行槽。',
+          inputSchema: <String, Object?>{'type': 'object'},
+        ),
+        McpToolInterface(
+          name: 'lmcp.capacity.renew',
+          title: '续租容量',
+          description: '续租本机执行槽。',
+          inputSchema: <String, Object?>{'type': 'object'},
+        ),
+        McpToolInterface(
+          name: 'lmcp.capacity.release',
+          title: '释放容量',
+          description: '幂等释放本机执行槽。',
+          inputSchema: <String, Object?>{'type': 'object'},
+        ),
+      ];
 }

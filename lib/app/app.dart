@@ -168,6 +168,26 @@ class _VibekitsAppState extends State<VibekitsApp> {
               toolName: toolName,
               arguments: arguments,
             ),
+        mcpSchedulePlanner: (String toolName, String taskId) =>
+            directory.planScheduledTool(toolName: toolName, taskId: taskId),
+        mcpAutoInvoker:
+            (
+              toolName,
+              taskId,
+              idempotencyKey,
+              scopeDigest,
+              arguments,
+              requestedSlots,
+              ttlSeconds,
+            ) => directory.scheduleAndInvoke(
+              toolName: toolName,
+              taskId: taskId,
+              idempotencyKey: idempotencyKey,
+              scopeDigest: scopeDigest,
+              arguments: arguments,
+              requestedSlots: requestedSlots,
+              ttlSeconds: ttlSeconds,
+            ),
         mcpReputationLoader: directory.exportReputations,
         mcpReputationRater:
             (String tier, String instanceId, String toolName, int rating) =>

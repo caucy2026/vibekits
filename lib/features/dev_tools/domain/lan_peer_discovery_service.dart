@@ -16,6 +16,7 @@ class Lmcp2Advertisement {
     required this.instanceKeyFingerprint,
     required this.catalogRevision,
     required this.capabilityDigest,
+    this.runtimeProvider,
   });
 
   final String appId;
@@ -28,6 +29,7 @@ class Lmcp2Advertisement {
   final String instanceKeyFingerprint;
   final String catalogRevision;
   final String capabilityDigest;
+  final Map<String, Object?> Function()? runtimeProvider;
 
   Map<String, Object?> toAnnouncement({
     String messageType = 'announce',
@@ -79,12 +81,11 @@ class Lmcp2Advertisement {
         ...endpoint,
         'serviceRole': 'tool-provider',
       },
-      'mcp': <String, Object?>{
-        'protocolVersions': const <String>['2025-06-18'],
-        'catalogRevision': revision,
-        'capabilityDigest': capabilityDigest,
-        'changeNotifications': false,
-      },
+      // The endpoint pair is authoritative for protocol/revision/digest. Keep
+      // only the mandatory notification flag in this compatibility mirror so
+      // runtime capacity still fits the 1200-byte multicast budget.
+      'mcp': const <String, Object?>{'changeNotifications': true},
+      if (runtimeProvider != null) 'runtime': runtimeProvider!(),
       'ttlSeconds': ttlSeconds,
     };
 
@@ -121,6 +122,7 @@ class VibekitsLanPeer {
     this.catalogRevision = '',
     this.serviceRole = '',
     this.tools = const <McpToolInterface>[],
+    this.runtime = const McpNodeRuntime.unknown(),
   });
 
   final String instanceId;
@@ -140,6 +142,7 @@ class VibekitsLanPeer {
   final String catalogRevision;
   final String serviceRole;
   final List<McpToolInterface> tools;
+  final McpNodeRuntime runtime;
 
   bool get supportsLmcp2Calls =>
       protocolVersion == 2 &&
@@ -185,6 +188,8 @@ class VibekitsLanPeer {
     'tools': <Map<String, Object?>>[
       for (final McpToolInterface tool in tools) tool.toJson(),
     ],
+    'runtime': runtime.toJson(),
+    'schedulable': supportsLmcp2Calls && runtime.schedulable,
     'authorized': supportsLmcp2Calls,
     'nextAction': supportsLmcp2Calls
         ? '普通 MCP 工具可自动读取目录并调用；远程 Harness 任务入口另行审批'
@@ -224,6 +229,7 @@ class LanPeerDiscoveryService {
   List<NetworkInterface> _interfaces = const <NetworkInterface>[];
   Timer? _announceTimer;
   Timer? _pruneTimer;
+  Timer? _runtimeAnnounceTimer;
   String _instanceId = '';
   bool _exposureEnabled = true;
   Lmcp2Advertisement? _lmcp2Advertisement;
@@ -315,6 +321,7 @@ class LanPeerDiscoveryService {
     socket.listen(_onEvent, onError: (_) => stop());
     _socket = socket;
     _interfaces = List<NetworkInterface>.unmodifiable(joined);
+    _sendDiscover();
     if (_exposureEnabled) _announce();
     _announceTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (_exposureEnabled) _announce();
@@ -337,11 +344,36 @@ class LanPeerDiscoveryService {
     _lmcp2Advertisement = advertisement;
   }
 
+  void notifyRuntimeChanged() {
+    if (!_exposureEnabled || _runtimeAnnounceTimer != null) return;
+    _runtimeAnnounceTimer = Timer(const Duration(milliseconds: 250), () {
+      _runtimeAnnounceTimer = null;
+      if (_exposureEnabled) _announce();
+    });
+  }
+
+  void _sendDiscover() {
+    final RawDatagramSocket? socket = _socket;
+    if (socket == null) return;
+    final List<int> payload = utf8.encode(
+      jsonEncode(<String, Object?>{
+        'protocol': discoveryProtocol,
+        'protocolVersion': '2.0',
+        'messageType': 'discover',
+        'instanceId': _instanceId,
+        'sentAt': DateTime.now().toUtc().toIso8601String(),
+      }),
+    );
+    socket.send(payload, group, port);
+  }
+
   Future<void> stop() async {
     _announceTimer?.cancel();
     _pruneTimer?.cancel();
+    _runtimeAnnounceTimer?.cancel();
     _announceTimer = null;
     _pruneTimer = null;
+    _runtimeAnnounceTimer = null;
     _socket?.close();
     _socket = null;
     _interfaces = const <NetworkInterface>[];
@@ -400,6 +432,12 @@ class LanPeerDiscoveryService {
         final Object? decoded = jsonDecode(utf8.decode(packet.data));
         if (decoded is! Map) continue;
         final String id = _safe('${decoded['instanceId'] ?? ''}', 80);
+        if (decoded['messageType'] == 'discover') {
+          if (id != _instanceId && _exposureEnabled) {
+            Timer(Duration(milliseconds: id.hashCode.abs() % 501), _announce);
+          }
+          continue;
+        }
         if (decoded['messageType'] == 'goodbye') {
           if (id.isNotEmpty) {
             _peers.remove(id);
@@ -633,14 +671,18 @@ class LanPeerDiscoveryService {
           catalogRevision.isEmpty ||
           catalogEndpointRevision != catalogRevision ||
           callEndpointRevision != catalogRevision ||
-          !mcpVersions.contains('2025-06-18') ||
-          mcpVersions.length != catalogVersions.length ||
-          !mcpVersions.containsAll(catalogVersions) ||
-          mcpVersions.length != callVersions.length ||
-          !mcpVersions.containsAll(callVersions)) {
+          !catalogVersions.contains('2025-06-18') ||
+          catalogVersions.length != callVersions.length ||
+          !catalogVersions.containsAll(callVersions) ||
+          (mcpVersions.isNotEmpty &&
+              (mcpVersions.length != catalogVersions.length ||
+                  !mcpVersions.containsAll(catalogVersions)))) {
         return null;
       }
     }
+    final McpNodeRuntime runtime = major == 2
+        ? McpNodeRuntime.fromJson(decoded['runtime'])
+        : const McpNodeRuntime.unknown();
     return VibekitsLanPeer(
       instanceId: id,
       name: name,
@@ -659,6 +701,7 @@ class LanPeerDiscoveryService {
       catalogRevision: catalogRevision,
       serviceRole: serviceRole,
       tools: List<McpToolInterface>.unmodifiable(tools),
+      runtime: runtime,
     );
   }
 

@@ -147,7 +147,7 @@ void main() {
       arguments: const <String, Object?>{'query': 'device'},
     );
 
-    expect(result['ok'], isTrue);
+    expect(result['ok'], isTrue, reason: '$result');
     expect(localClient.calls, 1);
     expect(localClient.executable, Platform.resolvedExecutable);
     expect(localClient.launchArguments, const <String>['--provider-mode']);
@@ -379,6 +379,124 @@ void main() {
     expect(directory.snapshot.lan, hasLength(1));
     expect(directory.snapshot.lan.single.hardwareCode, '41B8C7FDF4');
   });
+
+  test('自动调度在预约忙时切换节点并在业务调用后释放租约', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits-mcp-auto-schedule-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    final _FakeDiscoveryService discovery = _FakeDiscoveryService();
+    final _SchedulingRemoteClient remote = _SchedulingRemoteClient();
+    final McpCapabilityDirectory directory = McpCapabilityDirectory(
+      registrationDirectory: root,
+      discoveryService: discovery,
+      remoteClient: remote,
+      reputationStore: McpToolReputationStore(
+        file: File('${root.path}${Platform.pathSeparator}reputation.json'),
+      ),
+    );
+    addTearDown(directory.dispose);
+    addTearDown(discovery.close);
+    await directory.start(appBridge: VibekitsHarnessToolBridge());
+
+    VibekitsLanPeer peer(String suffix, String address) => VibekitsLanPeer(
+      instanceId: 'com.example.worker:$suffix',
+      name: 'Worker@$address-$suffix',
+      appId: 'com.example.worker',
+      appVersion: '3.0.0',
+      address: address,
+      port: 9443,
+      transport: 'https-streamable-http',
+      protocolVersion: 2,
+      capabilityDigest:
+          'sha256:${List<String>.filled(64, suffix[0].toLowerCase()).join()}',
+      lastSeen: DateTime.now(),
+      hardwareCode: suffix,
+      catalogPath: '/mcp',
+      callPath: '/mcp',
+      instanceKeyFingerprint:
+          'sha256:${List<String>.filled(64, suffix[1].toLowerCase()).join()}',
+      catalogRevision: '7',
+      serviceRole: 'tool-provider',
+      runtime: const McpNodeRuntime(
+        state: McpNodeState.idle,
+        capacity: 2,
+        inFlight: 0,
+        queueDepth: 0,
+        availableSlots: 2,
+        loadRevision: 9,
+        oldestTaskAgeMs: 0,
+        draining: false,
+        acceptingReservations: true,
+      ),
+    );
+    discovery.emit(<VibekitsLanPeer>[
+      peer('AAAAAAAAAA', '192.168.3.61'),
+      peer('BBBBBBBBBB', '192.168.3.62'),
+    ]);
+    await pumpEventQueue();
+
+    final Map<String, Object?> result = await directory.scheduleAndInvoke(
+      toolName: 'worker.build',
+      taskId: 'build-task-001',
+      idempotencyKey: 'build-task-001-attempt',
+      scopeDigest: 'sha256:workspace-scope',
+      arguments: const <String, Object?>{'target': 'release'},
+    );
+
+    expect(result['ok'], isTrue, reason: '$result');
+    expect(remote.reserveCalls, 2);
+    expect(remote.businessCalls, 1);
+    expect(remote.releaseCalls, 1);
+    expect(result.toString(), isNot(contains('private-lease-token')));
+    final List<Object?> attempts = result['attempts']! as List<Object?>;
+    expect((attempts.first! as Map)['outcome'], 'reserve-rejected');
+    expect((attempts.last! as Map)['outcome'], 'completed');
+  });
+
+  test('自动调度优先使用本机 app 作战单位并释放本机槽位', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits-mcp-app-schedule-',
+    );
+    addTearDown(() async {
+      if (await root.exists()) await root.delete(recursive: true);
+    });
+    int executions = 0;
+    final McpCapabilityDirectory directory = McpCapabilityDirectory(
+      registrationDirectory: root,
+      reputationStore: McpToolReputationStore(
+        file: File('${root.path}${Platform.pathSeparator}reputation.json'),
+      ),
+    );
+    addTearDown(directory.dispose);
+    await directory.start(
+      appBridge: VibekitsHarnessToolBridge(
+        handlers: <String, HarnessToolHandler>{
+          VibekitsHarnessToolBridge.programmerCalculatorId:
+              (Map<String, Object?> arguments) async {
+                executions++;
+                return <String, Object?>{'decimal': '2'};
+              },
+        },
+      ),
+    );
+
+    final Map<String, Object?> result = await directory.scheduleAndInvoke(
+      toolName: VibekitsHarnessToolBridge.programmerCalculatorId,
+      taskId: 'local-calc-001',
+      idempotencyKey: 'local-calc-001',
+      scopeDigest: 'sha256:calculator',
+      arguments: const <String, Object?>{'expression': '1+1'},
+    );
+
+    expect(result['ok'], isTrue, reason: '$result');
+    expect(((result['selected'] as Map)['tier']), 'app');
+    expect(executions, 1);
+    expect(directory.snapshot.app.single.runtime.availableSlots, 8);
+    expect(result['redactedFields'], const <String>['leaseToken']);
+  });
 }
 
 class _FakeDiscoveryService extends LanPeerDiscoveryService {
@@ -428,6 +546,7 @@ class _FakeRemoteClient extends LmcpRemoteClient {
     required VibekitsLanPeer peer,
     required String name,
     Map<String, Object?> arguments = const <String, Object?>{},
+    Map<String, Object?>? scheduling,
   }) async {
     calls++;
     return <String, Object?>{
@@ -449,6 +568,93 @@ class _FailingRemoteClient extends LmcpRemoteClient {
   }
 }
 
+class _SchedulingRemoteClient extends LmcpRemoteClient {
+  int reserveCalls = 0;
+  int businessCalls = 0;
+  int releaseCalls = 0;
+
+  static const List<McpToolInterface> catalog = <McpToolInterface>[
+    McpToolInterface(
+      name: 'worker.build',
+      title: 'build',
+      description: '',
+      inputSchema: <String, Object?>{'type': 'object'},
+    ),
+    McpToolInterface(
+      name: 'lmcp.node.status',
+      title: 'status',
+      description: '',
+      inputSchema: <String, Object?>{'type': 'object'},
+    ),
+    McpToolInterface(
+      name: 'lmcp.capacity.reserve',
+      title: 'reserve',
+      description: '',
+      inputSchema: <String, Object?>{'type': 'object'},
+    ),
+    McpToolInterface(
+      name: 'lmcp.capacity.renew',
+      title: 'renew',
+      description: '',
+      inputSchema: <String, Object?>{'type': 'object'},
+    ),
+    McpToolInterface(
+      name: 'lmcp.capacity.release',
+      title: 'release',
+      description: '',
+      inputSchema: <String, Object?>{'type': 'object'},
+    ),
+  ];
+
+  @override
+  Future<List<McpToolInterface>> loadTools(VibekitsLanPeer peer) async =>
+      catalog;
+
+  @override
+  Future<Map<String, Object?>> callTool({
+    required VibekitsLanPeer peer,
+    required String name,
+    Map<String, Object?> arguments = const <String, Object?>{},
+    Map<String, Object?>? scheduling,
+  }) async {
+    Map<String, Object?> response(
+      Map<String, Object?> structured, {
+      bool isError = false,
+    }) => <String, Object?>{
+      'instanceId': peer.instanceId,
+      'tool': name,
+      'catalogRevision': peer.catalogRevision,
+      'isError': isError,
+      'structuredContent': structured,
+    };
+    if (name == 'lmcp.capacity.reserve') {
+      reserveCalls++;
+      if (reserveCalls == 1) {
+        return response(<String, Object?>{
+          'ok': false,
+          'error': const <String, Object?>{'code': 'CAPACITY_BUSY'},
+        }, isError: true);
+      }
+      return response(<String, Object?>{
+        'ok': true,
+        'leaseId': 'lease-visible-id',
+        'leaseToken': 'private-lease-token',
+      });
+    }
+    if (name == 'lmcp.capacity.release') {
+      releaseCalls++;
+      return response(const <String, Object?>{'ok': true, 'released': true});
+    }
+    businessCalls++;
+    expect(scheduling?['leaseToken'], 'private-lease-token');
+    return response(const <String, Object?>{
+      'ok': true,
+      'phase': 'executed',
+      'artifactSha256': 'sha256:result',
+    });
+  }
+}
+
 class _FakeLocalClient extends LocalMcpStdioClient {
   int calls = 0;
   String executable = '';
@@ -461,6 +667,7 @@ class _FakeLocalClient extends LocalMcpStdioClient {
     List<String> launchArguments = const <String>[],
     required String toolName,
     Map<String, Object?> arguments = const <String, Object?>{},
+    Map<String, Object?>? scheduling,
   }) async {
     calls++;
     this.executable = executable;

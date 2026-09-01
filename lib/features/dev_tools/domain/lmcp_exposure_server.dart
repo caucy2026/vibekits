@@ -10,6 +10,7 @@ import 'harness_tool_bridge.dart';
 import 'lan_peer_discovery_service.dart';
 import 'lmcp_caller_auth.dart';
 import 'lmcp_inbound_call_hub.dart';
+import 'lmcp_capacity_manager.dart';
 import 'platform_credential_store.dart';
 
 typedef LmcpCredentialReader = Future<String?> Function(String key);
@@ -176,6 +177,7 @@ class VibekitsLmcpProtocol {
     this.pageSize = 100,
     LmcpInboundCallHub? callHub,
     LmcpToolInvocationRunner? invocationRunner,
+    LmcpCapacityLeaseManager? capacityManager,
   }) : _callHub = callHub ?? LmcpInboundCallHub.instance,
        _invocationRunner =
            invocationRunner ??
@@ -197,6 +199,8 @@ class VibekitsLmcpProtocol {
              cancellation.throwIfCancelled();
              return result;
            }),
+       capacityManager =
+           capacityManager ?? LmcpCapacityLeaseManager(capacity: 8),
        tools = List<HarnessToolDefinition>.unmodifiable(
          bridge.executableCatalog,
        ) {
@@ -207,7 +211,7 @@ class VibekitsLmcpProtocol {
   // The monotonic application build number changes together with the
   // executable catalog. The complete schema is independently protected by
   // [capabilityDigest].
-  static const String currentCatalogRevision = '2139';
+  static const String currentCatalogRevision = '2140';
 
   final String instanceId;
   final String serverVersion;
@@ -215,10 +219,12 @@ class VibekitsLmcpProtocol {
   final LmcpToolInvocationRunner _invocationRunner;
   final int pageSize;
   final List<HarnessToolDefinition> tools;
+  final LmcpCapacityLeaseManager capacityManager;
   late final String catalogRevision;
   int _traceSequence = 0;
 
   List<Map<String, Object?>> get toolCatalog => <Map<String, Object?>>[
+    ..._capacityToolCatalog,
     for (final HarnessToolDefinition tool in tools)
       <String, Object?>{
         'name': tool.id,
@@ -234,6 +240,91 @@ class VibekitsLmcpProtocol {
         'risk': tool.risk.name,
       },
   ];
+
+  static final List<Map<String, Object?>> _capacityToolCatalog =
+      <Map<String, Object?>>[
+        _capacityTool(
+          'lmcp.node.status',
+          '查询作战单位实时容量',
+          const <String, Object?>{},
+          const <String>[],
+        ),
+        _capacityTool(
+          'lmcp.capacity.reserve',
+          '原子预约作战单位执行槽位',
+          <String, Object?>{
+            'toolName': const <String, Object?>{'type': 'string'},
+            'idempotencyKey': const <String, Object?>{'type': 'string'},
+            'commanderId': const <String, Object?>{'type': 'string'},
+            'requestedSlots': const <String, Object?>{
+              'type': 'integer',
+              'minimum': 1,
+            },
+            'ttlSeconds': const <String, Object?>{
+              'type': 'integer',
+              'minimum': 10,
+              'maximum': 120,
+            },
+            'scopeDigest': const <String, Object?>{'type': 'string'},
+          },
+          const <String>[
+            'toolName',
+            'idempotencyKey',
+            'commanderId',
+            'requestedSlots',
+            'ttlSeconds',
+            'scopeDigest',
+          ],
+        ),
+        _capacityTool(
+          'lmcp.capacity.renew',
+          '续租已预约的执行槽位',
+          <String, Object?>{
+            'leaseId': const <String, Object?>{'type': 'string'},
+            'leaseToken': const <String, Object?>{'type': 'string'},
+            'ttlSeconds': const <String, Object?>{
+              'type': 'integer',
+              'minimum': 10,
+              'maximum': 120,
+            },
+          },
+          const <String>['leaseId', 'leaseToken', 'ttlSeconds'],
+        ),
+        _capacityTool(
+          'lmcp.capacity.release',
+          '幂等释放已预约的执行槽位',
+          <String, Object?>{
+            'leaseId': const <String, Object?>{'type': 'string'},
+            'leaseToken': const <String, Object?>{'type': 'string'},
+            'reason': const <String, Object?>{'type': 'string'},
+          },
+          const <String>['leaseId', 'leaseToken', 'reason'],
+        ),
+      ];
+
+  static Map<String, Object?> _capacityTool(
+    String name,
+    String description,
+    Map<String, Object?> properties,
+    List<String> required,
+  ) => <String, Object?>{
+    'name': name,
+    'title': name,
+    'description': description,
+    'inputSchema': <String, Object?>{
+      'type': 'object',
+      'properties': properties,
+      'required': required,
+      'additionalProperties': false,
+    },
+    'annotations': const <String, Object?>{
+      'readOnlyHint': false,
+      'destructiveHint': false,
+      'idempotentHint': true,
+      'openWorldHint': false,
+    },
+    'risk': 'readOnly',
+  };
 
   String get capabilityDigest =>
       'sha256:${sha256.convert(utf8.encode(canonicalJson(<String, Object?>{'tools': toolCatalog, 'nextCursor': null})))}';
@@ -342,16 +433,46 @@ class VibekitsLmcpProtocol {
         'tools/call requires a tool name and object arguments',
       );
     }
+    final Map<String, Object?> arguments = rawArguments == null
+        ? <String, Object?>{}
+        : Map<String, Object?>.from(rawArguments as Map);
+    if (_capacityToolCatalog.any(
+      (Map<String, Object?> entry) => entry['name'] == name,
+    )) {
+      return _callCapacityTool(name, arguments, caller);
+    }
     final HarnessToolDefinition? tool = tools
         .where((HarnessToolDefinition candidate) => candidate.id == name)
         .firstOrNull;
     if (tool == null) {
       throw LmcpProtocolException(-32602, 'Unknown tool: $name');
     }
-    final Map<String, Object?> arguments = rawArguments == null
-        ? <String, Object?>{}
-        : Map<String, Object?>.from(rawArguments as Map);
     validateToolArguments(arguments, tool.inputSchema);
+    final Object? rawScheduling = params['scheduling'];
+    if (rawScheduling != null) {
+      if (rawScheduling is! Map) {
+        throw const LmcpProtocolException(
+          -32602,
+          'scheduling must be an object',
+        );
+      }
+      final Map<String, Object?> scheduling = Map<String, Object?>.from(
+        rawScheduling,
+      );
+      try {
+        capacityManager.validateScheduledCall(
+          leaseId: '${scheduling['leaseId'] ?? ''}',
+          leaseToken: '${scheduling['leaseToken'] ?? ''}',
+          toolName: name,
+          idempotencyKey: '${scheduling['idempotencyKey'] ?? ''}',
+          callerInstanceId: caller.instanceId,
+        );
+      } on LmcpCapacityException catch (error) {
+        throw LmcpProtocolException(-32042, error.message, <String, Object?>{
+          'code': error.code,
+        });
+      }
+    }
     final String traceId =
         '${DateTime.now().toUtc().microsecondsSinceEpoch}-${_traceSequence++}';
     final LmcpInboundCallHandle call = _callHub.begin(
@@ -411,6 +532,70 @@ class VibekitsLmcpProtocol {
     );
   }
 
+  Map<String, Object?> _callCapacityTool(
+    String name,
+    Map<String, Object?> arguments,
+    LmcpCallerIdentity caller,
+  ) {
+    final String traceId =
+        '${DateTime.now().toUtc().microsecondsSinceEpoch}-${_traceSequence++}';
+    try {
+      final Map<String, Object?> structured = switch (name) {
+        'lmcp.node.status' => capacityManager.status(),
+        'lmcp.capacity.reserve' => capacityManager.reserve(
+          toolName: '${arguments['toolName'] ?? ''}'.trim(),
+          idempotencyKey: '${arguments['idempotencyKey'] ?? ''}'.trim(),
+          commanderId: '${arguments['commanderId'] ?? ''}'.trim(),
+          requestedSlots: arguments['requestedSlots'] is int
+              ? arguments['requestedSlots']! as int
+              : 0,
+          ttlSeconds: arguments['ttlSeconds'] is int
+              ? arguments['ttlSeconds']! as int
+              : 0,
+          scopeDigest: '${arguments['scopeDigest'] ?? ''}'.trim(),
+          callerInstanceId: caller.instanceId,
+        ),
+        'lmcp.capacity.renew' => capacityManager.renew(
+          leaseId: '${arguments['leaseId'] ?? ''}'.trim(),
+          leaseToken: '${arguments['leaseToken'] ?? ''}'.trim(),
+          ttlSeconds: arguments['ttlSeconds'] is int
+              ? arguments['ttlSeconds']! as int
+              : 0,
+          callerInstanceId: caller.instanceId,
+        ),
+        'lmcp.capacity.release' => capacityManager.release(
+          leaseId: '${arguments['leaseId'] ?? ''}'.trim(),
+          leaseToken: '${arguments['leaseToken'] ?? ''}'.trim(),
+          callerInstanceId: caller.instanceId,
+          reason: '${arguments['reason'] ?? ''}'.trim(),
+        ),
+        _ => throw const LmcpCapacityException(
+          'UNKNOWN_CONTROL_TOOL',
+          '未知容量控制工具',
+        ),
+      };
+      return _toolCallResponse(
+        structured: <String, Object?>{'ok': true, ...structured},
+        isError: false,
+        toolName: name,
+        traceId: traceId,
+      );
+    } on LmcpCapacityException catch (error) {
+      return _toolCallResponse(
+        structured: <String, Object?>{
+          'ok': false,
+          'error': <String, Object?>{
+            'code': error.code,
+            'message': error.message,
+          },
+        },
+        isError: true,
+        toolName: name,
+        traceId: traceId,
+      );
+    }
+  }
+
   Map<String, Object?> _toolCallResponse({
     required Map<String, Object?> structured,
     required bool isError,
@@ -457,7 +642,7 @@ class VibekitsLmcpExposureServer {
   static final VibekitsLmcpExposureServer instance = VibekitsLmcpExposureServer(
     discovery: LanPeerDiscoveryService.instance,
   );
-  static const String currentAppVersion = '1.9.0-dev.139';
+  static const String currentAppVersion = '1.9.0-dev.140';
 
   final LanPeerDiscoveryService discovery;
   final LmcpCertificateStore certificateStore;
@@ -469,6 +654,7 @@ class VibekitsLmcpExposureServer {
   final StreamController<bool> _changes = StreamController<bool>.broadcast();
   HttpServer? _server;
   VibekitsLmcpProtocol? _protocol;
+  LmcpCapacityLeaseManager? _capacityManager;
   int _activeRequests = 0;
   bool _accepting = false;
 
@@ -497,10 +683,17 @@ class VibekitsLmcpExposureServer {
     final SecurityContext context = SecurityContext()
       ..useCertificateChainBytes(utf8.encode(identity.certificatePem))
       ..usePrivateKeyBytes(utf8.encode(identity.privateKeyPem));
+    final LmcpCapacityLeaseManager capacityManager = _capacityManager ??=
+        LmcpCapacityLeaseManager(
+          capacity: maxConcurrentCalls,
+          onChanged: discovery.notifyRuntimeChanged,
+        );
+    capacityManager.setDraining(false);
     final VibekitsLmcpProtocol protocol = VibekitsLmcpProtocol(
       instanceId: instanceId,
       serverVersion: appVersion,
       bridge: bridge,
+      capacityManager: capacityManager,
     );
     final HttpServer? currentServer = _server;
     if (currentServer != null && _accepting) {
@@ -517,6 +710,7 @@ class VibekitsLmcpExposureServer {
           instanceKeyFingerprint: identity.fingerprint,
           catalogRevision: protocol.catalogRevision,
           capabilityDigest: protocol.capabilityDigest,
+          runtimeProvider: () => capacityManager.runtime.toJson(),
         ),
       );
       discovery.setExposureEnabled(true);
@@ -566,6 +760,7 @@ class VibekitsLmcpExposureServer {
         instanceKeyFingerprint: identity.fingerprint,
         catalogRevision: protocol.catalogRevision,
         capabilityDigest: protocol.capabilityDigest,
+        runtimeProvider: () => capacityManager.runtime.toJson(),
       ),
     );
     discovery.setExposureEnabled(true);
@@ -575,6 +770,7 @@ class VibekitsLmcpExposureServer {
   Future<void> stop({bool force = false}) async {
     final HttpServer? server = _server;
     _accepting = false;
+    _capacityManager?.setDraining(true);
     discovery.setExposureEnabled(false);
     if (server != null) {
       try {
@@ -585,6 +781,8 @@ class VibekitsLmcpExposureServer {
     }
     _server = null;
     _protocol = null;
+    _capacityManager?.dispose();
+    _capacityManager = null;
     discovery.configureLmcp2Advertisement(null);
     _changes.add(false);
   }

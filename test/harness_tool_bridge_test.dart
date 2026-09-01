@@ -307,6 +307,64 @@ void main() {
     expect(routedArguments?['sourcePath'], '/tmp/harmless.txt');
   });
 
+  test('Harness 自动 MCP 工具透传调度参数并返回业务终态', () async {
+    int approvals = 0;
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      mcpAutoInvoker:
+          (
+            toolName,
+            taskId,
+            idempotencyKey,
+            scopeDigest,
+            arguments,
+            requestedSlots,
+            ttlSeconds,
+          ) async {
+            expect(toolName, 'kemi.benchmark.run');
+            expect(taskId, 'stability-62');
+            expect(idempotencyKey, 'stability-62-run-1');
+            expect(scopeDigest, 'sha256:read-only-benchmark');
+            expect(arguments, const <String, Object?>{'mode': 'quick'});
+            expect(requestedSlots, 1);
+            expect(ttlSeconds, 45);
+            return <String, Object?>{
+              'ok': true,
+              'selected': const <String, Object?>{
+                'instanceId': 'com.newlink.kemiscrollbench:41B8C7FDF4',
+              },
+              'result': const <String, Object?>{
+                'structuredContent': <String, Object?>{
+                  'final': true,
+                  'grade': 'S',
+                },
+              },
+            };
+          },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.mcpAutoCallId,
+      arguments: const <String, Object?>{
+        'toolName': 'kemi.benchmark.run',
+        'taskId': 'stability-62',
+        'idempotencyKey': 'stability-62-run-1',
+        'scopeDigest': 'sha256:read-only-benchmark',
+        'arguments': <String, Object?>{'mode': 'quick'},
+      },
+      approve: (_) async {
+        approvals++;
+        return true;
+      },
+    );
+
+    expect(approvals, 1);
+    expect(result.ok, isTrue);
+    expect(
+      ((result.data?['result'] as Map)['structuredContent'] as Map)['grade'],
+      'S',
+    );
+  });
+
   test('移动端保留完整工具目录并明确桌面节点边界', () {
     expect(
       VibekitsHarnessToolBridge.requiresDesktopNode(

@@ -1,5 +1,94 @@
 enum McpCapabilityTier { app, local, lan }
 
+enum McpNodeState { idle, busy, saturated, draining, error }
+
+class McpNodeRuntime {
+  const McpNodeRuntime({
+    required this.state,
+    required this.capacity,
+    required this.inFlight,
+    required this.queueDepth,
+    required this.availableSlots,
+    required this.loadRevision,
+    required this.oldestTaskAgeMs,
+    required this.draining,
+    required this.acceptingReservations,
+  });
+
+  const McpNodeRuntime.unknown()
+    : state = McpNodeState.error,
+      capacity = 0,
+      inFlight = 0,
+      queueDepth = 0,
+      availableSlots = 0,
+      loadRevision = 0,
+      oldestTaskAgeMs = 0,
+      draining = false,
+      acceptingReservations = false;
+
+  final McpNodeState state;
+  final int capacity;
+  final int inFlight;
+  final int queueDepth;
+  final int availableSlots;
+  final int loadRevision;
+  final int oldestTaskAgeMs;
+  final bool draining;
+  final bool acceptingReservations;
+
+  bool get valid =>
+      capacity >= 1 &&
+      inFlight >= 0 &&
+      inFlight <= capacity &&
+      queueDepth >= 0 &&
+      availableSlots >= 0 &&
+      availableSlots <= capacity &&
+      availableSlots <= capacity - inFlight &&
+      loadRevision >= 1 &&
+      oldestTaskAgeMs >= 0;
+
+  bool get schedulable =>
+      valid &&
+      acceptingReservations &&
+      !draining &&
+      state != McpNodeState.error &&
+      state != McpNodeState.draining &&
+      availableSlots > 0;
+
+  factory McpNodeRuntime.fromJson(Object? value) {
+    if (value is! Map) return const McpNodeRuntime.unknown();
+    final String stateName = '${value['state'] ?? ''}'.trim();
+    final McpNodeState? state = McpNodeState.values
+        .where((McpNodeState item) => item.name == stateName)
+        .firstOrNull;
+    int integer(String key) => value[key] is int ? value[key]! as int : -1;
+    final McpNodeRuntime runtime = McpNodeRuntime(
+      state: state ?? McpNodeState.error,
+      capacity: integer('capacity'),
+      inFlight: integer('inFlight'),
+      queueDepth: integer('queueDepth'),
+      availableSlots: integer('availableSlots'),
+      loadRevision: integer('loadRevision'),
+      oldestTaskAgeMs: integer('oldestTaskAgeMs'),
+      draining: value['draining'] == true,
+      acceptingReservations: value['acceptingReservations'] == true,
+    );
+    return runtime.valid ? runtime : const McpNodeRuntime.unknown();
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'state': state.name,
+    'capacity': capacity,
+    'inFlight': inFlight,
+    'queueDepth': queueDepth,
+    'availableSlots': availableSlots,
+    'loadRevision': loadRevision,
+    'oldestTaskAgeMs': oldestTaskAgeMs,
+    'draining': draining,
+    'acceptingReservations': acceptingReservations,
+  };
+}
+
 class McpToolInterface {
   const McpToolInterface({
     required this.name,
@@ -62,6 +151,7 @@ class McpDeviceCapability {
     this.catalogRevision = '',
     this.hardwareCode = '',
     this.launchArguments = const <String>[],
+    this.runtime = const McpNodeRuntime.unknown(),
   });
 
   final String id;
@@ -77,6 +167,22 @@ class McpDeviceCapability {
   final String catalogRevision;
   final String hardwareCode;
   final List<String> launchArguments;
+  final McpNodeRuntime runtime;
+
+  bool get supportsSchedulingTools {
+    final Set<String> names = tools
+        .map((McpToolInterface tool) => tool.name)
+        .toSet();
+    return const <String>{
+      'lmcp.node.status',
+      'lmcp.capacity.reserve',
+      'lmcp.capacity.renew',
+      'lmcp.capacity.release',
+    }.every(names.contains);
+  }
+
+  bool get schedulable =>
+      callable && runtime.schedulable && supportsSchedulingTools;
 
   bool get callable =>
       tier == McpCapabilityTier.app ||

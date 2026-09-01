@@ -451,7 +451,7 @@ test worker N: 49100 + N
 4. `instanceId=<app.id>:<hardwareCode>`；同硬件多安装槽可追加 `:<slot>`；`hardwareCode` 恰为 10 位大写十六进制；不能等于本实例 ID。
 5. `sentAt` 为 UTC `Z` 时间；announce 的 `ttlSeconds` 恰为 12。
 6. 两个 endpoint 的 transport、port、path、fingerprint、protocolVersions、catalogRevision、capabilityDigest 必须逐项一致；路径恰为 `/mcp`，禁止 query、`..` 和重定向。
-7. 指纹和摘要均匹配 `sha256:` 加 64 位小写十六进制；三个位置的 revision/摘要必须一致；协议列表包含 `2025-06-18`。
+7. 指纹和摘要均匹配 `sha256:` 加 64 位小写十六进制；两个 endpoint 的 revision/摘要必须一致；协议列表包含 `2025-06-18`。为保证携带 runtime 后仍不超过 1200 bytes，顶层 `mcp` 只强制保留 `changeNotifications`，其 `protocolVersions/catalogRevision/capabilityDigest` 镜像字段可省略；若提供则必须与两个 endpoint 完全一致。接收端以 endpoint 对为权威值，禁止因可选镜像省略而拒绝合法公告。
 8. `callEndpoint.serviceRole` 只能是 `tool-provider` 或 `harness-controller`；`mcp.changeNotifications` 必须是 boolean。
 
 ### 4.4 启动顺序、周期发现与恢复（先启动的 APP 也必须被发现）
@@ -1055,7 +1055,8 @@ Provider 是“作战单位（worker）”。同一局域网允许多个指挥�
 `reserve` 的 Provider 处理必须是原子的：多个指挥官同时抢最后一个槽位时最多一个成功。
 租约默认 30 秒、允许范围 10～120 秒；未续租自动释放。`leaseToken` 是短期随机秘密，
 只在签名 HTTPS 响应/请求中出现，绝不进入 UDP、日志或最终报告。后续业务
-`tools/call` 必须携带 `leaseId` 和同一 `idempotencyKey`；租约的 tool、作用域摘要、
+`tools/call.params.scheduling` 必须携带 `leaseId/leaseToken/idempotencyKey`，业务
+`arguments` 仍严格保持原工具 Schema，不能把调度字段塞进业务参数；租约的 tool、作用域摘要、
 调用方身份不匹配时返回 `LEASE_SCOPE_MISMATCH`。Provider 崩溃恢复后未完成租约进入
 `unknown/interrupted`，不得静默重做副作用。
 
@@ -1149,12 +1150,20 @@ TTL 自动下线，并保留有界历史健康数据但不得把历史节点伪�
 - P-256 实例证书、HTTPS `/mcp`、MCP 服务端：`VibekitsLmcpExposureServer`
 - 证书固定和远端 MCP 客户端：`LmcpRemoteClient`
 - 实时三层目录：`McpCapabilityDirectory`
+- 运行态/原子租约：`McpNodeRuntime`、`LmcpCapacityLeaseManager`
+- 指挥官排序：`McpCommanderScheduler`（容量 35%、质量 25%、可靠性 15%、延迟 15%、新鲜度 5%、公平性 5%）
 - 界面：Harness 右侧工具轨的 MCP 明确开/关状态、首次/重新打开授权菜单、本 APP MCP 完整列表、本机 MCP 和局域网 MCP 列表
-- Harness 远端路由：`vibekits.mcp.catalog_list` 和 `vibekits.mcp.tool_call`
+- Harness 远端路由：`vibekits.mcp.catalog_list`、手工指定实例的 `vibekits.mcp.tool_call`、只读预演 `vibekits.mcp.schedule_plan`、自动完成“排序→预约→调用→释放”的 `vibekits.mcp.auto_call`
+
+### 8.1 dev.140 指挥官调度实现门禁
+
+VibeKits `1.9.0-dev.140+2140` 已实现首个可执行指挥官闭环：公告携带实时 runtime，负载改变在 250 ms 内合并重发；启动接收端会发送 discover，已运行 Provider 在 0～500 ms 内应答；Provider 目录固定公开四个调度控制工具；容量预约按调用方证书身份、工具、幂等键和作用域绑定；Harness 可用 `vibekits.mcp.auto_call` 自动选择最高优先层的最优空闲实例，预约忙时换队，业务结束或失败均在 finally 释放，最终结果仅保留 leaseId 并明确 `redactedFields=[leaseToken]`。
+
+本版本的自动化证据必须至少包括：100 个指挥官争抢 1 个槽位恰好 1 成功、99 个 `CAPACITY_BUSY`；同一幂等键复用同一租约；错误身份/令牌拒绝；第一个候选忙时切换第二节点；业务调用一次且 release 一次；返回证据不含 token；提供方先启动和观察者后启动发现通过。真实物理工具仍必须继续执行第 9 节的 LAN 和独立验真门禁，自动化协议测试不能代替 62 机器或文件接收端的真实结果。
 
 VibeKits 不再把扩展控件横向铺在 Harness 顶栏，也不把 Flutter 浮层叠在 Windows 原生 WebView 上。Harness Web 内容和一条 60px 的右侧工具轨采用物理分栏；不再保留“工具”总按钮。MCP 图标直接表示“打开本机 MCP”，与本机 MCP、局域网 MCP、飞书、日志、远程操作和设置使用同尺寸小图标纵向排列，悬浮后展示完整设备名、接口范围和当前状态。点击已关闭的 MCP 图标或设置面板开关时，必须先弹出权限和风险说明，仅“确认开启”后才启动服务、持久化授权并广播；关闭可立即执行。确认页必须包含远程 Harness/设备控制的可选范围；用户选中后该范围持续自动执行，不再独立逐次审批。本机/局域网设备数量使用右上角小徽标。设置图标打开统一面板，可查看设备身份、授权范围、切换 MCP、撤销授权、读取三层设备数和刷新目录。工具轨不得随主机名长度变化，不得遮挡 WebView，不得把控件挤向左侧。
 
-### 8.1 VibeKits 1.9 当前正式传输
+### 8.2 VibeKits 1.9 当前正式传输
 
 VibeKits 当前实现就是本文的 LMCP/2 `https-streamable-http`，不再对外公告无证书 `http-jsonrpc`。用户确认后启动 HTTPS `/mcp`，固定端口被同机 KEMI 占用时可回退动态端口，但公告中的两个 endpoint 必须精确携带真实端口、`/mcp`、证书指纹、协议版本、目录版本和摘要。客户端每次从实时公告取得端点，固定 TLS 证书后依次执行 `initialize → notifications/initialized → tools/list → tools/call`。
 

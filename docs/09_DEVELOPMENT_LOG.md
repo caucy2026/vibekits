@@ -1,5 +1,13 @@
 # Vibekits 开发日志
 
+## 2026-09-01 · 1.9.0-dev.140+2140 · LMCP 指挥官调度
+
+- 按唯一规范 50 实现作战单位 runtime、主动 discover、状态即时公告、四个原子容量租约工具和 token 脱敏。
+- 新增 app→local→lan 固定层级与同层加权调度，Harness 可用 `vibekits.mcp.schedule_plan` 预演、用 `vibekits.mcp.auto_call` 自动预约/执行/释放并在容量冲突时换队。
+- 68 项 LMCP/Harness 门禁通过（另 1 项平台跳过），analyze 0；Release 613.2 MB，正式产物释放到 `bin/Vibekits.app` 并通过 ad-hoc 深度验签。
+- 生产 Harness 发现 192.168.3.62，但对端 2.3.0/revision 7 对目录请求返回 HTTP 401 且没有 runtime，故严格保持不可调用；已把精确修复合同交给 KEMI-BM，未伪造远程完成结果。
+- 完整证据见 `docs/acceptance/V1_9_0_DEV140_LMCP_COMMANDER_SCHEDULING_2026-09-01.md`。
+
 ## 2026-09-01 · v1.9.0-dev.138 Harness 真实忙碌状态与后台项目切换
 
 - 修复 Harness 工具成功/失败后过早把整个项目上报为 `ready`：agent 编排期间统一回到 `reasoning`，工具执行保持 `toolRunning`，只有任务真正结束才恢复 `ready`，RustDesk 可据此正确显示 BUSY 与绿灯。

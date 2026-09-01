@@ -26,6 +26,7 @@ class LocalMcpStdioClient {
     List<String> launchArguments = const <String>[],
     required String toolName,
     Map<String, Object?> arguments = const <String, Object?>{},
+    Map<String, Object?>? scheduling,
   }) async {
     final File file = File(executable);
     if (!file.isAbsolute || !await file.exists()) {
@@ -100,7 +101,11 @@ class LocalMcpStdioClient {
         'jsonrpc': '2.0',
         'id': 3,
         'method': 'tools/call',
-        'params': <String, Object?>{'name': toolName, 'arguments': arguments},
+        'params': <String, Object?>{
+          'name': toolName,
+          'arguments': arguments,
+          'scheduling': ?scheduling,
+        },
       });
       return await _response(stdout, 3, callTimeout);
     } on TimeoutException {

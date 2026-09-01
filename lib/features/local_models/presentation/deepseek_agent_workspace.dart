@@ -225,6 +225,29 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               toolName: toolName,
               arguments: arguments,
             ),
+    mcpSchedulePlanner: (String toolName, String taskId) =>
+        McpCapabilityDirectory.instance.planScheduledTool(
+          toolName: toolName,
+          taskId: taskId,
+        ),
+    mcpAutoInvoker:
+        (
+          toolName,
+          taskId,
+          idempotencyKey,
+          scopeDigest,
+          arguments,
+          requestedSlots,
+          ttlSeconds,
+        ) => McpCapabilityDirectory.instance.scheduleAndInvoke(
+          toolName: toolName,
+          taskId: taskId,
+          idempotencyKey: idempotencyKey,
+          scopeDigest: scopeDigest,
+          arguments: arguments,
+          requestedSlots: requestedSlots,
+          ttlSeconds: ttlSeconds,
+        ),
     mcpReputationLoader: McpCapabilityDirectory.instance.exportReputations,
     mcpReputationRater:
         (String tier, String instanceId, String toolName, int rating) =>

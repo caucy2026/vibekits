@@ -156,6 +156,7 @@ class LmcpRemoteClient {
     required VibekitsLanPeer peer,
     required String name,
     Map<String, Object?> arguments = const <String, Object?>{},
+    Map<String, Object?>? scheduling,
   }) async {
     _requireCallablePeer(peer);
     if (name.trim().isEmpty) {
@@ -166,7 +167,11 @@ class LmcpRemoteClient {
       endpoint: peer.callUri,
       id: 1,
       method: 'tools/call',
-      params: <String, Object?>{'name': name, 'arguments': arguments},
+      params: <String, Object?>{
+        'name': name,
+        'arguments': arguments,
+        'scheduling': ?scheduling,
+      },
       requestTimeout: callTimeout,
     );
     final Map<Object?, Object?> structured = result['structuredContent'] is Map

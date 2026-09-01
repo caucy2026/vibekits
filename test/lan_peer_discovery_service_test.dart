@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
+import 'package:vibekits/features/dev_tools/domain/mcp_capability_models.dart';
 
 void main() {
   test('同一实例并发 start 只绑定一个 UDP socket', () async {
@@ -93,6 +94,17 @@ void main() {
       instanceKeyFingerprint: 'sha256:${List<String>.filled(64, 'a').join()}',
       catalogRevision: '2137',
       capabilityDigest: 'sha256:${List<String>.filled(64, 'b').join()}',
+      runtimeProvider: () => const McpNodeRuntime(
+        state: McpNodeState.idle,
+        capacity: 4,
+        inFlight: 0,
+        queueDepth: 0,
+        availableSlots: 4,
+        loadRevision: 7,
+        oldestTaskAgeMs: 0,
+        draining: false,
+        acceptingReservations: true,
+      ).toJson(),
     );
     final Map<String, Object?> encoded = advertisement.toAnnouncement();
     expect(utf8.encode(jsonEncode(encoded)).length, lessThanOrEqualTo(1200));
@@ -117,6 +129,8 @@ void main() {
     expect(peer.catalogUri.scheme, 'https');
     expect(peer.catalogUri.port, 9443);
     expect(peer.catalogUri.path, '/mcp');
+    expect(peer.runtime.state, McpNodeState.idle);
+    expect(peer.runtime.availableSlots, 4);
   }, skip: !(Platform.isWindows || Platform.isMacOS || Platform.isLinux));
 
   test('提供方先运行后启动的观察者仍会收到周期公告', () async {
