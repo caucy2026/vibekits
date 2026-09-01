@@ -59,5 +59,6 @@
 8. 云端完整日志确认下一处失败不是编译器：Xcode 在最终签名时把 `Contents/MacOS/tools/adb/package.xml` 判定为未签名 code object。ADB 可执行文件继续固定在 `Contents/MacOS/tools/adb/adb`，NOTICE/source.properties/package.xml 改放 `Contents/Resources/tools/adb`；兼容门禁同时禁止在 ADB 可执行目录混入任何非 `adb` 文件，避免不同 Xcode 版本出现签名结果分叉。
 9. 云端 App 已成功构建后，兼容脚本误把签名前官方 `7zz` SHA-256 用于比较签名后的 Mach-O；ad-hoc/Developer ID 签名会合法改变二进制字节，因此产生假失败。固定 SHA 现于复制和签名前验证 Git 输入；签名后的 App 继续独立验证 25.01 版本、许可证、双架构、两个切片 `minos=12.0` 和代码签名，既不误报，也不放弃供应链校验。
 10. 官方 25.01 信息首行实际是 `7-Zip (z) 25.01 (...)`，旧版本断言错误地假定名称与版本连续。准备和兼容脚本现用锚定表达式同时接受官方可选产品标记，但仍严格固定版本 25.01，避免把显示格式差异误判为版本错误。
+11. 本机 ADB 路径是指向另一套 SDK 的符号链接；若先解析链接再找 NOTICE/source.properties，会丢失链接所在官方 Platform-Tools 目录的元数据。打包现优先从用户配置路径所在目录取元数据，缺失时再回退真实二进制目录，并把 NOTICE/source.properties 设为强制门禁；既支持链接部署，也不允许只带裸二进制冒充完整官方运行时。
 
 在本节剩余门禁全部变绿前，`bin/Vibekits.app` 继续保留 dev.145 已公证回退基线。

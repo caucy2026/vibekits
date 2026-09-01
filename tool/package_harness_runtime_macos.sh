@@ -47,6 +47,7 @@ if [ -z "$ADB_SOURCE" ] || [ ! -x "$ADB_SOURCE" ]; then
   echo "Set VIBEKITS_ADB_SOURCE or put adb on PATH before Release packaging." >&2
   exit 4
 fi
+ADB_METADATA_SOURCE_DIRECTORY="$(dirname "$ADB_SOURCE")"
 if [ -L "$ADB_SOURCE" ]; then
   ADB_LINK_TARGET="$(readlink "$ADB_SOURCE")"
   if [[ "$ADB_LINK_TARGET" = /* ]]; then
@@ -63,14 +64,24 @@ ditto "$ADB_SOURCE" "$ADB_DESTINATION/adb"
 chmod 755 "$ADB_DESTINATION/adb"
 codesign --force --sign - "$ADB_DESTINATION/adb"
 
-ADB_SOURCE_DIRECTORY="$(dirname "$ADB_SOURCE")"
+ADB_RESOLVED_SOURCE_DIRECTORY="$(dirname "$ADB_SOURCE")"
 ADB_METADATA_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/adb"
 rm -rf "$ADB_METADATA_DESTINATION"
 mkdir -p "$ADB_METADATA_DESTINATION"
 for ADB_METADATA in NOTICE.txt source.properties package.xml; do
-  if [ -f "$ADB_SOURCE_DIRECTORY/$ADB_METADATA" ]; then
-    ditto "$ADB_SOURCE_DIRECTORY/$ADB_METADATA" \
+  ADB_METADATA_SOURCE="$ADB_METADATA_SOURCE_DIRECTORY/$ADB_METADATA"
+  if [ ! -f "$ADB_METADATA_SOURCE" ]; then
+    ADB_METADATA_SOURCE="$ADB_RESOLVED_SOURCE_DIRECTORY/$ADB_METADATA"
+  fi
+  if [ -f "$ADB_METADATA_SOURCE" ]; then
+    ditto "$ADB_METADATA_SOURCE" \
       "$ADB_METADATA_DESTINATION/$ADB_METADATA"
+  fi
+done
+for ADB_REQUIRED_METADATA in NOTICE.txt source.properties; do
+  if [ ! -f "$ADB_METADATA_DESTINATION/$ADB_REQUIRED_METADATA" ]; then
+    echo "Official Android Platform-Tools metadata is missing: $ADB_REQUIRED_METADATA" >&2
+    exit 4
   fi
 done
 echo "Packaged ADB runtime: $ADB_DESTINATION/adb"
