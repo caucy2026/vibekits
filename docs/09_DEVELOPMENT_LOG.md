@@ -1333,3 +1333,9 @@
 - 运行中与历史时间线共用详情对话框，保持默认折叠、展开逐步阅读、再次收起后继续会话的一致交互。新增与真实截图同规模的 48 步/超长 JSON 回归，定向 UI 回归 22/22 通过，Analyze 0 issue。
 - 用户明确授权后执行正式 Apple 公证流水线。Apple notarytool 返回 `Accepted`，Submission ID 为 `c13875c2-e8f6-4f8c-b02c-559672da101e`；ticket 已 staple 且 validate 通过，Gatekeeper 判定为 `source=Notarized Developer ID`。
 - 最终对外候选为 `bin/Vibekits-1.9.0-dev.144+2144-macos-universal-notarized.zip`（219 MB，SHA-256 `4432837e164e63876a42019d3148f629c30c10d570245ce66842f23460b7ff56`）。装订后的 App executable SHA-256 为 `c55e2cd709e69aa098148c14b783ab9c48da62141cde4c1deb7b2520a80b47a3`，App.framework SHA-256 为 `c3a3134fd1146b515be67fbc71fb6be3e49c925aca1fd6c3974574d957fdfce1`。
+# 2026-09-01 · Windows LMCP 多 APP 发现与 62 真机调用修复
+
+- 修复 Windows 多 APP 共享 UDP 47831 时绑定 `0.0.0.0` 导致组播数据报被争抢的问题；发现器改为绑定真实 RFC1918 网卡地址后再逐接口入组，跨实例、后启动和 goodbye 用例全部恢复。
+- 修复远端标准结果信封使用 `toolName` 时被误判 `response_identity_mismatch`；继续兼容历史 `tool`，但冲突身份仍严格拒绝。
+- 新 Release 真实发现 `192.168.3.62` 的 KEMI-BM 2.4.0/revision 8，9 工具目录完成 TLS、摘要和身份校验；只读 `device_status` 196 ms 返回。对端当前以 `AUTH_SCOPE_REQUIRED` 拒绝未授权调用，需在 62 持久授权后才能取得业务成功终态，未绕过授权或伪报完成。
+- LMCP/Harness 定向回归 78/78、全项目 648 项通过（12 项环境跳过，3 项并发资源竞争失败隔离复测 5/5 通过）、analyze 0、Windows Release 和 29 项自包含运行时核验均通过；完整证据见 `docs/acceptance/V1_9_0_DEV144_WINDOWS_LMCP_62_2026-09-01.md`。

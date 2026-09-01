@@ -297,15 +297,32 @@ class LanPeerDiscoveryService {
       throw const FormatException('局域网节点发现参数无效');
     }
     _exposureEnabled = exposureEnabled;
+    final List<NetworkInterface> interfaces = await _privateIpv4Interfaces();
+    InternetAddress bindAddress = InternetAddress.anyIPv4;
+    if (Platform.isWindows) {
+      bool foundAddress = false;
+      for (final NetworkInterface interface in interfaces) {
+        final Set<String> eligible = eligiblePrivateIpv4Addresses(
+          interface.addresses.map((InternetAddress address) => address.address),
+        ).toSet();
+        for (final InternetAddress address in interface.addresses) {
+          if (eligible.contains(address.address)) {
+            bindAddress = address;
+            foundAddress = true;
+            break;
+          }
+        }
+        if (foundAddress) break;
+      }
+    }
     final RawDatagramSocket socket =
         await (socketFactory?.call() ??
             RawDatagramSocket.bind(
-              InternetAddress.anyIPv4,
+              bindAddress,
               port,
               reuseAddress: true,
               reusePort: reusePort,
             ));
-    final List<NetworkInterface> interfaces = await _privateIpv4Interfaces();
     final List<NetworkInterface> joined = <NetworkInterface>[];
     for (final NetworkInterface interface in interfaces) {
       try {

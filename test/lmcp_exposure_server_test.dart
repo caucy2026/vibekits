@@ -113,7 +113,7 @@ void main() {
             'content': <Object?>[],
             'structuredContent': <String, Object?>{
               'instanceId': 'com.newlink.kemiscrollbench:0123456789',
-              'tool': 'kemi.benchmark.device_status',
+              'toolName': 'kemi.benchmark.device_status',
               'catalogRevision': 2,
               'ok': true,
             },

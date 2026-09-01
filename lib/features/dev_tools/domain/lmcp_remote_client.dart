@@ -177,11 +177,20 @@ class LmcpRemoteClient {
     final Map<Object?, Object?> structured = result['structuredContent'] is Map
         ? result['structuredContent']! as Map<Object?, Object?>
         : const <Object?, Object?>{};
-    final Object? responseInstanceId =
-        result['instanceId'] ?? structured['instanceId'];
-    final Object? responseTool = result['tool'] ?? structured['tool'];
-    final Object? responseRevision =
-        result['catalogRevision'] ?? structured['catalogRevision'];
+    final String? responseInstanceId = _consistentIdentityValue(<Object?>[
+      result['instanceId'],
+      structured['instanceId'],
+    ]);
+    final String? responseTool = _consistentIdentityValue(<Object?>[
+      result['toolName'],
+      result['tool'],
+      structured['toolName'],
+      structured['tool'],
+    ]);
+    final String? responseRevision = _consistentIdentityValue(<Object?>[
+      result['catalogRevision'],
+      structured['catalogRevision'],
+    ]);
     if (responseInstanceId != peer.instanceId || responseTool != name) {
       throw const LmcpRemoteException(
         'response_identity_mismatch',
@@ -189,13 +198,30 @@ class LmcpRemoteClient {
       );
     }
     if (peer.catalogRevision.isNotEmpty &&
-        '${responseRevision ?? ''}' != peer.catalogRevision) {
+        (responseRevision ?? '') != peer.catalogRevision) {
       throw const LmcpRemoteException(
         'catalog_revision_mismatch',
         '远端工具结果的目录版本已经变化',
       );
     }
     return result;
+  }
+
+  static String? _consistentIdentityValue(List<Object?> candidates) {
+    final List<String> values = candidates
+        .where((Object? value) => value != null)
+        .map((Object? value) => '$value')
+        .where((String value) => value.isNotEmpty)
+        .toList(growable: false);
+    if (values.isEmpty) return null;
+    final String first = values.first;
+    if (values.any((String value) => value != first)) {
+      throw const LmcpRemoteException(
+        'response_identity_mismatch',
+        '远端工具结果包含相互冲突的身份字段',
+      );
+    }
+    return first;
   }
 
   Future<Map<String, Object?>> _rpc({
