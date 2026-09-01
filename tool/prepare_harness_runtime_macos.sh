@@ -108,7 +108,7 @@ NODE="$NODE_DIST/bin/node"
     exit 5
   fi
 
-  install_x64_package() {
+  install_native_package() {
     SPEC="$1"
     RELATIVE_TARGET="$2"
     PACK_JSON="$("$NPM" pack "$SPEC" --pack-destination "$STAGING" --json \
@@ -125,13 +125,19 @@ NODE="$NODE_DIST/bin/node"
     tar -xzf "$STAGING/$TARBALL" -C "$DESTINATION" --strip-components=1
   }
 
-  # npm selects optional native packages for the build host. The application
-  # and bundled Node are universal, so materialize the matching Intel packages
-  # without removing the already installed arm64 variants.
-  install_x64_package '@img/sharp-darwin-x64@0.35.4' '@img/sharp-darwin-x64'
-  install_x64_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
-  install_x64_package '@koromix/koffi-darwin-x64@3.1.6' '@koromix/koffi-darwin-x64'
-  install_x64_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
+  # npm selects optional native packages for the build host. GitHub macos-14
+  # currently runs on Intel, while local release machines may be Apple Silicon.
+  # Materialize both architectures explicitly so a clean checkout produces the
+  # same Universal payload on either host instead of depending on npm's host
+  # architecture selection.
+  install_native_package '@img/sharp-darwin-arm64@0.35.4' '@img/sharp-darwin-arm64'
+  install_native_package '@img/sharp-libvips-darwin-arm64@1.3.3' '@img/sharp-libvips-darwin-arm64'
+  install_native_package '@koromix/koffi-darwin-arm64@3.1.6' '@koromix/koffi-darwin-arm64'
+  install_native_package '@vscode/ripgrep-darwin-arm64@1.18.0' '@vscode/ripgrep-darwin-arm64'
+  install_native_package '@img/sharp-darwin-x64@0.35.4' '@img/sharp-darwin-x64'
+  install_native_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
+  install_native_package '@koromix/koffi-darwin-x64@3.1.6' '@koromix/koffi-darwin-x64'
+  install_native_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
 
   # node-pty ships every platform in one package. A macOS runtime needs only
   # its two Darwin slices; keeping PE/ELF addons complicates signing audits.
