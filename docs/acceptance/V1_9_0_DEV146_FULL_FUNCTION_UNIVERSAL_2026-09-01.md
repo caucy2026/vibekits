@@ -54,5 +54,6 @@
 3. ad-hoc 签名没有 Team ID，若把整个 App 都强制 Hardened Runtime 会触发 library validation。仅本机联调链使用独立 Node ad-hoc JIT entitlement；正式 Developer ID 链仍保持全组件 Hardened Runtime、同 Team ID 和时间戳。
 4. LMCP 标准工程信封使用 `toolName`，旧 VibeKits 客户端却只读取 `tool`，导致 62 节点目录可见但结果身份拒绝。客户端现把 `tool` 仅作为旧别名，收集顶层和 `structuredContent` 的全部 `instanceId/toolName|tool/catalogRevision`，缺失或任何冲突都拒绝，不能用优先级覆盖攻击值。
 5. 第一版 Intel 门禁只执行 `node --version`，漏掉 Rosetta 中 DSH 初始化 V8 baseline compiler 时的可执行内存失败。正式门禁现必须执行真实 DSH JS 入口；x86_64 运行时使用 `--jitless`，保持最小 `allow-jit`，拒绝以更宽的未签名可执行内存权限掩盖问题。
+6. 首轮云端 `c476e4c` 在干净 checkout 的 Release 打包阶段失败：本机生成并忽略的 Harness、7-Zip、Git macOS runtime 不存在于 Git，旧工作流却直接构建。工作流现先按准备脚本和固定上游校验和生成/恢复缓存，逐项验证完整性，再把 runner 的官方 ADB 显式传给打包脚本；冷缓存超时提高到 90 分钟。新云端 run 未通过前，本项仍保持阻塞。
 
 在本节剩余门禁全部变绿前，`bin/Vibekits.app` 继续保留 dev.145 已公证回退基线。

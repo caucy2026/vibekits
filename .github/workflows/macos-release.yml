@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +34,46 @@ jobs:
 
       - name: Resolve dependencies
         run: flutter pub get
+
+      - name: Restore bundled macOS runtime cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/harness/macos/runtime
+            native/7zip/macos/runtime
+            native/git/macos/runtime
+          key: >-
+            vibekits-macos12-runtimes-v1-${{
+            hashFiles('tool/prepare_harness_runtime_macos.sh',
+            'tool/patch_harness_runtime.mjs',
+            'tool/list_harness_required_peers.mjs',
+            'native/harness/*.mjs',
+            'tool/prepare_7zip_runtime_macos.sh',
+            'tool/prepare_git_runtime_macos.sh') }}
+
+      - name: Prepare bundled macOS 12+ runtimes
+        shell: bash
+        run: |
+          if [[ ! -x native/harness/macos/runtime/bin/node || \
+                ! -f native/harness/macos/runtime/harness-runtime.json || \
+                ! -f native/harness/macos/runtime/vibekits-mcp-server.mjs || \
+                ! -f native/harness/macos/runtime/vibekits-approval.mjs || \
+                ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs ]]; then
+            ./tool/prepare_harness_runtime_macos.sh
+          fi
+          if [[ ! -x native/7zip/macos/runtime/7zz ]]; then
+            ./tool/prepare_7zip_runtime_macos.sh
+          fi
+          if [[ ! -x native/git/macos/runtime/bin/git || \
+                ! -x native/git/macos/runtime/libexec/git-core/git-remote-https || \
+                ! -d native/git/macos/runtime/share/git-core/templates ]]; then
+            ./tool/prepare_git_runtime_macos.sh
+          fi
+          test -x native/harness/macos/runtime/bin/node
+          test -f native/harness/macos/runtime/harness-runtime.json
+          test -x native/7zip/macos/runtime/7zz
+          test -x native/git/macos/runtime/bin/git
+          test -x native/git/macos/runtime/libexec/git-core/git-remote-https
 
       - name: Analyze macOS platform integration
         run: >-
@@ -51,7 +91,21 @@ jobs:
           test/app_settings_test.dart
 
       - name: Build unsigned macOS Release
-        run: flutter build macos --release --no-pub
+        shell: bash
+        run: |
+          adb_source="$(command -v adb || true)"
+          if [[ -z "$adb_source" && -n "${ANDROID_HOME:-}" ]]; then
+            adb_source="$ANDROID_HOME/platform-tools/adb"
+          fi
+          if [[ -z "$adb_source" && -n "${ANDROID_SDK_ROOT:-}" ]]; then
+            adb_source="$ANDROID_SDK_ROOT/platform-tools/adb"
+          fi
+          if [[ ! -x "$adb_source" ]]; then
+            echo "GitHub macOS runner does not provide Android Platform-Tools adb." >&2
+            exit 1
+          fi
+          VIBEKITS_ADB_SOURCE="$adb_source" \
+            flutter build macos --release --no-pub
 
       - name: Verify Intel, Apple Silicon and macOS 12+ compatibility
         run: >-
