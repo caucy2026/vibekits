@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_deleter.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_platform_policy.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_report.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
@@ -43,6 +44,7 @@ void main() {
 
     final CleanupDeleteResult result = await CleanupDeleter.deleteCandidates(
       candidates,
+      platform: CleanupPlatform.windows,
       recycle: (String path) {
         if (path == success.path) {
           File(path).deleteSync();
@@ -157,6 +159,7 @@ void main() {
       ],
       recycle: (String _) => false,
       permanentFallback: true,
+      platform: CleanupPlatform.windows,
     );
 
     expect(cache.existsSync(), isFalse);

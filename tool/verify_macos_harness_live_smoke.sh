@@ -53,7 +53,7 @@ mkdir -p "$DSH_LOG_DIR" "$VIBEKITS_SCREENSHOT_DIR" "$TEMP" \
   "$VIBEKITS_STRESS_REPORT_DIR"
 
 PROMPT='只调用只读工具 vibekits.mcp.catalog_list 获取当前实时 MCP 目录。报告 app/local/lan 三层实例数量和调用是否成功，不调用任何其他工具。最后单独输出 VIBEKITS_HARNESS_LIVE_SMOKE_OK。'
-OUTPUT="$(cd /private/tmp && "$NODE" "$DSH" --profile headless "$PROMPT")"
+OUTPUT="$(cd /private/tmp && "$NODE" --expose-internals "$DSH" --profile headless "$PROMPT")"
 printf '%s\n' "$OUTPUT"
 case "$OUTPUT" in
   *"VIBEKITS_HARNESS_LIVE_SMOKE_OK"*) ;;

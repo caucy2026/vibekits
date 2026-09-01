@@ -1,4 +1,5 @@
 import 'dart:ffi' as ffi;
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
@@ -77,28 +78,25 @@ final class _Credential extends ffi.Struct {
   external ffi.Pointer<Utf16> userName;
 }
 
-typedef _CredWriteNative = ffi.Int32 Function(
-  ffi.Pointer<_Credential>,
-  ffi.Uint32,
-);
+typedef _CredWriteNative =
+    ffi.Int32 Function(ffi.Pointer<_Credential>, ffi.Uint32);
 typedef _CredWriteDart = int Function(ffi.Pointer<_Credential>, int);
-typedef _CredReadNative = ffi.Int32 Function(
-  ffi.Pointer<Utf16>,
-  ffi.Uint32,
-  ffi.Uint32,
-  ffi.Pointer<ffi.Pointer<_Credential>>,
-);
-typedef _CredReadDart = int Function(
-  ffi.Pointer<Utf16>,
-  int,
-  int,
-  ffi.Pointer<ffi.Pointer<_Credential>>,
-);
-typedef _CredDeleteNative = ffi.Int32 Function(
-  ffi.Pointer<Utf16>,
-  ffi.Uint32,
-  ffi.Uint32,
-);
+typedef _CredReadNative =
+    ffi.Int32 Function(
+      ffi.Pointer<Utf16>,
+      ffi.Uint32,
+      ffi.Uint32,
+      ffi.Pointer<ffi.Pointer<_Credential>>,
+    );
+typedef _CredReadDart =
+    int Function(
+      ffi.Pointer<Utf16>,
+      int,
+      int,
+      ffi.Pointer<ffi.Pointer<_Credential>>,
+    );
+typedef _CredDeleteNative =
+    ffi.Int32 Function(ffi.Pointer<Utf16>, ffi.Uint32, ffi.Uint32);
 typedef _CredDeleteDart = int Function(ffi.Pointer<Utf16>, int, int);
 typedef _CredFreeNative = ffi.Void Function(ffi.Pointer<ffi.Void>);
 typedef _CredFreeDart = void Function(ffi.Pointer<ffi.Void>);
@@ -224,6 +222,7 @@ abstract final class _WindowsCredentials {
 
 abstract final class _MacKeychain {
   static const String _service = 'com.vibekits.database';
+  static const String _encodedPrefix = 'vibekits:b64:';
 
   static Future<String?> read(String key) async {
     final ProcessResult result = await Process.run('security', <String>[
@@ -238,7 +237,16 @@ abstract final class _MacKeychain {
     if (result.exitCode != 0) {
       throw StateError('读取 macOS Keychain 失败（${result.exitCode}）');
     }
-    return '${result.stdout}'.replaceFirst(RegExp(r'\r?\n$'), '');
+    final String stored = '${result.stdout}'.replaceFirst(
+      RegExp(r'\r?\n$'),
+      '',
+    );
+    if (!stored.startsWith(_encodedPrefix)) return stored;
+    try {
+      return utf8.decode(base64Decode(stored.substring(_encodedPrefix.length)));
+    } on Object {
+      throw const FormatException('macOS Keychain 凭据编码无效');
+    }
   }
 
   static Future<void> write(String key, String value) async {
@@ -254,7 +262,7 @@ abstract final class _MacKeychain {
       '-s',
       _service,
       '-w',
-      value,
+      '$_encodedPrefix${base64Encode(utf8.encode(value))}',
     ], runInShell: false).timeout(const Duration(seconds: 10));
     if (result.exitCode != 0) {
       throw StateError('写入 macOS Keychain 失败（${result.exitCode}）');

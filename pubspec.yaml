@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.9.0-dev.145+2145
+version: 1.9.0-dev.146+2146
 
 environment:
   sdk: ^3.11.0
@@ -76,6 +76,18 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# Flutter's current macOS native-assets runner hard-codes target_version=13
+# (flutter/flutter#145104), even when the app deployment target is macOS 12.
+# Keep audited source copies of the two affected packages so their build hooks
+# can explicitly preserve Vibekits' supported macOS 12 deployment floor.
+dependency_overrides:
+  libserialport_plus:
+    path: third_party/dart/libserialport_plus
+  objective_c:
+    path: third_party/dart/objective_c
+  sqlite3:
+    path: third_party/dart/sqlite3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

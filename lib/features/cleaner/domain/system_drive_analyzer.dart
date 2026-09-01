@@ -316,6 +316,11 @@ abstract final class SystemDriveAnalyzer {
     }
 
     final int workerCount = roots.length < 3 ? roots.length : 3;
+    // Publish a cancellable starting state before fast local filesystems can
+    // finish their first root. Yield once so a UI cancellation message sent
+    // from another isolate is observed before traversal continues.
+    report(0, force: true);
+    await Future<void>.delayed(Duration.zero);
     await Future.wait<void>(
       List<Future<void>>.generate(workerCount, (_) => worker()),
     );

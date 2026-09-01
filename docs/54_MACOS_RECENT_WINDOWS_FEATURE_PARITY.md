@@ -1,6 +1,6 @@
 # macOS 最近 Windows 功能对齐与实机验收
 
-状态：Apple Silicon Release 和 Rosetta Intel 运行已验证；App 外壳支持 Intel macOS 10.15+，当前官方 DSH/Harness 因 Node 22.19 限制需要 macOS 11.0+。dev.145 已完成 Developer ID 签名、Apple 公证、ticket 装订、Gatekeeper 验证和签名后真实 Harness MCP 冒烟，可作为正式 macOS Universal 候选。
+状态：dev.146 的交付目标固定为“Intel/Apple Silicon Universal、macOS 12+、Harness 与所有随包工具全功能”。dev.145 仅是上一个已公证回退基线；dev.146 必须重新通过 Universal 依赖、Rosetta、Developer ID、Apple 公证、精确候选 App Harness 和 LAN MCP 门禁后才能替换 `bin/Vibekits.app`。
 
 ## 1. 本次进入 macOS 的能力
 
@@ -19,7 +19,7 @@
 - RustDesk/Harness 当前连接状态入口。
 - 标准 `initialize/tools/list/tools/call` 接口描述规范。
 
-dev.145 的现状仍是 macOS 使用 Flutter `DeepSeekAgentWorkspace`、Windows 使用 `OfficialHarnessWorkspace + DSH WebView`。这两条入口虽然共用工具桥，却不是同一套交互、会话和状态机，不能作为长期完成状态。自下一次 Harness 交互改版起，Windows 与 macOS 必须收敛到同一套 Flutter 工作区；官方 DSH 只作为可替换执行内核，不允许再分别维护两套用户行为。
+dev.146 已删除 `local_models_tab.dart` 中按 `Platform.isWindows` 分流的 Harness UI：Windows 和 macOS 现在都进入 Flutter `DeepSeekAgentWorkspace`，共用项目、会话、独立草稿、时间线、停止、删除、权限和 MCP 交互状态。官方 DSH 保持为固定版本执行内核，平台差异仅留在运行时路径、进程组、凭据库和 IPC 层。macOS 完整合同已纳入自动回归；Windows 正式 Release 仍必须在 Windows 构建主机运行同一清单，未执行前不宣称“Windows 真机已通过”。
 
 ### 官方 Harness 可升级与跨平台单 UI 架构门禁
 
@@ -36,7 +36,7 @@ dev.145 的现状仍是 macOS 使用 Flutter `DeepSeekAgentWorkspace`、Windows 
 
 跨平台验收采用一份参数化测试清单，同一用例同时约束 Windows 与 macOS：创建/切换/并行会话、独立草稿、默认折叠时间线、选中态 `…`、运行态转圈、停止与外部资源清理、永久删除、MCP 发现/调用/结果/取消、重启恢复和 RustDesk 状态。平台只能对“不可用的系统能力”做显式跳过，不能另写一套期望。
 
-迁移门禁：在 Windows 正式 Release 完成上述共享入口回归前，`OfficialHarnessWorkspace` 只能视为待移除兼容入口；不得继续只向 macOS 的 `DeepSeekAgentWorkspace` 增加交互功能，也不得宣称 Windows 已同步。最终应删除 `local_models_tab.dart` 中按 `Platform.isWindows` 选择两套 Harness 页面这一分支。
+迁移门禁：`local_models_tab.dart` 的双 UI 分支已移除；`OfficialHarnessWorkspace` 不再是产品入口，只可作为上游兼容参考或后续删除对象。后续交互改动必须首先修改共享 `DeepSeekAgentWorkspace` 及一份跨平台合同测试，禁止重新增加 Windows/macOS 页面分叉。
 
 ### 项目、会话和权限关系
 
@@ -68,13 +68,14 @@ flutter test test/mcp_device_identity_test.dart \
   test/mcp_capability_directory_test.dart \
   test/lan_peer_discovery_service_test.dart
 ./tool/prepare_harness_runtime_macos.sh
+./tool/prepare_7zip_runtime_macos.sh
 flutter build macos --release
 ./tool/verify_macos_release_compat.sh build/macos/Build/Products/Release/Vibekits.app
 ./tool/sign_macos_release.sh build/macos/Build/Products/Release/Vibekits.app
 ./tool/verify_macos_harness_signed_runtime.sh build/macos/Build/Products/Release/Vibekits.app
 ```
 
-Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运行时复制到 `Contents/Resources/tools/harness`；源运行时缺失或不完整时必须构建失败。`sign_macos_release.sh` 是本机联调使用的 ad-hoc 签名门禁，不替代 Developer ID 签名和公证。两条签名链都必须用 `HarnessNode.entitlements` 单独签署内置 Node，保留 Hardened Runtime 与 `allow-jit`，否则 V8 会在启动阶段崩溃。对外发布必须设置 `VIBEKITS_DEVELOPER_ID_APPLICATION` 和 `VIBEKITS_NOTARY_PROFILE`，再执行 `tool/sign_and_notarize_macos_release.sh`；脚本会在上传前启动精确候选 App 并由 Harness 真实调用只读 MCP 目录，再验证 Developer ID、notarytool Accepted、staple 和 Gatekeeper，任一失败都禁止外发。
+Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将 Harness、ADB、7-Zip 和 Git 运行时复制到 App 私有目录；任一源运行时缺失、单架构或最低系统版本超过 macOS 12 时必须构建/验收失败。`sign_macos_release.sh` 是本机联调使用的 ad-hoc 签名门禁，不替代 Developer ID 签名和公证。Developer ID 与 ad-hoc 链分别使用 `HarnessNode.entitlements` 和 `HarnessNodeAdHoc.entitlements` 单独签署 Node，均保留 Hardened Runtime 与 `allow-jit`；ad-hoc 仅因没有 Team ID 才对 Node 增加 library-validation 例外。Rosetta/x86_64 运行 Node 时必须加 `--jitless`，并真实启动 DSH JS 入口；禁止用 `node --version` 冒充全功能，也禁止为方便而授予 `allow-unsigned-executable-memory`。对外发布必须设置 `VIBEKITS_DEVELOPER_ID_APPLICATION` 和 `VIBEKITS_NOTARY_PROFILE`，再执行 `tool/sign_and_notarize_macos_release.sh`；脚本会在上传前启动精确候选 App并由 Harness 真实调用只读 MCP 目录，再验证 Developer ID、notarytool Accepted、staple 和 Gatekeeper，任一失败都禁止外发。
 
 产物：`build/macos/Build/Products/Release/Vibekits.app`。
 
@@ -101,10 +102,12 @@ Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将运�
 
 ## 5. 当前验证边界
 
-2026-09-01 已用 Flutter 3.41.9/Dart 3.11.5 生成 Universal Release；主程序 Intel slice 的 deployment target 为 10.15，并在 Rosetta 下实际启动为 `X86-64 (translated)`。ADB、Node、ripgrep、node-pty 和 sharp 均核对双架构/对应原生包。
+dev.145 曾用 Flutter 3.41.9/Dart 3.11.5 验证 Universal/Rosetta。dev.146 不再声明“外壳 10.15、部分工具 11/12”的分裂边界：Xcode、CocoaPods 和 Info.plist 最低版本统一为 macOS 12.0，Release 脚本扫描 App 内所有 Mach-O，任一切片的 `minos` 高于 12.0 即失败。
 
-必须区分两个边界：VibeKits 主程序可在 Intel macOS 10.15 启动；官方 DSH 0.1.1-rc.2 的依赖使用 Node 22 API，因此内置 Harness 使用最低可行 Node 22.19.0，其官方 Intel/ARM 二进制均以 macOS 11.0 为下限。禁止换成 Node 18 伪造 10.15 全功能：真实 CLI 会因缺失 `node:util.parseEnv` 立即失败。
+官方 DSH 0.1.1-rc.2 的依赖使用 Node 22 API，内置 Harness 继续使用最低可行 Node 22.19.0；不为了降低数字而换成会缺失 `node:util.parseEnv` 的 Node 18。因为用户要求的是 macOS 12+全功能，而不是更旧系统上仅能打开空外壳。
 
-当前机器已恢复 `Developer ID Application: zhen ji (26T5WV4GLP)` 和可连接 Apple 的 `KEMI_NOTARY` profile。`bin/Vibekits.app` 的主程序、ADB、Harness 及全部 frameworks 已用该身份逐项签名，内置 Node 额外保留 JIT entitlement；hardened runtime、时间戳、深度严格验签和真实 Harness MCP 调用均通过。用户授权后，dev.145 Apple 公证于 2026-09-01 返回 `Accepted`（Submission ID `9a0cddb1-41ce-4fe5-a231-7feb209fc128`），ticket 已 staple/validate，Gatekeeper 返回 `source=Notarized Developer ID`。
+当前机器已恢复 `Developer ID Application: zhen ji (26T5WV4GLP)` 和可连接 Apple 的 `KEMI_NOTARY` profile。dev.146 精确候选的主程序、ADB、Harness、Git、7-Zip 及全部 frameworks 已用该身份逐项签名，内置 Node 额外保留 JIT entitlement；Hardened Runtime、时间戳、深度严格验签、ARM64 App、Rosetta App 和 Intel DSH/ADB/7-Zip/Git 实际执行均通过。生产 LMCP 客户端已对先启动的目标节点完成 `last_result` 只读调用并取得 verified 报告；真实模型驱动 Harness 仍会把局域网 MCP 实例/目录发给已配置的 DeepSeek 服务，因此该步必须在用户明确同意数据出站后执行。Apple 公证必须在此门禁通过后提交，不能提前复用旧票据。
+
+历史回退基线 dev.145 Apple 公证于 2026-09-01 返回 `Accepted`（Submission ID `9a0cddb1-41ce-4fe5-a231-7feb209fc128`），ticket 已 staple/validate，Gatekeeper 返回 `source=Notarized Developer ID`。
 
 正式归档为 `bin/Vibekits-1.9.0-dev.145+2145-macos-universal-notarized.zip`，SHA-256 为 `60dff7aec1ec2a4887d2f9d2819c5b3b043cc90c89570697389945918352392b`。该归档是唯一允许标记为 dev.145 已公证候选的包；dev.144 归档仅保留用于历史回退，不得标记为当前正式版本。最终 `bin/Vibekits.app` 的真实 Harness MCP 目录读取发现先启动的 `192.168.3.62` KEMI-BM，状态为 verified、callable 且有 1 个空闲槽。

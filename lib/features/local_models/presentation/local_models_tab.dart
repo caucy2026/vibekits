@@ -19,7 +19,6 @@ import '../domain/pp_ocr_v6.dart';
 import '../domain/screenshot_capture.dart';
 import '../domain/vad_inference.dart';
 import 'deepseek_agent_workspace.dart';
-import 'official_harness_workspace.dart';
 
 Future<List<int>> loadBundledModelAsset(String path) async {
   final ByteData bundled = await rootBundle.load(path);
@@ -907,47 +906,31 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
             children: <Widget>[
               _buildOcrWorkspace(),
               if (_agentOpened)
-                if (Platform.isWindows &&
-                    Platform.environment['FLUTTER_TEST'] != 'true')
-                  OfficialHarnessWorkspace(
-                    initialWorkspace: widget.initialHarnessWorkspace,
-                    initialDebugDirectory: _harnessDebugDirectory,
-                    initialDownloadDirectory: _downloadDirectory,
-                    onRunningChanged: (bool running) {
-                      if (mounted) setState(() => _agentRunning = running);
-                    },
-                    credentialReader: widget.harnessCredentialReader,
-                    remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
-                    screenshotOcrRunner: _captureScreenshotForHarness,
-                    externalPrompt: widget.externalHarnessPrompt,
-                    externalPromptSerial: widget.externalHarnessPromptSerial,
-                    rustDeskExecutable: widget.rustDeskExecutable,
-                    rustDeskWebClientUrl: widget.rustDeskWebClientUrl,
-                    preapprovedToolIds: widget.preapprovedHarnessToolIds,
-                  )
-                else
-                  DeepSeekAgentWorkspace(
-                    initialWorkspace: widget.initialHarnessWorkspace,
-                    onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
-                    initialDebugDirectory: _harnessDebugDirectory,
-                    onDebugDirectoryChanged: (String directory) async {
-                      if (mounted) {
-                        setState(() => _harnessDebugDirectory = directory);
-                      }
-                      await widget.onHarnessDebugDirectoryChanged?.call(
-                        directory,
-                      );
-                    },
-                    onRunningChanged: (bool running) {
-                      if (mounted) setState(() => _agentRunning = running);
-                    },
-                    checkEnvironment: widget.harnessCheckEnvironment,
-                    runAgent: widget.harnessRunAgent,
-                    pickDirectory: widget.harnessPickDirectory,
-                    credentialReader: widget.harnessCredentialReader,
-                    externalPrompt: widget.externalHarnessPrompt,
-                    externalPromptSerial: widget.externalHarnessPromptSerial,
-                  )
+                DeepSeekAgentWorkspace(
+                  initialWorkspace: widget.initialHarnessWorkspace,
+                  onWorkspaceChanged: widget.onHarnessWorkspaceChanged,
+                  initialDebugDirectory: _harnessDebugDirectory,
+                  onDebugDirectoryChanged: (String directory) async {
+                    if (mounted) {
+                      setState(() => _harnessDebugDirectory = directory);
+                    }
+                    await widget.onHarnessDebugDirectoryChanged?.call(
+                      directory,
+                    );
+                  },
+                  onRunningChanged: (bool running) {
+                    if (mounted) setState(() => _agentRunning = running);
+                  },
+                  checkEnvironment: widget.harnessCheckEnvironment,
+                  runAgent: widget.harnessRunAgent,
+                  pickDirectory: widget.harnessPickDirectory,
+                  credentialReader: widget.harnessCredentialReader,
+                  remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
+                  screenshotOcrRunner: _captureScreenshotForHarness,
+                  downloadDirectory: _downloadDirectory,
+                  externalPrompt: widget.externalHarnessPrompt,
+                  externalPromptSerial: widget.externalHarnessPromptSerial,
+                )
               else
                 const SizedBox.shrink(),
             ],

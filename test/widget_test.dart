@@ -97,35 +97,41 @@ void main() {
   testWidgets('Ctrl+数字键切换 Tab', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
-    Future<void> pressCtrlWithKey(LogicalKeyboardKey key) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    Future<void> pressPrimaryWithKey(LogicalKeyboardKey key) async {
+      final LogicalKeyboardKey modifier = Platform.isMacOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
       await tester.sendKeyEvent(key);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyUpEvent(modifier);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit4);
+    await pressPrimaryWithKey(LogicalKeyboardKey.digit4);
     expect(find.text('打开文件'), findsOneWidget);
-    await pressCtrlWithKey(LogicalKeyboardKey.keyF);
+    await pressPrimaryWithKey(LogicalKeyboardKey.keyF);
     expect(find.byType(TextField), findsOneWidget);
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit5);
+    await pressPrimaryWithKey(LogicalKeyboardKey.digit5);
     expect(
       find.byKey(const Key('programmer-calculator-input')),
       findsOneWidget,
     );
 
-    await pressCtrlWithKey(LogicalKeyboardKey.digit2);
+    await pressPrimaryWithKey(LogicalKeyboardKey.digit2);
     expect(find.text('打开压缩包'), findsOneWidget);
   });
 
   testWidgets('Ctrl+, 打开设置对话框', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final LogicalKeyboardKey modifier = Platform.isMacOS
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
     await tester.sendKeyEvent(LogicalKeyboardKey.comma);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(modifier);
     await tester.pump();
 
     expect(find.text('设置'), findsOneWidget);

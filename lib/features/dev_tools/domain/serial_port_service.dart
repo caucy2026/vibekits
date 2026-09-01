@@ -267,18 +267,35 @@ abstract final class SerialCodec {
 /// configuration, reads and writes therefore never block Flutter's UI isolate.
 abstract final class SerialPortService {
   static Future<List<SerialPortDescriptor>> listPorts() async {
-    final List<Map<String, Object?>> maps = await Isolate.run(_listSerialPorts)
-        .timeout(const Duration(seconds: 5));
+    final List<Map<String, Object?>> maps = await Isolate.run(
+      _listSerialPorts,
+    ).timeout(const Duration(seconds: 5));
     return maps.map(SerialPortDescriptor.fromMap).toList(growable: false);
   }
 
-  static Future<SerialPortSession> open(SerialConnectionSettings settings) =>
-      _WorkerSerialPortSession.open(settings);
+  static Future<SerialPortSession> open(
+    SerialConnectionSettings settings,
+  ) async {
+    settings.validate();
+    final String requested = settings.portName.trim();
+    final List<SerialPortDescriptor> available = await listPorts().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => throw TimeoutException('串口枚举超过 2 秒，已停止打开'),
+    );
+    final bool present = available.any(
+      (SerialPortDescriptor port) => Platform.isWindows
+          ? port.name.toLowerCase() == requested.toLowerCase()
+          : port.name == requested,
+    );
+    if (!present) {
+      throw StateError('串口不存在或已断开：$requested');
+    }
+    return _WorkerSerialPortSession.open(settings);
+  }
 }
 
-typedef SerialSessionOpener = Future<SerialPortSession> Function(
-  SerialConnectionSettings settings,
-);
+typedef SerialSessionOpener =
+    Future<SerialPortSession> Function(SerialConnectionSettings settings);
 
 /// Passive serial configuration discovery used by Harness.
 ///

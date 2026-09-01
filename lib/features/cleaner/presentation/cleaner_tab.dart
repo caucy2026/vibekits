@@ -34,34 +34,37 @@ void _recycleSoftwareCacheEntry(List<Object> request) {
   resultPort.send(CleanupDeleter.sendToRecycleBin(paths));
 }
 
-typedef CleanupScanRunner = Future<CleanupScanResult> Function({
-  required CleanupCancellationToken cancellationToken,
-  required void Function(CleanupScanProgress progress) onProgress,
-});
-typedef CleanupDeleteRunner = Future<CleanupDeleteResult> Function({
-  required List<CleanupCandidate> candidates,
-  required CleanupCancellationToken cancellationToken,
-  required bool permanentFallback,
-  required void Function(CleanupDeleteProgress progress) onProgress,
-});
+typedef CleanupScanRunner =
+    Future<CleanupScanResult> Function({
+      required CleanupCancellationToken cancellationToken,
+      required void Function(CleanupScanProgress progress) onProgress,
+    });
+typedef CleanupDeleteRunner =
+    Future<CleanupDeleteResult> Function({
+      required List<CleanupCandidate> candidates,
+      required CleanupCancellationToken cancellationToken,
+      required bool permanentFallback,
+      required void Function(CleanupDeleteProgress progress) onProgress,
+    });
 typedef CleanupDiskSnapshotReader = DiskSpaceSnapshot? Function(String path);
-typedef CleanupDriveAnalysisRunner = Future<SystemDriveAnalysis> Function({
-  required CleanupCancellationToken cancellationToken,
-  required void Function(SystemDriveAnalysisProgress progress) onProgress,
-});
+typedef CleanupDriveAnalysisRunner =
+    Future<SystemDriveAnalysis> Function({
+      required CleanupCancellationToken cancellationToken,
+      required void Function(SystemDriveAnalysisProgress progress) onProgress,
+    });
 typedef CleanupVolumeLoader = Future<List<DiskVolumeInfo>> Function();
-typedef CleanupVolumeDriveAnalysisRunner = Future<SystemDriveAnalysis> Function(
-  String rootPath, {
-  required CleanupCancellationToken cancellationToken,
-  required void Function(SystemDriveAnalysisProgress progress) onProgress,
-});
+typedef CleanupVolumeDriveAnalysisRunner =
+    Future<SystemDriveAnalysis> Function(
+      String rootPath, {
+      required CleanupCancellationToken cancellationToken,
+      required void Function(SystemDriveAnalysisProgress progress) onProgress,
+    });
 typedef CleanupDriveEntryRecycler = Future<bool> Function(String path);
 typedef CleanupHarnessLauncher = Future<void> Function(String prompt);
 typedef InstalledApplicationLoader =
     Future<List<InstalledApplication>> Function();
-typedef ApplicationUninstallLauncher = Future<bool> Function(
-  InstalledApplication application,
-);
+typedef ApplicationUninstallLauncher =
+    Future<bool> Function(InstalledApplication application);
 
 enum _CleanupResultView {
   recommended('推荐清理', Icons.auto_awesome_outlined),
@@ -104,6 +107,7 @@ class CleanerTab extends StatefulWidget {
     this.onAskHarness,
     this.installedApplicationLoader,
     this.applicationUninstallLauncher,
+    this.platform,
   });
 
   final CleanupScanRunner? scanRunner;
@@ -131,6 +135,7 @@ class CleanerTab extends StatefulWidget {
   final CleanupHarnessLauncher? onAskHarness;
   final InstalledApplicationLoader? installedApplicationLoader;
   final ApplicationUninstallLauncher? applicationUninstallLauncher;
+  final CleanupPlatform? platform;
 
   @override
   State<CleanerTab> createState() => _CleanerTabState();
@@ -187,15 +192,16 @@ class _CleanerTabState extends State<CleanerTab> {
   HarnessDebugStorageSummary? _harnessDebugSummary;
 
   bool get _acceptancePassed => _totalReleasedBytes >= _acceptanceTargetBytes;
+  CleanupPlatform get _platform => widget.platform ?? CleanupPlatform.current;
   bool get _supportsSystemWideAnalysis =>
-      CleanupPlatformPolicy.supportsSystemWideAnalysis(CleanupPlatform.current);
+      CleanupPlatformPolicy.supportsSystemWideAnalysis(_platform);
   int get _acceptanceRemainingBytes =>
       _acceptancePassed ? 0 : _acceptanceTargetBytes - _totalReleasedBytes;
 
   @override
   void initState() {
     super.initState();
-    final CleanupPlatform platform = CleanupPlatform.current;
+    final CleanupPlatform platform = _platform;
     if (CleanupPlatformPolicy.supportsSystemWideAnalysis(platform)) {
       _selectedVolumeRoots = <String>{_systemDiskPath()};
       _activeVolumeRoot = _systemDiskPath();
@@ -257,7 +263,8 @@ class _CleanerTabState extends State<CleanerTab> {
   Future<void> _discoverVolumes() async {
     try {
       List<DiskVolumeInfo> volumes =
-          await (widget.volumeLoader?.call() ?? DiskVolumeDiscovery.discover());
+          await (widget.volumeLoader?.call() ??
+              DiskVolumeDiscovery.discover(platform: _platform));
       if (volumes.isEmpty) {
         final String root = _systemDiskPath();
         final DiskSpaceSnapshot? disk =
@@ -313,7 +320,7 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Future<void> _discoverTargets() async {
     try {
-      final CleanupPlatform platform = CleanupPlatform.current;
+      final CleanupPlatform platform = _platform;
       final String bundledRuleDatabase = platform == CleanupPlatform.windows
           ? await rootBundle.loadString('assets/cleaner/windows_rules_v6.json')
           : '';
@@ -581,6 +588,7 @@ class _CleanerTabState extends State<CleanerTab> {
     return CleanupDecisionEngine.buildPlan(
       candidates,
       freeSpaceRatio: freeRatio,
+      platform: _platform,
       harnessDebugDirectory: widget.harnessDebugDirectory.trim().isEmpty
           ? PlatformStorageLayout.current().harnessDebugDirectory
           : widget.harnessDebugDirectory.trim(),
@@ -998,12 +1006,9 @@ class _CleanerTabState extends State<CleanerTab> {
   }
 
   Future<void> _analyzeSystemDrive() async {
-    if (!CleanupPlatformPolicy.supportsSystemWideAnalysis(
-      CleanupPlatform.current,
-    )) {
+    if (!CleanupPlatformPolicy.supportsSystemWideAnalysis(_platform)) {
       setState(() {
-        _message =
-            '${CleanupPlatform.current.label} 使用独立安全清理规则；当前不提供 Windows 式全盘分析';
+        _message = '${_platform.label} 使用独立安全清理规则；当前不提供 Windows 式全盘分析';
       });
       return;
     }
@@ -1606,7 +1611,7 @@ class _CleanerTabState extends State<CleanerTab> {
 
   Widget _buildPlatformNotice() {
     final CleanupPlatformCapabilities capabilities =
-        CleanupPlatformPolicy.capabilities(CleanupPlatform.current);
+        CleanupPlatformPolicy.capabilities(_platform);
     return Container(
       key: const Key('cleaner-platform-policy'),
       width: double.infinity,
@@ -2848,8 +2853,9 @@ class _CleanerTabState extends State<CleanerTab> {
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: entry.path));
               if (dialogContext.mounted) {
-                ScaffoldMessenger.of(dialogContext)
-                    .showSnackBar(const SnackBar(content: Text('路径已复制')));
+                ScaffoldMessenger.of(
+                  dialogContext,
+                ).showSnackBar(const SnackBar(content: Text('路径已复制')));
               }
             },
             icon: const Icon(Icons.copy_outlined, size: 16),

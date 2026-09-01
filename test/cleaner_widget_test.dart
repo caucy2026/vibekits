@@ -10,6 +10,7 @@ import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/domain/disk_volume_discovery.dart';
 import 'package:vibekits/features/cleaner/domain/installed_application_service.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_platform_policy.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analysis_report.dart';
 import 'package:vibekits/features/cleaner/domain/system_drive_analyzer.dart';
 import 'package:vibekits/features/cleaner/presentation/cleaner_tab.dart';
@@ -33,6 +34,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             persistDriveAnalysisReport: false,
+            platform: CleanupPlatform.windows,
             availableTargets: const <CleanupScanTarget>[
               ...testTargets,
               CleanupScanTarget(
@@ -79,6 +81,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             scanRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -128,7 +131,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('扫描已取消'), findsOneWidget);
-    expect(find.text(r'C:\Temp\partial.tmp'), findsOneWidget);
+    expect(find.text(r'C:\Temp\partial.tmp'), findsWidgets);
   });
 
   testWidgets('持久化白名单过滤真实子路径但不误伤相似前缀', (WidgetTester tester) async {
@@ -141,6 +144,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             initialWhitelist: const <String>[root],
             scanRunner:
                 ({
@@ -174,7 +178,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(protected), findsNothing);
-    expect(find.text(similar), findsOneWidget);
+    expect(find.text(similar), findsWidgets);
     expect(find.byTooltip('白名单（1）'), findsOneWidget);
   });
 
@@ -187,6 +191,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             scanRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -229,7 +234,8 @@ void main() {
                       reason: '当前可能使用的开发依赖',
                     ),
                     CleanupCandidate(
-                      path: r'C:\Users\caucy\AppData\Local\KnownApp\Cache\old.tmp',
+                      path:
+                          r'C:\Users\caucy\AppData\Local\KnownApp\Cache\old.tmp',
                       size: 512 * 1024 * 1024,
                       category: CleanupCategory.applicationCache,
                       reason: '已验证的可重建应用缓存',
@@ -273,6 +279,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             volumeLoader: () async => const <DiskVolumeInfo>[
               DiskVolumeInfo(
                 rootPath: 'C:\\',
@@ -333,6 +340,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             installedApplicationLoader: () async => <InstalledApplication>[
               InstalledApplication(
                 id: 'old-app',
@@ -405,6 +413,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             scanRunner:
                 ({
                   required CleanupCancellationToken cancellationToken,
@@ -487,6 +496,7 @@ void main() {
           body: CleanerTab(
             persistDriveAnalysisReport: false,
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             initialTotalReleasedBytes: 1024,
             initialCompletedRuns: 2,
             scanRunner:
@@ -526,9 +536,9 @@ void main() {
               diskReads++;
               return DiskSpaceSnapshot(
                 path: path,
-                availableBytes: diskReads == 1 ? 5000 : 7000,
+                availableBytes: diskReads <= 2 ? 5000 : 7000,
                 totalBytes: 10000,
-                freeBytes: diskReads == 1 ? 5000 : 7000,
+                freeBytes: diskReads <= 2 ? 5000 : 7000,
               );
             },
             onCleanupStatsChanged: (int total, int runs) async {
@@ -569,6 +579,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             installedApplicationLoader: () async =>
                 const <InstalledApplication>[],
             driveAnalysisRunner:
@@ -692,6 +703,7 @@ void main() {
       home: Scaffold(
         body: CleanerTab(
           availableTargets: testTargets,
+          platform: CleanupPlatform.windows,
           driveAnalysisCacheDirectory: cache,
           installedApplicationLoader: () async =>
               const <InstalledApplication>[],
@@ -742,6 +754,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             persistDriveAnalysisReport: false,
             installedApplicationLoader: () async =>
                 const <InstalledApplication>[],
@@ -821,6 +834,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             persistDriveAnalysisReport: false,
             installedApplicationLoader: () async =>
                 const <InstalledApplication>[],
@@ -939,6 +953,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             persistDriveAnalysisReport: false,
             installedApplicationLoader: () async =>
                 const <InstalledApplication>[
@@ -959,11 +974,12 @@ void main() {
               recycledPath = path;
               return true;
             },
-            driveAnalysisRunner: ({
-              required CleanupCancellationToken cancellationToken,
-              required void Function(SystemDriveAnalysisProgress progress)
-              onProgress,
-            }) async => analysis,
+            driveAnalysisRunner:
+                ({
+                  required CleanupCancellationToken cancellationToken,
+                  required void Function(SystemDriveAnalysisProgress progress)
+                  onProgress,
+                }) async => analysis,
           ),
         ),
       ),
@@ -1008,6 +1024,7 @@ void main() {
         home: Scaffold(
           body: CleanerTab(
             availableTargets: testTargets,
+            platform: CleanupPlatform.windows,
             persistDriveAnalysisReport: false,
             volumeLoader: () async => const <DiskVolumeInfo>[
               DiskVolumeInfo(

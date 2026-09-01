@@ -79,11 +79,11 @@
 | DEV-118 | 调用记录紧凑可读 | 默认使用小字号紧凑列表；展示人类可读的目标、命令、退出码和输出摘要，不把原始 JSON 当主界面 | ADB 专属记录和所有工具共用 Harness 记录弹窗已统一；原始证据仍保存在日志中 |
 | DEV-119 | Codex 式工具权限 | 输入区提供“请求批准 / 帮我批准 / 完全访问权限”；默认“帮我批准”且跨重启保存；普通注册工具不重复打断，破坏性操作仍询问；完全访问保存后跨页面/重启仍直接执行注册工具 | 三档状态机、持久化、官方 Harness 沙箱模式和原生授权回环桥已接通；MCP 与原生工具共用同一审批器，底层命令白名单不因完全访问而取消 |
 | DEV-120 | 展示可核对的推理中间态 | 运行回复中可展开查看“理解任务、规划操作、工具目标、真实结果、继续分析、生成回复”；不展示私有逐字思维链 | 已接入 Harness 生命周期与真实工具完成回调，成功/失败和耗时进入进度时间线 |
-| DEV-121 | 项目绑定多会话 | Workspace → ordered sessions 一对多关系；支持添加、搜索、切换、折叠和移出工作区；会话可移动到其他项目并重新绑定 workspace-write 权限；Windows 官方 Host 继续支持重命名/排序/Fork/Archive/Delete | Windows 使用官方 Web 单一数据源；macOS 原生工作区已持久化多项目目录、按项目显示会话、项目标题单击折叠/展开、搜索时临时展开匹配项、长按拖动/菜单移动和权限确认，移动不搬项目文件、运行中禁止移动；macOS 的 Fork/Archive/Delete 仍待与官方 Host 对齐 |
+| DEV-121 | 项目绑定多会话 | Workspace → ordered sessions 一对多关系；支持添加、搜索、切换、折叠和移出工作区；会话可移动到其他项目并重新绑定 workspace-write 权限；会话可独立永久删除 | dev.146 起 Windows/macOS 共用 `DeepSeekAgentWorkspace`；多项目、折叠、立即拖动/菜单移动、权限重绑、独立草稿、并行会话和永久删除已有共享合同测试；Windows 正式 Release 仍需 Windows 构建机真机复验 |
 | DEV-122 | Harness 调试目录 | 设置中指定日志、截图和临时文件根目录；默认 EXE 同级 `tmp`；跨重启保存；实际分流到 `logs/screenshots/temp`；日志不得含 Key | AppSettings 持久化、目录选择/创建、OCR 截图路由、Harness TEMP/TMP/日志环境与 stdout/stderr 文件落盘已接入；Windows 构建和实机目录检查见 dev.16 验收 |
-| DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows Git/ADB/7-Zip/Harness/Node 已随包；macOS Universal Node/Harness 已随包且 Release 缺失时构建失败；macOS Git/OCR、正式签名公证仍待闭环 |
+| DEV-123 | 界面工具必须自包含 | 只要显示在界面上的能力，核心执行路径不得要求用户另装 Git、ADB、7-Zip、Node、Harness、SSH 等第三方程序；发布构建缺少运行时必须失败 | Windows 已随包 Git/ADB/7-Zip/Harness/Node；macOS dev.146 的 Universal Node/Harness/ADB、官方 7-Zip 25.01 和源码构建 Git 2.53.0 均已通过 `minos<=12.0`、Developer ID 和 ARM64/Rosetta 实跑。Intel DSH 使用 `--jitless`，不扩大未签名可执行内存权限；OCR 真推理仍须在最终候选 App 再验 |
 | DEV-124 | 下载目录可配置 | 设置中显示并可选择工具与模型下载目录；默认 `%LOCALAPPDATA%\Vibekits\downloads`；下载使用 `.part` 暂存、哈希通过后原子改名；设置跨重启保存 | Windows 设置、持久化和模型下载路由已接入；随包工具固定在 Release 同级 `tools`，不与运行时下载混用 |
-| DEV-125 | 动态 MCP 工具必须可理解、可直接调用 | 本机进程和局域网 MCP 不能只列工具名；必须展示用途、完整 Schema、风险/副作用、前置条件、成功结果、稳定错误码和真实验收状态；Harness 使用实时目录生成参数，副作用结果必须在目标端核验；第三方 APP 只以文档 50 为协议交付入口 | 文档 50 已收敛身份、开关、LMCP/2 发现、HTTPS 调用、工具合同、Windows 防火墙和双机门禁；新 VibeKits 取消 LMCP/1 发送回退，仅保留旧节点接收显示；KEMI build102 三个只读工具已调用，跨 Windows 发现与文件落盘仍是真机门禁 |
+| DEV-125 | 动态 MCP 工具必须可理解、可直接调用 | 本机进程和局域网 MCP 不能只列工具名；必须展示用途、完整 Schema、风险/副作用、前置条件、成功结果、稳定错误码和真实验收状态；Harness 使用实时目录生成参数，副作用结果必须在目标端核验；第三方 APP 只以文档 50 为协议交付入口 | 文档 50 已收敛身份、开关、LMCP/2 发现、HTTPS 调用、工具合同、Windows 防火墙和双机门禁；新 VibeKits 取消 LMCP/1 发送回退，仅保留旧节点接收显示。dev.146 生产客户端已在候选晚启动条件下发现目标节点、验签 revision 9 目录并真实取得 `last_result final=true/verified`；模型驱动 Harness 出站和跨 Windows 文件落盘仍按各自门禁验收 |
 | NODE-001～010 | Windows 真机成为局域网测试节点 | 只读体检、幂等计划、窄权限 UAC、D 盘门禁、OpenSSH/LAN 防火墙、独立设备公钥、真实跨设备验收与精确回滚 | NODE-001/002/004 的领域、Harness、UI、真实 Windows 只读探测已闭环；签名 helper、设备登记/撤销、跨设备验证仍为阻断项，不伪报完成 |
 | NET-201～204 | 诊断真实代理端口并仅修复 GitHub Git | 分层区分凭据/网络/代理/Git；loopback 候选；host-scoped 配置；失败自动恢复旧值 | NET-001～003 已实现并自动测试：真实监听发现、HTTPS/Git 候选验证、计划、host-scoped 应用和失败恢复；系统代理/TUN 按边界未开放 |
 | GIT-201～203 | Harness 安全提交并推送既有 GitHub 仓库备份 | preview 阻断秘密；commit/push 分离审批；默认 backup 分支；远端 SHA 核验；禁止 force/删 ref/改 tag | 领域、Harness 和 UI 已完成，本地 bare remote 真 commit/push/SHA 通过；真实私有 GitHub 仓库仍需验收智能体在用户审批下补证 |
@@ -103,9 +103,9 @@
 
 | ID | 需求 | 可验收结果 | 当前状态 |
 |---|---|---|---|
-| PLT-101 | Windows 与 macOS 优先 | 共享领域逻辑；各自完成 Release、系统入口、安全删除、原生运行时验收 | Windows Release 已验证；macOS 工程基线待实机 |
+| PLT-101 | Windows 与 macOS 优先 | 共享领域逻辑与 Harness 交互层；各自完成 Release、系统入口、安全删除、原生运行时验收 | dev.146 已取消 Windows/macOS Harness 页面分支；macOS 12+ Universal 正在最终 Release 门禁，Windows 共享入口仍需 Windows 构建机复验 |
 | PLT-102 | 无网络不影响其他功能 | 不做阻塞全局启动的联网检查；网络动作只在自己的工作区内失败；所有本地工具、清理、文档和内置模型继续可用 | 主工作区按需挂载；Harness/Node/OCR/ADB/Git/7-Zip 均本地打包；网络服务有界超时且不接管全局状态 |
-| REL-101 | 效率优先且版本号更新 | 小步实现、窄测试先行；发布批次更新语义版本和构建号 | `1.8.0+10`，Analyze/271 测试/Release/两次启动已验证 |
+| REL-101 | 效率优先且版本号更新 | 小步实现、窄测试先行；发布批次更新语义版本和构建号 | 当前候选 `1.9.0-dev.146+2146`；只在完整测试、Universal/Rosetta、签名公证和 LAN MCP 全绿后释放 |
 | REL-102 | 最近改动写入对应文档 | 状态、日志、验收、第三方来源和限制与代码一致 | 已同步 |
 | REL-103 | 本地 Git 备份 | 清洁提交、版本标签同步到本地备份远端 | v1.8.0 发布提交与标签同步到 `backup` |
 | REL-104 | 云端仓库备份 | 同一提交/标签推送到 `caucy2026/vibekits`，不含研究/构建临时文件 | 同一 v1.8.0 发布提交与标签同步到 GitHub `cloud` |

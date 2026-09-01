@@ -148,12 +148,13 @@ class LmcpCallerIdentity {
   final String address;
 }
 
-typedef LmcpToolInvocationRunner = Future<HarnessToolCallResult> Function(
-  HarnessToolDefinition tool,
-  Map<String, Object?> arguments,
-  LmcpInboundCallCancellation cancellation,
-  LmcpInboundCallHandle call,
-);
+typedef LmcpToolInvocationRunner =
+    Future<HarnessToolCallResult> Function(
+      HarnessToolDefinition tool,
+      Map<String, Object?> arguments,
+      LmcpInboundCallCancellation cancellation,
+      LmcpInboundCallHandle call,
+    );
 
 class _LmcpInvocationFailure {
   const _LmcpInvocationFailure(this.error, this.stackTrace);
@@ -609,6 +610,9 @@ class VibekitsLmcpProtocol {
       'structuredContent': structured,
       'isError': isError,
       'instanceId': instanceId,
+      'toolName': toolName,
+      // Backward-compatible alias for LMCP/2 clients released before the
+      // engineering envelope standardized on `toolName`.
       'tool': toolName,
       'catalogRevision': catalogRevision,
       'traceId': traceId,

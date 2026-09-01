@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_background_runner.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_platform_policy.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_targets.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_task.dart';
 
@@ -43,6 +44,7 @@ void main() {
     final List<CleanupScanTarget> targets =
         await CleanupBackgroundRunner.discoverTargets(
           bundledRuleDatabase: database,
+          platform: CleanupPlatform.windows,
         );
 
     expect(
@@ -57,8 +59,9 @@ void main() {
     );
     addTearDown(() => directory.deleteSync(recursive: true));
     for (int index = 0; index < 800; index++) {
-      File('${directory.path}${Platform.pathSeparator}$index.tmp')
-          .writeAsStringSync('cache-$index');
+      File(
+        '${directory.path}${Platform.pathSeparator}$index.tmp',
+      ).writeAsStringSync('cache-$index');
     }
     final CleanupCancellationToken token = CleanupCancellationToken();
     int progressEvents = 0;
@@ -98,10 +101,12 @@ void main() {
       '${sandbox.path}${Platform.pathSeparator}second',
     )..createSync();
     for (int index = 0; index < 40; index++) {
-      File('${first.path}${Platform.pathSeparator}$index.log')
-          .writeAsStringSync('first-$index');
-      File('${second.path}${Platform.pathSeparator}$index.log')
-          .writeAsStringSync('second-$index');
+      File(
+        '${first.path}${Platform.pathSeparator}$index.log',
+      ).writeAsStringSync('first-$index');
+      File(
+        '${second.path}${Platform.pathSeparator}$index.log',
+      ).writeAsStringSync('second-$index');
     }
     final List<int> visitedProgress = <int>[];
     final CleanupScanResult result = await CleanupBackgroundRunner.scanTargets(

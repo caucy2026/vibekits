@@ -1,0 +1,89 @@
+## 1.0.4
+
+- Add extensive documentation for the public API.
+- Expand README usage, configuration, reader, and lifecycle guidance.
+- Update the README binding generation command.
+
+## 1.0.3
+
+- Code refactor
+
+## 1.0.2
+
+- Widen the `code_assets` constraint to >=1.0.0 <3.0.0
+
+## 1.0.1
+
+- Fix build system for unsupported platforms
+
+## 1.0.0
+
+- **Breaking:** Update minimum Dart SDK version to 3.10.0
+- **Breaking:** Convert from a Flutter FFI plugin to a Dart FFI package using Native Assets build hooks
+- **Breaking:** Remove the Flutter plugin platform scaffolding and `flutter` SDK dependency
+- **Breaking:** Replace package-defined serial config and transport enum wrappers with generated binding enum types
+- Add a Dart build hook for compiling bundled `libserialport` sources on Android, Linux, macOS, and Windows
+- Move `ffigen` configuration into `tool/ffigen.dart` and regenerate bindings for code assets
+- Move integration tests from the example app into the package `test/` directory
+
+## 0.1.2
+
+- Update ffigen configuration
+
+## 0.1.1
+
+- Change package license to MIT
+
+## 0.1.0
+
+- Add automatic port closing with `NativeFinalizer`
+
+## 0.0.12
+
+- Remove invalid config argument from `SerialPort` constructor
+
+## 0.0.11
+
+- Update CHANGELOG.md
+
+## 0.0.10
+
+- Change `close()` method in `SerialPortReader` to `Future<void>`
+
+## 0.0.9
+
+- Fix `nullptr` exceptions
+
+## 0.0.8
+
+- Change `SerialPortReader` behavior to auto-close on disconnect or when error occurs
+
+## 0.0.7
+
+- Fix Android build
+
+## 0.0.6
+
+- Update pubspec.yaml description
+
+## 0.0.5
+
+- Remove unused dependencies
+
+## 0.0.4
+
+- Fix error handling
+
+## 0.0.3
+
+- Remove iOS support
+- Fix macOS support
+- Add macOS setup in README.md
+
+## 0.0.2
+
+- Update README.md
+
+## 0.0.1
+
+- Add `SerialPort`, `SerialPortReader`, `SerialPortInfo` and `SerialPortConfig`

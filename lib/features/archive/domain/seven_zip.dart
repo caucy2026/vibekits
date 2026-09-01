@@ -38,19 +38,24 @@ abstract final class SevenZip {
     if (env != null && env.isNotEmpty) {
       candidates.add(env);
     }
-    candidates.add(
-      '${Directory.current.path}${Platform.pathSeparator}native'
-      '${Platform.pathSeparator}7zip${Platform.pathSeparator}7z.exe',
-    );
-    candidates.add(
-      '${File(Platform.resolvedExecutable).parent.path}'
-      '${Platform.pathSeparator}tools${Platform.pathSeparator}7zip'
-      '${Platform.pathSeparator}7z.exe',
-    );
-    candidates.add(
-      '${Directory.current.path}${Platform.pathSeparator}native'
-      '${Platform.pathSeparator}7za${Platform.pathSeparator}7za.exe',
-    );
+    final String separator = Platform.pathSeparator;
+    final String executableDirectory = File(
+      Platform.resolvedExecutable,
+    ).parent.path;
+    if (Platform.isWindows) {
+      candidates.addAll(<String>[
+        '${Directory.current.path}${separator}native${separator}7zip${separator}7z.exe',
+        '$executableDirectory${separator}tools${separator}7zip${separator}7z.exe',
+        '${Directory.current.path}${separator}native${separator}7za${separator}7za.exe',
+      ]);
+    } else if (Platform.isMacOS) {
+      candidates.addAll(<String>[
+        '$executableDirectory$separator..${separator}Resources${separator}tools'
+            '${separator}7zip${separator}7zz',
+        '${Directory.current.path}${separator}native${separator}7zip'
+            '${separator}macos${separator}runtime${separator}7zz',
+      ]);
+    }
     return candidates;
   }
 

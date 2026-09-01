@@ -73,6 +73,9 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.savePermissionMode = HarnessAgentPreferencesStore.savePermissionMode,
     this.externalPrompt = '',
     this.externalPromptSerial = 0,
+    this.remoteWorkspaceLauncher,
+    this.screenshotOcrRunner,
+    this.downloadDirectory = '',
   });
 
   final String initialWorkspace;
@@ -95,6 +98,9 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final HarnessAgentPermissionSaver savePermissionMode;
   final String externalPrompt;
   final int externalPromptSerial;
+  final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
+  final HarnessScreenshotOcrRunner? screenshotOcrRunner;
+  final String downloadDirectory;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
@@ -228,6 +234,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     bool agentOrchestrated = false,
     _HarnessSessionRun? run,
   }) => VibekitsHarnessToolBridge(
+    credentialReader: widget.credentialReader,
+    remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
+    screenshotOcrRunner: widget.screenshotOcrRunner,
+    downloadDirectory: widget.downloadDirectory,
     activityRecorder:
         ({
           required String toolId,

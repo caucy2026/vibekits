@@ -50,8 +50,8 @@ void main() {
       sandbox.path,
     );
     expect(
-      File(snapshot.root).absolute.path.replaceAll('\\', '/'),
-      sandbox.absolute.path.replaceAll('\\', '/'),
+      Directory(snapshot.root).resolveSymbolicLinksSync(),
+      sandbox.resolveSymbolicLinksSync(),
     );
     expect(snapshot.branch, isNotEmpty);
     expect(snapshot.status, contains('main.txt'));
@@ -143,13 +143,15 @@ void main() {
     run(sandbox.path, <String>['init']);
     run(sandbox.path, <String>['config', 'user.name', 'Vibekits Test']);
     run(sandbox.path, <String>['config', 'user.email', 'test@vibekits.local']);
-    File('${sandbox.path}${Platform.pathSeparator}README.md')
-        .writeAsStringSync('safe\n');
+    File(
+      '${sandbox.path}${Platform.pathSeparator}README.md',
+    ).writeAsStringSync('safe\n');
     run(sandbox.path, <String>['add', 'README.md']);
     run(sandbox.path, <String>['commit', '-m', 'initial']);
     run(sandbox.path, <String>['remote', 'add', 'backup', remote.path]);
-    File('${sandbox.path}${Platform.pathSeparator}.env')
-        .writeAsStringSync('API_KEY=super-secret-value-12345\n');
+    File(
+      '${sandbox.path}${Platform.pathSeparator}.env',
+    ).writeAsStringSync('API_KEY=super-secret-value-12345\n');
 
     final GitBackupPreview preview = await GitRepositoryService.previewBackup(
       sandbox.path,

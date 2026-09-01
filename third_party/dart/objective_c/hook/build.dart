@@ -1,0 +1,235 @@
+// Copyright (c) 2025, the Dart project authors.  Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
+
+import 'dart:io';
+
+import 'package:code_assets/code_assets.dart';
+import 'package:hooks/hooks.dart';
+import 'package:logging/logging.dart';
+
+const objCFlags = ['-x', 'objective-c', '-fobjc-arc'];
+
+const assetName = 'objective_c.dylib';
+
+final logger = Logger('')
+  ..level = Level.INFO
+  ..onRecord.listen((record) {
+    print('${record.level.name}: ${record.time}: ${record.message}');
+  });
+
+void main(List<String> args) async {
+  await build(args, (input, output) async {
+    if (!input.config.buildCodeAssets) {
+      // Don't build any other asset types.
+      return;
+    }
+
+    const supportedOSs = {OS.iOS, OS.macOS};
+    final codeConfig = input.config.code;
+    final os = codeConfig.targetOS;
+    if (!supportedOSs.contains(os)) {
+      // Nothing to do.
+      return;
+    }
+
+    if (codeConfig.linkModePreference == LinkModePreference.static) {
+      throw UnsupportedError('LinkModePreference.static is not supported.');
+    }
+
+    final packageName = input.packageName;
+    final assetPath = input.outputDirectory.resolve(assetName);
+    final srcDir = Directory.fromUri(input.packageRoot.resolve('src/'));
+    final target = toTargetTriple(codeConfig);
+
+    final cFiles = <String>[];
+    final mFiles = <String>[];
+    final hFiles = <String>[];
+    for (final file in srcDir.listSync(recursive: true)) {
+      if (file is File) {
+        final path = file.path;
+        if (path.endsWith('.c')) cFiles.add(path);
+        if (path.endsWith('.m')) mFiles.add(path);
+        if (path.endsWith('.h')) hFiles.add(path);
+      }
+    }
+
+    final testMode = input.userDefines['include_test_utils'] == true;
+    if (testMode) {
+      mFiles.add(input.packageRoot.resolve('test/gc_inject.m').toFilePath());
+      mFiles.add(
+        input.packageRoot.resolve('test/reference_tracker.m').toFilePath(),
+      );
+    }
+
+    final sysroot = sdkPath(codeConfig);
+    final minVersion = minOSVersion(codeConfig);
+
+    // TODO(https://github.com/flutter/flutter/issues/186856): Remove this
+    // workaround and just use -target. Atm this is necessary for AOT testing.
+    final useArm64e =
+        testMode && codeConfig.targetArchitecture == Architecture.arm64;
+
+    final cFlags = <String>[
+      '-isysroot',
+      sysroot,
+      if (useArm64e) ...['-arch', 'arm64e'] else ...['-target', target],
+      minVersion,
+    ];
+    final mFlags = [...cFlags, ...objCFlags];
+    final linkFlags = cFlags;
+
+    final builder = await Builder.create(input, input.packageRoot.toFilePath());
+
+    final objectFiles = await Future.wait(<Future<String>>[
+      for (final src in cFiles) builder.buildObject(src, cFlags),
+      for (final src in mFiles) builder.buildObject(src, mFlags),
+    ]);
+    await builder.linkLib(objectFiles, assetPath.toFilePath(), linkFlags);
+
+    output.dependencies.addAll(cFiles.map(Uri.file));
+    output.dependencies.addAll(mFiles.map(Uri.file));
+    output.dependencies.addAll(hFiles.map(Uri.file));
+
+    output.assets.code.add(
+      CodeAsset(
+        package: packageName,
+        name: assetName,
+        file: assetPath,
+        linkMode: DynamicLoadingBundled(),
+      ),
+    );
+  });
+}
+
+class Builder {
+  final String _compiler;
+  final String _rootDir;
+  final Uri _tempOutDir;
+  Builder._(this._compiler, this._rootDir, this._tempOutDir);
+
+  static Future<Builder> create(BuildInput input, String rootDir) async {
+    return Builder._(
+      await _findCompiler(input.config.code),
+      rootDir,
+      input.outputDirectory.resolve('obj/'),
+    );
+  }
+
+  static Future<String> _findCompiler(CodeConfig codeConfig) async {
+    final compiler = codeConfig.cCompiler?.compiler.toFilePath();
+    if (compiler != null) {
+      assert(await File(compiler).exists());
+      logger.info('Using compiler $compiler from BuildInput.cCompiler.cc.');
+      return compiler;
+    }
+    logger.info(
+      'No compiler set in BuildInput.cCompiler.cc. Falling back to '
+      'assuming clang is in the PATH.',
+    );
+    return 'clang';
+  }
+
+  Future<String> buildObject(String input, List<String> flags) async {
+    assert(input.startsWith(_rootDir));
+    final relativeInput = input.substring(_rootDir.length);
+    final output = '${_tempOutDir.resolve(relativeInput).toFilePath()}.o';
+    File(output).parent.createSync(recursive: true);
+    await _compile([
+      ...flags,
+      '-c',
+      input,
+      '-fpic',
+      '-gline-tables-only',
+      '-I',
+      'src',
+    ], output);
+    return output;
+  }
+
+  Future<void> linkLib(
+    List<String> objects,
+    String output,
+    List<String> flags,
+  ) => _compile([
+    '-shared',
+    '-Wl,-encryptable',
+    '-undefined',
+    'dynamic_lookup',
+    ...flags,
+    ...objects,
+  ], output);
+
+  Future<void> _compile(List<String> flags, String output) async {
+    final args = [...flags, '-o', output];
+    logger.info('Running: $_compiler ${args.join(" ")}');
+    final proc = await Process.run(_compiler, args);
+    logger.info(proc.stdout);
+    logger.info(proc.stderr);
+    if (proc.exitCode != 0) {
+      exitCode = proc.exitCode;
+      throw Exception('Command failed: $_compiler ${args.join(" ")}');
+    }
+    logger.info('Generated $output');
+  }
+}
+
+String sdkPath(CodeConfig codeConfig) {
+  final String target;
+  if (codeConfig.targetOS == OS.iOS) {
+    if (codeConfig.iOS.targetSdk == IOSSdk.iPhoneOS) {
+      target = 'iphoneos';
+    } else {
+      target = 'iphonesimulator';
+    }
+  } else {
+    assert(codeConfig.targetOS == OS.macOS);
+    target = 'macosx';
+  }
+  return firstLineOfStdout('xcrun', ['--show-sdk-path', '--sdk', target]);
+}
+
+String firstLineOfStdout(String cmd, List<String> args) {
+  final result = Process.runSync(cmd, args);
+  assert(result.exitCode == 0);
+  return (result.stdout as String)
+      .split('\n')
+      .where((line) => line.isNotEmpty)
+      .first;
+}
+
+String minOSVersion(CodeConfig codeConfig) {
+  if (codeConfig.targetOS == OS.iOS) {
+    final targetVersion = codeConfig.iOS.targetVersion;
+    return '-mios-version-min=$targetVersion';
+  }
+  assert(codeConfig.targetOS == OS.macOS);
+  // Flutter currently supplies 13 here regardless of the Runner project's
+  // deployment target (flutter/flutter#145104). Vibekits supports macOS 12,
+  // and this library only uses APIs guarded by generated availability checks,
+  // so compile the bundled native asset for the app's documented floor.
+  const targetVersion = 12;
+  return '-mmacos-version-min=$targetVersion';
+}
+
+String toTargetTriple(CodeConfig codeConfig) {
+  final architecture = codeConfig.targetArchitecture;
+  if (codeConfig.targetOS == OS.iOS) {
+    return appleClangIosTargetFlags[architecture]![codeConfig.iOS.targetSdk]!;
+  }
+  assert(codeConfig.targetOS == OS.macOS);
+  return appleClangMacosTargetFlags[architecture]!;
+}
+
+const appleClangMacosTargetFlags = {
+  Architecture.arm64: 'arm64-apple-darwin',
+  Architecture.x64: 'x86_64-apple-darwin',
+};
+
+const appleClangIosTargetFlags = {
+  Architecture.arm64: {
+    IOSSdk.iPhoneOS: 'arm64-apple-ios',
+    IOSSdk.iPhoneSimulator: 'arm64-apple-ios-simulator',
+  },
+  Architecture.x64: {IOSSdk.iPhoneSimulator: 'x86_64-apple-ios-simulator'},
+};

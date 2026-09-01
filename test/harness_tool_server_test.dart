@@ -152,12 +152,16 @@ void main() {
     final String root = Directory.current.path;
     final String runtime =
         '$root${Platform.pathSeparator}native${Platform.pathSeparator}harness'
-        '${Platform.pathSeparator}windows${Platform.pathSeparator}runtime';
+        '${Platform.pathSeparator}${Platform.isWindows ? 'windows' : 'macos'}'
+        '${Platform.pathSeparator}runtime';
     final String externalMcp =
-        '$root${Platform.pathSeparator}native${Platform.pathSeparator}harness'
-        '${Platform.pathSeparator}vibekits-codex-mcp.mjs';
+        '$runtime${Platform.pathSeparator}'
+        'vibekits-codex-mcp.mjs';
+    final String node = Platform.isWindows
+        ? '$runtime${Platform.pathSeparator}node.exe'
+        : '$runtime${Platform.pathSeparator}bin${Platform.pathSeparator}node';
     final Process process = await Process.start(
-      '$runtime${Platform.pathSeparator}node.exe',
+      node,
       <String>[externalMcp],
       environment: <String, String>{
         'VIBEKITS_TOOL_BRIDGE_FILE': connectionFile.path,

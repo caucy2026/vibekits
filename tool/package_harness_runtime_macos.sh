@@ -71,3 +71,57 @@ for ADB_METADATA in NOTICE.txt source.properties package.xml; do
   fi
 done
 echo "Packaged ADB runtime: $ADB_DESTINATION/adb"
+
+# Archive features advertise RAR/ISO/ZSTD support on macOS only when the
+# official App-private 7-Zip executable is present. Never fall back to PATH.
+SEVEN_ZIP_SOURCE="$PROJECT_ROOT/native/7zip/macos/runtime"
+SEVEN_ZIP_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/7zip"
+if [ ! -x "$SEVEN_ZIP_SOURCE/7zz" ]; then
+  echo "Official macOS 7-Zip runtime is missing." >&2
+  echo "Run tool/prepare_7zip_runtime_macos.sh before Release packaging." >&2
+  exit 5
+fi
+rm -rf "$SEVEN_ZIP_DESTINATION"
+mkdir -p "$SEVEN_ZIP_DESTINATION"
+ditto "$SEVEN_ZIP_SOURCE/7zz" "$SEVEN_ZIP_DESTINATION/7zz"
+chmod 755 "$SEVEN_ZIP_DESTINATION/7zz"
+for SEVEN_ZIP_METADATA in License.txt readme.txt History.txt; do
+  if [ -f "$SEVEN_ZIP_SOURCE/$SEVEN_ZIP_METADATA" ]; then
+    ditto "$SEVEN_ZIP_SOURCE/$SEVEN_ZIP_METADATA" \
+      "$SEVEN_ZIP_DESTINATION/$SEVEN_ZIP_METADATA"
+  fi
+done
+codesign --force --sign - "$SEVEN_ZIP_DESTINATION/7zz"
+echo "Packaged 7-Zip runtime: $SEVEN_ZIP_DESTINATION/7zz"
+
+# Git features must work on a clean Mac without Xcode Command Line Tools.
+# Package the pinned Universal runtime instead of falling back to /usr/bin/git.
+GIT_SOURCE="$PROJECT_ROOT/native/git/macos/runtime"
+GIT_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/git"
+if [ ! -x "$GIT_SOURCE/bin/git" ] || \
+   [ ! -x "$GIT_SOURCE/libexec/git-core/git-remote-https" ] || \
+   [ ! -d "$GIT_SOURCE/share/git-core/templates" ]; then
+  echo "Official macOS Git runtime is missing or incomplete." >&2
+  echo "Run tool/prepare_git_runtime_macos.sh before Release packaging." >&2
+  exit 6
+fi
+rm -rf "$GIT_DESTINATION"
+mkdir -p "$GIT_DESTINATION"
+ditto "$GIT_SOURCE" "$GIT_DESTINATION"
+GIT_SIGNED_INODES="$(mktemp)"
+trap 'rm -f "$GIT_SIGNED_INODES"' EXIT
+while IFS= read -r -d '' GIT_ITEM; do
+  GIT_KIND="$(/usr/bin/file -b "$GIT_ITEM")"
+  case "$GIT_KIND" in
+    Mach-O*)
+      GIT_INODE="$(stat -f '%i' "$GIT_ITEM")"
+      if grep -Fxq "$GIT_INODE" "$GIT_SIGNED_INODES"; then
+        continue
+      fi
+      printf '%s\n' "$GIT_INODE" >> "$GIT_SIGNED_INODES"
+      chmod 755 "$GIT_ITEM"
+      codesign --force --sign - "$GIT_ITEM"
+      ;;
+  esac
+done < <(find "$GIT_DESTINATION" -type f -print0)
+echo "Packaged Git runtime: $GIT_DESTINATION/bin/git"

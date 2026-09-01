@@ -88,6 +88,7 @@ void main() {
         CleanupTargetDiscovery.discover(
           environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
           windowsBuild: 22621,
+          platform: CleanupPlatform.windows,
         ).singleWhere(
           (CleanupScanTarget item) =>
               item.id == 'system-drive-root-large-diagnostics',
@@ -110,6 +111,7 @@ void main() {
         CleanupTargetDiscovery.discover(
           environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
           windowsBuild: 22621,
+          platform: CleanupPlatform.windows,
         ).singleWhere(
           (CleanupScanTarget item) => item.id == 'est-encryption-old-logs',
         );
@@ -180,6 +182,7 @@ void main() {
         CleanupTargetDiscovery.discover(
               environment: <String, String>{'USERPROFILE': sandbox.path},
               windowsBuild: 22621,
+              platform: CleanupPlatform.windows,
             )
             .where((CleanupScanTarget target) {
               return target.id == 'jetbrains-crash-heap-dumps' ||
@@ -242,13 +245,15 @@ void main() {
       '$explorer${Platform.pathSeparator}settings.dat',
     )..writeAsStringSync('keep');
     unrelated.setLastModifiedSync(old);
-    File('$explorer${Platform.pathSeparator}iconcache_32.db')
-        .writeAsStringSync('new cache');
+    File(
+      '$explorer${Platform.pathSeparator}iconcache_32.db',
+    ).writeAsStringSync('new cache');
     final File oldLog = File('$codeLogs${Platform.pathSeparator}renderer.log')
       ..writeAsStringSync('old log');
     oldLog.setLastModifiedSync(old);
-    File('$codeLogs${Platform.pathSeparator}current.log')
-        .writeAsStringSync('new log');
+    File(
+      '$codeLogs${Platform.pathSeparator}current.log',
+    ).writeAsStringSync('new log');
 
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{
@@ -257,6 +262,7 @@ void main() {
         'WINDIR': windows,
       },
       windowsBuild: 22621,
+      platform: CleanupPlatform.windows,
     );
     final Set<String> ids = targets
         .map((CleanupScanTarget target) => target.id)
@@ -306,6 +312,7 @@ void main() {
         'WINDIR': windows,
       },
       windowsBuild: 7601,
+      platform: CleanupPlatform.windows,
     ).map((CleanupScanTarget target) => target.id).toSet();
     expect(legacyIds, isNot(contains('delivery-optimization-cache')));
   });
@@ -341,6 +348,7 @@ void main() {
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{'SYSTEMDRIVE': drive.path},
       windowsBuild: 22621,
+      platform: CleanupPlatform.windows,
     );
     final CleanupScanTarget discovered = targets.singleWhere(
       (CleanupScanTarget target) => target.path == estlog.path,
@@ -402,10 +410,12 @@ void main() {
         'cache2',
       ].join(Platform.pathSeparator),
     ).createSync(recursive: true);
-    Directory(<String>[local, 'D3DSCache'].join(Platform.pathSeparator))
-        .createSync(recursive: true);
-    Directory(<String>[local, 'CrashDumps'].join(Platform.pathSeparator))
-        .createSync(recursive: true);
+    Directory(
+      <String>[local, 'D3DSCache'].join(Platform.pathSeparator),
+    ).createSync(recursive: true);
+    Directory(
+      <String>[local, 'CrashDumps'].join(Platform.pathSeparator),
+    ).createSync(recursive: true);
 
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: <String, String>{
@@ -413,6 +423,7 @@ void main() {
         'WINDIR': '${sandbox.path}${Platform.pathSeparator}Windows',
         'LOCALAPPDATA': local,
       },
+      platform: CleanupPlatform.windows,
     );
     final Set<String> ids = targets
         .map((CleanupScanTarget target) => target.id)
@@ -443,8 +454,9 @@ void main() {
   test('清理候选保留具体缓存来源供用户核对', () async {
     final Directory sandbox = Directory.systemTemp.createTempSync('vk_source');
     addTearDown(() => sandbox.deleteSync(recursive: true));
-    File('${sandbox.path}${Platform.pathSeparator}cache.bin')
-        .writeAsBytesSync(<int>[1, 2, 3]);
+    File(
+      '${sandbox.path}${Platform.pathSeparator}cache.bin',
+    ).writeAsBytesSync(<int>[1, 2, 3]);
     final CleanupScanResult result =
         await CleanupScanner.scanDirectoryWithProgress(
           sandbox.path,
@@ -517,6 +529,7 @@ void main() {
         'APPDATA': roaming,
         'USERPROFILE': profile,
       },
+      platform: CleanupPlatform.windows,
     ).map((CleanupScanTarget target) => target.id).toSet();
 
     expect(
@@ -552,10 +565,12 @@ void main() {
         File(<String>[downloads.path, 'setup.exe'].join(Platform.pathSeparator))
           ..writeAsStringSync('installer')
           ..setLastModifiedSync(old);
-    File(<String>[downloads.path, 'new-setup.exe'].join(Platform.pathSeparator))
-        .writeAsStringSync('new');
-    File(<String>[downloads.path, 'notes.txt'].join(Platform.pathSeparator))
-        .writeAsStringSync('keep');
+    File(
+      <String>[downloads.path, 'new-setup.exe'].join(Platform.pathSeparator),
+    ).writeAsStringSync('new');
+    File(
+      <String>[downloads.path, 'notes.txt'].join(Platform.pathSeparator),
+    ).writeAsStringSync('keep');
     final CleanupScanTarget target = CleanupScanTarget(
       id: 'downloads-suggestions',
       label: '下载目录清理建议',
@@ -688,6 +703,7 @@ void main() {
         'LOCALAPPDATA': local,
         'USERPROFILE': profile,
       },
+      platform: CleanupPlatform.windows,
     );
 
     expect(
@@ -832,6 +848,7 @@ void main() {
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
       environment: const <String, String>{},
       harnessDebugDirectory: sandbox.path,
+      platform: CleanupPlatform.windows,
     );
     final List<CleanupScanTarget> harness = targets
         .where((CleanupScanTarget target) => target.id.startsWith('harness-'))
@@ -862,6 +879,7 @@ void main() {
 
     final CleanupScanTarget target = CleanupTargetDiscovery.discover(
       environment: <String, String>{'SYSTEMDRIVE': sandbox.path},
+      platform: CleanupPlatform.windows,
     ).singleWhere((item) => item.id == 'system-drive-log-inventory');
     expect(target.maxEntries, 25000);
     expect(target.defaultEnabled, isFalse);
@@ -876,8 +894,13 @@ void main() {
   });
 
   test('回收站与系统盘日志清单共用盘符但不会被去重', () {
+    final Directory drive = Directory.systemTemp.createTempSync(
+      'vk_windows_drive_',
+    );
+    addTearDown(() => drive.deleteSync(recursive: true));
     final List<CleanupScanTarget> targets = CleanupTargetDiscovery.discover(
-      environment: const <String, String>{'SYSTEMDRIVE': r'C:'},
+      environment: <String, String>{'SYSTEMDRIVE': drive.path},
+      platform: CleanupPlatform.windows,
     );
     final CleanupScanTarget recycle = targets.singleWhere(
       (CleanupScanTarget item) => item.id == 'system-recycle-bin',
@@ -898,13 +921,15 @@ void main() {
     final Directory stale = Directory(
       '${sandbox.path}${Platform.pathSeparator}16.1.old',
     )..createSync();
-    File('${stale.path}${Platform.pathSeparator}payload.bin')
-        .writeAsBytesSync(List<int>.filled(4096, 7));
+    File(
+      '${stale.path}${Platform.pathSeparator}payload.bin',
+    ).writeAsBytesSync(List<int>.filled(4096, 7));
     final Directory current = Directory(
       '${sandbox.path}${Platform.pathSeparator}16.2.current',
     )..createSync();
-    File('${current.path}${Platform.pathSeparator}payload.bin')
-        .writeAsBytesSync(List<int>.filled(8192, 8));
+    File(
+      '${current.path}${Platform.pathSeparator}payload.bin',
+    ).writeAsBytesSync(List<int>.filled(8192, 8));
 
     final CleanupScanResult result = await CleanupScanner.scanTargets(
       <CleanupScanTarget>[
@@ -944,12 +969,15 @@ void main() {
     final Directory public = Directory(
       '${users.path}${Platform.pathSeparator}Public',
     )..createSync();
-    File('${current.path}${Platform.pathSeparator}keep.bin')
-        .writeAsBytesSync(List<int>.filled(11, 1));
-    File('${retired.path}${Platform.pathSeparator}NTUSER.DAT')
-        .writeAsBytesSync(List<int>.filled(37, 2));
-    File('${public.path}${Platform.pathSeparator}shared.bin')
-        .writeAsBytesSync(List<int>.filled(19, 3));
+    File(
+      '${current.path}${Platform.pathSeparator}keep.bin',
+    ).writeAsBytesSync(List<int>.filled(11, 1));
+    File(
+      '${retired.path}${Platform.pathSeparator}NTUSER.DAT',
+    ).writeAsBytesSync(List<int>.filled(37, 2));
+    File(
+      '${public.path}${Platform.pathSeparator}shared.bin',
+    ).writeAsBytesSync(List<int>.filled(19, 3));
 
     final CleanupScanTarget target =
         CleanupTargetDiscovery.discover(

@@ -3,8 +3,9 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # DSH requires Node >=22.19. Node 22.19 is the lowest compatible official
-# runtime and its Intel binary targets macOS 11.0. The Flutter application shell
-# still targets macOS 10.15; the release verifier reports both boundaries.
+# runtime and its Intel binary targets macOS 11.0, which is valid inside the
+# full-function macOS 12+ application. The release verifier rejects any bundled
+# Mach-O that requires a system newer than macOS 12.
 NODE_VERSION="${NODE_VERSION:-22.19.0}"
 DSH_VERSION="${DSH_VERSION:-0.1.1-rc.2}"
 TARGET="${1:-$PROJECT_ROOT/native/harness/macos/runtime}"
@@ -130,7 +131,6 @@ NODE="$NODE_DIST/bin/node"
   install_x64_package '@img/sharp-darwin-x64@0.35.4' '@img/sharp-darwin-x64'
   install_x64_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
   install_x64_package '@koromix/koffi-darwin-x64@3.1.6' '@koromix/koffi-darwin-x64'
-  install_x64_package 'node-addon-require-builtin-darwin-x64@0.1.5' 'node-addon-require-builtin-darwin-x64'
   install_x64_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
 
   # node-pty ships every platform in one package. A macOS runtime needs only
@@ -154,6 +154,13 @@ rm -rf "$TARGET"
 mkdir -p "$TARGET/bin" "$TARGET/profile"
 cp "$NODE_DIST/bin/node" "$TARGET/bin/node"
 ditto "$PACKAGE_ROOT/node_modules" "$TARGET/node_modules"
+# Published node-addon-require-builtin 0.1.5 Darwin binaries require macOS 15.
+# The pinned official DSH loader supports Node's explicit --expose-internals
+# path, which every macOS VibeKits launch uses. Remove the incompatible optional
+# fallback packages instead of shipping a hidden macOS 15 dependency.
+rm -rf \
+  "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64" \
+  "$TARGET/node_modules/node-addon-require-builtin-darwin-x64"
 for FILE in \
   vibekits-mcp-server.mjs \
   vibekits-codex-mcp.mjs \
@@ -169,6 +176,7 @@ cat > "$TARGET/harness-runtime.json" <<EOF
   "version": "@deepseek-ai/dsh@$DSH_VERSION",
   "nodeVersion": "v$NODE_VERSION",
   "architectures": ["arm64", "x86_64"],
+  "nodeArguments": ["--expose-internals"],
   "cli": "$CLI_RELATIVE"
 }
 EOF
@@ -182,8 +190,8 @@ test -f "$TARGET/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.3
 test -f "$TARGET/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node"
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node"
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node"
-test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node"
-test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node"
+test ! -d "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64"
+test ! -d "$TARGET/node_modules/node-addon-require-builtin-darwin-x64"
 test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-arm64/bin/rg"
 test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-x64/bin/rg"
 echo "Prepared macOS Harness runtime: $TARGET"

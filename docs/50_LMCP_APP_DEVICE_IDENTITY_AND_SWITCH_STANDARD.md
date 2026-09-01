@@ -666,7 +666,7 @@ VibeKits 直接使用 `tools/list` 的 `name` 与用户任务生成参数：
 - 长任务不要占用无限 HTTP 请求，应返回 `taskId`，再提供明确描述的 status/cancel 工具。
 - 每个响应保留 `instanceId`、工具名、目录版本和服务端追踪 ID，便于 VibeKits 审计来源。
 
-身份扩展字段允许位于 `tools/call.result` 顶层，或位于 MCP 标准的 `tools/call.result.structuredContent`；同一次响应不得给出两套冲突值。VibeKits 从两处合并读取后仍严格比较公告的 `instanceId`、实际工具名和 `catalogRevision`，缺失或不一致都拒绝结果。
+身份扩展字段允许位于 `tools/call.result` 顶层，或位于 MCP 标准的 `tools/call.result.structuredContent`；规范字段名固定为 `instanceId`、`toolName`、`catalogRevision`。为兼容早期 LMCP/2 实现，接收端可把 `tool` 作为 `toolName` 的只读旧别名，但新提供者必须发送 `toolName`，不得只发送 `tool`。同一次响应不得在顶层、`structuredContent` 或新旧别名中给出冲突值。VibeKits 合并全部已出现的身份值后仍严格比较公告的 `instanceId`、实际工具名和 `catalogRevision`；任何字段缺失或任何副本不一致都拒绝结果，禁止用优先级覆盖冲突值。
 
 ### 5.5 异步任务必须提供完整参数和可回收结果（KEMI-BM 生产样例）
 

@@ -66,9 +66,9 @@ void main() {
                       'index': 1,
                       'id': 'call_pwsh',
                       'function': <String, Object?>{
-                        'name': 'pwsh',
-                        'arguments': jsonEncode(<String, Object?>{'command': 'Set-Content -LiteralPath native-approved.txt '
-                            '-Value VIBEKITS_NATIVE_OK', 'description': 'Verify native approval bridge', 'sandbox_permissions': 'danger-full-access', 'justification': 'Verify the App permission selection reaches '
+                        'name': Platform.isWindows ? 'pwsh' : 'bash',
+                        'arguments': jsonEncode(<String, Object?>{'command': Platform.isWindows ? 'Set-Content -LiteralPath native-approved.txt '
+                                  '-Value VIBEKITS_NATIVE_OK' : 'printf VIBEKITS_NATIVE_OK > native-approved.txt', 'description': 'Verify native approval bridge', 'sandbox_permissions': 'danger-full-access', 'justification': 'Verify the App permission selection reaches '
                             'native Harness tools.'}),
                       },
                     },

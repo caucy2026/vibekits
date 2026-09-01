@@ -27,12 +27,13 @@ import 'svg_document_view.dart';
 import 'web_document_view.dart';
 
 typedef DocumentBytesReader = Future<Uint8List> Function(String path);
-typedef DocumentFileSaver = Future<SourceSaveResult> Function(
-  String path,
-  Uint8List bytes,
-  int expectedSize,
-  DateTime? expectedModified,
-);
+typedef DocumentFileSaver =
+    Future<SourceSaveResult> Function(
+      String path,
+      Uint8List bytes,
+      int expectedSize,
+      DateTime? expectedModified,
+    );
 
 /// 文本文件完整读取上限（大文件流式读取属后续迭代，DOC-102 索引结构已就绪）。
 const int _kMaxTextBytes = 64 * 1024 * 1024;
@@ -438,8 +439,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
         : int.tryParse(input);
     if (offset == null || offset < 0 || offset >= _hexFileSize) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('偏移无效或超出文件范围')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('偏移无效或超出文件范围')));
       }
       return;
     }
@@ -504,8 +506,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
       }
       if (found == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('未找到，已搜索完整文件')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('未找到，已搜索完整文件')));
         }
       } else {
         if (mounted) setState(() => _hexBusy = false);
@@ -513,8 +516,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('搜索失败：$error')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('搜索失败：$error')));
       }
     } finally {
       if (mounted) setState(() => _hexBusy = false);
@@ -783,8 +787,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
       await widget.onRecentPathsChanged?.call(const <String>[]);
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('记录已从界面清空，但设置文件保存失败')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('记录已从界面清空，但设置文件保存失败')));
       }
     }
   }
@@ -958,9 +963,7 @@ class _DocumentsTabState extends State<DocumentsTab> {
                     itemCount: _recent.length,
                     itemBuilder: (BuildContext context, int index) {
                       final String path = _recent[index];
-                      final String name = path
-                          .split(Platform.pathSeparator)
-                          .last;
+                      final String name = path.split(RegExp(r'[\\/]')).last;
                       return ListTile(
                         dense: true,
                         title: Text(
@@ -1048,8 +1051,9 @@ class _DocumentsTabState extends State<DocumentsTab> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary
-                        .withValues(alpha: 0.09),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.09),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(

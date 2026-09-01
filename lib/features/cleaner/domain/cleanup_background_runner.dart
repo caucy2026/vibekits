@@ -256,6 +256,20 @@ abstract final class CleanupBackgroundRunner {
       _WorkerMessage(_WorkerMessageKind.ready, cancellationPort.sendPort),
     );
     try {
+      request.resultPort.send(
+        _WorkerMessage(
+          _WorkerMessageKind.progress,
+          CleanupScanProgress(
+            currentPath: request.targets.first.path,
+            visitedEntries: 0,
+            candidateCount: 0,
+            candidateBytes: 0,
+          ),
+        ),
+      );
+      // Let the controller process READY/progress and deliver an immediate
+      // cancellation before a small directory finishes in one event turn.
+      await Future<void>.delayed(Duration.zero);
       final CleanupScanResult result = await CleanupScanner.scanTargets(
         request.targets,
         cancellationToken: token,

@@ -106,6 +106,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: RemoteWorkspace(
+            writeCredential: (_, _) async {},
             secureStartSession:
                 (
                   RemoteLaunchRequest request,
@@ -160,11 +161,12 @@ void main() {
               credentials[key] = secret;
             },
             deleteCredential: (String key) async => credentials.remove(key),
-            secureStartSession: (
-              RemoteLaunchRequest request,
-              String? secret,
-              RemoteHostKeyVerifier verifyHostKey,
-            ) async => _FakeRemoteSession(),
+            secureStartSession:
+                (
+                  RemoteLaunchRequest request,
+                  String? secret,
+                  RemoteHostKeyVerifier verifyHostKey,
+                ) async => _FakeRemoteSession(),
           ),
         ),
       ),
@@ -628,6 +630,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: RemoteWorkspace(
+            writeCredential: (_, _) async {},
             launchIntent: const RemoteWorkspaceIntent(
               host: '192.168.3.20',
               user: 'root',
@@ -725,11 +728,12 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: RemoteWorkspace(
-            connectPortForwards: (
-              RemoteConnectionProfile profile,
-              String? secret,
-              RemoteHostKeyVerifier verifier,
-            ) async => connection,
+            connectPortForwards:
+                (
+                  RemoteConnectionProfile profile,
+                  String? secret,
+                  RemoteHostKeyVerifier verifier,
+                ) async => connection,
           ),
         ),
       ),

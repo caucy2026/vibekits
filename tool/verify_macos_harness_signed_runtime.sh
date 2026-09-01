@@ -18,7 +18,9 @@ fi
 
 NODE_SIGNATURE="$(codesign --display --verbose=4 "$NODE" 2>&1)"
 case "$NODE_SIGNATURE" in
-  *"flags=0x10000(runtime)"*) ;;
+  # Developer ID is flags=0x10000(runtime); local validation additionally has
+  # the ad-hoc bit and is flags=0x10002(adhoc,runtime).
+  *"flags="*"runtime"*) ;;
   *) echo "Harness Node is missing Hardened Runtime signing" >&2; exit 4 ;;
 esac
 
@@ -34,5 +36,11 @@ case "$NODE_VERSION" in
   *) echo "Unexpected Harness Node version: $NODE_VERSION" >&2; exit 6 ;;
 esac
 
-"$NODE" "$DSH" --help >/dev/null
-echo "Verified signed Harness runtime: Node=$NODE_VERSION, JIT=allowed, DSH=launchable"
+"$NODE" --expose-internals "$DSH" --help >/dev/null
+
+# `node --version` does not initialize the V8 baseline compiler. Running the
+# actual DSH entry under Rosetta catches an Intel-only Hardened Runtime failure.
+X64_NODE_VERSION="$(arch -x86_64 "$NODE" --version)"
+arch -x86_64 "$NODE" --jitless --expose-internals "$DSH" --help >/dev/null
+
+echo "Verified signed Harness runtime: Node=$NODE_VERSION, x86=$X64_NODE_VERSION, JIT=allowed, DSH=launchable"

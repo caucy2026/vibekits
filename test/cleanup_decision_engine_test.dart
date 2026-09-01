@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_decision_engine.dart';
+import 'package:vibekits/features/cleaner/domain/cleanup_platform_policy.dart';
 import 'package:vibekits/features/cleaner/domain/cleanup_scanner.dart';
 
 void main() {
@@ -39,6 +40,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
     );
 
     expect(
@@ -70,6 +72,7 @@ void main() {
           ),
         ],
         now: now,
+        platform: CleanupPlatform.windows,
         freeSpaceRatio: 0.01,
         protectedRoots: const <String>[r'C:\Vibekits'],
       );
@@ -96,6 +99,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
     );
 
     expect(plan.candidatesFor(CleanupDecisionTier.review), hasLength(2));
@@ -119,6 +123,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
     );
 
     expect(plan.decisions, hasLength(1));
@@ -137,6 +142,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
       freeSpaceRatio: 0.08,
     );
 
@@ -158,6 +164,7 @@ void main() {
     final CleanupDecisionPlan plan = CleanupDecisionEngine.buildPlan(
       candidates,
       now: now,
+      platform: CleanupPlatform.windows,
     );
     clock.stop();
 
@@ -178,6 +185,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
       freeSpaceRatio: 0.001,
     );
 
@@ -200,6 +208,7 @@ void main() {
         ),
       ],
       now: now,
+      platform: CleanupPlatform.windows,
       freeSpaceRatio: 0.001,
       harnessDebugDirectory: root,
     );

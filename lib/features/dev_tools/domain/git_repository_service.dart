@@ -1186,9 +1186,16 @@ abstract final class GitRepositoryService {
           ...arguments,
         ],
         runInShell: false,
-        environment: const <String, String>{
+        environment: <String, String>{
           'GIT_TERMINAL_PROMPT': '0',
           'GCM_INTERACTIVE': 'Never',
+          if (Platform.isMacOS) ...<String, String>{
+            'GIT_EXEC_PATH': '$runtimeRoot${Platform.pathSeparator}libexec'
+                '${Platform.pathSeparator}git-core',
+            'GIT_TEMPLATE_DIR': '$runtimeRoot${Platform.pathSeparator}share'
+                '${Platform.pathSeparator}git-core'
+                '${Platform.pathSeparator}templates',
+          },
         },
         includeParentEnvironment: true,
       );
@@ -1240,12 +1247,13 @@ abstract final class GitRepositoryService {
             '${Directory.current.path}${separator}native${separator}git'
                 '${separator}macos${separator}runtime${separator}bin'
                 '${separator}git',
+            if (Platform.isMacOS) '/usr/bin/git',
           ];
     for (final String candidate in candidates) {
       if (File(candidate).existsSync()) return File(candidate).absolute.path;
     }
     throw StateError(
-      '安装包缺少内置 Git 运行时，请重新安装 Vibekits。已检查：'
+      '缺少可用 Git 运行时，请重新安装 Vibekits 或恢复 macOS 系统 Git。已检查：'
       '${candidates.join('；')}',
     );
   }

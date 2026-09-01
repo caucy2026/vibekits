@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -180,17 +181,13 @@ abstract interface class HarnessAgentHandle {
 }
 
 typedef HarnessEnvironmentChecker = Future<HarnessEnvironmentReport> Function();
-typedef HarnessSessionStarter = Future<HarnessSessionHandle> Function(
-  HarnessLaunchSpec spec,
-);
+typedef HarnessSessionStarter =
+    Future<HarnessSessionHandle> Function(HarnessLaunchSpec spec);
 typedef HarnessBrowserOpener = Future<void> Function(Uri url);
-typedef HarnessAgentRunner = Future<HarnessAgentHandle> Function(
-  HarnessAgentRequest request,
-);
-typedef HarnessModelLister = Future<List<String>> Function(
-  String apiKey,
-  String baseUrl,
-);
+typedef HarnessAgentRunner =
+    Future<HarnessAgentHandle> Function(HarnessAgentRequest request);
+typedef HarnessModelLister =
+    Future<List<String>> Function(String apiKey, String baseUrl);
 
 abstract final class DeepSeekHarnessService {
   /// Official DSH ships optional multi-provider, telemetry and HMR plugins.
@@ -428,7 +425,11 @@ abstract final class DeepSeekHarnessService {
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
-        <String>[runtime.cliPath, ...spec.arguments],
+        <String>[
+          ..._nodeRuntimeArguments(),
+          runtime.cliPath,
+          ...spec.arguments,
+        ],
         workingDirectory: spec.workspace.trim(),
         runInShell: false,
         mode: ProcessStartMode.normal,
@@ -469,7 +470,11 @@ abstract final class DeepSeekHarnessService {
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
-        <String>[runtime.cliPath, ...request.arguments],
+        <String>[
+          ..._nodeRuntimeArguments(),
+          runtime.cliPath,
+          ...request.arguments,
+        ],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
           if (request.apiKey.trim().isNotEmpty)
@@ -570,7 +575,11 @@ abstract final class DeepSeekHarnessService {
     try {
       final Process process = await Process.start(
         runtime.nodeExecutable,
-        <String>[runtime.cliPath, ...request.arguments],
+        <String>[
+          ..._nodeRuntimeArguments(),
+          runtime.cliPath,
+          ...request.arguments,
+        ],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
           'DSH_HOME': harnessHome.path,
@@ -830,6 +839,14 @@ abstract final class DeepSeekHarnessService {
     });
   }
 
+  static List<String> _nodeRuntimeArguments() => <String>[
+    // Rosetta's V8 baseline compiler can fail Hardened Runtime MAP_JIT even
+    // with allow-jit. Jitless mode keeps Intel Harness functional without the
+    // broader allow-unsigned-executable-memory entitlement.
+    if (Platform.isMacOS && Abi.current() == Abi.macosX64) '--jitless',
+    if (Platform.isMacOS) '--expose-internals',
+  ];
+
   static Future<Directory> _prepareNodeCompileCache(
     _HarnessRuntime runtime,
     Directory harnessHome,
@@ -899,9 +916,9 @@ class _HarnessRuntime {
 }
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
-  final String executableDirectory = File(Platform.resolvedExecutable)
-      .parent
-      .path;
+  final String executableDirectory = File(
+    Platform.resolvedExecutable,
+  ).parent.path;
   final Directory? appBundle = Platform.isMacOS
       ? macOsAppBundleForExecutable(Platform.resolvedExecutable)
       : null;
@@ -1364,8 +1381,10 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
       try {
-        await Future.wait<void>(<Future<void>>[_stdoutDone, _stderrDone])
-            .timeout(const Duration(seconds: 2));
+        await Future.wait<void>(<Future<void>>[
+          _stdoutDone,
+          _stderrDone,
+        ]).timeout(const Duration(seconds: 2));
       } on Object {
         await _stdout.cancel();
         await _stderr.cancel();

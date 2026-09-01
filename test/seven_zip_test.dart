@@ -5,13 +5,21 @@ import 'package:vibekits/features/archive/domain/archive_service.dart';
 import 'package:vibekits/features/archive/domain/seven_zip.dart';
 
 void main() {
-  test('内置 7-Zip 是支持 RAR/ISO/ZSTD 的完整 26.02 后端', () async {
+  test('内置 7-Zip 是支持 RAR/ISO/ZSTD 的固定完整后端', () async {
     final String? exe = SevenZip.findExecutable();
     expect(exe, isNotNull);
     final ProcessResult info = await Process.run(exe!, <String>['i']);
     expect(info.exitCode, 0);
     final String output = info.stdout as String;
-    expect(output, contains('7-Zip 26.02'));
+    final String expectedVersion = Platform.isMacOS ? '25.01' : '26.02';
+    expect(
+      output,
+      matches(
+        RegExp(
+          '7-Zip(?: \\(z\\))? ${RegExp.escape(expectedVersion)}',
+        ),
+      ),
+    );
     expect(output, contains(' Rar5 '));
     expect(output, contains(' Iso '));
     expect(output, contains(' zstd '));

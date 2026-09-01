@@ -1,5 +1,13 @@
 # Vibekits 开发日志
 
+## 2026-09-02 · 1.9.0-dev.146+2146 · 全功能 Universal 发布收口
+
+- Windows/macOS 合并为一套 `DeepSeekAgentWorkspace` 交互层；项目/会话折叠、移动与权限重绑、独立草稿、并行运行、默认折叠时间线、选中态菜单、停止和永久删除均由共享合同约束，官方 DSH 仅作为固定可替换执行内核。
+- macOS 支持边界统一为 12.0+，App、Flutter framework、Objective-C/串口原生资产、ADB、Node/DSH、7-Zip 与源码构建 Git 都必须是 x86_64+arm64。Developer ID 精确候选已在 Rosetta 下真实启动；发现并修复“`node --version` 通过但 DSH/V8 崩溃”的假门禁，Intel Node 改用不扩大签名权限的 `--jitless`，DSH/ADB/7-Zip/Git 均真实执行通过。
+- 修复 LMCP 结果身份兼容：规范字段固定为 `toolName`，旧 `tool` 仅作只读别名；顶层、`structuredContent` 和别名之间任何冲突均失败关闭。该缺陷正是 62 节点“可发现、调用 response_identity_mismatch”的 VibeKits 侧原因。
+- 干净 Release、全量 analyze、653 passed/15 gated skips/0 failed、33 个 Mach-O Developer ID Authority/Team/Hardened Runtime 验证、时间戳、原生与 Rosetta DSH 启动已通过。生产 LMCP 客户端在候选晚启动条件下发现目标节点并真实取得 `final=true/verified` 的只读报告（单独 live test 1/1）。Apple 公证、模型驱动 Harness 的 LAN 数据出站同意、锁屏后的 UI 巡检和 Windows 构建机回归仍是发布门禁；未替换 `bin`、未伪报完成。
+- 完整逐项证据见 `docs/acceptance/V1_9_0_DEV146_FULL_FUNCTION_UNIVERSAL_2026-09-01.md`。
+
 ## 2026-09-01 · 1.9.0-dev.140+2140 · LMCP 指挥官调度
 
 - 按唯一规范 50 实现作战单位 runtime、主动 discover、状态即时公告、四个原子容量租约工具和 token 脱敏。

@@ -18,6 +18,10 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+    # Audited upstream source packages are built by Dart native-asset hooks.
+    # Their upstream test/tool trees use dev-only dependencies that are not
+    # part of the Vibekits application analyzer graph.
+    - third_party/**
 
 linter:
   # The lint rules applied to this project can be customized in the

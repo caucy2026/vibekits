@@ -64,7 +64,10 @@ abstract final class CleanupDecisionEngine {
         '${Platform.environment['LOCALAPPDATA']}${Platform.pathSeparator}'
             'flutter_webview_windows${Platform.pathSeparator}vibekits',
     ].where((String path) => path.trim().isNotEmpty).toList(growable: false);
-    final List<CleanupCandidate> unique = _removeNestedDuplicates(candidates);
+    final List<CleanupCandidate> unique = _removeNestedDuplicates(
+      candidates,
+      targetPlatform,
+    );
     return CleanupDecisionPlan(
       unique
           .map(
@@ -109,7 +112,7 @@ abstract final class CleanupDecisionEngine {
     final bool harnessArtifact =
         source.contains('harness') ||
         (harnessDebugDirectory.trim().isNotEmpty &&
-            _containsPath(harnessDebugDirectory, candidate.path));
+            _containsPath(harnessDebugDirectory, candidate.path, platform));
     if (harnessArtifact) {
       return CleanupDecision(
         candidate: candidate,
@@ -119,7 +122,7 @@ abstract final class CleanupDecisionEngine {
       );
     }
     if (protectedRoots.any(
-      (String root) => _containsPath(root, candidate.path),
+      (String root) => _containsPath(root, candidate.path, platform),
     )) {
       return CleanupDecision(
         candidate: candidate,
@@ -242,6 +245,7 @@ abstract final class CleanupDecisionEngine {
 
   static List<CleanupCandidate> _removeNestedDuplicates(
     Iterable<CleanupCandidate> candidates,
+    CleanupPlatform platform,
   ) {
     final List<CleanupCandidate> ordered = candidates.toList(growable: false)
       ..sort((CleanupCandidate left, CleanupCandidate right) {
@@ -257,8 +261,8 @@ abstract final class CleanupDecisionEngine {
         group,
         () => <String>{},
       );
-      final String normalized = _normalize(candidate.path);
-      if (_hasAcceptedAncestor(accepted, normalized)) continue;
+      final String normalized = _normalize(candidate.path, platform);
+      if (_hasAcceptedAncestor(accepted, normalized, platform)) continue;
       result.add(candidate);
       if (candidate.category != CleanupCategory.recycleBin &&
           candidate.size > 0) {
@@ -268,11 +272,18 @@ abstract final class CleanupDecisionEngine {
     return result;
   }
 
-  static bool _hasAcceptedAncestor(Set<String> accepted, String path) {
+  static bool _hasAcceptedAncestor(
+    Set<String> accepted,
+    String path,
+    CleanupPlatform platform,
+  ) {
+    final String pathSeparator = platform == CleanupPlatform.windows
+        ? r'\'
+        : '/';
     String cursor = path;
     while (cursor.isNotEmpty) {
       if (accepted.contains(cursor)) return true;
-      final int separator = cursor.lastIndexOf(Platform.pathSeparator);
+      final int separator = cursor.lastIndexOf(pathSeparator);
       if (separator < 0) return false;
       // Preserve a Windows drive root (C:\) as the last possible ancestor.
       final int nextLength = separator == 2 && cursor.length >= 3
@@ -284,21 +295,25 @@ abstract final class CleanupDecisionEngine {
     return false;
   }
 
-  static bool _containsPath(String root, String candidate) {
-    final String normalizedRoot = _normalize(root);
-    final String normalizedCandidate = _normalize(candidate);
+  static bool _containsPath(
+    String root,
+    String candidate,
+    CleanupPlatform platform,
+  ) {
+    final String separator = platform == CleanupPlatform.windows ? r'\' : '/';
+    final String normalizedRoot = _normalize(root, platform);
+    final String normalizedCandidate = _normalize(candidate, platform);
     return normalizedCandidate == normalizedRoot ||
-        normalizedCandidate.startsWith(
-          '$normalizedRoot${Platform.pathSeparator}',
-        );
+        normalizedCandidate.startsWith('$normalizedRoot$separator');
   }
 
-  static String _normalize(String path) {
-    String value = path.replaceAll('/', Platform.pathSeparator);
-    while (value.endsWith(Platform.pathSeparator) && value.length > 3) {
+  static String _normalize(String path, CleanupPlatform platform) {
+    final String separator = platform == CleanupPlatform.windows ? r'\' : '/';
+    String value = path.replaceAll(RegExp(r'[\\/]'), separator);
+    while (value.endsWith(separator) && value.length > 3) {
       value = value.substring(0, value.length - 1);
     }
-    return Platform.isWindows ? value.toLowerCase() : value;
+    return platform == CleanupPlatform.windows ? value.toLowerCase() : value;
   }
 
   static String _parentPath(String path) {

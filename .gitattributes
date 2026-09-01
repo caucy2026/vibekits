@@ -2,3 +2,6 @@
 native/7za/*.txt -text whitespace=-trailing-space
 native/mihomo/windows/runtime/*.dat binary
 native/mihomo/windows/runtime/*.mmdb binary
+# Audited upstream packages are preserved byte-for-byte (including upstream
+# CRLF and whitespace); review the small local hook deltas before vendoring.
+third_party/** -diff -text

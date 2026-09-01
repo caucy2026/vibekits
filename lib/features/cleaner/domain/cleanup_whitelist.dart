@@ -4,12 +4,21 @@ abstract final class CleanupWhitelist {
   static String? normalize(String path) {
     String value = path.trim();
     if (value.isEmpty || value.contains('\u0000')) return null;
+    final bool windowsPath =
+        RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(value) || value.startsWith(r'\\');
+    if (windowsPath) {
+      value = value.replaceAll('/', r'\');
+      while (value.endsWith(r'\') && !_isDriveRoot(value)) {
+        value = value.substring(0, value.length - 1);
+      }
+      return value;
+    }
     try {
-      value = Directory(value).absolute.path.replaceAll('/', r'\');
+      value = Directory(value).absolute.path.replaceAll(r'\', '/');
     } on FileSystemException {
       return null;
     }
-    while (value.endsWith(r'\') && !_isDriveRoot(value)) {
+    while (value.endsWith('/') && value.length > 1) {
       value = value.substring(0, value.length - 1);
     }
     return value;
@@ -31,10 +40,17 @@ abstract final class CleanupWhitelist {
     if (normalizedRoot == null || normalizedCandidate == null) return false;
     final String rootKey = _key(normalizedRoot);
     final String candidateKey = _key(normalizedCandidate);
-    return candidateKey == rootKey || candidateKey.startsWith('$rootKey\\');
+    final String separator = _isWindowsPath(normalizedRoot) ? r'\' : '/';
+    return candidateKey == rootKey ||
+        candidateKey.startsWith('$rootKey$separator');
   }
 
+  // Default macOS volumes are case-insensitive too. A whitelist must never
+  // miss the same physical path merely because a scanner changed casing.
   static String _key(String path) => path.toLowerCase();
+
+  static bool _isWindowsPath(String path) =>
+      RegExp(r'^[a-zA-Z]:\\').hasMatch(path) || path.startsWith(r'\\');
 
   static bool _isDriveRoot(String path) =>
       RegExp(r'^[a-zA-Z]:\\$').hasMatch(path);

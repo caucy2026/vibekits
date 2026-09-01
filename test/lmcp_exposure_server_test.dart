@@ -55,6 +55,7 @@ void main() {
     final List<bool> requestUsedContentLength = <bool>[];
     final List<Map<String, String>> callerHeaders = <Map<String, String>>[];
     final List<LmcpVerifiedCaller> verifiedCallers = <LmcpVerifiedCaller>[];
+    int toolCallCount = 0;
     final LmcpCallerRequestVerifier callerVerifier =
         LmcpCallerRequestVerifier();
     unawaited(() async {
@@ -90,6 +91,7 @@ void main() {
           jsonDecode(utf8.decode(requestBytes)) as Map,
         );
         final String method = '${payload['method'] ?? ''}';
+        if (method == 'tools/call') toolCallCount++;
         request.response.headers.contentType = ContentType.json;
         if (!payload.containsKey('id')) {
           request.response.statusCode = HttpStatus.accepted;
@@ -117,6 +119,7 @@ void main() {
               'catalogRevision': 2,
               'ok': true,
             },
+            if (toolCallCount > 1) 'tool': 'spoofed.tool',
             'isError': false,
           },
           _ => <String, Object?>{},
@@ -155,6 +158,16 @@ void main() {
     expect(tools.single.risk, 'readOnly');
     final result = await client.callTool(peer: peer, name: tools.single.name);
     expect(result['isError'], isFalse);
+    await expectLater(
+      client.callTool(peer: peer, name: tools.single.name),
+      throwsA(
+        isA<LmcpRemoteException>().having(
+          (LmcpRemoteException error) => error.code,
+          'code',
+          'response_identity_mismatch',
+        ),
+      ),
+    );
     expect(requestUsedContentLength, everyElement(isTrue));
     expect(
       callerHeaders,
@@ -420,18 +433,15 @@ void main() {
       },
     }, caller: caller))!;
 
-    final Map<String, Object?> reserved = await call(
-      1,
-      'lmcp.capacity.reserve',
-      const <String, Object?>{
-        'toolName': VibekitsHarnessToolBridge.programmerCalculatorId,
-        'idempotencyKey': 'calc-001',
-        'commanderId': 'com.vibekits.desktop:COMMANDER1',
-        'requestedSlots': 1,
-        'ttlSeconds': 45,
-        'scopeDigest': 'sha256:calculator',
-      },
-    );
+    final Map<String, Object?> reserved =
+        await call(1, 'lmcp.capacity.reserve', const <String, Object?>{
+          'toolName': VibekitsHarnessToolBridge.programmerCalculatorId,
+          'idempotencyKey': 'calc-001',
+          'commanderId': 'com.vibekits.desktop:COMMANDER1',
+          'requestedSlots': 1,
+          'ttlSeconds': 45,
+          'scopeDigest': 'sha256:calculator',
+        });
     final Map<Object?, Object?> reserveResult =
         reserved['result']! as Map<Object?, Object?>;
     final Map<Object?, Object?> lease =
@@ -457,15 +467,12 @@ void main() {
       const <String, Object?>{},
     );
     expect(status.toString(), isNot(contains('${lease['leaseToken']}')));
-    final Map<String, Object?> released = await call(
-      4,
-      'lmcp.capacity.release',
-      <String, Object?>{
-        'leaseId': lease['leaseId'],
-        'leaseToken': lease['leaseToken'],
-        'reason': 'completed',
-      },
-    );
+    final Map<String, Object?> released =
+        await call(4, 'lmcp.capacity.release', <String, Object?>{
+          'leaseId': lease['leaseId'],
+          'leaseToken': lease['leaseToken'],
+          'reason': 'completed',
+        });
     expect((released['result']! as Map)['isError'], isFalse);
   });
 
@@ -479,9 +486,10 @@ void main() {
     bool resourceClosed = false;
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
       handlers: <String, HarnessToolHandler>{
-        VibekitsHarnessToolBridge.programmerCalculatorId: (
-          Map<String, Object?> arguments,
-        ) async => <String, Object?>{'unused': true},
+        VibekitsHarnessToolBridge.programmerCalculatorId:
+            (Map<String, Object?> arguments) async => <String, Object?>{
+              'unused': true,
+            },
       },
     );
     final VibekitsLmcpProtocol protocol = VibekitsLmcpProtocol(
@@ -562,9 +570,10 @@ void main() {
     addTearDown(() => server.stop(force: true));
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
       handlers: <String, HarnessToolHandler>{
-        VibekitsHarnessToolBridge.programmerCalculatorId: (
-          Map<String, Object?> arguments,
-        ) async => <String, Object?>{'value': 2},
+        VibekitsHarnessToolBridge.programmerCalculatorId:
+            (Map<String, Object?> arguments) async => <String, Object?>{
+              'value': 2,
+            },
       },
     );
 

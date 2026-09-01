@@ -12,10 +12,8 @@ import 'lmcp_exposure_server.dart';
 import 'mcp_capability_models.dart';
 import 'mcp_device_identity.dart';
 
-typedef LmcpCallerHeaderProvider = Future<Map<String, String>> Function(
-  Uri endpoint,
-  List<int> body,
-);
+typedef LmcpCallerHeaderProvider =
+    Future<Map<String, String>> Function(Uri endpoint, List<int> body);
 
 class LmcpRemoteException implements Exception {
   const LmcpRemoteException(this.code, this.message);
@@ -182,6 +180,9 @@ class LmcpRemoteClient {
       structured['instanceId'],
     ]);
     final String? responseTool = _consistentIdentityValue(<Object?>[
+      // `toolName` is the LMCP/2 engineering-envelope field. `tool` is the
+      // legacy extension emitted by early LMCP/2 providers and remains a
+      // read-only compatibility alias.
       result['toolName'],
       result['tool'],
       structured['toolName'],
