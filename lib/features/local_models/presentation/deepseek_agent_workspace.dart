@@ -3801,16 +3801,31 @@ String _readableTimelineDetail(String detail, {int maxLines = 4}) {
       .toList(growable: false);
   if (source.isEmpty) return '已记录';
 
-  String? firstWith(String prefix) =>
-      source.where((String line) => line.startsWith(prefix)).firstOrNull;
+  const List<String> fieldLabels = <String>['目标：', '参数：', '结果：', '状态：', '耗时：'];
+  final String normalized = source.join(' ');
+  String? field(String prefix) {
+    final int start = normalized.indexOf(prefix);
+    if (start < 0) return null;
+    int end = normalized.length;
+    for (final String candidate in fieldLabels) {
+      if (candidate == prefix) continue;
+      final int found = normalized.indexOf(
+        ' $candidate',
+        start + prefix.length,
+      );
+      if (found >= 0 && found < end) end = found;
+    }
+    return normalized.substring(start, end).trim();
+  }
+
   String compact(String line, {int limit = 128}) =>
       line.length <= limit ? line : '${line.substring(0, limit - 1)}…';
 
-  final String? target = firstWith('目标：');
-  final String? status = firstWith('状态：');
-  final String? elapsed = firstWith('耗时：');
-  final String? arguments = firstWith('参数：');
-  final String? result = firstWith('结果：');
+  final String? target = field('目标：');
+  final String? status = field('状态：');
+  final String? elapsed = field('耗时：');
+  final String? arguments = field('参数：');
+  final String? result = field('结果：');
   final List<String> readable = <String>[
     if (target != null) compact(target),
     if (status != null || elapsed != null)
@@ -3823,6 +3838,97 @@ String _readableTimelineDetail(String detail, {int maxLines = 4}) {
   }
   return readable.take(maxLines).join('\n');
 }
+
+class _PersistedTimelineStep {
+  const _PersistedTimelineStep({
+    required this.title,
+    required this.detail,
+    required this.state,
+  });
+
+  final String title;
+  final String detail;
+  final _AgentProgressState state;
+}
+
+List<_PersistedTimelineStep> _parsePersistedTimeline(String trace) {
+  final RegExp stepPattern = RegExp(r'^([◌✓!]) \*\*(.+?)\*\*\s*—\s*(.*)$');
+  final List<_PersistedTimelineStep> result = <_PersistedTimelineStep>[];
+  String? title;
+  _AgentProgressState state = _AgentProgressState.completed;
+  final List<String> detail = <String>[];
+
+  void flush() {
+    final String? currentTitle = title;
+    if (currentTitle == null) return;
+    result.add(
+      _PersistedTimelineStep(
+        title: currentTitle,
+        detail: detail.join('\n').trim(),
+        state: state,
+      ),
+    );
+    detail.clear();
+  }
+
+  for (final String rawLine in trace.split('\n')) {
+    final String line = rawLine.trim();
+    if (line.isEmpty || line.startsWith('### ')) continue;
+    final RegExpMatch? match = stepPattern.firstMatch(line);
+    if (match == null) {
+      if (title != null) detail.add(line);
+      continue;
+    }
+    flush();
+    title = match.group(2)!.trim();
+    state = switch (match.group(1)) {
+      '◌' => _AgentProgressState.active,
+      '!' => _AgentProgressState.failed,
+      _ => _AgentProgressState.completed,
+    };
+    final String firstDetail = match.group(3)!.trim();
+    if (firstDetail.isNotEmpty) detail.add(firstDetail);
+  }
+  flush();
+  if (result.isNotEmpty) return result;
+  return <_PersistedTimelineStep>[
+    _PersistedTimelineStep(
+      title: '执行详情',
+      detail: trace.replaceFirst(RegExp(r'^###\s*执行时间线\s*'), '').trim(),
+      state: _AgentProgressState.completed,
+    ),
+  ];
+}
+
+Future<void> _showTimelineDetailDialog(
+  BuildContext context, {
+  required String title,
+  required String detail,
+}) => showDialog<void>(
+  context: context,
+  builder: (BuildContext dialogContext) => AlertDialog(
+    title: Text(title),
+    content: SizedBox(
+      width: 620,
+      child: SingleChildScrollView(
+        child: SelectableText(
+          detail,
+          style: const TextStyle(
+            fontFamily: 'Cascadia Mono',
+            fontSize: 12,
+            height: 1.45,
+          ),
+        ),
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(dialogContext),
+        child: const Text('关闭'),
+      ),
+    ],
+  ),
+);
 
 class _AgentProgressStep {
   const _AgentProgressStep({
@@ -4391,10 +4497,9 @@ class _PersistedExecutionTraceState extends State<_PersistedExecutionTrace> {
 
   @override
   Widget build(BuildContext context) {
-    final int stepCount = RegExp(
-      r'^[◌✓!] \*\*',
-      multiLine: true,
-    ).allMatches(widget.trace).length;
+    final List<_PersistedTimelineStep> steps = _parsePersistedTimeline(
+      widget.trace,
+    );
     return Container(
       key: const Key('agent-persisted-execution-trace'),
       margin: const EdgeInsets.only(bottom: 10),
@@ -4422,7 +4527,7 @@ class _PersistedExecutionTraceState extends State<_PersistedExecutionTrace> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '执行时间线${stepCount == 0 ? '' : ' · $stepCount 步'}',
+                      '执行时间线 · ${steps.length} 步',
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -4446,20 +4551,74 @@ class _PersistedExecutionTraceState extends State<_PersistedExecutionTrace> {
             Padding(
               key: const Key('agent-persisted-trace-details'),
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
-              child: MarkdownBody(
-                data: widget.trace,
-                selectable: false,
-                styleSheet: MarkdownStyleSheet(
-                  h3: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  p: TextStyle(
-                    fontSize: 11.5,
-                    height: 1.45,
-                    color: context.vibe.muted,
-                  ),
-                ),
+              child: Column(
+                children: <Widget>[
+                  Divider(height: 1, color: context.vibe.border),
+                  const SizedBox(height: 9),
+                  for (int index = 0; index < steps.length; index++)
+                    InkWell(
+                      key: Key('agent-persisted-step-$index'),
+                      borderRadius: BorderRadius.circular(7),
+                      onTap: steps[index].detail.length <= 180
+                          ? null
+                          : () => _showTimelineDetailDialog(
+                              context,
+                              title: steps[index].title,
+                              detail: steps[index].detail,
+                            ),
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          bottom: index == steps.length - 1 ? 0 : 11,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: _ProgressStateIcon(
+                                state: steps[index].state,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    steps[index].title,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _readableTimelineDetail(
+                                      steps[index].detail,
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      height: 1.4,
+                                      color: context.vibe.muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (steps[index].detail.length > 180)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6, top: 1),
+                                child: Icon(
+                                  Icons.open_in_new,
+                                  size: 12,
+                                  color: context.vibe.muted,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
         ],
@@ -4558,32 +4717,10 @@ class _AgentProgressView extends StatelessWidget {
                       borderRadius: BorderRadius.circular(7),
                       onTap: steps[index].detail.length <= 180
                           ? null
-                          : () => showDialog<void>(
-                              context: context,
-                              builder: (BuildContext dialogContext) =>
-                                  AlertDialog(
-                                    title: Text(steps[index].title),
-                                    content: SizedBox(
-                                      width: 620,
-                                      child: SingleChildScrollView(
-                                        child: SelectableText(
-                                          steps[index].detail,
-                                          style: const TextStyle(
-                                            fontFamily: 'Cascadia Mono',
-                                            fontSize: 12,
-                                            height: 1.45,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    actions: <Widget>[
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(dialogContext),
-                                        child: const Text('关闭'),
-                                      ),
-                                    ],
-                                  ),
+                          : () => _showTimelineDetailDialog(
+                              context,
+                              title: steps[index].title,
+                              detail: steps[index].detail,
                             ),
                       child: Padding(
                         padding: EdgeInsets.only(

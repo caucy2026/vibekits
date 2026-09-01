@@ -252,6 +252,15 @@ void main() {
       find.byKey(const Key('agent-persisted-trace-details')),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('agent-persisted-step-0')), findsOneWidget);
+    expect(find.byKey(const Key('agent-persisted-step-1')), findsOneWidget);
+    expect(find.text('理解任务'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-persisted-trace-toggle')));
+    await tester.pump();
+    expect(
+      find.byKey(const Key('agent-persisted-trace-details')),
+      findsNothing,
+    );
 
     await tester.enterText(find.byKey(const Key('agent-composer')), '再检查一次改动');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -335,6 +344,81 @@ void main() {
     expect(handle.running, isFalse);
     expect(find.text('任务已停止。'), findsOneWidget);
     expect(find.byKey(const Key('agent-progress')), findsNothing);
+  });
+
+  testWidgets('历史 48 步时间线逐项显示且不铺开超长 JSON', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 800);
+    addTearDown(tester.view.reset);
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_timeline_48_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime.now();
+    final String longValue = List<String>.filled(420, 'x').join();
+    final String trace = <String>[
+      '### 执行时间线',
+      for (int index = 0; index < 48; index++)
+        '✓ **调用工具 $index** — 目标：测试设备 '
+            '参数：{"payload":"$longValue"} '
+            '结果：{"ok":true,"raw":"$longValue"} '
+            '状态：执行成功 耗时：${index + 1} ms',
+    ].join('\n');
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'timeline-48',
+          title: '历史时间线',
+          messages: <HarnessConversationMessage>[
+            const HarnessConversationMessage(text: '执行测试', user: true),
+            HarnessConversationMessage(
+              text: '任务已完成。',
+              user: false,
+              executionTrace: trace,
+            ),
+          ],
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+      activeSessionId: 'timeline-48',
+      updatedAt: now,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            loadWorkspaceCatalog: () async => <String>[workspace.path],
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v22.19.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('执行时间线 · 48 步'), findsOneWidget);
+    expect(
+      find.byKey(const Key('agent-persisted-trace-details')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const Key('agent-persisted-trace-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('agent-persisted-step-0')), findsOneWidget);
+    expect(find.byKey(const Key('agent-persisted-step-47')), findsOneWidget);
+    expect(find.text('调用工具 0'), findsOneWidget);
+    expect(find.text('调用工具 47'), findsOneWidget);
+    expect(find.textContaining(longValue), findsNothing);
+    expect(find.textContaining('结果：已保存完整输出，点击这一步查看'), findsNWidgets(48));
   });
 
   testWidgets('Harness 调试目录可选择保存并创建真实分类目录', (WidgetTester tester) async {

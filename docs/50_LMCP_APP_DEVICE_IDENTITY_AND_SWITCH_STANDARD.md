@@ -35,7 +35,7 @@
 | 单个发现包 | 最多 1200 UTF-8 bytes，不是 1200 字符 |
 | 单个 MCP 请求/响应 | 最多 1 MiB |
 
-VibeKits 当前实现的 `catalogRevision` 是单调构建号 `2143`，APP 版本为 `1.9.0-dev.143`。后续任何工具名称、描述、风险、annotations 或 JSON Schema 变化都必须提升构建号并重新计算摘要。
+VibeKits 当前实现的 `catalogRevision` 是单调构建号 `2144`，APP 版本为 `1.9.0-dev.144`。后续任何工具名称、描述、风险、annotations 或 JSON Schema 变化都必须提升构建号并重新计算摘要。
 
 ## 1. 完成后的用户体验
 
@@ -328,7 +328,7 @@ APP 打开开关后，每 4 秒向 `239.255.42.99:47831/UDP` 发送不超过 120
     "path": "/mcp",
     "instanceKeyFingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "protocolVersions": ["2025-06-18"],
-    "catalogRevision": 2143,
+    "catalogRevision": 2144,
     "capabilityDigest": "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
   },
   "callEndpoint": {
@@ -337,13 +337,13 @@ APP 打开开关后，每 4 秒向 `239.255.42.99:47831/UDP` 发送不超过 120
     "path": "/mcp",
     "instanceKeyFingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "protocolVersions": ["2025-06-18"],
-    "catalogRevision": 2143,
+    "catalogRevision": 2144,
     "capabilityDigest": "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     "serviceRole": "tool-provider"
   },
   "mcp": {
     "protocolVersions": ["2025-06-18"],
-    "catalogRevision": 2143,
+    "catalogRevision": 2144,
     "capabilityDigest": "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     "changeNotifications": false
   },

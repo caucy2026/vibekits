@@ -1325,3 +1325,9 @@
 - macOS 构建链固定 Flutter 3.41.9/Dart 3.11.5，App Intel deployment target 为 10.15，ARM 为 11.0；增加 Universal 架构、原生依赖和最低系统二进制门禁。
 - DSH 真实运行证明 Node 18 不可用（缺失 `node:util.parseEnv`）；最低可用内置运行时为 Universal Node 22.19.0，ARM/Intel CLI 均已执行 `--help`，官方最低系统为 macOS 11.0。因此 10.15 可启动 App 外壳，完整 Harness 明确需要 11.0+。
 - 新增独立 Developer ID 签名脚本，以及 hardened runtime + notarytool + staple + Gatekeeper 的一键正式发布脚本。Keychain 后续恢复有效 `zhen ji (26T5WV4GLP)` 身份；`bin/Vibekits.app` 已完成全部内嵌代码的 Developer ID 签名、时间戳和深度严格验签。Apple 公证上传涉及向第三方传送 606.6 MB App，在取得用户针对该载荷/目的地的明确授权前未执行。
+
+# 2026-09-01 · dev.144 历史执行时间线可读性修复
+
+- 不再用 Markdown 渲染历史时间线；旧会话中的 48 个步骤会被解析成 48 条独立事件，每条有成功/运行/失败图标、动作标题和摘要，不再连成一大段文字。
+- 对旧格式中同一行的目标、参数、结果、状态和耗时做字段拆分；主界面只显示有界摘要，超长 JSON 必须点击对应步骤后才在独立对话框显示。
+- 运行中与历史时间线共用详情对话框，保持默认折叠、展开逐步阅读、再次收起后继续会话的一致交互。新增与真实截图同规模的 48 步/超长 JSON 回归，定向 UI 回归 22/22 通过，Analyze 0 issue。
