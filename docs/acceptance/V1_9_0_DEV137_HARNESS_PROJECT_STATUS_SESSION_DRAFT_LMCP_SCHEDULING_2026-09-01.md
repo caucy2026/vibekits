@@ -52,6 +52,20 @@ harness ready  workspace-inventory/workspace-status
 - 草稿按 `workspace + sessionId` 隔离；发送只清空当前会话草稿，切换项目和会话前先保存当前草稿。
 - LMCP 调度标准见 `docs/50_LMCP_APP_DEVICE_IDENTITY_AND_SWITCH_STANDARD.md` 6.9：作战单位必须公开实时容量，并通过原子租约参与多指挥官调度；不能只靠“在线”或历史评分决定调用。
 
-## 6. 验收边界
+## 6. RustDesk 63 真机跨设备验收
+
+RustDesk 使用现有协议订阅正式 VibeKits publisher，63 远端真机已实时显示：
+
+```text
+Vibekits · 测试1   IDLE   蓝灯
+Vibekits · 测试2   IDLE   蓝灯
+Vibekits · harness READY  蓝灯
+项目 3 · 运行 0 · 等待确认 0 · 失败 0
+来源设备 260262802 · 最后更新 12:16:56
+```
+
+截图证据：`/private/tmp/vibekits-project-final.png`。结论：项目级订阅门禁闭环成功，RustDesk 无需协议改动。
+
+## 7. 验收边界
 
 本机自动化界面动作管道在尝试正式 App 鼠标输入时发生 `native pipe closed before response`，因此 111/222 的交互以 Flutter 真实 Widget 测试完成，不伪造人工点击截图。正式 App 的启动、项目 UI、IPC 快照、UDP socket、签名和 AOT 均已在生产进程上独立核验。
