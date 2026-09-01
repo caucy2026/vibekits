@@ -35,7 +35,7 @@
 | 单个发现包 | 最多 1200 UTF-8 bytes，不是 1200 字符 |
 | 单个 MCP 请求/响应 | 最多 1 MiB |
 
-VibeKits 当前实现的 `catalogRevision` 是单调构建号 `2144`，APP 版本为 `1.9.0-dev.144`。后续任何工具名称、描述、风险、annotations 或 JSON Schema 变化都必须提升构建号并重新计算摘要。
+VibeKits 当前实现的 `catalogRevision` 是单调构建号 `2146`，APP 版本为 `1.9.0-dev.146`。后续任何工具名称、描述、风险、annotations 或 JSON Schema 变化都必须提升构建号并重新计算摘要。
 
 ## 1. 完成后的用户体验
 
