@@ -296,7 +296,15 @@ void main() {
   });
 
   test('智能体能力自检保证所有公开工具都有本地执行器', () async {
-    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
+    final Directory runtime = Directory.systemTemp.createTempSync(
+      'vibekits_capability_runtime_',
+    );
+    addTearDown(() => runtime.deleteSync(recursive: true));
+    final File adb = File('${runtime.path}${Platform.pathSeparator}adb')
+      ..writeAsStringSync('test adb runtime');
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: adb.path,
+    );
     int approvals = 0;
     final HarnessToolCallResult result = await bridge.invoke(
       toolId: VibekitsHarnessToolBridge.capabilityCheckId,
@@ -309,6 +317,7 @@ void main() {
     expect(result.ok, isTrue);
     expect(result.data?['ready'], isTrue);
     expect(result.data?['missingHandlers'], isEmpty);
+    expect(result.data?['missingRuntimes'], isEmpty);
     expect(result.data?['executableTools'], greaterThan(50));
     expect(result.data?['unavailableTools'], isNotEmpty);
     final Map<String, Object?> productHierarchy =
@@ -334,6 +343,32 @@ void main() {
     expect(cleanup['platform'], Platform.operatingSystem);
     expect(cleanup['scanScope'], isNotEmpty);
     expect(approvals, 0);
+  });
+
+  test('智能体能力自检不会把缺少 ADB 的安装包报告为 ready', () async {
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable:
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'definitely-missing-vibekits-adb',
+    );
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.capabilityCheckId,
+      arguments: const <String, Object?>{},
+      approve: (_) async => true,
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['ready'], isFalse);
+    expect(
+      result.data?['missingRuntimes'],
+      contains(
+        isA<Map<String, Object?>>().having(
+          (Map<String, Object?> value) => value['id'],
+          'id',
+          'android-platform-tools-adb',
+        ),
+      ),
+    );
   });
 
   test('Harness 可列出节点设备并导出不含秘密的 onboarding', () async {
@@ -447,9 +482,8 @@ void main() {
       'vibekits_harness_structure_',
     );
     addTearDown(() => root.delete(recursive: true));
-    await File(
-      '${root.path}${Platform.pathSeparator}agent.dart',
-    ).writeAsString('class ToolAgent {}\n');
+    await File('${root.path}${Platform.pathSeparator}agent.dart')
+        .writeAsString('class ToolAgent {}\n');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
 
@@ -604,6 +638,53 @@ void main() {
     );
     expect(result.ok, isTrue);
     expect(calls.single, <String>[
+      '-s',
+      '192.168.3.63:5555',
+      'shell',
+      'getprop',
+      'ro.product.model',
+    ]);
+  });
+
+  test('Android Shell 自动拆分模型生成的多属性 getprop', () async {
+    final List<List<String>> calls = <List<String>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: '/tools/adb/adb',
+      adbRunner: (String executable, List<String> arguments) async {
+        calls.add(List<String>.of(arguments));
+        return AdbCommandResult(
+          exitCode: 0,
+          stdout: arguments.last == 'ro.product.model'
+              ? 'huanglong\n'
+              : 'newlink\n',
+          stderr: '',
+        );
+      },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.adbShellId,
+      arguments: <String, Object?>{
+        'serial': '192.168.3.63:5555',
+        'arguments': <String>[
+          'getprop',
+          'ro.product.model',
+          'ro.product.manufacturer',
+          'ro.build.version.release',
+        ],
+      },
+      approve: (_) async => true,
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['expandedGetprop'], isTrue);
+    expect(result.data?['properties'], <String, String>{
+      'ro.product.model': 'huanglong',
+      'ro.product.manufacturer': 'newlink',
+      'ro.build.version.release': 'newlink',
+    });
+    expect(calls, hasLength(3));
+    expect(calls.first, <String>[
       '-s',
       '192.168.3.63:5555',
       'shell',
@@ -854,9 +935,8 @@ void main() {
       'vibekits_harness_search_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File(
-      '${sandbox.path}${Platform.pathSeparator}hello.dart',
-    ).writeAsString('void main() {}');
+    await File('${sandbox.path}${Platform.pathSeparator}hello.dart')
+        .writeAsString('void main() {}');
     final HarnessToolCallResult result = await VibekitsHarnessToolBridge()
         .invoke(
           toolId: VibekitsHarnessToolBridge.fileSearchId,
@@ -984,12 +1064,11 @@ void main() {
               stderr: '',
             );
           },
-      remoteFileConnector:
-          (
-            RemoteConnectionProfile connection,
-            String? secret,
-            RemoteHostKeyVerifier verifier,
-          ) async => _FakeHarnessRemoteFileClient(transfers),
+      remoteFileConnector: (
+        RemoteConnectionProfile connection,
+        String? secret,
+        RemoteHostKeyVerifier verifier,
+      ) async => _FakeHarnessRemoteFileClient(transfers),
     );
 
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1267,9 +1346,8 @@ void main() {
     final File first = await File(
       '${sandbox.path}${Platform.pathSeparator}first.bin',
     ).writeAsString('same-content');
-    await File(
-      '${sandbox.path}${Platform.pathSeparator}second.bin',
-    ).writeAsString('same-content');
+    await File('${sandbox.path}${Platform.pathSeparator}second.bin')
+        .writeAsString('same-content');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1311,9 +1389,8 @@ void main() {
       'vibekits_harness_drive_task_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File(
-      '${sandbox.path}${Platform.pathSeparator}sample.bin',
-    ).writeAsBytes(List<int>.filled(4096, 7));
+    await File('${sandbox.path}${Platform.pathSeparator}sample.bin')
+        .writeAsBytes(List<int>.filled(4096, 7));
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     Future<bool> approve(HarnessToolApprovalRequest request) async => true;
 

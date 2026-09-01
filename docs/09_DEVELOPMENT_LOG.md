@@ -1,5 +1,13 @@
 # Vibekits 开发日志
 
+## 2026-09-01 · macOS Release ADB 缺包与多属性 getprop 修复
+
+- 定位 Harness 中两次 `vibekits.adb.shell` 红色失败均首先发生在进程启动前：正式 App 缺少约定路径 `Contents/MacOS/tools/adb/adb`，返回 `ProcessException: No such file or directory`。
+- macOS Release 打包现在必须从官方 Android SDK Platform-Tools 复制 Universal `adb`、签名并附带 NOTICE/版本元数据；找不到 ADB 时构建直接失败，不再交付假可用 App。
+- `vibekits.system.capability_check` 从“仅检查 Dart handler”升级为同时检查实际 ADB runtime；缺包时 `ready=false` 并返回 `missingRuntimes`。
+- Harness 常见的 `getprop prop1 prop2 ...` 参数错误由工具桥安全拆为逐属性调用，返回 `expandedGetprop=true` 与结构化 `properties`，不使用设备 shell 字符串拼接。
+- 正式 App 内置 ADB 在 `192.168.3.63:5555` 真实验收通过：型号 `huanglong`、厂商 `HL2.0`、Android 12/SDK 31/arm64-v8a，Display 0/2 均为 1920×1280。
+
 ## 2026-09-01 · Harness 项目状态、会话草稿与 LMCP 调度架构
 
 - `vibekits.harness.status/v1` 保持协议不变，正式 publisher 改为同步官方 DSH 左侧真实项目名与状态；工作区引用不可逆脱敏，Codex/VS Code 继续使用 RustDesk 独立通道。

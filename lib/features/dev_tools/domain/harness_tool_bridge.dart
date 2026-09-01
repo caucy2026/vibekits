@@ -748,7 +748,7 @@ class VibekitsHarnessToolBridge {
     adbShellId: _definition(
       id: adbShellId,
       name: '执行 Android Shell',
-      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。',
+      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -2423,6 +2423,27 @@ class VibekitsHarnessToolBridge {
       for (final HarnessToolDefinition tool in executable)
         if (_handlerFor(tool.id) == null) tool.id,
     ];
+    final String adbExecutable =
+        _adbExecutable ?? AdbService.bundledExecutablePath();
+    final List<Map<String, Object?>> missingRuntimes = <Map<String, Object?>>[
+      if (!await File(adbExecutable).exists())
+        <String, Object?>{
+          'id': 'android-platform-tools-adb',
+          'requiredBy': const <String>[
+            adbListDevicesId,
+            adbConnectId,
+            adbCommandId,
+            adbShellId,
+            adbLogcatId,
+            adbInstallApkId,
+            adbPushFileId,
+            adbPullFileId,
+            adbScreenshotId,
+          ],
+          'expectedPath': adbExecutable,
+          'reason': '安装包缺少内置 Android Platform-Tools adb',
+        },
+    ];
     final List<Map<String, Object?>> unavailable = <Map<String, Object?>>[
       for (final HarnessToolDefinition tool in fullCatalog)
         if (!tool.available && !_customHandlers.containsKey(tool.id))
@@ -2447,7 +2468,7 @@ class VibekitsHarnessToolBridge {
       }
     }
     return <String, Object?>{
-      'ready': missingHandlers.isEmpty,
+      'ready': missingHandlers.isEmpty && missingRuntimes.isEmpty,
       'protocol': protocolVersion,
       'productHierarchy': <String, Object?>{
         'topLevelPageCount': 5,
@@ -2471,6 +2492,7 @@ class VibekitsHarnessToolBridge {
       'definedTools': fullCatalog.length,
       'executableTools': executable.length,
       'missingHandlers': missingHandlers,
+      'missingRuntimes': missingRuntimes,
       'unavailableTools': unavailable,
       'riskCounts': riskCounts,
       'autoConfigurationPolicy': <String, Object?>{
@@ -2774,8 +2796,38 @@ class VibekitsHarnessToolBridge {
   ) async {
     final List<String> values = _stringList(arguments['arguments']);
     if (values.isEmpty) throw const FormatException('缺少 Android shell 参数');
+    if (values.length > 3 &&
+        values.first.toLowerCase() == 'getprop' &&
+        values.skip(1).every(_isAndroidPropertyName)) {
+      final Map<String, String> properties = <String, String>{};
+      Map<String, Object?>? latest;
+      for (final String property in values.skip(1)) {
+        latest = await _executeSemanticAdb(arguments, <String>[
+          'shell',
+          'getprop',
+          property,
+        ]);
+        properties[property] = (latest['stdout'] ?? '').toString().trim();
+      }
+      return <String, Object?>{
+        'exitCode': 0,
+        'stdout': properties.entries
+            .map(
+              (MapEntry<String, String> entry) => '${entry.key}=${entry.value}',
+            )
+            .join('\n'),
+        'stderr': '',
+        'arguments': <String>['shell', ...values],
+        'expandedGetprop': true,
+        'properties': properties,
+        'adbServer': latest?['adbServer'] ?? _activeAdbEndpoint.toAuditFields(),
+      };
+    }
     return _executeSemanticAdb(arguments, <String>['shell', ...values]);
   }
+
+  static bool _isAndroidPropertyName(String value) =>
+      RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$').hasMatch(value);
 
   Future<Map<String, Object?>> _readAdbLogcat(
     Map<String, Object?> arguments,
