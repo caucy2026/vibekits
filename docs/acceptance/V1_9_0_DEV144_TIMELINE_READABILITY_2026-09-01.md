@@ -26,9 +26,13 @@ dev.143 虽将时间线改为默认折叠，但展开历史记录时仍使用 Ma
 - App：`/Volumes/ORICO/newlink-new/vibekits/bin/Vibekits.app`
 - 版本：`1.9.0.144 (2144)`
 - Universal 门禁：App Intel 10.15+，Harness Intel/ARM 11.0+。
-- 签名：`Developer ID Application: zhen ji (26T5WV4GLP)`，Apple 时间戳 `2026-09-01 19:59:51 +08:00`，深度严格验签通过。
-- App executable SHA-256：`f8ab311515e4942d1329d4a5c44c0967d9d79dc258e9b667b481b7ce2c59f370`
-- App.framework SHA-256：`4b80e2fe533a9f5268cf0ff8ce70b8029603c43719b8490cadd7576c4e0fb5cd`
-- 当前运行 PID：`93777`。
+- 签名：`Developer ID Application: zhen ji (26T5WV4GLP)`，hardened runtime、Apple 时间戳和深度严格验签通过。
+- Apple 公证：`Accepted`，Submission ID `c13875c2-e8f6-4f8c-b02c-559672da101e`。
+- 装订与系统验证：`stapler staple`、`stapler validate` 均通过；Gatekeeper 返回 `source=Notarized Developer ID`。
+- 最终归档：`/Volumes/ORICO/newlink-new/vibekits/bin/Vibekits-1.9.0-dev.144+2144-macos-universal-notarized.zip`（219 MB）。
+- 最终归档 SHA-256：`4432837e164e63876a42019d3148f629c30c10d570245ce66842f23460b7ff56`
+- 装订后 App executable SHA-256：`c55e2cd709e69aa098148c14b783ab9c48da62141cde4c1deb7b2520a80b47a3`
+- 装订后 App.framework SHA-256：`c3a3134fd1146b515be67fbc71fb6be3e49c925aca1fd6c3974574d957fdfce1`
+- 公证后重新启动的运行 PID：`41852`。
 
-Apple 公证上传仍未执行；不得将 Developer ID 签名等同于 notarization/staple 已完成。
+提交 Apple 前的中间 ZIP 已移至 `build/notarization-submissions/Vibekits-dev144-submitted.zip`，正式 `bin` 目录只保留已装订 App 和最终已公证分发 ZIP，避免误用未装订载荷。

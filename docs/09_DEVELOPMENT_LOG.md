@@ -1331,3 +1331,5 @@
 - 不再用 Markdown 渲染历史时间线；旧会话中的 48 个步骤会被解析成 48 条独立事件，每条有成功/运行/失败图标、动作标题和摘要，不再连成一大段文字。
 - 对旧格式中同一行的目标、参数、结果、状态和耗时做字段拆分；主界面只显示有界摘要，超长 JSON 必须点击对应步骤后才在独立对话框显示。
 - 运行中与历史时间线共用详情对话框，保持默认折叠、展开逐步阅读、再次收起后继续会话的一致交互。新增与真实截图同规模的 48 步/超长 JSON 回归，定向 UI 回归 22/22 通过，Analyze 0 issue。
+- 用户明确授权后执行正式 Apple 公证流水线。Apple notarytool 返回 `Accepted`，Submission ID 为 `c13875c2-e8f6-4f8c-b02c-559672da101e`；ticket 已 staple 且 validate 通过，Gatekeeper 判定为 `source=Notarized Developer ID`。
+- 最终对外候选为 `bin/Vibekits-1.9.0-dev.144+2144-macos-universal-notarized.zip`（219 MB，SHA-256 `4432837e164e63876a42019d3148f629c30c10d570245ce66842f23460b7ff56`）。装订后的 App executable SHA-256 为 `c55e2cd709e69aa098148c14b783ab9c48da62141cde4c1deb7b2520a80b47a3`，App.framework SHA-256 为 `c3a3134fd1146b515be67fbc71fb6be3e49c925aca1fd6c3974574d957fdfce1`。
