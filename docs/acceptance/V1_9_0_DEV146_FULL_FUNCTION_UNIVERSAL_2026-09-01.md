@@ -38,6 +38,7 @@
 - Flutter analyze：2026-09-02 最终源码执行，`No issues found`。
 - 完整串行 Flutter tests：最终源码 653 passed、15 skipped、0 failed。15 项均为需要显式外部环境或授权的门控测试：QEMU/Mihomo live、真实系统盘、真实 ADB、一次性 KEMI 文件发送、Windows 注册表、真实模型联网、真实 LMCP 和 UI 截图等；跳过不计作通过。真实 LMCP 项另带目标参数单独执行 1/1 通过。
 - Universal Release：干净 `flutter clean → pub get --offline → flutter build macos --release --no-pub` 成功；App 实际占用约 714 MiB。`verify_macos_release_compat.sh` 扫描 App、frameworks、ADB、Node/DSH、7-Zip、Git 和 Harness 原生模块全部通过，App 最低版本固定为 macOS 12.0。
+- GitHub `macOS Release` 门禁明确标记为 macOS 12+，并监听 `third_party/**` 与 `tool/**`；运行时或验证脚本单独变化也必须重新构建、验证 Universal 双架构并生成校验和，避免漏验。
 - Rosetta：Developer ID 精确候选以 `arch -x86_64` 启动，`vmmap` 报告 `Code Type: X86-64 (translated)`；同一包内 Node 22.19.0、DSH 0.1.1-rc.2、ADB 37.0.0、7-Zip 25.01、Git 2.53.0 的 Intel 切片均实际启动成功，ADB 明确报告 `Darwin x86_64`。Intel/Rosetta Node 固定带 `--jitless`，真实执行 DSH JS 入口而非只跑 `node --version`；不授予 `allow-unsigned-executable-memory`。
 - Developer ID：33 个可执行/原生 Mach-O 逐项验证 Authority、Team ID 与 Hardened Runtime，并通过 `codesign --verify --deep --strict`；Authority=`Developer ID Application: zhen ji (26T5WV4GLP)`、TeamIdentifier=`26T5WV4GLP`、Apple timestamp 均已取得；Node JIT/DSH 启动复验通过。
 - Apple Notarization / Gatekeeper：`KEMI_NOTARY` 凭据已只读验证可访问 Apple；新 dev.146 payload 尚未提交，不能复用 dev.145 票据，也不能提前标记已公证。
