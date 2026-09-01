@@ -51,7 +51,7 @@ jobs:
             'tool/prepare_7zip_runtime_macos.sh',
             'tool/prepare_git_runtime_macos.sh') }}
 
-      - name: Prepare bundled macOS 12+ runtimes
+      - name: Prepare Universal Harness runtime
         shell: bash
         run: |
           if [[ ! -x native/harness/macos/runtime/bin/node || \
@@ -61,17 +61,25 @@ jobs:
                 ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs ]]; then
             ./tool/prepare_harness_runtime_macos.sh
           fi
+          test -x native/harness/macos/runtime/bin/node
+          test -f native/harness/macos/runtime/harness-runtime.json
+
+      - name: Prepare Universal 7-Zip runtime
+        shell: bash
+        run: |
           if [[ ! -x native/7zip/macos/runtime/7zz ]]; then
             ./tool/prepare_7zip_runtime_macos.sh
           fi
+          test -x native/7zip/macos/runtime/7zz
+
+      - name: Prepare Universal Git runtime
+        shell: bash
+        run: |
           if [[ ! -x native/git/macos/runtime/bin/git || \
                 ! -x native/git/macos/runtime/libexec/git-core/git-remote-https || \
                 ! -d native/git/macos/runtime/share/git-core/templates ]]; then
             ./tool/prepare_git_runtime_macos.sh
           fi
-          test -x native/harness/macos/runtime/bin/node
-          test -f native/harness/macos/runtime/harness-runtime.json
-          test -x native/7zip/macos/runtime/7zz
           test -x native/git/macos/runtime/bin/git
           test -x native/git/macos/runtime/libexec/git-core/git-remote-https
 
