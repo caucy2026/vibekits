@@ -56,5 +56,6 @@
 5. 第一版 Intel 门禁只执行 `node --version`，漏掉 Rosetta 中 DSH 初始化 V8 baseline compiler 时的可执行内存失败。正式门禁现必须执行真实 DSH JS 入口；x86_64 运行时使用 `--jitless`，保持最小 `allow-jit`，拒绝以更宽的未签名可执行内存权限掩盖问题。
 6. 首轮云端 `c476e4c` 在干净 checkout 的 Release 打包阶段失败：本机生成并忽略的 Harness、7-Zip、Git macOS runtime 不存在于 Git，旧工作流却直接构建。工作流现先按准备脚本和固定上游校验和生成/恢复缓存，逐项验证完整性，再把 runner 的官方 ADB 显式传给打包脚本；冷缓存超时提高到 90 分钟。第二轮又暴露 npm 会按构建主机架构选择可选原生包；准备脚本现不论运行在 Intel 或 Apple Silicon 都显式物化 arm64/x64 的 Sharp、libvips、Koffi 和 ripgrep。临时冷生成验证两套包和 Universal Node 完整；新云端 run 未通过前，本项仍保持阻塞。
 7. 拆分门禁确认 Harness 冷生成成功，而 7-Zip 下载/准备步骤在云端失败。25.01 Universal `7zz` 及上游 License/readme/History 总计约 5.6 MiB，现作为固定、可审计的 Release 输入纳入 Git；准备脚本及上游压缩包 SHA-256 仍保留用于显式升级，构建不再依赖 GitHub runner 临时下载该二进制。兼容验证仍会独立检查两个切片和 `minos=12.0`，不能靠跳过下载绕过架构门禁。
+8. 云端完整日志确认下一处失败不是编译器：Xcode 在最终签名时把 `Contents/MacOS/tools/adb/package.xml` 判定为未签名 code object。ADB 可执行文件继续固定在 `Contents/MacOS/tools/adb/adb`，NOTICE/source.properties/package.xml 改放 `Contents/Resources/tools/adb`；兼容门禁同时禁止在 ADB 可执行目录混入任何非 `adb` 文件，避免不同 Xcode 版本出现签名结果分叉。
 
 在本节剩余门禁全部变绿前，`bin/Vibekits.app` 继续保留 dev.145 已公证回退基线。

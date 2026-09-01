@@ -121,6 +121,14 @@ for ITEM in \
   require_file "$ITEM"
 done
 
+for ADB_METADATA in NOTICE.txt source.properties; do
+  require_file "$APP_BUNDLE/Contents/Resources/tools/adb/$ADB_METADATA"
+done
+if find "$APP_BUNDLE/Contents/MacOS/tools/adb" -type f ! -name adb -print -quit | grep -q .; then
+  echo "Non-executable ADB metadata must not be placed in Contents/MacOS." >&2
+  exit 3
+fi
+
 MINIMUM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP_BUNDLE/Contents/Info.plist")"
 if [ "$MINIMUM" != "12.0" ]; then
   echo "Expected LSMinimumSystemVersion 12.0, got $MINIMUM" >&2

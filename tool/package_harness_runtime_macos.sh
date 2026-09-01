@@ -64,10 +64,13 @@ chmod 755 "$ADB_DESTINATION/adb"
 codesign --force --sign - "$ADB_DESTINATION/adb"
 
 ADB_SOURCE_DIRECTORY="$(dirname "$ADB_SOURCE")"
+ADB_METADATA_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/adb"
+rm -rf "$ADB_METADATA_DESTINATION"
+mkdir -p "$ADB_METADATA_DESTINATION"
 for ADB_METADATA in NOTICE.txt source.properties package.xml; do
   if [ -f "$ADB_SOURCE_DIRECTORY/$ADB_METADATA" ]; then
     ditto "$ADB_SOURCE_DIRECTORY/$ADB_METADATA" \
-      "$ADB_DESTINATION/$ADB_METADATA"
+      "$ADB_METADATA_DESTINATION/$ADB_METADATA"
   fi
 done
 echo "Packaged ADB runtime: $ADB_DESTINATION/adb"
