@@ -714,8 +714,9 @@ void main() {
       'vibekits_harness_structure_',
     );
     addTearDown(() => root.delete(recursive: true));
-    await File('${root.path}${Platform.pathSeparator}agent.dart')
-        .writeAsString('class ToolAgent {}\n');
+    await File(
+      '${root.path}${Platform.pathSeparator}agent.dart',
+    ).writeAsString('class ToolAgent {}\n');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
 
@@ -922,6 +923,49 @@ void main() {
       'shell',
       'getprop',
       'ro.product.model',
+    ]);
+  });
+
+  test('Android Shell 安全规范化 dumpsys grep 管道并在本地过滤', () async {
+    final List<List<String>> calls = <List<String>>[];
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      adbExecutable: '/tools/adb/adb',
+      adbRunner: (String executable, List<String> arguments) async {
+        calls.add(List<String>.of(arguments));
+        return const AdbCommandResult(
+          exitCode: 0,
+          stdout:
+              'DisplayDeviceInfo{"Built-in Screen"}\n'
+              '  mDisplayId=0\n'
+              'unrelated-value\n',
+          stderr: '',
+        );
+      },
+    );
+
+    final HarnessToolCallResult result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.adbShellId,
+      arguments: <String, Object?>{
+        'serial': '192.168.3.63:5555',
+        'arguments': <String>[
+          'dumpsys',
+          'display',
+          '|',
+          'grep',
+          '-E',
+          r'DisplayDeviceInfo|mDisplayId|DisplayDeviceInfo\("Built-in size',
+        ],
+      },
+      approve: (_) async => true,
+    );
+
+    expect(result.ok, isTrue);
+    expect(result.data?['pipelineNormalized'], isTrue);
+    expect(result.data?['stdout'], contains('DisplayDeviceInfo'));
+    expect(result.data?['stdout'], contains('mDisplayId=0'));
+    expect(result.data?['stdout'], isNot(contains('unrelated-value')));
+    expect(calls, <List<String>>[
+      <String>['-s', '192.168.3.63:5555', 'shell', 'dumpsys', 'display'],
     ]);
   });
 
@@ -1167,8 +1211,9 @@ void main() {
       'vibekits_harness_search_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File('${sandbox.path}${Platform.pathSeparator}hello.dart')
-        .writeAsString('void main() {}');
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}hello.dart',
+    ).writeAsString('void main() {}');
     final HarnessToolCallResult result = await VibekitsHarnessToolBridge()
         .invoke(
           toolId: VibekitsHarnessToolBridge.fileSearchId,
@@ -1296,11 +1341,12 @@ void main() {
               stderr: '',
             );
           },
-      remoteFileConnector: (
-        RemoteConnectionProfile connection,
-        String? secret,
-        RemoteHostKeyVerifier verifier,
-      ) async => _FakeHarnessRemoteFileClient(transfers),
+      remoteFileConnector:
+          (
+            RemoteConnectionProfile connection,
+            String? secret,
+            RemoteHostKeyVerifier verifier,
+          ) async => _FakeHarnessRemoteFileClient(transfers),
     );
 
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1578,8 +1624,9 @@ void main() {
     final File first = await File(
       '${sandbox.path}${Platform.pathSeparator}first.bin',
     ).writeAsString('same-content');
-    await File('${sandbox.path}${Platform.pathSeparator}second.bin')
-        .writeAsString('same-content');
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}second.bin',
+    ).writeAsString('same-content');
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     int approvals = 0;
     Future<bool> approve(HarnessToolApprovalRequest request) async {
@@ -1621,8 +1668,9 @@ void main() {
       'vibekits_harness_drive_task_',
     );
     addTearDown(() => sandbox.delete(recursive: true));
-    await File('${sandbox.path}${Platform.pathSeparator}sample.bin')
-        .writeAsBytes(List<int>.filled(4096, 7));
+    await File(
+      '${sandbox.path}${Platform.pathSeparator}sample.bin',
+    ).writeAsBytes(List<int>.filled(4096, 7));
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge();
     Future<bool> approve(HarnessToolApprovalRequest request) async => true;
 

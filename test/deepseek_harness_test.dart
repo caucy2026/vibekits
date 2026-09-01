@@ -381,8 +381,9 @@ void main() {
       isTrue,
     );
     expect(
-      Directory('${selected.path}${Platform.pathSeparator}screenshots')
-          .existsSync(),
+      Directory(
+        '${selected.path}${Platform.pathSeparator}screenshots',
+      ).existsSync(),
       isTrue,
     );
     expect(
@@ -422,6 +423,10 @@ void main() {
     expect(find.byKey(const Key('agent-sidebar-settings')), findsOneWidget);
     expect(find.text('Harness 设置'), findsOneWidget);
     expect(find.text('新建会话'), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('agent-composer-shell'))).width,
+      greaterThan(820),
+    );
   });
 
   testWidgets('标准 Mac 窗口可打开和收起会话侧边栏', (WidgetTester tester) async {

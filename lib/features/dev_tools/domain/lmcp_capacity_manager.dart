@@ -22,12 +22,7 @@ class LmcpCapacityLeaseManager {
     Random? random,
   }) : assert(capacity > 0),
        _now = now ?? DateTime.now,
-       _random = random ?? Random.secure() {
-    _expiryTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _removeExpired(),
-    );
-  }
+       _random = random ?? Random.secure();
 
   final int capacity;
   final void Function()? onChanged;
@@ -35,7 +30,7 @@ class LmcpCapacityLeaseManager {
   final Random _random;
   final Map<String, _LmcpCapacityLease> _leases =
       <String, _LmcpCapacityLease>{};
-  late final Timer _expiryTimer;
+  Timer? _expiryTimer;
   int _loadRevision = 1;
   bool _draining = false;
 
@@ -145,6 +140,7 @@ class LmcpCapacityLeaseManager {
       expiresAt: now.add(Duration(seconds: ttlSeconds)),
     );
     _leases[lease.id] = lease;
+    _ensureExpiryTimer();
     _changed();
     return _leaseJson(lease);
   }
@@ -183,6 +179,10 @@ class LmcpCapacityLeaseManager {
     }
     _require(leaseId, leaseToken, callerInstanceId);
     _leases.remove(leaseId);
+    if (_leases.isEmpty) {
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
+    }
     _changed();
     return <String, Object?>{
       'released': true,
@@ -215,7 +215,10 @@ class LmcpCapacityLeaseManager {
     _changed();
   }
 
-  void dispose() => _expiryTimer.cancel();
+  void dispose() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+  }
 
   _LmcpCapacityLease _require(
     String leaseId,
@@ -250,7 +253,19 @@ class LmcpCapacityLeaseManager {
     _leases.removeWhere(
       (_, _LmcpCapacityLease lease) => !lease.expiresAt.isAfter(now),
     );
+    if (_leases.isEmpty) {
+      _expiryTimer?.cancel();
+      _expiryTimer = null;
+    }
     if (_leases.length != before) _changed();
+  }
+
+  void _ensureExpiryTimer() {
+    if (_expiryTimer?.isActive ?? false) return;
+    _expiryTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _removeExpired(),
+    );
   }
 
   void _changed() {

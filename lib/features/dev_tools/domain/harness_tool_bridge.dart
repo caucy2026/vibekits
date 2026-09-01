@@ -825,7 +825,7 @@ class VibekitsHarnessToolBridge {
     adbShellId: _definition(
       id: adbShellId,
       name: '执行 Android Shell',
-      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。',
+      description: '对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。对 dumpsys/getprop 后的 `| grep [-E|-F|-i] pattern` 会在本地安全过滤，不把管道或引号交给设备 shell 重新解析。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'serial': _string('设备序列号或 IP:端口'),
@@ -2901,6 +2901,27 @@ class VibekitsHarnessToolBridge {
   ) async {
     final List<String> values = _stringList(arguments['arguments']);
     if (values.isEmpty) throw const FormatException('缺少 Android shell 参数');
+    final _AdbLocalTextFilter? localFilter = _AdbLocalTextFilter.tryParse(
+      values,
+    );
+    if (localFilter != null) {
+      final Map<String, Object?> result = await _executeSemanticAdb(
+        arguments,
+        <String>['shell', ...localFilter.command],
+      );
+      result['stdout'] = localFilter.apply((result['stdout'] ?? '').toString());
+      result['arguments'] = <String>['shell', ...values];
+      result['executedArguments'] = <String>['shell', ...localFilter.command];
+      result['pipelineNormalized'] = true;
+      result['localFilter'] = <String, Object?>{
+        'tool': 'grep',
+        'pattern': localFilter.pattern,
+        'extended': localFilter.extended,
+        'fixed': localFilter.fixed,
+        'ignoreCase': localFilter.ignoreCase,
+      };
+      return result;
+    }
     if (values.length > 3 &&
         values.first.toLowerCase() == 'getprop' &&
         values.skip(1).every(_isAndroidPropertyName)) {
@@ -4993,6 +5014,94 @@ class VibekitsHarnessToolBridge {
           .toString();
     }
     return (arguments['input'] ?? toolId).toString();
+  }
+}
+
+/// Recognizes the narrow read-only pipeline form models commonly emit and
+/// keeps the pipe out of `adb shell`. ADB joins argv into a remote shell command,
+/// so embedded quotes in a grep expression can otherwise become a syntax error.
+final class _AdbLocalTextFilter {
+  const _AdbLocalTextFilter({
+    required this.command,
+    required this.pattern,
+    required this.extended,
+    required this.fixed,
+    required this.ignoreCase,
+  });
+
+  final List<String> command;
+  final String pattern;
+  final bool extended;
+  final bool fixed;
+  final bool ignoreCase;
+
+  static _AdbLocalTextFilter? tryParse(List<String> values) {
+    final int pipe = values.indexOf('|');
+    if (pipe <= 0 || pipe + 2 > values.length) return null;
+    if (values.indexOf('|', pipe + 1) >= 0) return null;
+    final String commandName = values.first.toLowerCase();
+    if (commandName != 'dumpsys' && commandName != 'getprop') return null;
+    if (values[pipe + 1].toLowerCase() != 'grep') return null;
+
+    bool extended = false;
+    bool fixed = false;
+    bool ignoreCase = false;
+    int cursor = pipe + 2;
+    while (cursor < values.length && values[cursor].startsWith('-')) {
+      final String flags = values[cursor].substring(1);
+      if (flags.isEmpty ||
+          flags.split('').any((String flag) => !'EFi'.contains(flag))) {
+        return null;
+      }
+      extended = extended || flags.contains('E');
+      fixed = fixed || flags.contains('F');
+      ignoreCase = ignoreCase || flags.contains('i');
+      cursor++;
+    }
+    if (cursor >= values.length || (extended && fixed)) return null;
+    String pattern = values.sublist(cursor).join(' ').trim();
+    if (pattern.startsWith('"') || pattern.startsWith("'")) {
+      pattern = pattern.substring(1);
+    }
+    if (pattern.endsWith('"') || pattern.endsWith("'")) {
+      pattern = pattern.substring(0, pattern.length - 1);
+    }
+    if (pattern.isEmpty || pattern.length > 2048) return null;
+    return _AdbLocalTextFilter(
+      command: List<String>.unmodifiable(values.sublist(0, pipe)),
+      pattern: pattern,
+      extended: extended,
+      fixed: fixed,
+      ignoreCase: ignoreCase,
+    );
+  }
+
+  String apply(String stdout) {
+    final Pattern matcher = _matcher();
+    final Iterable<String> lines = stdout.split('\n').where((String line) {
+      if (matcher is RegExp) return matcher.hasMatch(line);
+      final String candidate = ignoreCase ? line.toLowerCase() : line;
+      return candidate.contains(matcher as String);
+    });
+    return lines.join('\n');
+  }
+
+  Pattern _matcher() {
+    if (fixed) {
+      return ignoreCase ? pattern.toLowerCase() : pattern;
+    }
+    try {
+      return RegExp(pattern, caseSensitive: !ignoreCase, multiLine: false);
+    } on FormatException {
+      final String fallback = pattern
+          .replaceAll('\\', '')
+          .replaceAll('(', '')
+          .replaceAll(')', '')
+          .replaceAll('"', '')
+          .replaceAll("'", '')
+          .trim();
+      return ignoreCase ? fallback.toLowerCase() : fallback;
+    }
   }
 }
 

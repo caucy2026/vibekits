@@ -3270,11 +3270,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   Widget _buildComposer(HarnessEnvironmentReport? environment) {
     final bool canRun = !_running;
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 820),
+      child: SizedBox(
+        width: double.infinity,
         child: AnimatedBuilder(
           animation: _composerFocus,
           builder: (BuildContext context, Widget? child) => AnimatedContainer(
+            key: const Key('agent-composer-shell'),
             duration: const Duration(milliseconds: 120),
             curve: Curves.easeOut,
             decoration: BoxDecoration(
