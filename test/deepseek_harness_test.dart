@@ -10,6 +10,7 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 import 'package:vibekits/features/dev_tools/domain/harness_agent_preferences.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_conversation_store.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_work_status.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
@@ -515,6 +516,116 @@ void main() {
     expect(find.byKey(const Key('agent-session-collapse-one')), findsOneWidget);
     expect(find.byKey(const Key('agent-session-collapse-two')), findsOneWidget);
     expect(find.byTooltip('折叠项目会话'), findsOneWidget);
+  });
+
+  testWidgets('Harness 运行时可切换项目且后台结果回到原会话', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1100, 800);
+    addTearDown(tester.view.reset);
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vibekits_background_project_switch_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    final Directory source = Directory('${root.path}/source')..createSync();
+    final Directory target = Directory('${root.path}/target')..createSync();
+    final DateTime now = DateTime.now();
+    final Map<String, HarnessConversationProject> projects =
+        <String, HarnessConversationProject>{
+          source.path: HarnessConversationProject(
+            workspace: source.path,
+            sessions: <HarnessConversationSession>[
+              HarnessConversationSession(
+                id: 'source-session',
+                title: '后台任务',
+                messages: const <HarnessConversationMessage>[],
+                createdAt: now,
+                updatedAt: now,
+              ),
+            ],
+            activeSessionId: 'source-session',
+            updatedAt: now,
+          ),
+          target.path: HarnessConversationProject(
+            workspace: target.path,
+            sessions: <HarnessConversationSession>[
+              HarnessConversationSession(
+                id: 'target-session',
+                title: '目标会话',
+                messages: const <HarnessConversationMessage>[
+                  HarnessConversationMessage(text: '目标项目内容', user: true),
+                ],
+                createdAt: now,
+                updatedAt: now,
+              ),
+            ],
+            activeSessionId: 'target-session',
+            updatedAt: now,
+          ),
+        };
+    final _FakeAgentHandle handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    final List<String> workspaceChanges = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: source.path,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            loadWorkspaceCatalog: () async => <String>[
+              source.path,
+              target.path,
+            ],
+            loadConversation: (String workspace) async => projects[workspace],
+            saveConversation: (HarnessConversationProject project) async {
+              projects[project.workspace] = project;
+            },
+            onWorkspaceChanged: (String workspace) async {
+              workspaceChanges.add(workspace);
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+            runAgent: (_) async => handle,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '后台运行');
+    await tester.ensureVisible(find.byKey(const Key('agent-send')));
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.reasoning);
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('agent-workspace-header-${target.path}')),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(workspaceChanges.last, target.path);
+    expect(find.text('目标项目内容'), findsOneWidget);
+    expect(find.byKey(const Key('agent-stop')), findsOneWidget);
+    expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.reasoning);
+
+    handle.add('后台任务已完成');
+    await tester.pump();
+    expect(find.text('后台任务已完成'), findsNothing);
+    await handle.complete(0);
+    await tester.pumpAndSettle();
+    expect(HarnessWorkStatusHub.latest.phase, HarnessWorkPhase.ready);
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('agent-workspace-header-${source.path}')),
+    );
+    await tester.pumpAndSettle();
+    expect(workspaceChanges.last, source.path);
+    expect(find.text('后台任务已完成'), findsOneWidget);
   });
 
   testWidgets('可添加工作区并拖动会话后确认权限根目录重绑定', (WidgetTester tester) async {

@@ -209,6 +209,7 @@ class VibekitsHarnessToolBridge {
     HarnessMcpToolInvoker? mcpToolInvoker,
     HarnessMcpReputationLoader? mcpReputationLoader,
     HarnessMcpReputationRater? mcpReputationRater,
+    bool agentOrchestrated = false,
   }) => VibekitsHarnessToolBridge._(
     handlers,
     adbRunner,
@@ -236,6 +237,7 @@ class VibekitsHarnessToolBridge {
     mcpToolInvoker,
     mcpReputationLoader,
     mcpReputationRater,
+    agentOrchestrated,
   );
 
   VibekitsHarnessToolBridge._(
@@ -265,6 +267,7 @@ class VibekitsHarnessToolBridge {
     this._mcpToolInvoker,
     this._mcpReputationLoader,
     this._mcpReputationRater,
+    this._agentOrchestrated,
   );
 
   static const String protocolVersion = 'vibekits.tools.v1';
@@ -419,6 +422,7 @@ class VibekitsHarnessToolBridge {
   final HarnessMcpToolInvoker? _mcpToolInvoker;
   final HarnessMcpReputationLoader? _mcpReputationLoader;
   final HarnessMcpReputationRater? _mcpReputationRater;
+  final bool _agentOrchestrated;
   final AudioHarnessService _audioHarnessService = AudioHarnessService();
   final PacketCaptureService _packetCaptureService =
       PacketCaptureService.instance;
@@ -1908,7 +1912,9 @@ class VibekitsHarnessToolBridge {
         startedAt: startedAt,
       );
       HarnessWorkStatusHub.publish(
-        phase: HarnessWorkPhase.ready,
+        phase: _agentOrchestrated
+            ? HarnessWorkPhase.reasoning
+            : HarnessWorkPhase.ready,
         message: '${definition.name}需要桌面节点',
         toolId: toolId,
         toolName: definition.name,
@@ -1942,7 +1948,9 @@ class VibekitsHarnessToolBridge {
           startedAt: startedAt,
         );
         HarnessWorkStatusHub.publish(
-          phase: HarnessWorkPhase.ready,
+          phase: _agentOrchestrated
+              ? HarnessWorkPhase.reasoning
+              : HarnessWorkPhase.ready,
           message: '已拒绝 ${definition.name}',
           toolId: toolId,
           toolName: definition.name,
@@ -1972,8 +1980,12 @@ class VibekitsHarnessToolBridge {
         );
       }
       HarnessWorkStatusHub.publish(
-        phase: HarnessWorkPhase.ready,
-        message: '${definition.name} 执行成功',
+        phase: _agentOrchestrated
+            ? HarnessWorkPhase.reasoning
+            : HarnessWorkPhase.ready,
+        message: _agentOrchestrated
+            ? '${definition.name} 执行成功，Harness 继续分析'
+            : '${definition.name} 执行成功',
         toolId: toolId,
         toolName: definition.name,
         target: target,
@@ -1992,8 +2004,12 @@ class VibekitsHarnessToolBridge {
         );
       }
       HarnessWorkStatusHub.publish(
-        phase: HarnessWorkPhase.failed,
-        message: '${definition.name} 执行失败',
+        phase: _agentOrchestrated
+            ? HarnessWorkPhase.reasoning
+            : HarnessWorkPhase.failed,
+        message: _agentOrchestrated
+            ? '${definition.name} 执行失败，Harness 正在调整方案'
+            : '${definition.name} 执行失败',
         toolId: toolId,
         toolName: definition.name,
         target: target,

@@ -290,7 +290,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.adb.session_close` | `adb__session_close` | 关闭 ADB 长连接 | 是 | 停止指定设备的后台心跳；不杀死其他工具正在使用的 ADB server。 | `controlsDevice` | `sessionId`* (string) |
 | `vibekits.adb.session_open` | `adb__session_open` | 保持 ADB 长连接 | 是 | 为指定设备建立带真实 get-state 心跳的长连接；后续用 session_status 检查，完成后显式关闭。底层复用内置 ADB server 连接。 | `controlsDevice` | `serial`* (string), `heartbeatSeconds` (integer；最小=3；最大=60) |
 | `vibekits.adb.session_status` | `adb__session_status` | 读取 ADB 长连接状态 | 是 | 返回真实心跳次数、最后检查时间和设备连接状态。 | `readOnly` | `sessionId`* (string) |
-| `vibekits.adb.shell` | `adb__shell` | 执行 Android Shell | 是 | 对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。 | `controlsDevice` | `serial`* (string), `arguments`* (array) |
+| `vibekits.adb.shell` | `adb__shell` | 执行 Android Shell | 是 | 对选定设备执行参数化 Android shell 命令；不经过本机 cmd 或 sh。读取多个系统属性时可把多个合法属性名放在同一次 getprop 调用中，VibeKits 会安全拆分并返回属性映射。 | `controlsDevice` | `serial`* (string), `arguments`* (array) |
 | `vibekits.remote.list_profiles` | `remote__list_profiles` | 列出远程会话 | 是 | 列出已保存的 SSH/SFTP 历史、最近使用时间和当前在线连接数；不返回密码或私钥内容。 | `readOnly` | `{}` |
 | `vibekits.remote.open_interactive` | `remote__open_interactive` | 打开 SSH 与 SFTP 工作流 | 否（环境/接线门禁） | 在 Vibekits 中打开指定主机的 SSH 登录界面；用户认证一次后自动复用该连接展示 SFTP 双栏文件。 | `readOnly` | `host`* (string), `user` (string), `port` (integer；最小=1；最大=65535), `openSftp` (boolean) |
 | `vibekits.remote.sftp_download` | `remote__sftp_download` | SFTP 下载文件 | 是 | 通过已保存 SSH 会话下载一个远端文件；覆盖本地文件必须明确指定。 | `writesData` | `profileId`* (string), `remotePath`* (string), `localPath`* (string), `overwrite` (boolean) |

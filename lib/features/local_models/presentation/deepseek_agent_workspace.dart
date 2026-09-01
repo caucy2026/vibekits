@@ -146,6 +146,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   HarnessEnvironmentReport? _environment;
   HarnessAgentHandle? _handle;
   StreamSubscription<String>? _outputSubscription;
+  String? _runningWorkspace;
+  String? _runningSessionId;
+  List<_AgentMessage>? _runningMessages;
   Stopwatch? _runClock;
   bool _checking = true;
   bool _running = false;
@@ -208,7 +211,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     }
   }
 
-  VibekitsHarnessToolBridge _createMcpBridge() => VibekitsHarnessToolBridge(
+  VibekitsHarnessToolBridge _createMcpBridge({
+    bool agentOrchestrated = false,
+  }) => VibekitsHarnessToolBridge(
     activityRecorder: _recordHarnessToolActivity,
     mcpCatalogLoader: McpCapabilityDirectory.instance.exportForHarness,
     mcpToolInvoker:
@@ -227,6 +232,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               toolName: toolName,
               rating: rating,
             ),
+    agentOrchestrated: agentOrchestrated,
   );
 
   Future<void> _startMcpExposure(VibekitsHarnessToolBridge bridge) =>
@@ -330,25 +336,32 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   void _syncHarnessWorkspaceStatus() {
     final String current = _workspace.text.trim();
+    final String statusWorkspace = _runningWorkspace ?? current;
     HarnessWorkStatusHub.syncWorkspaceInventory(<HarnessWorkspaceSummary>[
       for (final String workspace in _workspaceCatalog)
         HarnessWorkspaceSummary(
           workspaceRef: workspace,
           label: _workspaceDisplayName(workspace),
-          active: workspace == current,
+          active: workspace == statusWorkspace,
         ),
     ]);
     final HarnessWorkspaceStatusContext? previous = _workStatusContext;
     if (previous != null) HarnessWorkStatusHub.clearWorkspace(previous);
-    if (current.isEmpty) {
+    if (statusWorkspace.isEmpty) {
       _workStatusContext = null;
       return;
     }
     _workStatusContext = HarnessWorkStatusHub.activateWorkspace(
-      workspaceRef: current,
-      workspaceLabel: _workspaceDisplayName(current),
+      workspaceRef: statusWorkspace,
+      workspaceLabel: _workspaceDisplayName(statusWorkspace),
       sessionRef: 'workspace-inventory',
     );
+    if (_runningWorkspace != null) {
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.reasoning,
+        message: 'Harness 任务正在继续运行',
+      );
+    }
   }
 
   void _setRunning(bool value) {
@@ -697,7 +710,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _adoptWorkspace(String workspace, {bool notify = true}) async {
     final String target = workspace.trim();
-    if (_running || target == _workspace.text.trim()) return;
+    if (target == _workspace.text.trim()) return;
     if (!Directory(target).isAbsolute || !Directory(target).existsSync()) {
       if (mounted) _show('工作区不存在或无法访问：$target');
       return;
@@ -734,18 +747,30 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     }
     if (!mounted ||
         epoch != _conversationEpoch ||
-        target != _workspace.text.trim() ||
-        _running) {
+        target != _workspace.text.trim()) {
       return;
     }
+    final List<HarnessConversationSession> restoredSessions =
+        target == _runningWorkspace
+        ? List<HarnessConversationSession>.of(
+            _workspaceSessions[target] ??
+                project?.sessions ??
+                const <HarnessConversationSession>[],
+          )
+        : List<HarnessConversationSession>.of(
+            project?.sessions ?? const <HarnessConversationSession>[],
+          );
+    final String? restoredActiveSessionId = target == _runningWorkspace
+        ? _runningSessionId
+        : project?.activeSessionId;
     setState(() {
       _sessions
         ..clear()
-        ..addAll(project?.sessions ?? const <HarnessConversationSession>[]);
+        ..addAll(restoredSessions);
       _workspaceSessions[target] = List<HarnessConversationSession>.of(
-        project?.sessions ?? const <HarnessConversationSession>[],
+        restoredSessions,
       );
-      _activeSessionId = project?.activeSessionId;
+      _activeSessionId = restoredActiveSessionId;
       final HarnessConversationSession? active = _sessions
           .where(
             (HarnessConversationSession session) =>
@@ -833,6 +858,93 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     }
   }
 
+  List<HarnessConversationMessage> _storedMessages(
+    Iterable<_AgentMessage> messages,
+  ) => <HarnessConversationMessage>[
+    for (final _AgentMessage message in messages)
+      HarnessConversationMessage(
+        text: message.text,
+        user: message.user,
+        elapsedMs: message.elapsed?.inMilliseconds,
+        exitCode: message.exitCode,
+        stopped: message.stopped,
+      ),
+  ];
+
+  bool get _viewingRunningSession =>
+      _workspace.text.trim() == _runningWorkspace &&
+      _activeSessionId == _runningSessionId;
+
+  void _syncRunningSessionCache() {
+    final String? workspace = _runningWorkspace;
+    final String? sessionId = _runningSessionId;
+    final List<_AgentMessage>? messages = _runningMessages;
+    if (workspace == null || sessionId == null || messages == null) return;
+    final List<HarnessConversationSession> sessions =
+        List<HarnessConversationSession>.of(
+          _workspaceSessions[workspace] ??
+              (_workspace.text.trim() == workspace
+                  ? _sessions
+                  : const <HarnessConversationSession>[]),
+        );
+    final int index = sessions.indexWhere(
+      (HarnessConversationSession session) => session.id == sessionId,
+    );
+    final DateTime now = DateTime.now();
+    final List<HarnessConversationMessage> stored = _storedMessages(messages);
+    final HarnessConversationSession updated = index < 0
+        ? HarnessConversationSession(
+            id: sessionId,
+            title: _conversationTitle(stored),
+            messages: stored,
+            createdAt: now,
+            updatedAt: now,
+          )
+        : sessions[index].copyWith(
+            title: _conversationTitle(stored),
+            messages: stored,
+            updatedAt: now,
+          );
+    if (index < 0) {
+      sessions.insert(0, updated);
+    } else {
+      sessions[index] = updated;
+    }
+    _workspaceSessions[workspace] = sessions;
+    if (_workspace.text.trim() == workspace) {
+      final int visibleIndex = _sessions.indexWhere(
+        (HarnessConversationSession session) => session.id == sessionId,
+      );
+      if (visibleIndex < 0) {
+        _sessions.insert(0, updated);
+      } else {
+        _sessions[visibleIndex] = updated;
+      }
+    }
+  }
+
+  Future<void> _persistRunningConversation() async {
+    final String? workspace = _runningWorkspace;
+    final String? sessionId = _runningSessionId;
+    if (workspace == null || sessionId == null) return;
+    _syncRunningSessionCache();
+    try {
+      await widget.saveConversation(
+        HarnessConversationProject(
+          workspace: workspace,
+          sessions: List<HarnessConversationSession>.unmodifiable(
+            _workspaceSessions[workspace] ??
+                const <HarnessConversationSession>[],
+          ),
+          activeSessionId: sessionId,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } on Object {
+      // A read-only workspace must not interrupt a running Harness task.
+    }
+  }
+
   String _conversationTitle(List<HarnessConversationMessage> messages) {
     final String title =
         messages
@@ -889,7 +1001,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       debugDirectory: _debugDirectory.text.trim(),
       permissionMode: _permissionMode,
       approveTool: _approveHarnessTool,
-      toolBridge: _createMcpBridge(),
+      toolBridge: _createMcpBridge(agentOrchestrated: true),
     );
     if (request.apiKey.isEmpty) {
       _show('请先点右上角设置并填写 DeepSeek API Key');
@@ -924,7 +1036,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ),
         );
       _progressExpanded = true;
+      _runningWorkspace = request.workspace;
+      _runningSessionId = _activeSessionId;
+      _runningMessages = List<_AgentMessage>.of(_messages);
+      _syncRunningSessionCache();
     });
+    _syncHarnessWorkspaceStatus();
     HarnessWorkStatusHub.publish(
       phase: HarnessWorkPhase.reasoning,
       message: 'Harness 正在处理当前项目任务',
@@ -952,7 +1069,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ),
       );
       _outputSubscription = handle.output.listen((String chunk) {
-        if (!mounted || assistantIndex >= _messages.length) return;
+        final List<_AgentMessage>? runningMessages = _runningMessages;
+        if (!mounted ||
+            runningMessages == null ||
+            assistantIndex >= runningMessages.length) {
+          return;
+        }
         final String clean = chunk.replaceAll(_ansiEscape, '');
         if (clean.isEmpty) return;
         final bool stickToBottom = _nearBottom;
@@ -970,11 +1092,18 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               state: _AgentProgressState.active,
             ),
           );
-          _messages[assistantIndex] = _messages[assistantIndex].copyWith(
-            text: '${_messages[assistantIndex].text}$clean',
-          );
+          runningMessages[assistantIndex] = runningMessages[assistantIndex]
+              .copyWith(text: '${runningMessages[assistantIndex].text}$clean');
+          if (_viewingRunningSession) {
+            _messages
+              ..clear()
+              ..addAll(runningMessages);
+          }
+          _syncRunningSessionCache();
         });
-        _scrollToEnd(force: stickToBottom);
+        if (_viewingRunningSession) {
+          _scrollToEnd(force: stickToBottom);
+        }
       });
       final int code = await handle.exitCode;
       final Future<void>? cancelOutput = _outputSubscription?.cancel();
@@ -993,7 +1122,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         _setRunning(false);
         _stopping = false;
         _handle = null;
-        final _AgentMessage current = _messages[assistantIndex];
+        final List<_AgentMessage>? runningMessages = _runningMessages;
+        if (runningMessages == null ||
+            assistantIndex >= runningMessages.length) {
+          return;
+        }
+        final _AgentMessage current = runningMessages[assistantIndex];
         String text = current.text;
         if (text.trim().isEmpty) {
           text = _stopRequested
@@ -1004,26 +1138,30 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         } else if (code != 0 && !_stopRequested) {
           text = '$text\n\n进程退出代码：$code';
         }
-        _messages[assistantIndex] = current.copyWith(
+        runningMessages[assistantIndex] = current.copyWith(
           text: text,
           elapsed: _runClock?.elapsed,
           exitCode: code,
           stopped: _stopRequested,
         );
+        if (_viewingRunningSession) {
+          _messages
+            ..clear()
+            ..addAll(runningMessages);
+        }
+        _syncRunningSessionCache();
       });
       HarnessWorkStatusHub.publish(
-        phase: code == 0
-            ? HarnessWorkPhase.completed
-            : _stopRequested
-            ? HarnessWorkPhase.stopped
+        phase: code == 0 || _stopRequested
+            ? HarnessWorkPhase.ready
             : HarnessWorkPhase.failed,
         message: _stopRequested
-            ? 'Harness 任务已停止'
+            ? 'Harness 已停止，工作区就绪'
             : code == 0
-            ? 'Harness 任务已完成'
+            ? 'Harness 任务完成，工作区就绪'
             : 'Harness 任务执行失败',
       );
-      await _persistConversation();
+      await _persistRunningConversation();
     } on Object catch (error) {
       if (!mounted) return;
       _runClock?.stop();
@@ -1032,20 +1170,38 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         _setRunning(false);
         _stopping = false;
         _handle = null;
-        _messages[assistantIndex] = _messages[assistantIndex].copyWith(
-          text: '启动失败：$error',
-          elapsed: _runClock?.elapsed,
-          exitCode: -1,
-        );
+        final List<_AgentMessage>? runningMessages = _runningMessages;
+        if (runningMessages == null ||
+            assistantIndex >= runningMessages.length) {
+          return;
+        }
+        runningMessages[assistantIndex] = runningMessages[assistantIndex]
+            .copyWith(
+              text: '启动失败：$error',
+              elapsed: _runClock?.elapsed,
+              exitCode: -1,
+            );
+        if (_viewingRunningSession) {
+          _messages
+            ..clear()
+            ..addAll(runningMessages);
+        }
+        _syncRunningSessionCache();
       });
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.failed,
         message: 'Harness 启动失败',
       );
-      await _persistConversation();
+      await _persistRunningConversation();
     }
-    _scrollToEnd(force: true);
-    _composerFocus.requestFocus();
+    _runningWorkspace = null;
+    _runningSessionId = null;
+    _runningMessages = null;
+    _syncHarnessWorkspaceStatus();
+    if (_workspace.text.trim() == request.workspace) {
+      _scrollToEnd(force: true);
+      _composerFocus.requestFocus();
+    }
   }
 
   Future<void> _stop() async {
@@ -1302,7 +1458,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _switchSession(String sessionId) async {
-    if (_running || sessionId == _activeSessionId) return;
+    if (sessionId == _activeSessionId) return;
     _captureComposerDraft();
     await _persistConversation();
     if (!mounted) return;
@@ -1349,7 +1505,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     String workspace,
     String sessionId,
   ) async {
-    if (_running) return;
     if (workspace != _workspace.text.trim()) {
       await _adoptWorkspace(workspace);
       if (!mounted || workspace != _workspace.text.trim()) return;
@@ -2665,7 +2820,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       ),
                       subtitle: accepting ? const Text('松开以移动并重绑定权限') : null,
                       onTap: () {
-                        if (activeWorkspace || _running) {
+                        if (activeWorkspace) {
                           setState(() {
                             if (!_collapsedWorkspaces.remove(workspace)) {
                               _collapsedWorkspaces.add(workspace);
@@ -2761,10 +2916,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 11),
       ),
-      onTap: _running
-          ? null
-          : () => _activateWorkspaceSession(workspace, session.id),
-      trailing: _workspaceCatalog.length < 2
+      onTap: () => _activateWorkspaceSession(workspace, session.id),
+      trailing: _running || _workspaceCatalog.length < 2
           ? null
           : _SessionMoveMenuButton(
               buttonKey: activeWorkspace

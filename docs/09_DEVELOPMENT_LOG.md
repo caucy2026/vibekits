@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-01 · v1.9.0-dev.138 Harness 真实忙碌状态与后台项目切换
+
+- 修复 Harness 工具成功/失败后过早把整个项目上报为 `ready`：agent 编排期间统一回到 `reasoning`，工具执行保持 `toolRunning`，只有任务真正结束才恢复 `ready`，RustDesk 可据此正确显示 BUSY 与绿灯。
+- 解除“任务运行时项目和会话不可点击”的全局 UI 锁；运行任务固定绑定启动时 workspace/session，用户可查看其他项目，后台流式结果仍安全写回原会话，切回后完整可见。
+- 保留单任务、权限根目录和移动操作门禁，浏览切换不会扩大工具权限或把输出串入其他项目。
+- 版本提升为 `1.9.0-dev.138+2138`，LMCP `catalogRevision` 同步提升到 `2138`；本轮验收同时覆盖上一版 macOS 内置 ADB 缺包与多属性 `getprop` 恢复。
+
 ## 2026-09-01 · macOS Release ADB 缺包与多属性 getprop 修复
 
 - 定位 Harness 中两次 `vibekits.adb.shell` 红色失败均首先发生在进程启动前：正式 App 缺少约定路径 `Contents/MacOS/tools/adb/adb`，返回 `ProcessException: No such file or directory`。

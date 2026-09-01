@@ -151,7 +151,7 @@ Vibekits 响应：
   "protocol": "vibekits.harness.status",
   "selectedVersion": 1,
   "publisher": "vibekits",
-  "publisherVersion": "1.9.0-dev.137",
+  "publisherVersion": "1.9.0-dev.138",
   "instanceId": "ephemeral-uuid",
   "capabilities": ["snapshot", "subscribe", "heartbeat", "resync"],
   "nonce": "same-random-base64",
@@ -288,7 +288,7 @@ final publisher = HarnessStatusIpcPublisher(
   snapshotStream: () => HarnessWorkStatusHub.registryChanges.map(
     (snapshot) => snapshot.toJson(),
   ),
-  publisherVersion: '1.9.0-dev.137',
+  publisherVersion: '1.9.0-dev.138',
   observer: onHarnessStatusIpcEvent,
 );
 final result = await publisher.start();

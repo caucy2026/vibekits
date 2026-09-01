@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,7 @@ import 'package:vibekits/features/dev_tools/domain/adb_server_endpoint.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_work_status.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_connection_record.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_connection_status.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_database_service.dart';
@@ -16,6 +18,49 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('Harness 编排中的工具结束后回到 reasoning 而不是误报 ready', () async {
+    final Completer<void> release = Completer<void>();
+    const String workspaceRef = 'test-agent-orchestrated-workspace';
+    final HarnessWorkspaceStatusContext context =
+        HarnessWorkStatusHub.activateWorkspace(
+          workspaceRef: workspaceRef,
+          workspaceLabel: '编排项目',
+          sessionRef: 'test-session',
+        );
+    addTearDown(() => HarnessWorkStatusHub.clearWorkspace(context));
+    final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
+      agentOrchestrated: true,
+      handlers: <String, HarnessToolHandler>{
+        'vibekits.file_hash': (_) async {
+          await release.future;
+          return <String, Object?>{'digest': 'test'};
+        },
+      },
+    );
+
+    final Future<HarnessToolCallResult> pending = bridge.invoke(
+      toolId: 'vibekits.file_hash',
+      arguments: const <String, Object?>{'input': '/tmp/test'},
+      approve: (_) async => true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    HarnessTaskSnapshot task = HarnessWorkStatusHub.registryLatest.tasks
+        .lastWhere(
+          (HarnessTaskSnapshot value) => value.key.workspaceRef == workspaceRef,
+        );
+    expect(task.phase, HarnessWorkPhase.toolRunning);
+    expect(task.busy, isTrue);
+
+    release.complete();
+    expect((await pending).ok, isTrue);
+    task = HarnessWorkStatusHub.registryLatest.tasks.lastWhere(
+      (HarnessTaskSnapshot value) => value.key.workspaceRef == workspaceRef,
+    );
+    expect(task.phase, HarnessWorkPhase.reasoning);
+    expect(task.busy, isTrue);
+    expect(task.message, contains('继续分析'));
+  });
+
   test('Harness 可查看并经写权限审批人工评价 MCP 全局信誉', () async {
     int approvals = 0;
     final VibekitsHarnessToolBridge bridge = VibekitsHarnessToolBridge(
