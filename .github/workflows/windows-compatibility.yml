@@ -1,0 +1,72 @@
+name: Windows Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-compatibility.yml'
+      - 'assets/**'
+      - 'lib/**'
+      - 'native/harness/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'test/**'
+      - 'tool/**'
+      - 'windows/**'
+
+concurrency:
+  group: windows-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.41.9'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Prepare and test pinned Harness runtime
+        shell: pwsh
+        run: |
+          $nodeDirectory = Split-Path (Get-Command node).Source
+          .\tool\prepare_harness_runtime.ps1 -NodeDirectory $nodeDirectory
+          & .\native\harness\windows\runtime\node.exe .\tool\test_harness_session_rebind.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Harness rebind verification failed' }
+
+      - name: Analyze shared application
+        run: flutter analyze --no-pub
+
+      - name: Test Harness, MCP and shared interaction regressions
+        run: >-
+          flutter test --no-pub
+          test/deepseek_harness_test.dart
+          test/harness_agent_integration_test.dart
+          test/harness_tool_bridge_test.dart
+          test/lan_mcp_tool_server_test.dart
+          test/widget_test.dart
+
+      - name: Compile Windows application
+        run: flutter build windows --debug --no-pub
+
+      - name: Verify Windows executable and Harness payload
+        shell: pwsh
+        run: |
+          $bundle = 'build\windows\x64\runner\Debug'
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'vibekits.exe'))) { throw 'vibekits.exe missing' }
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs'))) { throw 'Session rebind helper missing' }
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\harness-runtime.json'))) { throw 'Harness runtime manifest missing' }

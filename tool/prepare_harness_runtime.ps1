@@ -81,6 +81,8 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-session-
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
 if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }
+& (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\test_harness_session_rebind.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Harness cross-project session rebind test failed' }
 
 # Prime Node's portable compile cache at build time. New installations can
 # seed this small cache before their first DSH launch instead of compiling the
