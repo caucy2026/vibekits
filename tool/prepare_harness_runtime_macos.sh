@@ -171,6 +171,7 @@ for FILE in \
   vibekits-mcp-server.mjs \
   vibekits-codex-mcp.mjs \
   vibekits-approval.mjs \
+  vibekits-parent-watchdog.mjs \
   vibekits-android-stress-mcp.mjs; do
   cp "$PROJECT_ROOT/native/harness/$FILE" "$TARGET/$FILE"
 done
@@ -191,6 +192,7 @@ EOF
 test -f "$TARGET/$CLI_RELATIVE"
 test -f "$TARGET/vibekits-mcp-server.mjs"
 test -f "$TARGET/vibekits-approval.mjs"
+test -f "$TARGET/vibekits-parent-watchdog.mjs"
 test -f "$TARGET/vibekits-android-stress-mcp.mjs"
 test -f "$TARGET/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.4.node"
 test -f "$TARGET/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node"

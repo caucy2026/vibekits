@@ -152,10 +152,15 @@
       return;
     }
     window.__vibekitsWorkspaceSignature = signature;
-    window.chrome?.webview?.postMessage(JSON.stringify({
+    const message = JSON.stringify({
       type: 'vibekits.workspaceSnapshot',
       workspaces,
-    }));
+    });
+    if (window.chrome?.webview?.postMessage) {
+      window.chrome.webview.postMessage(message);
+    } else if (window.VibekitsHost?.postMessage) {
+      window.VibekitsHost.postMessage(message);
+    }
   };
 
   if (!window.__vibekitsWorkspaceObserverInstalled) {

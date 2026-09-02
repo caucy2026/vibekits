@@ -58,6 +58,7 @@ jobs:
                 ! -f native/harness/macos/runtime/harness-runtime.json || \
                 ! -f native/harness/macos/runtime/vibekits-mcp-server.mjs || \
                 ! -f native/harness/macos/runtime/vibekits-approval.mjs || \
+                ! -f native/harness/macos/runtime/vibekits-parent-watchdog.mjs || \
                 ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs ]]; then
             ./tool/prepare_harness_runtime_macos.sh
           fi

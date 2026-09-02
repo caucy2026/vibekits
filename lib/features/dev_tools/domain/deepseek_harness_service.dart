@@ -431,6 +431,8 @@ abstract final class DeepSeekHarnessService {
           ...spec.arguments,
         ],
         workingDirectory: spec.workspace.trim(),
+        environment: _nodeAppLifetimeEnvironment(runtime),
+        includeParentEnvironment: true,
         runInShell: false,
         mode: ProcessStartMode.normal,
       );
@@ -477,6 +479,7 @@ abstract final class DeepSeekHarnessService {
         ],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
+          ..._nodeAppLifetimeEnvironment(runtime),
           if (request.apiKey.trim().isNotEmpty)
             'DEEPSEEK_API_KEY': request.apiKey.trim(),
           'DEEPSEEK_BASE_URL': request.baseUrl.trim(),
@@ -582,6 +585,7 @@ abstract final class DeepSeekHarnessService {
         ],
         workingDirectory: request.workspace.trim(),
         environment: <String, String>{
+          ..._nodeAppLifetimeEnvironment(runtime),
           'DSH_HOME': harnessHome.path,
           'NODE_COMPILE_CACHE': nodeCompileCache.path,
           'NODE_COMPILE_CACHE_PORTABLE': '1',
@@ -905,6 +909,7 @@ class _HarnessRuntime {
     required this.mcpServerPath,
     required this.androidStressMcpPath,
     required this.approvalPluginPath,
+    required this.parentWatchdogPath,
   });
 
   final String nodeExecutable;
@@ -913,7 +918,14 @@ class _HarnessRuntime {
   final String mcpServerPath;
   final String androidStressMcpPath;
   final String approvalPluginPath;
+  final String parentWatchdogPath;
 }
+
+Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
+    <String, String>{
+      'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
+      'VIBEKITS_PARENT_PID': '$pid',
+    };
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
   final String executableDirectory = File(
@@ -970,6 +982,12 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         '${root.parent.parent.path}${Platform.pathSeparator}vibekits-android-stress-mcp.mjs',
       ),
     ];
+    final List<File> parentWatchdogCandidates = <File>[
+      File('${root.path}${Platform.pathSeparator}vibekits-parent-watchdog.mjs'),
+      File(
+        '${root.parent.parent.path}${Platform.pathSeparator}vibekits-parent-watchdog.mjs',
+      ),
+    ];
     final File? mcpServer = mcpCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
@@ -979,13 +997,17 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
     final File? androidStressMcp = androidStressCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
+    final File? parentWatchdog = parentWatchdogCandidates
+        .where((File file) => file.existsSync())
+        .firstOrNull;
     if (cli.isEmpty ||
         version.isEmpty ||
         !node.existsSync() ||
         !cliFile.existsSync() ||
         mcpServer == null ||
         androidStressMcp == null ||
-        approvalPlugin == null) {
+        approvalPlugin == null ||
+        parentWatchdog == null) {
       continue;
     }
     return _HarnessRuntime(
@@ -995,6 +1017,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       mcpServerPath: mcpServer.path,
       androidStressMcpPath: androidStressMcp.path,
       approvalPluginPath: approvalPlugin.path,
+      parentWatchdogPath: parentWatchdog.path,
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');

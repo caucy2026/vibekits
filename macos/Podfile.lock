@@ -7,12 +7,16 @@ PODS:
   - FlutterMacOS (1.0.0)
   - sherpa_onnx_macos (1.13.6):
     - FlutterMacOS
+  - webview_flutter_wkwebview (0.0.1):
+    - Flutter
+    - FlutterMacOS
 
 DEPENDENCIES:
   - audioplayers_darwin (from `Flutter/ephemeral/.symlinks/plugins/audioplayers_darwin/darwin`)
   - file_selector_macos (from `Flutter/ephemeral/.symlinks/plugins/file_selector_macos/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - sherpa_onnx_macos (from `Flutter/ephemeral/.symlinks/plugins/sherpa_onnx_macos/macos`)
+  - webview_flutter_wkwebview (from `Flutter/ephemeral/.symlinks/plugins/webview_flutter_wkwebview/darwin`)
 
 EXTERNAL SOURCES:
   audioplayers_darwin:
@@ -23,12 +27,15 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   sherpa_onnx_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/sherpa_onnx_macos/macos
+  webview_flutter_wkwebview:
+    :path: Flutter/ephemeral/.symlinks/plugins/webview_flutter_wkwebview/darwin
 
 SPEC CHECKSUMS:
   audioplayers_darwin: f15e209a3e856d1a7edcf98dc029f484fead2242
   file_selector_macos: 3e56eaea051180007b900eacb006686fd54da150
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   sherpa_onnx_macos: 101a94c73206157f9c128b03f86c8d85f2daa056
+  webview_flutter_wkwebview: 29eb20d43355b48fe7d07113835b9128f84e3af4
 
 PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
 

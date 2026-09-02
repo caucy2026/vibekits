@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.9.0-dev.146+2146
+version: 1.9.0-dev.147+2147
 
 environment:
   sdk: ^3.11.0
@@ -45,11 +45,17 @@ dependencies:
   xml: ^7.0.1
   csv: ^8.0.0
   webview_windows: ^0.4.0
+  # Official Harness Web is the single workspace/session/plugin UI on macOS.
+  # Windows keeps WebView2 through webview_windows until the same bridge has
+  # completed Windows binary compatibility validation.
+  webview_flutter: ^4.14.1
   flutter_svg: ^2.3.0
   archive: ^4.0.9
   ffi: ^2.2.0
   image: ^4.5.4
-  sherpa_onnx: ^1.13.4
+  # Native runtime is supply-chain pinned; upgrade only with new hashes and
+  # Universal/macOS compatibility evidence.
+  sherpa_onnx: 1.13.6
   # SQLite 3.x uses Dart native-asset hooks and bundles official SQLite builds
   # for Windows and macOS; no legacy sqlite3_flutter_libs package is required.
   sqlite3: ^3.5.0

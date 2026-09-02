@@ -1,5 +1,14 @@
 # Vibekits 开发日志
 
+## 2026-09-02 · 1.9.0-dev.147+2147 · 恢复官方 Harness 插件与设置体验
+
+- 修复移植时把官方 DSH Web 从正式入口替换掉、导致 Settings → Plugins 和插件清单不可达的问题。Windows/macOS 桌面端现在统一使用 `OfficialHarnessWorkspace`；官方 DSH 继续拥有项目、会话、对话、模型、权限、Skills 与插件设置，不在 Flutter 中复制第二份状态。
+- 新增 `HarnessWebViewBridge`：macOS 使用 WKWebView，Windows 保留 WebView2，统一 URL、JavaScript、页面完成和 Host 消息接口。VibeKits 的 MCP/OCR/飞书/日志/RustDesk 工具轨仍在 WebView 外侧，避免与官方菜单、输入框和插件功能冲突。
+- 修复 macOS 首次声明按钮可能只停留在按下态的问题：WKWebView 通过 `EagerGestureRecognizer` 接管完整指针序列，避免外层 Flutter 快捷键/滚轮监听器与平台视图拆分 mouse-down/mouse-up。用户现场点击实际已持久化首次确认；修复候选重启后直接进入官方会话页。
+- 新增跨平台 Harness 父进程看门狗：官方 DSH、插件与 MCP Node 子进程继承 VibeKits App PID；即使系统终止发生在 Flutter `dispose` 之前，也会在父进程消失后自动退出。Windows 原有 Job Object 保留为第二道兜底，不改变官方正常停止流程。
+- 固定插件能力门禁：运行时 composition 必须含 Host plugin inventory、Web 插件配置页与只读插件清单；双平台消息注入同时支持 `window.VibekitsHost` 和 `window.chrome.webview`。官方当前不是第三方下载商店，未审核社区插件不会被静默安装。
+- 版本、LMCP `appVersion` 与 `catalogRevision=2147` 同步提升。自动合同已覆盖官方桌面入口、插件 composition、双平台桥、指针序列、进程树清理、剪贴板和主界面；全量 657 项通过、15 项按环境门禁跳过，Universal macOS 12+ Release 与 Developer ID 签名通过；公证和 Windows 真机仍按发布门禁继续执行。
+
 ## 2026-09-02 · 1.9.0-dev.146+2146 · 全功能 Universal 发布收口
 
 - Windows/macOS 合并为一套 `DeepSeekAgentWorkspace` 交互层；项目/会话折叠、移动与权限重绑、独立草稿、并行运行、默认折叠时间线、选中态菜单、停止和永久删除均由共享合同约束，官方 DSH 仅作为固定可替换执行内核。

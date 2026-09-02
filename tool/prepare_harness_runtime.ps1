@@ -75,6 +75,7 @@ Copy-Item -LiteralPath (Join-Path $staging 'node_modules') -Destination $target 
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-mcp-server.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-codex-mcp.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval.mjs') -Destination $target
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-parent-watchdog.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-android-stress-mcp.mjs') -Destination $target
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target

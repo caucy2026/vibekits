@@ -1,6 +1,6 @@
 # macOS 最近 Windows 功能对齐与实机验收
 
-状态：dev.146 的交付目标固定为“Intel/Apple Silicon Universal、macOS 12+、Harness 与所有随包工具全功能”。dev.145 仅是上一个已公证回退基线；dev.146 必须重新通过 Universal 依赖、Rosetta、Developer ID、Apple 公证、精确候选 App Harness 和 LAN MCP 门禁后才能替换 `bin/Vibekits.app`。
+状态：dev.147 在 dev.146 Universal/macOS 12+ 门禁之上恢复官方 Harness Web 交互面，并保留 VibeKits MCP、OCR、飞书、日志和 RustDesk 等外围能力。dev.145 仍是上一个已公证回退基线；dev.147 必须重新通过签名、公证、精确候选 App Harness 和 LAN MCP 门禁后才能替换 `bin/Vibekits.app`。
 
 ## 1. 本次进入 macOS 的能力
 
@@ -19,24 +19,25 @@
 - RustDesk/Harness 当前连接状态入口。
 - 标准 `initialize/tools/list/tools/call` 接口描述规范。
 
-dev.146 已删除 `local_models_tab.dart` 中按 `Platform.isWindows` 分流的 Harness UI：Windows 和 macOS 现在都进入 Flutter `DeepSeekAgentWorkspace`，共用项目、会话、独立草稿、时间线、停止、删除、权限和 MCP 交互状态。官方 DSH 保持为固定版本执行内核，平台差异仅留在运行时路径、进程组、凭据库和 IPC 层。macOS 完整合同已纳入自动回归；Windows 正式 Release 仍必须在 Windows 构建主机运行同一清单，未执行前不宣称“Windows 真机已通过”。
+dev.147 修正了 dev.146 过度替换官方交互层的问题：Windows 和 macOS 正式桌面端统一进入 `OfficialHarnessWorkspace`，由固定版本的官方 DSH Web 自己管理项目、会话、对话、模型、权限、Skills 和 Settings → Plugins。macOS 使用 WKWebView，Windows 使用 WebView2，但两者只通过同一个 `HarnessWebViewBridge` 适配；Flutter `DeepSeekAgentWorkspace` 只用于自动测试和不支持官方 WebView 的平台降级，不能成为另一套桌面产品界面。
 
 ### 官方 Harness 可升级与跨平台单 UI 架构门禁
 
 目标分层固定如下：
 
-1. `HarnessExperience`：唯一的跨平台 Flutter 交互层，负责项目、会话、独立草稿、执行时间线、停止、删除、权限提示和 MCP 可见状态；Windows/macOS 使用完全相同的 Widget、状态机和持久化合同。
-2. `HarnessEngineAdapter`：官方 DSH 版本适配层，只负责启动、能力协商、事件归一化、发送、取消、恢复和错误映射。上层不得读取官方 Web DOM，也不得依赖某个 DSH 页面结构或 CSS 类名。
-3. `HarnessPlatformRuntime`：薄平台层，只处理 Node/DSH 路径、进程组终止、Keychain/Credential Manager、Unix socket/Named Pipe 和签名规则；不得包含会话或 UI 行为。
-4. `VibekitsHarnessToolBridge`：稳定 MCP/工具边界，工具 ID、输入输出 Schema、风险、取消和证据语义不随皮肤变化；官方升级不能绕过此桥直接调用物理工具。
+1. `OfficialHarnessWorkspace`：唯一桌面 Harness 交互入口。官方 DSH Web 是项目、会话、对话、模型、权限、Skills 与插件设置的唯一事实源，不在 Flutter 中复制这些状态和操作。
+2. `HarnessWebViewBridge`：只适配 WKWebView/WebView2 的加载、脚本和消息通道。平台分支不得包含产品功能、菜单或持久化逻辑。
+3. `DeepSeekHarnessService`：固定版本运行时适配层，只负责启动、停止、凭据迁移、端口和错误映射；不得改写官方页面的插件/项目数据模型。
+4. `VibekitsHarnessToolBridge`：稳定 MCP/工具边界。VibeKits 的本机和局域网工具通过官方 Harness 工具调用面进入，工具 ID、Schema、风险、取消和证据语义不随官方 UI 升级变化。
+5. `VibeKits extension rail`：MCP 开关与目录、OCR、飞书、调用日志和 RustDesk 状态仍位于官方 WebView 外侧的 Flutter 工具轨；它不遮挡或替换官方 Settings、Plugins、项目栏和输入框。
 
 官方 DSH 升级必须是显式版本波次，不允许运行时自动漂移：固定 package/version、Node ABI 和 runtime manifest；把对上游的兼容修改保存为可审计、可重复应用的版本化 patchset，禁止手工修改打包后的 `node_modules`。升级流程为“构建新 runtime → 运行旧/新协议 fixture → 能力协商 → Windows/macOS 同一交互合同测试 → 两端 Release 冒烟 → 再切换默认版本”，任何一步失败都回退上一 runtime，而不是临时分叉 UI。
 
-适配器必须容忍上游增加未知事件和字段，未知字段保留或忽略但不能崩溃；缺少必需能力时显示明确的“不兼容/需升级”，不得把失败解释为任务空闲。会话、工具步骤和终态使用 VibeKits 自有稳定模型，上游事件只通过映射表进入该模型。每次升级要保存事件 fixture、能力清单、迁移结果和回滚证据。
+适配器必须容忍上游增加未知事件和字段，未知字段保留或忽略但不能崩溃；缺少必需能力时显示明确的“不兼容/需升级”，不得把失败解释为任务空闲。VibeKits 只从官方 Web 的稳定消息/会话接口投影运行状态和工具审计，不接管官方会话内容。每次升级要保存消息 fixture、官方插件清单、能力清单、迁移结果和回滚证据。
 
 跨平台验收采用一份参数化测试清单，同一用例同时约束 Windows 与 macOS：创建/切换/并行会话、独立草稿、默认折叠时间线、选中态 `…`、运行态转圈、停止与外部资源清理、永久删除、MCP 发现/调用/结果/取消、重启恢复和 RustDesk 状态。平台只能对“不可用的系统能力”做显式跳过，不能另写一套期望。
 
-迁移门禁：`local_models_tab.dart` 的双 UI 分支已移除；`OfficialHarnessWorkspace` 不再是产品入口，只可作为上游兼容参考或后续删除对象。后续交互改动必须首先修改共享 `DeepSeekAgentWorkspace` 及一份跨平台合同测试，禁止重新增加 Windows/macOS 页面分叉。
+迁移门禁：`local_models_tab.dart` 的正式桌面入口必须是 `OfficialHarnessWorkspace`；禁止再把 macOS/Windows 分成官方 Web 与自研会话页两套产品。官方 composition 必须持续包含 `dsh-host-plugin-inventory`、`dsh-client-ui-settings-plugin-inventory` 和 `dsh-client-ui-settings-plugins`。升级或裁剪依赖后，缺任一项即测试失败。官方当前提供插件配置和已加载插件只读清单，不把未经审核的社区“市场”冒充官方功能；第三方插件引入必须另做固定版本、许可证、权限和供应链审查。
 
 ### 项目、会话和权限关系
 

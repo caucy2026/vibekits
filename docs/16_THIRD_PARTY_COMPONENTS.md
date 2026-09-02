@@ -2,7 +2,7 @@
 
 更新日期：2026-09-02
 
-适用版本：`1.9.0-dev.146+2146`
+适用版本：`1.9.0-dev.147+2147`
 
 ## 发布时直接使用的关键组件
 
@@ -74,7 +74,7 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 - 2026-08-18 继续审阅 [Kudu](https://github.com/AdventDevInc/kudu)（MIT）、[constUP Garbage Cleaner](https://github.com/constup-foss/garbage-cleaner-powershell)（MPL-2.0）与 [BitCleanerX](https://github.com/paulocoutinhox/bitcleanerx)（MIT）。Vibekits 没有嵌入上游源码或规则文件；独立实现了最小年龄、最大扫描深度、直接文件名白名单和 dry-run 候选模型，并根据公开路径语义增加 JetBrains/WSLg/Gradio/.NET/Scoop 等受限规则。MPL 上游实现未复制，因此不引入其文件级许可证传播要求。
 - 2026-08-19 再次复核 [BleachBit CleanerML](https://github.com/bleachbit/cleanerml)（GPL-3.0-or-later）、[Winapp2](https://github.com/MoscaDotTo/Winapp2)（仓库当前标注 CC-BY-SA-4.0）与 [Czkawka](https://github.com/qarmin/czkawka)（MIT）。仅吸收声明式规则、Detect/Exclude/Warning、发布前验证、dry-run、排除路径、停止标记和进度等通用设计；未复制 CleanerML/Winapp2 规则、源码或文本。Vibekits 独立实现系统盘 `.log` 高风险清单、Harness 调试产物保留期和 v2 本地审计日志。
 - 2026-08-19 将上述安全模型扩展到 macOS 明确缓存/日志目录，并新增 Windows 系统盘只读空间审计。空间审计只统计元数据和容量，不复制第三方源码、不读取文件正文，也不把未知根目录自动变为删除规则。
-- dev.146 起 Windows/macOS 共用 Flutter `DeepSeekAgentWorkspace` 交互层，官方 DSH 是固定版本、可替换的执行内核；项目、会话、时间线、权限和停止使用 VibeKits 稳定模型，不读取或修改上游 Web DOM。ADB/串口/Git 等继续通过稳定 MCP 工具桥接入。
+- dev.147 起 Windows/macOS 正式桌面端共用官方 `dsh-web-app` 交互层；项目、会话、对话、模型、权限、Skills 和 Settings → Plugins 均由官方 DSH 管理。VibeKits 只提供 WKWebView/WebView2 薄桥、固定运行时和外侧扩展工具轨，ADB/串口/Git/LMCP 等继续通过稳定 MCP 工具桥接入。固定 composition 中的插件配置页与只读插件清单不得被裁剪；官方包不含一键下载安装的第三方市场，任何社区市场插件必须先完成版本、许可证、签名、网络权限和更新源审计。
 - Zed、Geany、OpenSSH 和 GitHub 文档只用于工作流与操作习惯研究。Git 执行采用官方 MinGit 二进制分发，按 GPL-2.0-only 及归档组件许可证履行随附义务，不复制修改其源码。
 - SSH 交互终端、SFTP 和端口转发使用 `dartssh2`，终端渲染使用 `xterm`；主机密钥必须经用户确认或与已绑定指纹一致。转发连接和数据泵运行在后台 Isolate；不自行实现密码学。
 - GitHub 网络诊断只读取 DNS/TLS/HTTPS/代理/hosts/SSH 状态，不移植 FastGithub 的 hosts、代理、证书或系统修改逻辑。

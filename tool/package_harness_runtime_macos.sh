@@ -16,6 +16,7 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
    [ ! -x "$SOURCE/bin/node" ] || \
    [ ! -f "$SOURCE/vibekits-mcp-server.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-approval.mjs" ] || \
+   [ ! -f "$SOURCE/vibekits-parent-watchdog.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-android-stress-mcp.mjs" ]; then
   echo "Bundled macOS Harness runtime is missing or incomplete." >&2
   echo "Run tool/prepare_harness_runtime_macos.sh before Release packaging." >&2

@@ -26,12 +26,12 @@ import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
 import 'mcp_exposure_consent_dialog.dart';
 import 'mcp_reputation_badge.dart';
+import 'harness_webview_bridge.dart';
 
 typedef OfficialHarnessCredentialReader = Future<String?> Function(String key);
 typedef OfficialHarnessCredentialDeleter = Future<void> Function(String key);
-typedef OfficialHarnessWebStarter = Future<HarnessSessionHandle> Function(
-  HarnessWebRequest request,
-);
+typedef OfficialHarnessWebStarter =
+    Future<HarnessSessionHandle> Function(HarnessWebRequest request);
 
 /// Hosts the official `@deepseek-ai/dsh-web-app` inside Vibekits.
 ///
@@ -82,11 +82,11 @@ class OfficialHarnessWorkspace extends StatefulWidget {
 class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
   static Future<String>? _conversationUxScript;
-  final WebviewController _webview = WebviewController();
+  final HarnessWebViewBridge _webview = HarnessWebViewBridge();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
   StreamSubscription<dynamic>? _webMessageSubscription;
-  StreamSubscription<LoadingState>? _loadingStateSubscription;
+  StreamSubscription<void>? _loadingStateSubscription;
   bool _loading = true;
   bool _starting = false;
   bool _webviewReady = false;
@@ -323,16 +323,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         }
         if (!mounted || !identical(_session, session)) return;
         _webviewReady = true;
-        _webMessageSubscription = _webview.webMessage.listen(_handleWebMessage);
-        _loadingStateSubscription = _webview.loadingState.listen((
-          LoadingState state,
-        ) {
-          if (state == LoadingState.navigationCompleted) {
-            unawaited(_installCodexConversationUx());
-          }
+        _webMessageSubscription = _webview.messages.listen(_handleWebMessage);
+        _loadingStateSubscription = _webview.pageFinished.listen((_) {
+          unawaited(_installCodexConversationUx());
         });
       }
-      await _webview.loadUrl(session.url.toString());
+      await _webview.loadUrl(session.url);
       await _installCodexConversationUx();
       unawaited(
         Future<void>.delayed(const Duration(milliseconds: 600)).then((_) {
@@ -412,7 +408,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     try {
       final String script = await (_conversationUxScript ??= rootBundle
           .loadString('assets/harness/codex_conversation_ux.js'));
-      await _webview.executeScript(script);
+      await _webview.executeScriptVoid(script);
     } on Object {
       // The official workspace must remain usable if a visual enhancement
       // cannot be injected on an older WebView2 runtime.
@@ -443,7 +439,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Widget _buildHarnessWebview() => Listener(
     onPointerSignal: _scrollHarnessConversation,
-    child: Webview(_webview, permissionRequested: _handleWebPermission),
+    child: _webview.build(permissionRequested: _handleWebPermission),
   );
 
   Future<bool> _approveVibekitsTool(HarnessToolApprovalRequest request) async {
@@ -1032,8 +1028,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                         width: 104,
                         height: 264,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface
-                              .withValues(alpha: 0.90),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surface.withValues(alpha: 0.90),
                           borderRadius: BorderRadius.circular(22),
                           border: Border.all(
                             color: Theme.of(context).colorScheme.outlineVariant
@@ -1108,8 +1105,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                     right: 12,
                     top: 186,
                     child: Material(
-                      color: Theme.of(context).colorScheme.surface
-                          .withValues(alpha: 0.94),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surface.withValues(alpha: 0.94),
                       elevation: 2,
                       borderRadius: BorderRadius.circular(20),
                       child: PopupMenuButton<FeishuHarnessTask>(
@@ -1176,8 +1174,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                               ).colorScheme.outline,
                             };
                             return Material(
-                              color: Theme.of(context).colorScheme.surface
-                                  .withValues(alpha: 0.94),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surface.withValues(alpha: 0.94),
                               elevation: 2,
                               borderRadius: BorderRadius.circular(20),
                               child: InkWell(
@@ -1227,8 +1226,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                     right: 12,
                     top: 230,
                     child: Material(
-                      color: Theme.of(context).colorScheme.surface
-                          .withValues(alpha: 0.94),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surface.withValues(alpha: 0.94),
                       elevation: 2,
                       borderRadius: BorderRadius.circular(20),
                       child: InkWell(
@@ -1582,8 +1582,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     if (_mcpExposureEnabled == enabled || _mcpExposureChanging) return;
     final VibekitsHarnessToolBridge? bridge = _mcpExposureBridge;
     if (bridge == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('MCP 工具目录尚未就绪，请稍后重试')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('MCP 工具目录尚未就绪，请稍后重试')));
       return;
     }
     if (enabled) {
@@ -1594,8 +1595,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         );
       } on Object catch (error) {
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('准备 MCP 实例证书失败：$error')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('准备 MCP 实例证书失败：$error')));
         }
         return;
       }
@@ -1640,8 +1642,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       }
     } on Object catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('保存 MCP 开关失败：$error')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存 MCP 开关失败：$error')));
     } finally {
       if (mounted) setState(() => _mcpExposureChanging = false);
     }
@@ -1876,12 +1879,13 @@ class _McpDeviceDetailsDialog extends StatelessWidget {
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(10),
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                             child: SelectableText(
-                              const JsonEncoder.withIndent('  ')
-                                  .convert(tool.inputSchema),
+                              const JsonEncoder.withIndent(
+                                '  ',
+                              ).convert(tool.inputSchema),
                               style: const TextStyle(
                                 fontFamily: 'monospace',
                                 fontSize: 12,
