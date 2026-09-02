@@ -65,7 +65,18 @@ else
   echo "External model smoke skipped; set VIBEKITS_ALLOW_EXTERNAL_HARNESS_SMOKE=1 only with explicit data-transmission authorization."
 fi
 kill -TERM "$SMOKE_PID"
-SMOKE_PID=""
+for _ in $(seq 1 30); do
+  if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
+    SMOKE_PID=""
+    break
+  fi
+  sleep 1
+done
+if [ -n "$SMOKE_PID" ]; then
+  echo "Signed candidate did not exit after local Harness verification." >&2
+  exit 7
+fi
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
 ARCHIVE="${APP_BUNDLE%.app}-notarization.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ARCHIVE"
