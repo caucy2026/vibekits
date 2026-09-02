@@ -5,6 +5,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+trap {
+  $message = $_.Exception.Message -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+  Write-Host "::error title=Windows Harness runtime preparation failed::$message"
+  exit 1
+}
 $packageVersion = $PackageVersion.Trim()
 if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
   throw "Invalid Harness package version: $PackageVersion"
