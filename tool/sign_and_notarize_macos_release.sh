@@ -56,7 +56,14 @@ if [ -z "$SMOKE_PID" ]; then
   echo "Signed candidate did not publish its Harness bridge within 30 seconds." >&2
   exit 6
 fi
-"$PROJECT_ROOT/tool/verify_macos_harness_live_smoke.sh" "$APP_BUNDLE"
+"$APP_BUNDLE/Contents/Resources/tools/harness/bin/node" \
+  "$PROJECT_ROOT/tool/verify_harness_local_bridge.mjs" \
+  "$BRIDGE_FILE" "$SMOKE_PID"
+if [ "${VIBEKITS_ALLOW_EXTERNAL_HARNESS_SMOKE:-0}" = "1" ]; then
+  "$PROJECT_ROOT/tool/verify_macos_harness_live_smoke.sh" "$APP_BUNDLE"
+else
+  echo "External model smoke skipped; set VIBEKITS_ALLOW_EXTERNAL_HARNESS_SMOKE=1 only with explicit data-transmission authorization."
+fi
 kill -TERM "$SMOKE_PID"
 SMOKE_PID=""
 
