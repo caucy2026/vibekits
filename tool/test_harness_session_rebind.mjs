@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { zstdCompress, zstdDecompress } from 'node:zlib';
 import { promisify } from 'node:util';
 
@@ -40,7 +41,7 @@ await writeFile(join(root, 'storages', 'session_projcache.json'), JSON.stringify
 
 try {
   const child = spawn(process.execPath, [
-    new URL('../native/harness/vibekits-session-rebind.mjs', import.meta.url).pathname,
+    fileURLToPath(new URL('../native/harness/vibekits-session-rebind.mjs', import.meta.url)),
     root, sessionId, sourceId, targetId,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
