@@ -1,5 +1,11 @@
 # Vibekits 开发日志
 
+## 2026-09-02 · 1.9.0-dev.148+2148 · 恢复官方 Harness 全页面点击
+
+- dev.147 真实复测发现 macOS 官方 Harness 左侧整列按钮点击无效；根因是为首次声明页增加的全局 eager 手势识别器抢占了整个 WKWebView 事件序列。撤销全局接管，恢复 AppKit/WKWebView 默认点击分发；Windows WebView2 不变。
+- 同一 DSH 实例已逐项验证侧栏开合、新建会话、搜索/清除、工作区菜单、四档 Agent 模式、三档权限、模型菜单、输入启用、设置、插件配置和 167 项插件列表。测试输入已清空且未发送模型。
+- dev.147 明确拒收，禁止进入 `bin`；dev.148 必须重新完成真实 App 鼠标、全量回归、Universal/macOS 12+、Developer ID、Rosetta、Windows 和公证门禁。
+
 ## 2026-09-02 · 1.9.0-dev.147+2147 · 恢复官方 Harness 插件与设置体验
 
 - 修复移植时把官方 DSH Web 从正式入口替换掉、导致 Settings → Plugins 和插件清单不可达的问题。Windows/macOS 桌面端现在统一使用 `OfficialHarnessWorkspace`；官方 DSH 继续拥有项目、会话、对话、模型、权限、Skills 与插件设置，不在 Flutter 中复制第二份状态。

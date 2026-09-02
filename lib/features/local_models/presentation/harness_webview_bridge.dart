@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart' as mac;
 import 'package:webview_windows/webview_windows.dart' as win;
@@ -109,17 +107,11 @@ class HarnessWebViewBridge {
     }
     final mac.WebViewController? macos = _macos;
     if (macos != null) {
-      return mac.WebViewWidget(
-        controller: macos,
-        // The official Web workspace sits below Flutter shortcut/scroll
-        // listeners. Claim the complete pointer sequence in the platform view
-        // so mouse-down and mouse-up cannot be split between Flutter and
-        // WKWebView (which left the official first-run Continue button stuck
-        // in its pressed state on macOS).
-        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-          Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new),
-        },
-      );
+      // AppKitView already forwards unclaimed pointer sequences to WKWebView.
+      // Supplying a global eager recognizer here makes Flutter win the desktop
+      // gesture arena before AppKit can dispatch click/up to the native view;
+      // the page still paints, but official sidebar buttons stop responding.
+      return mac.WebViewWidget(controller: macos);
     }
     return const SizedBox.shrink();
   }

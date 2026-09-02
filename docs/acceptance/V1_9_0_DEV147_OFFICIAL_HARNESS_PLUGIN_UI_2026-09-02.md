@@ -1,7 +1,7 @@
 # VibeKits 1.9.0-dev.147 官方 Harness 插件界面验收
 
 日期：2026-09-02
-状态：代码、本机 Release 自测与 Developer ID 签名通过；Apple 公证、Windows 真机仍是发布门禁，禁止提前复制到 `bin`。
+状态：**已拒收，禁止发布。** 该候选虽通过代码、构建和页面加载测试，但真实 App 点击复测发现 macOS 左侧官方按钮被全局手势接管阻断。修复与新验收转入 dev.148。
 
 ## 目标与边界
 
@@ -14,7 +14,7 @@
 
 dev.146 的桌面产品入口被改为 Flutter `DeepSeekAgentWorkspace`，官方 Settings → Plugins 因而不可达。dev.147 把正式桌面入口恢复为官方 Web，同时保留自研页面作为 Flutter 自动测试/不支持 WebView 平台的降级入口。
 
-macOS 首次“内测声明”现场出现按钮看似无法继续。进程采样确认 VibeKits 主线程、WebKit WebContent 与 DSH Node 均未死锁；同一 DSH URL 在独立浏览器可正常继续，问题定位为 Flutter 外层监听器与 WKWebView 平台视图的指针序列竞争。修复后 WKWebView 使用 `EagerGestureRecognizer` 获取完整 mouse-down/mouse-up。现场首次确认已经持久化，修复候选重启后直接进入官方会话页。
+macOS 首次“内测声明”现场出现按钮看似无法继续。进程采样确认 VibeKits 主线程、WebKit WebContent 与 DSH Node 均未死锁；同一 DSH URL 在独立浏览器可正常继续。dev.147 错误地为整个 WKWebView 配置全局 eager recognizer，随后真实用户复测证明它使 AppKit 无法把完整 click/up 送入官方页面，左侧按钮整列失效。此方案已在 dev.148 撤销。
 
 退出路径自测还发现，直接终止桌面进程可能早于 Flutter widget `dispose`，从而留下官方 DSH 与插件 MCP Node。dev.147 为所有 Harness Node 进程注入只读父 PID 看门狗；子进程每 750 ms 检查 App 是否仍存在，App 消失即自行退出。Windows 继续保留 Job Object 的进程树兜底，正常“停止 Harness”仍先走既有显式清理。
 

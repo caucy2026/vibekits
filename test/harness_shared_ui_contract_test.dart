@@ -57,7 +57,8 @@ void main() {
     expect(source, contains('Platform.isWindows'));
     expect(source, contains("addJavaScriptChannel(\n        'VibekitsHost'"));
     expect(source, contains('win.WebviewController'));
-    expect(source, contains('Factory<EagerGestureRecognizer>'));
+    expect(source, isNot(contains('EagerGestureRecognizer')));
+    expect(source, contains('return mac.WebViewWidget(controller: macos)'));
     expect(injectedUx, contains('window.chrome.webview'));
     expect(injectedUx, contains('window.VibekitsHost'));
   });
