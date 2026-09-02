@@ -175,7 +175,8 @@ await replaceOnce(
 
 await replaceOnce(
   'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
-  `\t\t\tconst now = Date.now();`,
+  `\t\t\tconst now = Date.now();
+\t\t\tconst commitSessionDrag = (activeDrag, over) => {`,
   `\t\t\tconst now = Date.now();
 \t\t\tconst requestSessionProjectMove = (activeDrag, targetWorkspaceId) => {
 \t\t\t\tif (activeDrag.accountKey === "" || activeDrag.accountKey === targetWorkspaceId) return;
@@ -192,7 +193,8 @@ await replaceOnce(
 \t\t\t\t});
 \t\t\t\tif (window.chrome?.webview?.postMessage) window.chrome.webview.postMessage(message);
 \t\t\t\telse window.VibekitsHost?.postMessage(message);
-\t\t\t};`,
+\t\t\t};
+\t\t\tconst commitSessionDrag = (activeDrag, over) => {`,
   `type: "vibekits.moveSession"`,
 );
 
