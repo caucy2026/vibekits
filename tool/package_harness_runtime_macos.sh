@@ -17,7 +17,8 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
    [ ! -f "$SOURCE/vibekits-mcp-server.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-approval.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-parent-watchdog.mjs" ] || \
-   [ ! -f "$SOURCE/vibekits-android-stress-mcp.mjs" ]; then
+   [ ! -f "$SOURCE/vibekits-android-stress-mcp.mjs" ] || \
+   [ ! -f "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" ]; then
   echo "Bundled macOS Harness runtime is missing or incomplete." >&2
   echo "Run tool/prepare_harness_runtime_macos.sh before Release packaging." >&2
   exit 3
@@ -26,6 +27,7 @@ fi
 rm -rf "$DESTINATION" "$LEGACY_DESTINATION"
 mkdir -p "$(dirname "$DESTINATION")"
 ditto "$SOURCE" "$DESTINATION"
+cp "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" "$DESTINATION/vibekits-session-rebind.mjs"
 chmod 755 "$DESTINATION/bin/node"
 codesign --force --sign - "$DESTINATION/bin/node"
 echo "Packaged Harness runtime: $DESTINATION"

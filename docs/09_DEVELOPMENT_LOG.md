@@ -1,8 +1,24 @@
 # Vibekits 开发日志
 
+## 2026-09-03 · 1.9.0-dev.150+2150 · 官方 Harness 交互与全功能回归收口
+
+- 保留官方 DSH 工作区、会话、模型、权限、Skills、设置和插件清单；VibeKits 只通过稳定补丁和 Host bridge 增加 MCP 工具轨、永久删除确认及跨项目移动，不复制或替换官方状态。真实签名候选已打开官方设置与 167 项插件清单。
+- 修复 macOS WKWebView 左侧按钮失效：AppKit 仅在 Harness WebView 可交互期间转发窗口鼠标事件；任何 Flutter 授权、删除、移动或设备弹层出现时暂停原生输入，关闭后恢复，避免点击穿透。Windows WebView2 保持同一 Web 消息合同。
+- 修复会话删除在 macOS 只发送 WebView2 消息的问题；删除会明确提示聊天、推理和工具记录将永久删除，取消不会丢数据。项目菜单继续支持改名和移除，添加工作区继续使用系统目录选择器。
+- 会话可拖到其他项目，但必须先确认目标目录权限。迁移助手在 Harness 停止后同时改写官方 workspace/session 投影、压缩会话头的 cwd 和物理目录；采用暂存、备份、分阶段交换和失败回滚，迁移成功后自动恢复 Harness。同项目内排序仍由官方实现处理。
+- 会话列表保持“仅选中或悬停显示省略号，未选中的运行会话显示旋转状态”；独立草稿、并行会话、可切换后台任务、停止、默认折叠时间线和可读工具步骤均纳入回归。
+- 全量 `flutter analyze --no-pub` 为 0 issue；全量测试 659 passed、15 个显式环境门禁 skip、0 failed；跨项目压缩会话迁移原生测试通过。生产 LMCP 在提供方先启动的情况下发现 192.168.3.62 的 KEMI-BM 2.4.1/revision 9，并真实调用 `kemi.benchmark.last_result` 得到 `final=true/verified`、S 级与可核验报告哈希。
+- 详细逐项证据见 `docs/acceptance/V1_9_0_DEV150_RELEASE_ACCEPTANCE_2026-09-03.md`。Universal macOS 12+、Developer ID、公证、Windows CI 和最终 `bin` 发布继续以该文档的剩余门禁为准，任一失败都不得发布。
+
+## 2026-09-02 · 1.9.0-dev.149+2149 · 修复 macOS 官方 Harness 原生鼠标路由
+
+- dev.148 用户真实复测仍失败，现已明确拒收。此前只移除 eager recognizer，没有移除包裹 AppKitView 的 Flutter `Listener`，导致 WKWebView 页面虽正常绘制，左侧打开侧栏、新会话、添加工作区、搜索和设置仍收不到完整鼠标事件。
+- dev.149 删除整页 Flutter 指针/滚轮包装，`WebViewWidget` 作为原生平台视图直接承接 macOS 点击、拖动、选择和滚轮；Windows WebView2 路径不变。新增源码结构门禁，禁止以后重新在整页 WKWebView 外包 `Listener`。
+- 本版本必须通过精确签名 App 的真实鼠标复测后才能进入后续 Universal、Rosetta、Windows 与公证发布门禁；复测前不进入 `bin`。
+
 ## 2026-09-02 · 1.9.0-dev.148+2148 · 恢复官方 Harness 全页面点击
 
-- dev.147 真实复测发现 macOS 官方 Harness 左侧整列按钮点击无效；根因是为首次声明页增加的全局 eager 手势识别器抢占了整个 WKWebView 事件序列。撤销全局接管，恢复 AppKit/WKWebView 默认点击分发；Windows WebView2 不变。
+- dev.147 真实复测发现 macOS 官方 Harness 左侧整列按钮点击无效；本版撤销了全局 eager 手势识别器，但遗漏外层 Flutter `Listener`。用户对精确 dev.148 再次真实复测仍全部无效，因此本版也已拒收，不能进入 `bin`。
 - 同一 DSH 实例已逐项验证侧栏开合、新建会话、搜索/清除、工作区菜单、四档 Agent 模式、三档权限、模型菜单、输入启用、设置、插件配置和 167 项插件列表。测试输入已清空且未发送模型。
 - dev.147 明确拒收，禁止进入 `bin`；dev.148 必须重新完成真实 App 鼠标、全量回归、Universal/macOS 12+、Developer ID、Rosetta、Windows 和公证门禁。
 

@@ -161,12 +161,78 @@ await replaceOnce(
   'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
   `\t\t\t\t\t\t\t\t\tif (id === "archive") onArchive(node.id);`,
   `\t\t\t\t\t\t\t\t\tif (id === "archive") onArchive(node.id);
-\t\t\t\t\t\t\t\t\tif (id === "delete") window.chrome?.webview?.postMessage({
-\t\t\t\t\t\t\t\t\t\ttype: "vibekits.deleteSession",
-\t\t\t\t\t\t\t\t\t\tsessionId: node.id,
-\t\t\t\t\t\t\t\t\t\ttitle
-\t\t\t\t\t\t\t\t\t});`,
+\t\t\t\t\t\t\t\t\tif (id === "delete") {
+\t\t\t\t\t\t\t\t\t\tconst message = JSON.stringify({
+\t\t\t\t\t\t\t\t\t\t\ttype: "vibekits.deleteSession",
+\t\t\t\t\t\t\t\t\t\t\tsessionId: node.id,
+\t\t\t\t\t\t\t\t\t\t\ttitle
+\t\t\t\t\t\t\t\t\t\t});
+\t\t\t\t\t\t\t\t\t\tif (window.chrome?.webview?.postMessage) window.chrome.webview.postMessage(message);
+\t\t\t\t\t\t\t\t\t\telse window.VibekitsHost?.postMessage(message);
+\t\t\t\t\t\t\t\t\t}`,
   `type: "vibekits.deleteSession"`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\tconst now = Date.now();`,
+  `\t\t\tconst now = Date.now();
+\t\t\tconst requestSessionProjectMove = (activeDrag, targetWorkspaceId) => {
+\t\t\t\tif (activeDrag.accountKey === "" || activeDrag.accountKey === targetWorkspaceId) return;
+\t\t\t\tconst source = orderedWorkspaces.find((workspace) => workspace.workspaceId === activeDrag.accountKey);
+\t\t\t\tconst target = orderedWorkspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId);
+\t\t\t\tif (source === void 0 || target === void 0) return;
+\t\t\t\tconst message = JSON.stringify({
+\t\t\t\t\ttype: "vibekits.moveSession",
+\t\t\t\t\tsessionId: activeDrag.sessionId,
+\t\t\t\t\tsourceWorkspaceId: source.workspaceId,
+\t\t\t\t\tsourceLabel: source.title,
+\t\t\t\t\ttargetWorkspaceId: target.workspaceId,
+\t\t\t\t\ttargetLabel: target.title
+\t\t\t\t});
+\t\t\t\tif (window.chrome?.webview?.postMessage) window.chrome.webview.postMessage(message);
+\t\t\t\telse window.VibekitsHost?.postMessage(message);
+\t\t\t};`,
+  `type: "vibekits.moveSession"`,
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-workspace/lib/client.js',
+  `\t\t\t\t\t\t\t\tonDragOver: workspaceDrag === null || hoverWorkspace === void 0 ? void 0 : (e) => {
+\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\te.dataTransfer.dropEffect = "move";
+\t\t\t\t\t\t\t\t\thoverWorkspace(workspaceGroupHalf(e));
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tonDrop: workspaceDrag === null || dropWorkspace === void 0 ? void 0 : (e) => {
+\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\tdropWorkspace(workspaceGroupHalf(e));
+\t\t\t\t\t\t\t\t},`,
+  `\t\t\t\t\t\t\t\tonDragOver: (e) => {
+\t\t\t\t\t\t\t\t\tif (workspaceDrag !== null && hoverWorkspace !== void 0) {
+\t\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\t\te.dataTransfer.dropEffect = "move";
+\t\t\t\t\t\t\t\t\t\thoverWorkspace(workspaceGroupHalf(e));
+\t\t\t\t\t\t\t\t\t\treturn;
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t\tif (drag !== null && workspaceId !== void 0 && drag.accountKey !== workspaceId) {
+\t\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\t\te.dataTransfer.dropEffect = "move";
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tonDrop: (e) => {
+\t\t\t\t\t\t\t\t\tif (workspaceDrag !== null && dropWorkspace !== void 0) {
+\t\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\t\tdropWorkspace(workspaceGroupHalf(e));
+\t\t\t\t\t\t\t\t\t\treturn;
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t\tif (drag !== null && workspaceId !== void 0 && drag.accountKey !== workspaceId) {
+\t\t\t\t\t\t\t\t\t\te.preventDefault();
+\t\t\t\t\t\t\t\t\t\tsessionDropCommitted.current = true;
+\t\t\t\t\t\t\t\t\t\tsetDrag(null);
+\t\t\t\t\t\t\t\t\t\trequestSessionProjectMove(drag, workspaceId);
+\t\t\t\t\t\t\t\t\t}
+\t\t\t\t\t\t\t\t},`,
+  `requestSessionProjectMove(drag, workspaceId);`,
 );
 
 await replaceOnce(

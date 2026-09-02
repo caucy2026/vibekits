@@ -843,6 +843,42 @@ abstract final class DeepSeekHarnessService {
     });
   }
 
+  /// Rebinds one stopped official Harness session to another workspace.
+  ///
+  /// The bundled Node helper rewrites the immutable session cwd, both official
+  /// indexes and the project directory as one rollback-protected operation.
+  /// Callers must stop the Harness server and obtain explicit user consent.
+  static Future<void> rebindSessionWorkspace({
+    required String sessionId,
+    required String sourceWorkspaceId,
+    required String targetWorkspaceId,
+  }) async {
+    final _HarnessRuntime runtime = await _cachedBundledRuntime();
+    final ProcessResult result = await Process.run(
+      runtime.nodeExecutable,
+      <String>[
+        ..._nodeRuntimeArguments(),
+        runtime.sessionRebindPath,
+        officialHarnessHomeDirectory().path,
+        sessionId,
+        sourceWorkspaceId,
+        targetWorkspaceId,
+      ],
+      includeParentEnvironment: true,
+      runInShell: false,
+    ).timeout(const Duration(seconds: 30));
+    if (result.exitCode != 0) {
+      final String detail = '${result.stderr}'
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      throw StateError(detail.isEmpty ? 'Harness 会话工作区迁移失败' : detail);
+    }
+    final Object? decoded = jsonDecode('${result.stdout}');
+    if (decoded is! Map || decoded['ok'] != true) {
+      throw StateError('Harness 会话工作区迁移未返回成功凭据');
+    }
+  }
+
   static List<String> _nodeRuntimeArguments() => <String>[
     // Rosetta's V8 baseline compiler can fail Hardened Runtime MAP_JIT even
     // with allow-jit. Jitless mode keeps Intel Harness functional without the
@@ -910,6 +946,7 @@ class _HarnessRuntime {
     required this.androidStressMcpPath,
     required this.approvalPluginPath,
     required this.parentWatchdogPath,
+    required this.sessionRebindPath,
   });
 
   final String nodeExecutable;
@@ -919,6 +956,7 @@ class _HarnessRuntime {
   final String androidStressMcpPath;
   final String approvalPluginPath;
   final String parentWatchdogPath;
+  final String sessionRebindPath;
 }
 
 Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
@@ -988,6 +1026,9 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         '${root.parent.parent.path}${Platform.pathSeparator}vibekits-parent-watchdog.mjs',
       ),
     ];
+    final File sessionRebind = File(
+      '${root.path}${Platform.pathSeparator}vibekits-session-rebind.mjs',
+    );
     final File? mcpServer = mcpCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
@@ -1007,7 +1048,8 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         mcpServer == null ||
         androidStressMcp == null ||
         approvalPlugin == null ||
-        parentWatchdog == null) {
+        parentWatchdog == null ||
+        !sessionRebind.existsSync()) {
       continue;
     }
     return _HarnessRuntime(
@@ -1018,6 +1060,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       androidStressMcpPath: androidStressMcp.path,
       approvalPluginPath: approvalPlugin.path,
       parentWatchdogPath: parentWatchdog.path,
+      sessionRebindPath: sessionRebind.path,
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');

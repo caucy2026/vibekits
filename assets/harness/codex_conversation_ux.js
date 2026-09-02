@@ -1,4 +1,32 @@
 (() => {
+  const markSelectedSessionActions = () => {
+    for (const marked of document.querySelectorAll(
+      '.vibekits-selected-session-actions, .vibekits-selected-session-time',
+    )) {
+      marked.classList.remove(
+        'vibekits-selected-session-actions',
+        'vibekits-selected-session-time',
+      );
+    }
+    for (const row of document.querySelectorAll(
+      '[role="treeitem"][aria-selected="true"]',
+    )) {
+      if (!(row instanceof HTMLElement)) continue;
+      const directSpans = [...row.children].filter(
+        (child) => child instanceof HTMLSpanElement,
+      );
+      const actions = directSpans.find(
+        (span) => span.querySelector('button[aria-label]') !== null,
+      );
+      if (!(actions instanceof HTMLSpanElement)) continue;
+      actions.classList.add('vibekits-selected-session-actions');
+      const time = actions.previousElementSibling;
+      if (time instanceof HTMLSpanElement) {
+        time.classList.add('vibekits-selected-session-time');
+      }
+    }
+  };
+
   const localizeOfficialActions = () => {
     for (const element of document.querySelectorAll('button, [role="button"]')) {
       if (element.textContent?.trim() !== 'Session log') continue;
@@ -115,6 +143,16 @@
         outline: 2px solid #6f8cff;
         outline-offset: 2px;
       }
+
+      /* The selected session keeps its action visible. Other rows retain the
+         official hover-only action and can show their running status dot. */
+      .vibekits-selected-session-actions {
+        display: inline-flex !important;
+      }
+
+      .vibekits-selected-session-time {
+        display: none !important;
+      }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -182,9 +220,13 @@
   publishWorkspaceSnapshot();
   if (!window.__vibekitsConversationLocalizationInstalled) {
     window.__vibekitsConversationLocalizationInstalled = true;
-    const observer = new MutationObserver(localizeOfficialActions);
+    const observer = new MutationObserver(() => {
+      localizeOfficialActions();
+      markSelectedSessionActions();
+    });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
+  markSelectedSessionActions();
 
   const findConversationHost = () =>
     [...document.querySelectorAll('[data-conversation-scroll]')]

@@ -38,6 +38,7 @@ $required = @(
   'tools\harness\vibekits-approval.mjs',
   'tools\harness\vibekits-parent-watchdog.mjs',
   'tools\harness\vibekits-android-stress-mcp.mjs',
+  'tools\harness\vibekits-session-rebind.mjs',
   'tools\mihomo\mihomo.exe',
   'tools\mihomo\vibekits-mihomo-runtime.json',
   'tools\mihomo\Country.mmdb',
@@ -82,5 +83,7 @@ foreach ($helperName in @('git-remote-http.exe', 'git-remote-https.exe')) {
 $node = Join-Path $bundle 'tools\harness\node.exe'
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-approval.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness approval plugin syntax check failed' }
+& $node --check (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Harness session rebind helper syntax check failed' }
 
 Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; required runtimes: $($required.Count)"

@@ -25,12 +25,17 @@ if ! lsof -p "$BRIDGE_PID" 2>/dev/null | grep -Fq \
   exit 4
 fi
 
+# New installs keep the credential in the official DSH store. Retain the
+# legacy Keychain lookup only as an optional migration fallback; requiring it
+# made a correctly migrated production App fail the release smoke gate.
 DEEPSEEK_KEY="$(security find-generic-password \
-  -a deepseek-api-key -s com.vibekits.database -w)"
+  -a deepseek-api-key -s com.vibekits.database -w 2>/dev/null || true)"
 BRIDGE_URL="$(plutil -extract endpoint raw -o - "$BRIDGE_FILE")"
 BRIDGE_TOKEN="$(plutil -extract token raw -o - "$BRIDGE_FILE")"
 
-export DEEPSEEK_API_KEY="$DEEPSEEK_KEY"
+if [ -n "$DEEPSEEK_KEY" ]; then
+  export DEEPSEEK_API_KEY="$DEEPSEEK_KEY"
+fi
 export DEEPSEEK_BASE_URL="https://api.deepseek.com"
 export DEEPSEEK_MODEL="deepseek-v4-flash"
 export DSH_HOME="$HARNESS_HOME"
@@ -52,7 +57,7 @@ export VIBEKITS_TOOL_BRIDGE_TOKEN="$BRIDGE_TOKEN"
 mkdir -p "$DSH_LOG_DIR" "$VIBEKITS_SCREENSHOT_DIR" "$TEMP" \
   "$VIBEKITS_STRESS_REPORT_DIR"
 
-PROMPT='只调用只读工具 vibekits.mcp.catalog_list 获取当前实时 MCP 目录。报告 app/local/lan 三层实例数量和调用是否成功，不调用任何其他工具。最后单独输出 VIBEKITS_HARNESS_LIVE_SMOKE_OK。'
+PROMPT='只调用只读工具 vibekits.system.capability_check，确认 VibeKits 本机工具桥可用，不读取或发送局域网 MCP 目录，不调用任何其他工具。最后单独输出 VIBEKITS_HARNESS_LIVE_SMOKE_OK。'
 OUTPUT="$(cd /private/tmp && "$NODE" --expose-internals "$DSH" --profile headless "$PROMPT")"
 printf '%s\n' "$OUTPUT"
 case "$OUTPUT" in

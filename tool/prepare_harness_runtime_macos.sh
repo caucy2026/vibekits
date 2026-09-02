@@ -172,7 +172,8 @@ for FILE in \
   vibekits-codex-mcp.mjs \
   vibekits-approval.mjs \
   vibekits-parent-watchdog.mjs \
-  vibekits-android-stress-mcp.mjs; do
+  vibekits-android-stress-mcp.mjs \
+  vibekits-session-rebind.mjs; do
   cp "$PROJECT_ROOT/native/harness/$FILE" "$TARGET/$FILE"
 done
 
@@ -194,6 +195,8 @@ test -f "$TARGET/vibekits-mcp-server.mjs"
 test -f "$TARGET/vibekits-approval.mjs"
 test -f "$TARGET/vibekits-parent-watchdog.mjs"
 test -f "$TARGET/vibekits-android-stress-mcp.mjs"
+test -f "$TARGET/vibekits-session-rebind.mjs"
+"$TARGET/bin/node" "$PROJECT_ROOT/tool/test_harness_session_rebind.mjs"
 test -f "$TARGET/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.4.node"
 test -f "$TARGET/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node"
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node"

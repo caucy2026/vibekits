@@ -111,6 +111,7 @@ done
 
 for ITEM in \
   "$APP_BUNDLE/Contents/Resources/tools/harness/vibekits-parent-watchdog.mjs" \
+  "$APP_BUNDLE/Contents/Resources/tools/harness/vibekits-session-rebind.mjs" \
   "$APP_BUNDLE/Contents/Resources/tools/harness/node_modules/@vscode/ripgrep-darwin-arm64/bin/rg" \
   "$APP_BUNDLE/Contents/Resources/tools/harness/node_modules/@vscode/ripgrep-darwin-x64/bin/rg" \
   "$APP_BUNDLE/Contents/Resources/tools/harness/node_modules/node-pty/prebuilds/darwin-arm64/pty.node" \

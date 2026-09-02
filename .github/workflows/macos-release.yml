@@ -59,11 +59,15 @@ jobs:
                 ! -f native/harness/macos/runtime/vibekits-mcp-server.mjs || \
                 ! -f native/harness/macos/runtime/vibekits-approval.mjs || \
                 ! -f native/harness/macos/runtime/vibekits-parent-watchdog.mjs || \
-                ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs ]]; then
+                ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs || \
+                ! -f native/harness/macos/runtime/vibekits-session-rebind.mjs ]]; then
             ./tool/prepare_harness_runtime_macos.sh
           fi
           test -x native/harness/macos/runtime/bin/node
           test -f native/harness/macos/runtime/harness-runtime.json
+
+      - name: Test Harness cross-project session rebind
+        run: native/harness/macos/runtime/bin/node tool/test_harness_session_rebind.mjs
 
       - name: Prepare Universal 7-Zip runtime
         shell: bash

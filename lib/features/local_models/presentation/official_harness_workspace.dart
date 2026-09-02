@@ -80,6 +80,15 @@ class OfficialHarnessWorkspace extends StatefulWidget {
 }
 
 class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
+  static const MethodChannel _nativeInputChannel = MethodChannel(
+    'vibekits/harness_input',
+  );
+  static const bool _pointerDiagnostics = bool.fromEnvironment(
+    'VIBEKITS_POINTER_DIAGNOSTICS',
+  );
+  static final File _pointerDiagnosticLog = File(
+    '${Directory.systemTemp.path}/vibekits-harness-pointer-probe.log',
+  );
   static const String _credentialKey = 'deepseek-api-key';
   static Future<String>? _conversationUxScript;
   final HarnessWebViewBridge _webview = HarnessWebViewBridge();
@@ -99,6 +108,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   HarnessAgentPermissionMode _permissionMode =
       HarnessAgentPermissionMode.assisted;
   final Set<String> _deletingSessionIds = <String>{};
+  final Set<String> _movingSessionIds = <String>{};
   final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
   final McpExposurePreferences _mcpExposurePreferences =
       McpExposurePreferences();
@@ -107,11 +117,18 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _restoreMcpExposureOnStart = false;
   VibekitsHarnessToolBridge? _mcpExposureBridge;
   bool _quickActionsExpanded = false;
+  int _nativeInputBlockDepth = 0;
   HarnessWorkspaceStatusContext? _workStatusContext;
 
   @override
   void initState() {
     super.initState();
+    if (_pointerDiagnostics) {
+      _pointerDiagnosticLog.writeAsStringSync('');
+      GestureBinding.instance.pointerRouter.addGlobalRoute(
+        _recordFlutterPointer,
+      );
+    }
     _sessionApprovedToolIds.addAll(widget.preapprovedToolIds);
     // Let the workspace frame paint before credential, port and DSH startup.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -409,38 +426,99 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       final String script = await (_conversationUxScript ??= rootBundle
           .loadString('assets/harness/codex_conversation_ux.js'));
       await _webview.executeScriptVoid(script);
+      if (_pointerDiagnostics) {
+        await _webview.executeScriptVoid('''
+          (() => {
+            if (window.__vibekitsPointerProbeInstalled) return;
+            window.__vibekitsPointerProbeInstalled = true;
+            for (const eventName of ['mousedown', 'mouseup', 'click']) {
+              document.addEventListener(eventName, (event) => {
+                const target = event.target instanceof Element
+                  ? (event.target.getAttribute('aria-label') ||
+                    event.target.getAttribute('title') ||
+                    event.target.textContent || event.target.tagName)
+                  : 'unknown';
+                window.VibekitsHost?.postMessage(JSON.stringify({
+                  type: 'vibekits.pointerProbe',
+                  layer: 'dom',
+                  event: eventName,
+                  x: event.clientX,
+                  y: event.clientY,
+                  target: String(target).trim().slice(0, 80),
+                }));
+              }, true);
+            }
+          })();
+        ''');
+      }
     } on Object {
       // The official workspace must remain usable if a visual enhancement
       // cannot be injected on an older WebView2 runtime.
     }
   }
 
-  void _scrollHarnessConversation(PointerSignalEvent signal) {
-    if (signal is! PointerScrollEvent ||
-        !_webviewReady ||
-        signal.localPosition.dx < 300 ||
-        signal.scrollDelta.dy == 0) {
-      return;
-    }
-    final double delta = signal.scrollDelta.dy;
-    unawaited(
-      _webview.executeScript('''
-        (() => {
-          const host = [...document.querySelectorAll('[data-conversation-scroll]')]
-            .find((element) => element instanceof HTMLElement &&
-              element.offsetParent !== null && element.clientHeight > 0);
-          if (!(host instanceof HTMLElement)) return false;
-          host.scrollTop += ${delta.toStringAsFixed(2)};
-          return true;
-        })()
-      '''),
+  void _recordFlutterPointer(PointerEvent event) {
+    if (!_pointerDiagnostics || event is! PointerDownEvent) return;
+    _appendPointerDiagnostic(
+      'flutter down x=${event.position.dx.toStringAsFixed(1)} '
+      'y=${event.position.dy.toStringAsFixed(1)}',
     );
   }
 
-  Widget _buildHarnessWebview() => Listener(
-    onPointerSignal: _scrollHarnessConversation,
-    child: _webview.build(permissionRequested: _handleWebPermission),
-  );
+  void _appendPointerDiagnostic(String line) {
+    try {
+      _pointerDiagnosticLog.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} $line\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } on Object {
+      // A diagnostic-only write must never interfere with Harness input.
+    }
+  }
+
+  // Keep the native platform view as the direct child. A Flutter [Listener]
+  // around an AppKitView can win macOS pointer routing before WKWebView sees
+  // mouse-down/up, leaving the official page painted but non-interactive.
+  // WKWebView owns click, drag, selection and wheel scrolling natively.
+  Widget _buildHarnessWebview() =>
+      _webview.build(permissionRequested: _handleWebPermission);
+
+  Future<void> _setNativeWebViewInputEnabled(bool enabled) async {
+    if (!Platform.isMacOS) return;
+    try {
+      await _nativeInputChannel.invokeMethod<void>(
+        'setWebViewInputEnabled',
+        enabled,
+      );
+    } on MissingPluginException {
+      // Widget tests and older hosts do not install the native input channel.
+    }
+  }
+
+  Future<void> _blockNativeWebViewInput() async {
+    _nativeInputBlockDepth += 1;
+    if (_nativeInputBlockDepth == 1) {
+      await _setNativeWebViewInputEnabled(false);
+    }
+  }
+
+  Future<void> _unblockNativeWebViewInput() async {
+    if (_nativeInputBlockDepth == 0) return;
+    _nativeInputBlockDepth -= 1;
+    if (_nativeInputBlockDepth == 0) {
+      await _setNativeWebViewInputEnabled(true);
+    }
+  }
+
+  Future<T?> _withFlutterOverlay<T>(Future<T?> Function() present) async {
+    await _blockNativeWebViewInput();
+    try {
+      return await present();
+    } finally {
+      await _unblockNativeWebViewInput();
+    }
+  }
 
   Future<bool> _approveVibekitsTool(HarnessToolApprovalRequest request) async {
     if (request.tool.risk == HarnessToolRisk.readOnly ||
@@ -452,55 +530,57 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     }
     if (!mounted) return false;
     final _ToolApprovalDecision? decision =
-        await showDialog<_ToolApprovalDecision>(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext dialogContext) => AlertDialog(
-            title: Text('允许 ${request.tool.name}？'),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(request.tool.description),
-                  if (request.target.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 10),
-                    SelectableText('目标：${request.target}'),
+        await _withFlutterOverlay<_ToolApprovalDecision>(
+          () => showDialog<_ToolApprovalDecision>(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext dialogContext) => AlertDialog(
+              title: Text('允许 ${request.tool.name}？'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(request.tool.description),
+                    if (request.target.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 10),
+                      SelectableText('目标：${request.target}'),
+                    ],
+                    if (request.arguments.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        request.arguments.entries
+                            .map((item) => '${item.key}: ${item.value}')
+                            .join('\n'),
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ],
                   ],
-                  if (request.arguments.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      request.arguments.entries
-                          .map((item) => '${item.key}: ${item.value}')
-                          .join('\n'),
-                      style: const TextStyle(fontSize: 11),
-                    ),
-                  ],
-                ],
+                ),
               ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(dialogContext, _ToolApprovalDecision.deny),
+                  child: const Text('拒绝'),
+                ),
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    _ToolApprovalDecision.allowSession,
+                  ),
+                  child: const Text('本次运行允许同类操作'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    _ToolApprovalDecision.allowOnce,
+                  ),
+                  child: const Text('允许一次'),
+                ),
+              ],
             ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () =>
-                    Navigator.pop(dialogContext, _ToolApprovalDecision.deny),
-                child: const Text('拒绝'),
-              ),
-              OutlinedButton(
-                onPressed: () => Navigator.pop(
-                  dialogContext,
-                  _ToolApprovalDecision.allowSession,
-                ),
-                child: const Text('本次运行允许同类操作'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(
-                  dialogContext,
-                  _ToolApprovalDecision.allowOnce,
-                ),
-                child: const Text('允许一次'),
-              ),
-            ],
           ),
         );
     if (decision == _ToolApprovalDecision.allowSession) {
@@ -757,6 +837,13 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         : message is String
         ? (jsonDecode(message) as Map?)?.cast<String, dynamic>()
         : null;
+    if (_pointerDiagnostics && payload?['type'] == 'vibekits.pointerProbe') {
+      _appendPointerDiagnostic(
+        'dom ${payload?['event']} x=${payload?['x']} y=${payload?['y']} '
+        'target=${payload?['target']}',
+      );
+      return;
+    }
     if (payload?['type'] == 'vibekits.workspaceSnapshot') {
       final Object? rawWorkspaces = payload?['workspaces'];
       if (rawWorkspaces is! List) return;
@@ -776,10 +863,106 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       HarnessWorkStatusHub.syncWorkspaceInventory(workspaces);
       return;
     }
+    if (payload?['type'] == 'vibekits.moveSession') {
+      final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
+      final String sourceWorkspaceId =
+          (payload?['sourceWorkspaceId'] as String? ?? '').trim();
+      final String targetWorkspaceId =
+          (payload?['targetWorkspaceId'] as String? ?? '').trim();
+      final String sourceLabel = (payload?['sourceLabel'] as String? ?? '')
+          .trim();
+      final String targetLabel = (payload?['targetLabel'] as String? ?? '')
+          .trim();
+      unawaited(
+        _confirmMoveSession(
+          sessionId: sessionId,
+          sourceWorkspaceId: sourceWorkspaceId,
+          targetWorkspaceId: targetWorkspaceId,
+          sourceLabel: sourceLabel,
+          targetLabel: targetLabel,
+        ),
+      );
+      return;
+    }
     if (payload?['type'] != 'vibekits.deleteSession') return;
     final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
     final String title = (payload?['title'] as String? ?? '').trim();
     unawaited(_confirmDeleteSession(sessionId, title));
+  }
+
+  Future<void> _confirmMoveSession({
+    required String sessionId,
+    required String sourceWorkspaceId,
+    required String targetWorkspaceId,
+    required String sourceLabel,
+    required String targetLabel,
+  }) async {
+    if (!mounted ||
+        _starting ||
+        sessionId.isEmpty ||
+        sourceWorkspaceId.isEmpty ||
+        targetWorkspaceId.isEmpty ||
+        sourceWorkspaceId == targetWorkspaceId ||
+        !_movingSessionIds.add(sessionId)) {
+      return;
+    }
+    final bool confirmed =
+        await _withFlutterOverlay<bool>(
+          () => showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext dialogContext) => AlertDialog(
+              title: const Text('移动会话并切换工作区权限？'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 500),
+                child: Text(
+                  '会话将从“${sourceLabel.isEmpty ? '原项目' : sourceLabel}”移动到'
+                  '“${targetLabel.isEmpty ? '目标项目' : targetLabel}”。\n\n'
+                  '后续文件读取、写入和命令执行将以目标项目目录为工作区。'
+                  '为保证权限边界一致，当前 Harness 运行会先安全停止，迁移成功后自动恢复。',
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('移动并切换权限'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) {
+      _movingSessionIds.remove(sessionId);
+      return;
+    }
+    setState(() => _status = '正在安全迁移会话工作区…');
+    try {
+      final HarnessSessionHandle? session = _session;
+      _session = null;
+      if (session != null && session.running) {
+        await session.stop();
+        widget.onRunningChanged?.call(false);
+      }
+      await DeepSeekHarnessService.rebindSessionWorkspace(
+        sessionId: sessionId,
+        sourceWorkspaceId: sourceWorkspaceId,
+        targetWorkspaceId: targetWorkspaceId,
+      );
+      if (!mounted) return;
+      setState(() => _status = '会话已移动，正在按新工作区权限恢复…');
+      await _start(preserveWebview: true);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _status = '移动会话失败，原项目保持不变：$error');
+      await _start(preserveWebview: true);
+    } finally {
+      _movingSessionIds.remove(sessionId);
+    }
   }
 
   Future<void> _confirmDeleteSession(String sessionId, String title) async {
@@ -790,27 +973,29 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       return;
     }
     final bool confirmed =
-        await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (BuildContext dialogContext) => AlertDialog(
-            title: const Text('删除这个会话？'),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Text(
-                '${title.isEmpty ? sessionId : title}\n\n聊天记录、推理过程和工具调用记录将被永久删除，无法从归档恢复。',
+        await _withFlutterOverlay<bool>(
+          () => showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (BuildContext dialogContext) => AlertDialog(
+              title: const Text('删除这个会话？'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Text(
+                  '${title.isEmpty ? sessionId : title}\n\n聊天记录、推理过程和工具调用记录将被永久删除，无法从归档恢复。',
+                ),
               ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('删除'),
+                ),
+              ],
             ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('删除'),
-              ),
-            ],
           ),
         ) ??
         false;
@@ -880,6 +1065,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   @override
   void dispose() {
+    if (_pointerDiagnostics) {
+      GestureBinding.instance.pointerRouter.removeGlobalRoute(
+        _recordFlutterPointer,
+      );
+    }
     _diagnosticsTimer?.cancel();
     _outputSubscription?.cancel();
     _webMessageSubscription?.cancel();
@@ -1263,10 +1453,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     );
   }
 
-  Future<void> _showRuntimeLogs() => showDialog<void>(
-    context: context,
-    builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
-  );
+  Future<void> _showRuntimeLogs() async {
+    await _withFlutterOverlay<void>(
+      () => showDialog<void>(
+        context: context,
+        builder: (BuildContext context) => const _HarnessRuntimeLogDialog(),
+      ),
+    );
+  }
 
   Widget _buildQuickActionsRail() => Container(
     width: 60,
@@ -1340,8 +1534,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         PopupMenuButton<FeishuHarnessTask>(
           key: const Key('rail-feishu'),
           tooltip: '飞书任务：查看谁在找我等只读任务',
-          onSelected: (FeishuHarnessTask task) =>
-              unawaited(_selectFeishuTask(task)),
+          onOpened: () => unawaited(_blockNativeWebViewInput()),
+          onCanceled: () => unawaited(_unblockNativeWebViewInput()),
+          onSelected: (FeishuHarnessTask task) {
+            unawaited(_unblockNativeWebViewInput());
+            unawaited(_selectFeishuTask(task));
+          },
           itemBuilder: (BuildContext context) =>
               <PopupMenuEntry<FeishuHarnessTask>>[
                 for (final FeishuHarnessTask task
@@ -1468,62 +1666,64 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     ),
   );
 
-  Future<void> _showMcpSettings() => showDialog<void>(
-    context: context,
-    builder: (BuildContext context) => StatefulBuilder(
-      builder: (BuildContext context, StateSetter setDialogState) {
-        final McpCapabilitySnapshot snapshot =
-            McpCapabilityDirectory.instance.snapshot;
-        return AlertDialog(
-          title: const Text('MCP 与协同设置'),
-          content: SizedBox(
-            width: 560,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                SelectableText(
-                  '设备名称：${_mcpIdentity.displayName}\n'
-                  '硬件识别码：${_mcpIdentity.hardwareCode}\n'
-                  '实例 ID：${_mcpIdentity.instanceId}\n'
-                  '发现地址：239.255.42.99:47831/UDP',
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('允许发布本 APP 的 MCP 能力'),
-                  subtitle: const Text('关闭后发送 goodbye；本机仍继续发现其他 MCP 设备'),
-                  value: _mcpExposureEnabled,
-                  onChanged: (bool enabled) async {
-                    await _setMcpExposure(enabled);
-                    setDialogState(() {});
-                  },
-                ),
-                const Divider(),
-                Text(
-                  '本 APP ${snapshot.app.length} 台 · '
-                  '本机 ${snapshot.local.length} 台 · '
-                  '局域网 ${snapshot.lan.length} 台 · '
-                  '目录版本 ${snapshot.version}',
-                ),
-              ],
+  Future<void> _showMcpSettings() async => _withFlutterOverlay<void>(
+    () => showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setDialogState) {
+          final McpCapabilitySnapshot snapshot =
+              McpCapabilityDirectory.instance.snapshot;
+          return AlertDialog(
+            title: const Text('MCP 与协同设置'),
+            content: SizedBox(
+              width: 560,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  SelectableText(
+                    '设备名称：${_mcpIdentity.displayName}\n'
+                    '硬件识别码：${_mcpIdentity.hardwareCode}\n'
+                    '实例 ID：${_mcpIdentity.instanceId}\n'
+                    '发现地址：239.255.42.99:47831/UDP',
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('允许发布本 APP 的 MCP 能力'),
+                    subtitle: const Text('关闭后发送 goodbye；本机仍继续发现其他 MCP 设备'),
+                    value: _mcpExposureEnabled,
+                    onChanged: (bool enabled) async {
+                      await _setMcpExposure(enabled);
+                      setDialogState(() {});
+                    },
+                  ),
+                  const Divider(),
+                  Text(
+                    '本 APP ${snapshot.app.length} 台 · '
+                    '本机 ${snapshot.local.length} 台 · '
+                    '局域网 ${snapshot.lan.length} 台 · '
+                    '目录版本 ${snapshot.version}',
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () async {
-                await McpCapabilityDirectory.instance.refreshLocal();
-                setDialogState(() {});
-              },
-              child: const Text('重新读取目录'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('完成'),
-            ),
-          ],
-        );
-      },
+            actions: <Widget>[
+              TextButton(
+                onPressed: () async {
+                  await McpCapabilityDirectory.instance.refreshLocal();
+                  setDialogState(() {});
+                },
+                child: const Text('重新读取目录'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('完成'),
+              ),
+            ],
+          );
+        },
+      ),
     ),
   );
 
@@ -1608,12 +1808,16 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           .app
           .expand((McpDeviceCapability device) => device.tools)
           .toList(growable: false);
-      final bool allowed = await showMcpExposureConsentDialog(
-        context: context,
-        deviceName: _mcpIdentity.displayName,
-        tools: tools,
-        certificateFingerprint: identity.fingerprint,
-      );
+      final bool allowed =
+          await _withFlutterOverlay<bool>(
+            () => showMcpExposureConsentDialog(
+              context: context,
+              deviceName: _mcpIdentity.displayName,
+              tools: tools,
+              certificateFingerprint: identity.fingerprint,
+            ),
+          ) ??
+          false;
       if (!mounted || !allowed) return;
     }
     setState(() => _mcpExposureChanging = true);
@@ -1685,18 +1889,26 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     ),
   );
 
-  Future<void> _showMcpDevices(McpCapabilityTier tier) => showDialog<void>(
-    context: context,
-    builder: (BuildContext context) => _McpDeviceListDialog(tier: tier),
-  );
+  Future<void> _showMcpDevices(McpCapabilityTier tier) async {
+    await _withFlutterOverlay<void>(
+      () => showDialog<void>(
+        context: context,
+        builder: (BuildContext context) => _McpDeviceListDialog(tier: tier),
+      ),
+    );
+  }
 
-  Future<void> _showRemoteShare() => showDialog<void>(
-    context: context,
-    builder: (BuildContext context) => _HarnessRemoteShareDialog(
-      configuredExecutable: widget.rustDeskExecutable,
-      webClientUrl: widget.rustDeskWebClientUrl,
-    ),
-  );
+  Future<void> _showRemoteShare() async {
+    await _withFlutterOverlay<void>(
+      () => showDialog<void>(
+        context: context,
+        builder: (BuildContext context) => _HarnessRemoteShareDialog(
+          configuredExecutable: widget.rustDeskExecutable,
+          webClientUrl: widget.rustDeskWebClientUrl,
+        ),
+      ),
+    );
+  }
 }
 
 class _McpDeviceListDialog extends StatelessWidget {

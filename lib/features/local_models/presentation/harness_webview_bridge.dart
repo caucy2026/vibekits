@@ -107,10 +107,8 @@ class HarnessWebViewBridge {
     }
     final mac.WebViewController? macos = _macos;
     if (macos != null) {
-      // AppKitView already forwards unclaimed pointer sequences to WKWebView.
-      // Supplying a global eager recognizer here makes Flutter win the desktop
-      // gesture arena before AppKit can dispatch click/up to the native view;
-      // the page still paints, but official sidebar buttons stop responding.
+      // This must stay unwrapped by Flutter pointer listeners in the caller.
+      // WKWebView is responsible for native macOS mouse and wheel delivery.
       return mac.WebViewWidget(controller: macos);
     }
     return const SizedBox.shrink();
