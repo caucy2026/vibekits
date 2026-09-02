@@ -38,14 +38,14 @@
 - Flutter analyze：2026-09-02 最终源码执行，`No issues found`。
 - 完整串行 Flutter tests：最终源码 653 passed、15 skipped、0 failed。15 项均为需要显式外部环境或授权的门控测试：QEMU/Mihomo live、真实系统盘、真实 ADB、一次性 KEMI 文件发送、Windows 注册表、真实模型联网、真实 LMCP 和 UI 截图等；跳过不计作通过。真实 LMCP 项另带目标参数单独执行 1/1 通过。
 - Universal Release：干净 `flutter clean → pub get --offline → flutter build macos --release --no-pub` 成功；App 实际占用约 714 MiB。`verify_macos_release_compat.sh` 扫描 App、frameworks、ADB、Node/DSH、7-Zip、Git 和 Harness 原生模块全部通过，App 最低版本固定为 macOS 12.0。
-- GitHub `macOS Release` 门禁明确标记为 macOS 12+，并监听 `third_party/**` 与 `tool/**`；运行时或验证脚本单独变化也必须重新构建、验证 Universal 双架构并生成校验和，避免漏验。
+- GitHub `macOS Release` 门禁明确标记为 macOS 12+，并监听 `third_party/**` 与 `tool/**`；运行时或验证脚本单独变化也必须重新构建、验证 Universal 双架构并生成校验和，避免漏验。代码提交 `c8f9d28` 对应 run `33572483744` 已完整成功；后续 `b4bc463` 只增加 UI 回归测试，不改变 Release 输入，且 `test/**` 不在该工作流路径触发范围内。
 - Rosetta：Developer ID 精确候选以 `arch -x86_64` 启动，`vmmap` 报告 `Code Type: X86-64 (translated)`；同一包内 Node 22.19.0、DSH 0.1.1-rc.2、ADB 37.0.0、7-Zip 25.01、Git 2.53.0 的 Intel 切片均实际启动成功，ADB 明确报告 `Darwin x86_64`。Intel/Rosetta Node 固定带 `--jitless`，真实执行 DSH JS 入口而非只跑 `node --version`；不授予 `allow-unsigned-executable-memory`。
 - Developer ID：33 个可执行/原生 Mach-O 逐项验证 Authority、Team ID 与 Hardened Runtime，并通过 `codesign --verify --deep --strict`；Authority=`Developer ID Application: zhen ji (26T5WV4GLP)`、TeamIdentifier=`26T5WV4GLP`、Apple timestamp 均已取得；Node JIT/DSH 启动复验通过。
 - Apple Notarization / Gatekeeper：`KEMI_NOTARY` 凭据已只读验证可访问 Apple；新 dev.146 payload 尚未提交，不能复用 dev.145 票据，也不能提前标记已公证。
 - 目标 LAN 基准节点：VibeKits 生产 LMCP 客户端在提供方先启动、候选后启动的条件下发现 2.4.1/revision 9，完成 TLS 指纹固定、目录摘要校验并得到 `callable=true`。真实调用 `kemi.benchmark.last_result` 返回 `final=true`、`state=succeeded`、`verification=verified`、评分 99.51107080350508、等级 S 和匹配的报告 SHA-256；`response_identity_mismatch` 与 `AUTH_SCOPE_REQUIRED` 均未复现。可重复门禁为 `lmcp_readonly_live_test.dart`，执行 1/1 通过。模型驱动 Harness 仍需用户明确同意把实时 LAN 实例/目录信息发送给已配置的 DeepSeek 服务；生产客户端直调通过不冒充模型驱动验收。
-- UI 人工巡检：自动辅助功能巡检被 macOS 锁屏阻止；需用户解锁后完成浅/深色、项目/会话菜单、独立输入、并行切换、时间线和永久删除的非破坏性检查。
+- UI 自动/人工巡检：精确 Developer ID ARM 候选已在解锁状态启动并截图确认浅色布局、`v1.9.0-dev.146+2146`、项目/会话层级及“仅选中会话显示 `…`”正确。`deepseek_harness_test.dart` 25/25、与主界面 `widget_test.dart` 合计 45 项通过，覆盖浅/深主题、项目折叠、项目菜单与改名、添加工作区/拖动权限、仅选中会话操作、独立草稿、双会话并行、停止、默认折叠时间线、永久删除逻辑和移除项目取消不丢数据。真实点击剩余门禁尚未完成：Codex Computer Use 的只读 `get_app_state` 可用，但任何 `click/set_value` 都会使 `com.openai.sky.CUAService` 退出；系统日志明确记录其 application-group entitlement 因 invalid application signature/provisioning profile 被忽略。本项目不得修改或绕过外部自动化工具签名；当前 Mac 随后再次锁屏。服务签名恢复且 Mac 解锁后，仍需在精确候选补做项目/会话菜单、改名、运行转圈和删除取消的真实点击复核。
 - Windows：共享源码入口已完成；本机没有 Windows 构建环境，正式 Windows Release/真机结果必须由 Windows 构建任务补证，未补证前保持为门禁项。
-- Git commit / GitHub SHA：待全部门禁通过后填写。
+- Git commit / GitHub SHA：Release 代码基线 `c8f9d28`，UI 门禁测试补充 `b4bc463`，两者均已推送 `origin/main`；正式归档 SHA 仍须等剩余门禁通过后填写。
 
 ## 5. 本轮发现并阻止进入发布的真实问题
 
@@ -54,7 +54,7 @@
 3. ad-hoc 签名没有 Team ID，若把整个 App 都强制 Hardened Runtime 会触发 library validation。仅本机联调链使用独立 Node ad-hoc JIT entitlement；正式 Developer ID 链仍保持全组件 Hardened Runtime、同 Team ID 和时间戳。
 4. LMCP 标准工程信封使用 `toolName`，旧 VibeKits 客户端却只读取 `tool`，导致 62 节点目录可见但结果身份拒绝。客户端现把 `tool` 仅作为旧别名，收集顶层和 `structuredContent` 的全部 `instanceId/toolName|tool/catalogRevision`，缺失或任何冲突都拒绝，不能用优先级覆盖攻击值。
 5. 第一版 Intel 门禁只执行 `node --version`，漏掉 Rosetta 中 DSH 初始化 V8 baseline compiler 时的可执行内存失败。正式门禁现必须执行真实 DSH JS 入口；x86_64 运行时使用 `--jitless`，保持最小 `allow-jit`，拒绝以更宽的未签名可执行内存权限掩盖问题。
-6. 首轮云端 `c476e4c` 在干净 checkout 的 Release 打包阶段失败：本机生成并忽略的 Harness、7-Zip、Git macOS runtime 不存在于 Git，旧工作流却直接构建。工作流现先按准备脚本和固定上游校验和生成/恢复缓存，逐项验证完整性，再把 runner 的官方 ADB 显式传给打包脚本；冷缓存超时提高到 90 分钟。第二轮又暴露 npm 会按构建主机架构选择可选原生包；准备脚本现不论运行在 Intel 或 Apple Silicon 都显式物化 arm64/x64 的 Sharp、libvips、Koffi 和 ripgrep。临时冷生成验证两套包和 Universal Node 完整；新云端 run 未通过前，本项仍保持阻塞。
+6. 首轮云端 `c476e4c` 在干净 checkout 的 Release 打包阶段失败：本机生成并忽略的 Harness、7-Zip、Git macOS runtime 不存在于 Git，旧工作流却直接构建。工作流现先按准备脚本和固定上游校验和生成/恢复缓存，逐项验证完整性，再把 runner 的官方 ADB 显式传给打包脚本；冷缓存超时提高到 90 分钟。第二轮又暴露 npm 会按构建主机架构选择可选原生包；准备脚本现不论运行在 Intel 或 Apple Silicon 都显式物化 arm64/x64 的 Sharp、libvips、Koffi 和 ripgrep。临时冷生成验证两套包和 Universal Node 完整；最终云端 run `33572483744` 已完整通过，本项解除阻塞。
 7. 拆分门禁确认 Harness 冷生成成功，而 7-Zip 下载/准备步骤在云端失败。25.01 Universal `7zz` 及上游 License/readme/History 总计约 5.6 MiB，现作为固定、可审计的 Release 输入纳入 Git；准备脚本及上游压缩包 SHA-256 仍保留用于显式升级，构建不再依赖 GitHub runner 临时下载该二进制。兼容验证仍会独立检查两个切片和 `minos=12.0`，不能靠跳过下载绕过架构门禁。
 8. 云端完整日志确认下一处失败不是编译器：Xcode 在最终签名时把 `Contents/MacOS/tools/adb/package.xml` 判定为未签名 code object。ADB 可执行文件继续固定在 `Contents/MacOS/tools/adb/adb`，NOTICE/source.properties/package.xml 改放 `Contents/Resources/tools/adb`；兼容门禁同时禁止在 ADB 可执行目录混入任何非 `adb` 文件，避免不同 Xcode 版本出现签名结果分叉。
 9. 云端 App 已成功构建后，兼容脚本误把签名前官方 `7zz` SHA-256 用于比较签名后的 Mach-O；ad-hoc/Developer ID 签名会合法改变二进制字节，因此产生假失败。固定 SHA 现于复制和签名前验证 Git 输入；签名后的 App 继续独立验证 25.01 版本、许可证、双架构、两个切片 `minos=12.0` 和代码签名，既不误报，也不放弃供应链校验。
