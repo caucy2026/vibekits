@@ -13,7 +13,7 @@
 
 ## 2. 真实 UI 验收
 
-精确 Developer ID 签名候选已用原生鼠标事件逐项操作：
+与 dev.150 应用代码一致的 Developer ID 签名候选已用原生鼠标事件逐项操作；其后提交仅涉及 CI、测试脚本和 Windows CMake 兼容，不改变下列界面行为：
 
 | 功能 | 结果 | 证据 |
 |---|---|---|
@@ -64,7 +64,7 @@
 - 官方 Harness 本地模型集成：真实 SSE 工具调用、原生审批桥及继续推理通过。
 - CI 必须使用内置 Node 22 执行 zstd 迁移测试，不能误用 runner 自带旧 Node。
 
-## 6. 发布前剩余门禁
+## 6. 发布门禁状态
 
 1. 依据最终 HEAD 重建 Release，重新 Developer ID 深度签名。
 2. 执行 Universal/macOS 12 兼容脚本、签名/硬化运行时检查、arm64 与 Rosetta x86_64 启动。
@@ -72,4 +72,17 @@
 4. GitHub macOS Release 与 Windows workflow 全绿；Windows 必须包含同一迁移 helper 并通过 `node.exe --check`。
 5. Apple 公证 Accepted、staple/validate 通过后，才可把精确候选复制到项目 `bin` 并记录 SHA-256。
 
-本机门禁进度：第 1、2 项已通过。最终可执行 SHA-256 为 `e2e8aed25e5568b31fcab474f2d9d750cfd72ee5876137891f41a9ec9f046057`，App.framework SHA-256 为 `bc44b8836940490a60c216f66815867dec64a3082a5bea52f8bfe32dcacfbcf3`。同一候选已以 Rosetta 启动，`vmmap` 显示 `Code Type: X86-64 (translated)`、版本 `1.9.0.150 (2150)`。
+macOS CI run `33662742558` 已完整成功，覆盖 Universal/macOS 12、Harness、ADB、7-Zip、Git、签名和构建检查。与应用代码一致的本地候选曾以 Rosetta 启动，`vmmap` 显示 `Code Type: X86-64 (translated)`、版本 `1.9.0.150 (2150)`；当时可执行 SHA-256 为 `e2e8aed25e5568b31fcab474f2d9d750cfd72ee5876137891f41a9ec9f046057`，App.framework SHA-256 为 `bc44b8836940490a60c216f66815867dec64a3082a5bea52f8bfe32dcacfbcf3`。这些哈希仅作为预发布验证证据，不能冒充最终公证包哈希。
+
+Windows run `33663785345` 中 83 项共享测试全部通过，唯一失败来自 GitHub 新版 MSVC 将 Flutter 上游插件的 `<experimental/coroutine>` 弃用诊断升级为硬错误。提交 `449f675` 已在项目层显式启用微软提供的兼容定义，使其覆盖生成的插件目标且不修改第三方插件源码。
+
+该轮还暴露了一个只存在于测试替身中的顺序假设：官方 Harness 可以先请求生成会话标题，再开始主任务；旧测试错误地把第一条模型请求固定当作工具调用。提交 `f928f0c` 改为按请求语义分别响应标题、工具调用和工具结果，本机真实集成测试连续三次通过。此修复保留官方标题功能，没有绕过或关闭它；最终 Windows run 更新为 `33666463241`。
+
+随后 Windows 真机式工具桥测试发现 `vibekits.system.resources` 会被可选的 `GPU Engine` 性能计数器拖满 25 秒。提交 `6adc1b7` 保留显卡名称和安装显存证据，在性能计数器不可依赖时把实时 GPU 利用率明确标为不可用，避免次要指标阻塞整份物理资源快照。本机工具桥 36 项通过（Windows 专项在 Windows CI 执行）、`flutter analyze` 0 issue。
+
+最终双平台门禁已通过：
+
+- Windows run `33667794795`：固定 Harness runtime、静态分析、24 项 Harness UI、官方 Agent、本地工具桥、LAN MCP、共享界面、Windows EXE 编译和内置 Harness payload 全部成功。
+- macOS run `33667794739`：Universal/macOS 12、Harness、ADB、7-Zip、Git、构建、签名检查和打包全部成功。
+
+当前登录钥匙串暂时没有可用的 Developer ID Application 身份（`security find-identity` 为 0）。因此任何中断或无有效身份的本地签名副本均已排除，不会复制到 `bin`。恢复证书后须从未改动的 Release 构建重新完整签名，再经本地桥接 smoke、深度验签、公证 Accepted、staple/validate 和 Gatekeeper 后记录最终哈希。
