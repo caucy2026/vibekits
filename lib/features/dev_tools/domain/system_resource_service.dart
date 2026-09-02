@@ -4,10 +4,8 @@ import 'dart:io';
 
 import 'adb_service.dart';
 
-typedef ResourceProcessRunner = Future<ProcessResult> Function(
-  String executable,
-  List<String> arguments,
-);
+typedef ResourceProcessRunner =
+    Future<ProcessResult> Function(String executable, List<String> arguments);
 
 class SystemResourceProbeController {
   Process? _activeProcess;
@@ -276,7 +274,6 @@ abstract final class SystemResourceService {
         'Get-Process 两次采样',
         '.NET DriveInfo',
         'Windows Display Adapter 注册表',
-        'Windows GPU Engine 性能计数器（系统支持时）',
       ],
     );
   }
@@ -600,8 +597,10 @@ $disks=[System.IO.DriveInfo]::GetDrives() | Where-Object {$_.DriveType -eq 'Fixe
 $videoKeys=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Video\*\0000' | Where-Object {$_.DriverDesc}
 $gpuNames=@($videoKeys | ForEach-Object {$_.DriverDesc} | Select-Object -Unique)
 $gpuMemory=($videoKeys | ForEach-Object {if($_.'HardwareInformation.MemorySize'){[int64]$_.'HardwareInformation.MemorySize'}else{0}} | Measure-Object -Sum).Sum
-$gpuCounter=Get-Counter '\GPU Engine(*)\Utilization Percentage' -MaxSamples 1
-$gpuMaximum=if($gpuCounter){($gpuCounter.CounterSamples | Measure-Object CookedValue -Maximum).Maximum}else{$null}
-[pscustomobject]@{target=$env:COMPUTERNAME;cpuPercent=[Math]::Min(100,[Math]::Round($cpuTotal,1));logicalProcessors=$logical;memoryTotalBytes=[int64]$info.TotalPhysicalMemory;memoryAvailableBytes=[int64]$info.AvailablePhysicalMemory;gpuNames=$gpuNames;gpuPercent=if($null -eq $gpuMaximum){$null}else{[Math]::Min(100,[Math]::Round([double]$gpuMaximum,1))};gpuMemoryTotalBytes=if($gpuMemory){[int64]$gpuMemory}else{$null};gpuMemoryUsedBytes=$null;storage=@($disks);processes=@($top)} | ConvertTo-Json -Depth 5 -Compress
+# GPU Engine performance counters are optional and can block indefinitely on
+# machines where the provider is absent or rebuilding. Names and installed
+# memory remain useful evidence; utilization is reported as unavailable so a
+# secondary metric can never stall the complete physical resource snapshot.
+[pscustomobject]@{target=$env:COMPUTERNAME;cpuPercent=[Math]::Min(100,[Math]::Round($cpuTotal,1));logicalProcessors=$logical;memoryTotalBytes=[int64]$info.TotalPhysicalMemory;memoryAvailableBytes=[int64]$info.AvailablePhysicalMemory;gpuNames=$gpuNames;gpuPercent=$null;gpuMemoryTotalBytes=if($gpuMemory){[int64]$gpuMemory}else{$null};gpuMemoryUsedBytes=$null;storage=@($disks);processes=@($top)} | ConvertTo-Json -Depth 5 -Compress
 ''';
 }
