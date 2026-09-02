@@ -51,14 +51,20 @@ jobs:
       - name: Analyze shared application
         run: flutter analyze --no-pub
 
-      - name: Test Harness, MCP and shared interaction regressions
-        run: >-
-          flutter test --no-pub
-          test/deepseek_harness_test.dart
-          test/harness_agent_integration_test.dart
-          test/harness_tool_bridge_test.dart
-          test/lan_mcp_tool_server_test.dart
-          test/widget_test.dart
+      - name: Test Harness UI interactions
+        run: flutter test --no-pub test/deepseek_harness_test.dart
+
+      - name: Test Harness agent integration
+        run: flutter test --no-pub test/harness_agent_integration_test.dart
+
+      - name: Test local Harness tool bridge
+        run: flutter test --no-pub test/harness_tool_bridge_test.dart
+
+      - name: Test LAN MCP server
+        run: flutter test --no-pub test/lan_mcp_tool_server_test.dart
+
+      - name: Test shared application widgets
+        run: flutter test --no-pub test/widget_test.dart
 
       - name: Compile Windows application
         run: flutter build windows --debug --no-pub
