@@ -34,6 +34,7 @@ void main() {
     );
     addTearDown(() => model.close(force: true));
     final List<String> modelRequests = <String>[];
+    final List<String> taskRequests = <String>[];
     int nativeApprovals = 0;
     model.listen((HttpRequest request) async {
       expect(request.uri.path, '/chat/completions');
@@ -41,13 +42,22 @@ void main() {
         request.headers.value(HttpHeaders.authorizationHeader),
         'Bearer test-key',
       );
-      modelRequests.add(await utf8.decoder.bind(request).join());
+      final String requestBody = await utf8.decoder.bind(request).join();
+      modelRequests.add(requestBody);
       request.response.headers.set(
         HttpHeaders.contentTypeHeader,
         'text/event-stream; charset=utf-8',
       );
-      if (modelRequests.length == 1) {
-        expect(modelRequests.first, contains('mcp__vibekits__sha256'));
+      if (requestBody.contains(
+        'Create a concise title for an AI coding-assistant session',
+      )) {
+        request.response.write(
+          'data: {"choices":[{"delta":{"content":"最小联调"},'
+          '"finish_reason":"stop"}]}\n\n',
+        );
+      } else if (requestBody.contains('mcp__vibekits__sha256') &&
+          !requestBody.contains('ba7816bf8f01cfea')) {
+        taskRequests.add(requestBody);
         request.response.write(
           'data: ${jsonEncode(<String, Object?>{
             'choices': <Object?>[
@@ -81,6 +91,7 @@ void main() {
           })}\n\n',
         );
       } else {
+        taskRequests.add(requestBody);
         request.response.write(
           'data: {"choices":[{"delta":{"content":"VIBEKITS_FULL_STACK_OK"},'
           '"finish_reason":"stop"}],"usage":{"prompt_tokens":20,'
@@ -120,15 +131,15 @@ void main() {
     );
     expect(code, 0, reason: output.toString());
     expect(output.toString(), contains('VIBEKITS_FULL_STACK_OK'));
-    expect(modelRequests.length, greaterThanOrEqualTo(2));
+    expect(taskRequests.length, greaterThanOrEqualTo(2));
     expect(
-      modelRequests
+      taskRequests
           .skip(1)
           .any((String request) => request.contains('ba7816bf8f01cfea')),
       isTrue,
     );
     final List<dynamic> finalMessages =
-        (jsonDecode(modelRequests.last) as Map<String, dynamic>)['messages']
+        (jsonDecode(taskRequests.last) as Map<String, dynamic>)['messages']
             as List<dynamic>;
     expect(
       nativeApprovals,
