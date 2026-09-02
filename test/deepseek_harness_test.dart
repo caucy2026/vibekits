@@ -635,6 +635,109 @@ void main() {
     expect(find.byTooltip('折叠项目会话'), findsOneWidget);
   });
 
+  testWidgets('项目菜单支持改名且移除取消不丢项目，会话仅选中项显示操作', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 800);
+    addTearDown(tester.view.reset);
+    final Directory root = Directory.systemTemp.createTempSync(
+      'vibekits_workspace_menu_',
+    );
+    addTearDown(() => root.deleteSync(recursive: true));
+    final Directory source = Directory('${root.path}/source')..createSync();
+    final Directory target = Directory('${root.path}/target')..createSync();
+    final DateTime now = DateTime.now();
+    final HarnessConversationProject sourceProject = HarnessConversationProject(
+      workspace: source.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'selected-session',
+          title: '已选会话',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+        HarnessConversationSession(
+          id: 'other-session',
+          title: '未选会话',
+          messages: const <HarnessConversationMessage>[],
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+      activeSessionId: 'selected-session',
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: source.path,
+            loadWorkspaceCatalog: () async => <String>[
+              source.path,
+              target.path,
+            ],
+            loadConversation: (String workspace) async =>
+                workspace == source.path ? sourceProject : null,
+            saveConversation: (_) async {},
+            saveWorkspaceCatalog: (_) async {},
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.20.0',
+              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              message: 'Harness 已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('agent-session-menu-selected-session')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('agent-session-menu-other-session')),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${source.path}')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('编辑名称'), findsOneWidget);
+    expect(find.text('在此新建会话'), findsOneWidget);
+    expect(find.text('移除项目'), findsOneWidget);
+
+    await tester.tap(find.text('编辑名称'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('agent-workspace-name-field')),
+      '重新命名项目',
+    );
+    await tester.tap(find.byKey(const Key('agent-save-workspace-name')));
+    await tester.pumpAndSettle();
+    expect(find.text('重新命名项目'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(ValueKey<String>('agent-workspace-menu-${source.path}')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除项目'));
+    await tester.pumpAndSettle();
+    expect(find.text('移除项目？'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey<String>('agent-workspace-${source.path}')),
+      findsOneWidget,
+    );
+    expect(find.text('重新命名项目'), findsOneWidget);
+  });
+
   testWidgets('Harness 运行时可切换项目且后台结果回到原会话', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1100, 800);
