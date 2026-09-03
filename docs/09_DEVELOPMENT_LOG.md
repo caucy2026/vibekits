@@ -1436,3 +1436,11 @@
 - 新增 `docs/59_KEMI_APP_MARKET_CROSS_PLATFORM_INTEGRATION_STANDARD.md`，作为其他 APP 接入 KEMI 市场的统一执行文档，明确分离商城公开读取、本 APP 自更新和管理员发布三条权限链路。
 - 文档覆盖 Android、Windows、macOS 的平台筛选、安装格式、大小/SHA-256、APK/Authenticode/Developer ID 与 Apple 公证门禁，以及旧版升级、取消、失败回滚和目标真机矩阵。
 - 固化 `(package_name, os_type)` 唯一键、桌面端强制 `os`、`file_size` 与 `file_size_bytes` 双字段、公开详情/CDN/更新正反向/实际安装四层闭环，禁止将发布凭据编译进客户端。
+
+# 2026-09-03 · dev.155 Windows/macOS 正式市场发布
+
+- 发布前发现 UI/包版本为 dev.154，但 LMCP 公告仍硬编码 dev.152；停止旧候选，统一升版为 `1.9.0-dev.155+2155`，LMCP appVersion/catalogRevision 同步为 dev.155/2155。
+- Analyze 0 issue、定向 7/7、全量 667 项通过（16 项环境门禁跳过、0 失败）；Windows run `33748949677` 和 macOS run `33748949670` 均完整成功。
+- Windows 正式 ZIP 283,303,960 bytes、SHA-256 `ec9a9e6f5757f1883d03c883e053539a10551125d2f001f089783dedd85eeb86`；自包含 Harness/Git/ADB/7-Zip/Mihomo/QEMU 复核通过。
+- macOS Universal 正式 ZIP 263,121,804 bytes、SHA-256 `9928a81e4d5d7edf49d02682978afecb4078a91118b4a18a637af2954e9cfb91`；Apple 公证 `Accepted`（`e9bc35ed-868b-4cf1-9160-be79de5265a9`），staple、Gatekeeper 和签名后真实本机 Harness 工具桥通过。
+- KEMI 市场既有 Windows app_id 54、macOS app_id 53 已更新至 dev.155，保持上架且非强制更新；公开列表、CDN 长度/SHA、旧版 `has_update=true` 和当前版 `has_update=false` 均闭环。详细证据见 `docs/acceptance/V1_9_0_DEV155_MARKET_RELEASE_2026-09-03.md`。

@@ -114,6 +114,7 @@
 107. [Harness 语义 Record & Replay](55_HARNESS_SEMANTIC_RECORD_AND_REPLAY.md)——一次示教生成参数化 Skill，按实时三层 MCP 重新规划、逐步验证和安全恢复，禁止坐标宏回放
 108. [macOS 自包含 Harness 运行时验收](56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md)——Key 已配置仍启动失败的根因、Universal Node/DSH 打包签名、真实工具调用证据和剩余发布门槛
 109. [KEMI 应用商城跨平台接入、安装、自更新与发布标准](59_KEMI_APP_MARKET_CROSS_PLATFORM_INTEGRATION_STANDARD.md)——供所有 APP 团队执行的 Android/Windows/macOS 商城浏览、自更新、安全安装、签名发布和真机闭环唯一操作手册
+110. [dev.155 Windows/macOS 正式市场发布验收](acceptance/V1_9_0_DEV155_MARKET_RELEASE_2026-09-03.md)——版本一致性修复、Windows 自包含产物、macOS Developer ID/Apple 公证、市场 app_id 53/54 更新及公开自更新正反向闭环
 
 ## 完成定义
 
