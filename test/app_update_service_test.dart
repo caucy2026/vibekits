@@ -37,7 +37,7 @@ void main() {
       requestUri.queryParameters['package_name'],
       AppUpdateService.packageName,
     );
-    expect(requestUri.queryParameters['version_code'], '2153');
+    expect(requestUri.queryParameters['version_code'], '2154');
     expect(requestUri.queryParameters['os'], 'macos');
     expect(service.snapshot.value.phase, AppUpdatePhase.current);
     service.dispose();

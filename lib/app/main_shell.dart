@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
+import '../features/app_center/presentation/app_center_tab.dart';
 import '../features/about/presentation/about_tab.dart';
 import '../features/cleaner/presentation/cleaner_tab.dart';
 import '../features/documents/presentation/documents_tab.dart';
@@ -55,6 +56,7 @@ class _MainShellState extends State<MainShell> {
     '系统清理',
     '文档阅读',
     '开发工具',
+    '应用中心',
     '关于我们',
   ];
 
@@ -64,6 +66,7 @@ class _MainShellState extends State<MainShell> {
     'cleaner',
     'documents',
     'dev-tools',
+    'app-center',
     'about',
   ];
 
@@ -73,6 +76,7 @@ class _MainShellState extends State<MainShell> {
     Icons.cleaning_services_outlined,
     Icons.article_outlined,
     Icons.construction_outlined,
+    Icons.apps_rounded,
     Icons.info_outline_rounded,
   ];
 
@@ -82,6 +86,7 @@ class _MainShellState extends State<MainShell> {
     '扫描可清理空间并生成可核对报告',
     '快速查看文本、结构化数据与二进制文件',
     '独立开发工作区与转换检查工具',
+    '浏览和安装适用于当前系统的 KEMI 市场应用',
     '产品信息、当前版本能力与隐私说明',
   ];
 
@@ -642,7 +647,8 @@ class _MainShellState extends State<MainShell> {
         onAskHarness: _openHarnessWithPrompt,
         initialToolId: null,
       ),
-      AboutTab(active: _selectedIndex == 5),
+      const AppCenterTab(),
+      AboutTab(active: _selectedIndex == 6),
     ];
     final List<Widget> tabPages = List<Widget>.generate(
       allTabPages.length,

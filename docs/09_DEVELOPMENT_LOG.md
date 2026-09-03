@@ -1422,3 +1422,11 @@
 - 首轮 Windows CI 绿灯包经解包发现缺少内置 Git，判定为假成功并禁止发布。工作流现强制准备固定 Harness/MinGit/Mihomo/QEMU，并调用 `verify_windows_bundle.ps1` 做完整运行时门禁；后续只接受修正工作流产物。
 - Windows 最终 run `33726440489` 完整成功，最终 ZIP 为 283,281,459 bytes、SHA-256 `eac7044e0e085c950e5d65f50ec8a2fc803a3ae39f9b698b39c603cbbc0578f9`；下载后再次检查压缩完整性和关键工具文件，作废包未上架。
 - 用户核对并确认后已免审发布到 KEMI 市场：macOS `app_id=53`、Windows `app_id=54`，共同包名 `com.caucy.vibekits`、版本代码 2153、分类“开发工具”、商城展示开启、强制更新关闭。公开更新接口对旧版本返回两端精确 URL/大小/SHA-256，对当前版本返回 `has_update=false`。
+
+# 2026-09-03 · dev.154 Windows/macOS 应用中心
+
+- 一级导航在“开发工具”和“关于我们”之间新增“应用中心”，Windows 与 macOS 共用同一页面；快捷键扩展为 Ctrl/Cmd+1～7，应用中心为第 6 项、关于我们为第 7 项。
+- 接入 KEMI 市场公开分类与应用列表，桌面端请求必须显式携带 `os=windows` 或 `os=macos`。客户端再按 `os_type/platforms` 二次过滤，错误平台或没有明确平台归属的条目不会进入 UI。
+- 分类、搜索、刷新、应用卡片和详情均已接通。安装继续执行 HTTPS、平台扩展名、精确字节数和 SHA-256 四重门禁；缺少完整校验元数据时只能查看，不能安装。应用中心与官方 Harness 插件市场保持并存，不修改插件能力或数据模型。
+- 静态检查 0 issue；定向 31/31、全量 667 项通过，16 项环境门禁跳过、0 失败。macOS 真实生产接口显示 KEMI OFFICE 与 Vibekits 两个 macOS 条目，未混入 Windows 条目。
+- dev.154 精确 macOS Release 为 Universal x86_64+arm64，使用 `Developer ID Application: zhen ji (26T5WV4GLP)` 对 34 个 Mach-O 签名，Harness JIT/DSH 与深度严格验签通过。本轮只形成本机签名候选，未公证、未复制到 `bin`、未更新市场。完整证据见 `docs/acceptance/V1_9_0_DEV154_APP_CENTER_2026-09-03.md`。

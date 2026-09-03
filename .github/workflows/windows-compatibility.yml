@@ -82,13 +82,13 @@ jobs:
       - name: Verify Windows executable and Harness payload
         shell: pwsh
         run: |
-          .\tool\verify_windows_bundle.ps1 -Configuration Release -ExpectedVersion '1.9.0-dev.153+2153'
+          .\tool\verify_windows_bundle.ps1 -Configuration Release -ExpectedVersion '1.9.0-dev.154+2154'
 
       - name: Package Windows Release candidate
         shell: pwsh
         run: |
           $bundle = Resolve-Path 'build\windows\x64\runner\Release'
-          $archive = Join-Path $env:RUNNER_TEMP 'Vibekits-1.9.0-dev.153+2153-windows-x64.zip'
+          $archive = Join-Path $env:RUNNER_TEMP 'Vibekits-1.9.0-dev.154+2154-windows-x64.zip'
           Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $archive -CompressionLevel Optimal
           $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "sha256=$hash" | Out-File -LiteralPath "$archive.sha256" -Encoding ascii
@@ -98,7 +98,7 @@ jobs:
       - name: Upload Windows Release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: Vibekits-1.9.0-dev.153-2153-windows-x64
+          name: Vibekits-1.9.0-dev.154-2154-windows-x64
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
