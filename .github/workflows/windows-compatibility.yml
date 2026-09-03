@@ -48,6 +48,13 @@ jobs:
           & .\native\harness\windows\runtime\node.exe .\tool\test_harness_session_rebind.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Harness rebind verification failed' }
 
+      - name: Prepare pinned Windows tool runtimes
+        shell: pwsh
+        run: |
+          .\tool\prepare_git_runtime.ps1
+          .\tool\prepare_mihomo_runtime.ps1
+          .\tool\prepare_qemu_runtime.ps1
+
       - name: Analyze shared application
         run: flutter analyze --no-pub
 
@@ -63,6 +70,9 @@ jobs:
       - name: Test LAN MCP server
         run: flutter test --no-pub test/lan_mcp_tool_server_test.dart
 
+      - name: Test desktop self update contract
+        run: flutter test --no-pub test/app_update_service_test.dart
+
       - name: Test shared application widgets
         run: flutter test --no-pub test/widget_test.dart
 
@@ -72,10 +82,7 @@ jobs:
       - name: Verify Windows executable and Harness payload
         shell: pwsh
         run: |
-          $bundle = 'build\windows\x64\runner\Release'
-          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'vibekits.exe'))) { throw 'vibekits.exe missing' }
-          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs'))) { throw 'Session rebind helper missing' }
-          if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\harness-runtime.json'))) { throw 'Harness runtime manifest missing' }
+          .\tool\verify_windows_bundle.ps1 -Configuration Release -ExpectedVersion '1.9.0-dev.153+2153'
 
       - name: Package Windows Release candidate
         shell: pwsh
