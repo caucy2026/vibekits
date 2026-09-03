@@ -20,6 +20,7 @@ import '../features/about/domain/marketing_cache_service.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
 import 'app_version.dart';
+import 'app_update_service.dart';
 import 'dropped_file_router.dart';
 import 'main_shell.dart';
 
@@ -75,6 +76,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       unawaited(_startHarnessStatusPublisher());
     }
     if (!_isFlutterTest) MarketingCacheService.instance.start();
+    if (!_isFlutterTest) unawaited(AppUpdateService.instance.start());
   }
 
   Future<void> _startHarnessStatusPublisher() async {

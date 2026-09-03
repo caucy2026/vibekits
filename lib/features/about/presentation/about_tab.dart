@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
 import '../../../app/app_version.dart';
+import '../../../app/app_update_service.dart';
 import '../domain/marketing_cache_service.dart';
 
 class AboutTab extends StatefulWidget {
@@ -110,6 +111,8 @@ class _AboutTabState extends State<AboutTab> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 _identity(context),
+                const SizedBox(height: 14),
+                _updateCard(context),
                 const SizedBox(height: 22),
                 ValueListenableBuilder<MarketingCacheSnapshot>(
                   valueListenable: _service.snapshot,
@@ -205,6 +208,76 @@ class _AboutTabState extends State<AboutTab> {
         ),
       ),
     ],
+  );
+
+  Widget _updateCard(
+    BuildContext context,
+  ) => ValueListenableBuilder<AppUpdateSnapshot>(
+    valueListenable: AppUpdateService.instance.snapshot,
+    builder: (context, value, child) {
+      final bool busy =
+          value.phase == AppUpdatePhase.checking ||
+          value.phase == AppUpdatePhase.downloading;
+      final bool available = value.phase == AppUpdatePhase.available;
+      return Card(
+        key: const Key('about-update-card'),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: <Widget>[
+              if (busy)
+                const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  available ? Icons.system_update_alt : Icons.verified_outlined,
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      available ? '可更新到 ${value.versionName}' : '应用更新',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value.message.isEmpty
+                          ? '启动时自动检查，也可随时手动检查。'
+                          : value.message,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (available && value.releaseNotes.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Text(
+                        value.releaseNotes,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.tonal(
+                key: Key(
+                  available ? 'about-install-update' : 'about-check-update',
+                ),
+                onPressed: busy
+                    ? null
+                    : available
+                    ? AppUpdateService.instance.downloadAndInstall
+                    : AppUpdateService.instance.check,
+                child: Text(available ? '下载并安装' : '检查更新'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
   );
 
   Widget _marketing(BuildContext context, MarketingCacheSnapshot value) {

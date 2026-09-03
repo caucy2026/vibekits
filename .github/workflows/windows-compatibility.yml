@@ -66,13 +66,34 @@ jobs:
       - name: Test shared application widgets
         run: flutter test --no-pub test/widget_test.dart
 
-      - name: Compile Windows application
-        run: flutter build windows --debug --no-pub
+      - name: Compile Windows Release application
+        run: flutter build windows --release --no-pub
 
       - name: Verify Windows executable and Harness payload
         shell: pwsh
         run: |
-          $bundle = 'build\windows\x64\runner\Debug'
+          $bundle = 'build\windows\x64\runner\Release'
           if (-not (Test-Path -LiteralPath (Join-Path $bundle 'vibekits.exe'))) { throw 'vibekits.exe missing' }
           if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs'))) { throw 'Session rebind helper missing' }
           if (-not (Test-Path -LiteralPath (Join-Path $bundle 'tools\harness\harness-runtime.json'))) { throw 'Harness runtime manifest missing' }
+
+      - name: Package Windows Release candidate
+        shell: pwsh
+        run: |
+          $bundle = Resolve-Path 'build\windows\x64\runner\Release'
+          $archive = Join-Path $env:RUNNER_TEMP 'Vibekits-1.9.0-dev.153+2153-windows-x64.zip'
+          Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$hash" | Out-File -LiteralPath "$archive.sha256" -Encoding ascii
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+        id: package
+
+      - name: Upload Windows Release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vibekits-1.9.0-dev.153-2153-windows-x64
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 14
