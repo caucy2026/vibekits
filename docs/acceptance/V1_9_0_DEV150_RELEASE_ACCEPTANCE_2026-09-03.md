@@ -2,7 +2,7 @@
 
 日期：2026-09-03  
 候选：`1.9.0-dev.150+2150`  
-状态：发布门禁进行中；完成 Universal、签名、公证、CI 和最终复测前不得放入 `bin`。
+状态：正式发布完成；Universal、双平台 CI、Developer ID、Apple 公证、Gatekeeper、Intel/Rosetta 和最终 Harness 桥门禁全部通过，精确产物已放入 `bin`。
 
 ## 1. 兼容边界
 
@@ -64,7 +64,7 @@
 - 官方 Harness 本地模型集成：真实 SSE 工具调用、原生审批桥及继续推理通过。
 - CI 必须使用内置 Node 22 执行 zstd 迁移测试，不能误用 runner 自带旧 Node。
 
-## 6. 发布门禁状态
+## 6. 发布门禁结果
 
 1. 依据最终 HEAD 重建 Release，重新 Developer ID 深度签名。
 2. 执行 Universal/macOS 12 兼容脚本、签名/硬化运行时检查、arm64 与 Rosetta x86_64 启动。
@@ -85,4 +85,20 @@ Windows run `33663785345` 中 83 项共享测试全部通过，唯一失败来�
 - Windows run `33667794795`：固定 Harness runtime、静态分析、24 项 Harness UI、官方 Agent、本地工具桥、LAN MCP、共享界面、Windows EXE 编译和内置 Harness payload 全部成功。
 - macOS run `33667794739`：Universal/macOS 12、Harness、ADB、7-Zip、Git、构建、签名检查和打包全部成功。
 
-当前登录钥匙串暂时没有可用的 Developer ID Application 身份（`security find-identity` 为 0）。因此任何中断或无有效身份的本地签名副本均已排除，不会复制到 `bin`。恢复证书后须从未改动的 Release 构建重新完整签名，再经本地桥接 smoke、深度验签、公证 Accepted、staple/validate 和 Gatekeeper 后记录最终哈希。
+私有认证指南确认：受限沙箱中的 `security find-identity` 和 `codesign` 结果可能是假阴性，认证必须在正常 Security/trustd 上下文执行。正常上下文识别并使用了 `Developer ID Application: zhen ji (26T5WV4GLP)`，身份指纹为 `CBF5FFD7566900053824789DF3FB4DDDF15F427A`；没有使用 ad-hoc 包冒充正式包。
+
+最终发布闭环：
+
+- 精确源码：`e5c50010313d8c3b4b452e58f62b20681af6a25f`。
+- Release 构建：`Vibekits.app`，构建输出约 668.6 MB；兼容检查确认全部嵌入组件为 Universal、最低 macOS 12。
+- Developer ID：34 个 Mach-O 完整签名并深度验签；内置 Harness Node 22.19.0、ADB、7-Zip、Git、DSH 均通过门禁。
+- Apple 公证：Accepted，Submission ID `525138ba-cd62-4b0c-ab57-e362e88b6b32`；staple/validate 成功；Gatekeeper 返回 `accepted`、`source=Notarized Developer ID`。
+- Intel 真机式兼容：对最终解包候选执行 `arch -x86_64`，`vmmap` 返回 `Code Type: X86-64 (translated)`；同一进程真实调用内置 Harness 本地桥并返回 `Verified local Harness tool bridge`，随后可由 TERM 正常结束。
+- 正式 App：`bin/Vibekits.app`。
+- 正式 ZIP：`bin/Vibekits-1.9.0-dev.150+2150-macos-universal-notarized.zip`，大小 263,002,248 bytes。
+- ZIP SHA-256：`743e5c94362a94e47c36b475acbdb3a0719eb8b2a3d3751de2a3434f6e88af1d`。
+- 签名并 staple 后主可执行 SHA-256：`987d616177622e152be81bafdde728b86197db2d39412933aa196291babb4e04`。
+- 签名并 staple 后 App.framework SHA-256：`9fac6b9b4ba796bf3beeb47520d87f8fe21bcc923f3f5fd540941061ca42a818`。
+- 复制到 `bin` 后再次通过 SHA、`codesign --deep --strict`、`stapler validate` 和 `spctl --assess`，排除了复制损坏或票据丢失。
+
+旧 `bin/Vibekits.app` 未直接删除，发布时移动到 `/private/tmp/vibekits-bin-backup.P7BCVJ/Vibekits.app` 作为本机临时回退副本。
