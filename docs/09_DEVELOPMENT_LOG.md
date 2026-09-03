@@ -1430,3 +1430,9 @@
 - 分类、搜索、刷新、应用卡片和详情均已接通。安装继续执行 HTTPS、平台扩展名、精确字节数和 SHA-256 四重门禁；缺少完整校验元数据时只能查看，不能安装。应用中心与官方 Harness 插件市场保持并存，不修改插件能力或数据模型。
 - 静态检查 0 issue；定向 31/31、全量 667 项通过，16 项环境门禁跳过、0 失败。macOS 真实生产接口显示 KEMI OFFICE 与 Vibekits 两个 macOS 条目，未混入 Windows 条目。
 - dev.154 精确 macOS Release 为 Universal x86_64+arm64，使用 `Developer ID Application: zhen ji (26T5WV4GLP)` 对 34 个 Mach-O 签名，Harness JIT/DSH 与深度严格验签通过。本轮只形成本机签名候选，未公证、未复制到 `bin`、未更新市场。完整证据见 `docs/acceptance/V1_9_0_DEV154_APP_CENTER_2026-09-03.md`。
+
+# 2026-09-03 · KEMI 应用商城跨平台接入标准
+
+- 新增 `docs/59_KEMI_APP_MARKET_CROSS_PLATFORM_INTEGRATION_STANDARD.md`，作为其他 APP 接入 KEMI 市场的统一执行文档，明确分离商城公开读取、本 APP 自更新和管理员发布三条权限链路。
+- 文档覆盖 Android、Windows、macOS 的平台筛选、安装格式、大小/SHA-256、APK/Authenticode/Developer ID 与 Apple 公证门禁，以及旧版升级、取消、失败回滚和目标真机矩阵。
+- 固化 `(package_name, os_type)` 唯一键、桌面端强制 `os`、`file_size` 与 `file_size_bytes` 双字段、公开详情/CDN/更新正反向/实际安装四层闭环，禁止将发布凭据编译进客户端。
