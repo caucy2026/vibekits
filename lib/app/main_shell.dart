@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../features/archive/presentation/archive_tab.dart';
+import '../features/about/presentation/about_tab.dart';
 import '../features/cleaner/presentation/cleaner_tab.dart';
 import '../features/documents/presentation/documents_tab.dart';
 import '../features/documents/domain/format_router.dart';
@@ -54,6 +55,7 @@ class _MainShellState extends State<MainShell> {
     '系统清理',
     '文档阅读',
     '开发工具',
+    '关于我们',
   ];
 
   static const List<String> _workspaceIds = <String>[
@@ -62,6 +64,7 @@ class _MainShellState extends State<MainShell> {
     'cleaner',
     'documents',
     'dev-tools',
+    'about',
   ];
 
   static const List<IconData> _tabIcons = <IconData>[
@@ -70,6 +73,7 @@ class _MainShellState extends State<MainShell> {
     Icons.cleaning_services_outlined,
     Icons.article_outlined,
     Icons.construction_outlined,
+    Icons.info_outline_rounded,
   ];
 
   static const List<String> _tabDescriptions = <String>[
@@ -78,6 +82,7 @@ class _MainShellState extends State<MainShell> {
     '扫描可清理空间并生成可核对报告',
     '快速查看文本、结构化数据与二进制文件',
     '独立开发工作区与转换检查工具',
+    '产品信息、当前版本能力与隐私说明',
   ];
 
   int _selectedIndex = 0;
@@ -637,6 +642,7 @@ class _MainShellState extends State<MainShell> {
         onAskHarness: _openHarnessWithPrompt,
         initialToolId: null,
       ),
+      const AboutTab(),
     ];
     final List<Widget> tabPages = List<Widget>.generate(
       allTabPages.length,
@@ -887,8 +893,9 @@ class _MainShellState extends State<MainShell> {
                     button: true,
                     child: Material(
                       color: selected
-                          ? Theme.of(context).colorScheme.primary
-                                .withValues(alpha: 0.10)
+                          ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withValues(alpha: 0.10)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(8),
                       child: InkWell(
@@ -996,8 +1003,10 @@ class _MainShellState extends State<MainShell> {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Text(
               '工作台',
-              style: Theme.of(context).textTheme.labelSmall
-                  ?.copyWith(color: context.vibe.muted, letterSpacing: 0.8),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: context.vibe.muted,
+                letterSpacing: 0.8,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -1019,8 +1028,9 @@ class _MainShellState extends State<MainShell> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary
-                  .withValues(alpha: 0.07),
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.07),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: context.vibe.border),
             ),
@@ -1042,8 +1052,10 @@ class _MainShellState extends State<MainShell> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
               'VIBEKITS  ·  ${AppVersion.display}',
-              style: Theme.of(context).textTheme.labelSmall
-                  ?.copyWith(color: context.vibe.muted, letterSpacing: 0.5),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: context.vibe.muted,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
         ],
@@ -1110,8 +1122,9 @@ class _NavigationItem extends StatelessWidget {
               borderRadius: BorderRadius.circular(9),
               border: selected
                   ? Border.all(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: 0.26),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.26),
                     )
                   : null,
             ),
@@ -1195,8 +1208,10 @@ class _StatusPill extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelMedium
-                ?.copyWith(color: color, fontWeight: FontWeight.w600),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),

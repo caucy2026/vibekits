@@ -25,7 +25,7 @@ Future<void> pumpBounded(WidgetTester tester, {int frames = 20}) async {
 }
 
 void main() {
-  testWidgets('启动后显示五个 Tab 与第一个页面', (WidgetTester tester) async {
+  testWidgets('启动后显示六个 Tab 与第一个页面', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
     for (final String title in <String>[
@@ -34,6 +34,7 @@ void main() {
       '系统清理',
       '文档阅读',
       '开发工具',
+      '关于我们',
     ]) {
       // 激活 Tab 的标题会同时出现在标签栏和页面标题中，因此至少存在一个。
       expect(find.text(title), findsWidgets);
@@ -119,6 +120,11 @@ void main() {
       findsOneWidget,
     );
 
+    await pressPrimaryWithKey(LogicalKeyboardKey.digit6);
+    expect(find.byKey(const Key('about-us-page')), findsOneWidget);
+    expect(find.text('本地优先的智能体与工程工具箱'), findsOneWidget);
+    expect(find.text(AppVersion.display), findsOneWidget);
+
     await pressPrimaryWithKey(LogicalKeyboardKey.digit2);
     expect(find.text('打开压缩包'), findsOneWidget);
   });
@@ -165,7 +171,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('最小窗口逐项切换五个工作区不溢出', (WidgetTester tester) async {
+  testWidgets('最小窗口逐项切换六个工作区不溢出', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1024, 700);
     addTearDown(tester.view.reset);
@@ -176,6 +182,7 @@ void main() {
       '系统清理',
       '文档阅读',
       '开发工具',
+      '关于我们',
       '解压缩',
     ]) {
       await tester.tap(find.text(title).first);

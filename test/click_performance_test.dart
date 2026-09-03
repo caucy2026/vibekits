@@ -39,7 +39,7 @@ void main() {
     );
   }
 
-  testWidgets('五个一级工作区和设置窗口点击响应计时', (WidgetTester tester) async {
+  testWidgets('六个一级工作区和设置窗口点击响应计时', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1440, 900);
     addTearDown(tester.view.reset);
@@ -73,6 +73,7 @@ void main() {
       '系统清理',
       '文档阅读',
       '开发工具',
+      '关于我们',
     ];
     final Map<String, int> first = <String, int>{};
     for (final String name in workspaces) {

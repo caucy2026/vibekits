@@ -205,6 +205,7 @@ class AppSettings {
       'cleaner',
       'documents',
       'dev-tools',
+      'about',
     };
     final String storedWorkspace = json['lastWorkspaceId'] is String
         ? json['lastWorkspaceId']! as String

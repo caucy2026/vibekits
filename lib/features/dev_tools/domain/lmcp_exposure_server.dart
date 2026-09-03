@@ -212,7 +212,7 @@ class VibekitsLmcpProtocol {
   // The monotonic application build number changes together with the
   // executable catalog. The complete schema is independently protected by
   // [capabilityDigest].
-  static const String currentCatalogRevision = '2150';
+  static const String currentCatalogRevision = '2151';
 
   final String instanceId;
   final String serverVersion;
@@ -646,7 +646,7 @@ class VibekitsLmcpExposureServer {
   static final VibekitsLmcpExposureServer instance = VibekitsLmcpExposureServer(
     discovery: LanPeerDiscoveryService.instance,
   );
-  static const String currentAppVersion = '1.9.0-dev.150';
+  static const String currentAppVersion = '1.9.0-dev.151';
 
   final LanPeerDiscoveryService discovery;
   final LmcpCertificateStore certificateStore;
