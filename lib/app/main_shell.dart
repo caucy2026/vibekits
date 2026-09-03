@@ -642,7 +642,7 @@ class _MainShellState extends State<MainShell> {
         onAskHarness: _openHarnessWithPrompt,
         initialToolId: null,
       ),
-      const AboutTab(),
+      AboutTab(active: _selectedIndex == 5),
     ];
     final List<Widget> tabPages = List<Widget>.generate(
       allTabPages.length,

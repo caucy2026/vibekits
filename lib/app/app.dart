@@ -16,6 +16,7 @@ import '../features/dev_tools/domain/mcp_capability_directory.dart';
 import '../features/dev_tools/domain/mcp_device_identity.dart';
 import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../features/dev_tools/presentation/lmcp_inbound_call_overlay.dart';
+import '../features/about/domain/marketing_cache_service.dart';
 import 'app_theme.dart';
 import 'app_settings.dart';
 import 'app_version.dart';
@@ -73,6 +74,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       unawaited(_startMcpFabricAndExternalToolServer());
       unawaited(_startHarnessStatusPublisher());
     }
+    if (!_isFlutterTest) MarketingCacheService.instance.start();
   }
 
   Future<void> _startHarnessStatusPublisher() async {
@@ -281,6 +283,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
       unawaited(McpCapabilityDirectory.instance.dispose());
       unawaited(LanPeerDiscoveryService.instance.stop());
     }
+    if (!_isFlutterTest) MarketingCacheService.instance.stop();
     if (widget.settingsController == null) _settings.dispose();
     super.dispose();
   }
