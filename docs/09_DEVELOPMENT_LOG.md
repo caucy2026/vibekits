@@ -1420,3 +1420,5 @@
 - 接入 KEMI 商店公开更新接口；Windows/macOS 启动自动检查，并在“关于我们”提供状态、手动检查和下载入口。下载只接受 HTTPS 和平台白名单扩展名，必须同时通过精确字节数与 SHA-256 校验。
 - macOS Universal/macOS 12+ Release 已完成 Developer ID 签名、Apple 公证 `Accepted`（`4e9ef05e-5817-402c-b0a0-0c12e016141a`）、票据装订与 Gatekeeper 验证。
 - 首轮 Windows CI 绿灯包经解包发现缺少内置 Git，判定为假成功并禁止发布。工作流现强制准备固定 Harness/MinGit/Mihomo/QEMU，并调用 `verify_windows_bundle.ps1` 做完整运行时门禁；后续只接受修正工作流产物。
+- Windows 最终 run `33726440489` 完整成功，最终 ZIP 为 283,281,459 bytes、SHA-256 `eac7044e0e085c950e5d65f50ec8a2fc803a3ae39f9b698b39c603cbbc0578f9`；下载后再次检查压缩完整性和关键工具文件，作废包未上架。
+- 用户核对并确认后已免审发布到 KEMI 市场：macOS `app_id=53`、Windows `app_id=54`，共同包名 `com.caucy.vibekits`、版本代码 2153、分类“开发工具”、商城展示开启、强制更新关闭。公开更新接口对旧版本返回两端精确 URL/大小/SHA-256，对当前版本返回 `has_update=false`。

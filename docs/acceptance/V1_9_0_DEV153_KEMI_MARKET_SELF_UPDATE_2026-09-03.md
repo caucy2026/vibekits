@@ -32,10 +32,23 @@
 
 该提交触发的 CI `33725694793` 又正确暴露了第二个环境耦合：`prepare_mihomo_runtime.ps1` 默认从 runner 并不存在的 `C:\Program Files\Clash Verge\verge-mihomo.exe` 复制内核。现已改为下载 Mihomo 官方 `v1.19.29` Windows amd64 Release ZIP，并在解压前核对固定 SHA-256；三个 GeoData 文件也逐一执行固定 SHA-256 校验。外部已安装 Clash Verge 仍可作为显式参数输入，但不再是 CI 或正式构建的隐含依赖。
 
-## 上架前剩余硬门禁
+## Windows 最终门禁
 
-1. 修正后的 Windows Actions Release 构建及完整产物下载成功。
-2. macOS Developer ID、Hardened Runtime、时间戳、Apple 公证 Accepted、staple、Gatekeeper 全部通过。
-3. 登录 KEMI 开发者后台，读取管理员发布规范，核对或创建 macOS/Windows 两条同包名、不同 `os_type` 的应用记录。
-4. 上传最终产物后记录市场返回的下载 URL、字节数和 SHA-256，并从公开更新接口以旧版本号真实查询两平台。
-5. 最终发布/覆盖线上记录属于外部状态修改，执行前展示精确版本、文件和 SHA-256 并取得确认。
+- 修复提交 `cb162e032dacaf5e019d00c99eb0c064c544c5f0` 触发 GitHub Actions run `33726440489`，完整成功。
+- CI 已依次通过 Harness、MinGit、Mihomo、QEMU 准备，Flutter analyze、共享与 Harness/LMCP/自更新测试、Windows Release 编译和 30 项完整运行时验证。
+- 最终 Windows ZIP：283,281,459 bytes；SHA-256 `eac7044e0e085c950e5d65f50ec8a2fc803a3ae39f9b698b39c603cbbc0578f9`。
+- 下载 Artifact 后再次执行 `unzip -t`，并实查 `vibekits.exe`、Harness Node、ADB、Git HTTPS helper、7-Zip、Mihomo、QEMU 均存在。
+
+## KEMI 市场正式发布闭环
+
+用户核对精确字段并明确确认后，使用 KEMI 管理员 API 上传并免审上架；未使用作废的首轮 Windows ZIP。
+
+| 系统 | app_id | 市场版本 | 大小 | SHA-256 |
+|---|---:|---|---:|---|
+| macOS | 53 | `1.9.0-dev.153` / 2153 | 263,093,194 | `f50fdaecb3f70a316681eff5f61692668781a5a648ec6fefd9845c41d716606c` |
+| Windows | 54 | `1.9.0-dev.153` / 2153 | 283,281,459 | `eac7044e0e085c950e5d65f50ec8a2fc803a3ae39f9b698b39c603cbbc0578f9` |
+
+- 两端逻辑包名均为 `com.caucy.vibekits`，分类为“开发工具”，`list_in_store=1`、`force_update=0`，状态均为 `1`（已上架）。
+- 公开更新接口以 `version_code=0` 查询，两端均返回 `has_update=true`，且 URL、大小、SHA-256 与上传结果完全一致。
+- 同一接口以当前 `version_code=2153` 查询，两端均返回 `has_update=false`，没有自更新循环。
+- 上传使用的临时管理员令牌仅存于受限临时文件，发布完成后立即删除；账号、密码和令牌均未进入源码、文档、Git 或命令输出。
