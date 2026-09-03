@@ -1388,3 +1388,14 @@
 - Apple 公证返回 `Accepted`，Submission ID `9a0cddb1-41ce-4fe5-a231-7feb209fc128`；ticket 已 staple/validate，深度严格验签与 Gatekeeper `Notarized Developer ID` 均通过。正式 ZIP 为 `bin/Vibekits-1.9.0-dev.145+2145-macos-universal-notarized.zip`，SHA-256 `60dff7aec1ec2a4887d2f9d2819c5b3b043cc90c89570697389945918352392b`；App executable SHA-256 `939b12a9b1b950317f8cb96a08cd13f5bdee4fd287475fc94761860ea7205ceb`，App.framework SHA-256 `38d9f4a74db95830d962da9e1a8719ebc0900068baa9322264f60e5df0d9962a`。
 - 从最终 `bin/Vibekits.app` 再次执行真实 Harness 冒烟成功。只读目录返回 app=1、local=0、lan=1；先启动的 `192.168.3.62` KEMI-BM（`com.newlink.kemiscrollbench:41B8C7FDF4`）被后启动的 VibeKits 发现，状态为 online、`catalogState=verified`、`callable=true`，并有 1 个空闲执行槽。
 - 架构复核同时确认一个未完成项：dev.145 的 Windows 仍使用 `OfficialHarnessWorkspace + DSH WebView`，macOS 使用 `DeepSeekAgentWorkspace`。文档 54 已把“官方 DSH 作为可替换执行内核、跨平台共用单一 Flutter 交互/会话/状态机”设为下一版本硬门禁；在移除 `Platform.isWindows` 的双页面分流并完成 Windows Release 回归前，不得宣称这项跨平台统一已经完成。
+
+# 2026-09-03 · dev.150 官方 Harness 全交互恢复与 Windows 同步
+
+- 关闭 dev.145 遗留的双页面分流：macOS WKWebView 与 Windows WebView2 现在都进入同一个 `OfficialHarnessWorkspace`，共用 `codex_conversation_ux.js`、会话/项目状态、权限确认和 Host 消息合同；移动端与测试替身才使用 Flutter fallback。以后升级官方 Harness 时只维护幂等补丁与平台适配器，不维护第二套产品界面。
+- 恢复并保留官方 Harness 能力：左侧栏、新会话、工作区、搜索、设置、插件市场及官方标题生成均可用；插件清单真机显示 167 项。VibeKits 的项目菜单、会话菜单、重命名、折叠、添加工作区、选中项省略号、运行转圈、独立草稿、并行会话、默认折叠可读时间线、停止、永久删除与跨项目拖动以兼容增强方式叠加，不替换官方数据模型。
+- 跨项目拖动落实真实权限与数据事务：确认后停止源任务，重写会话 cwd 和两个官方索引，采用暂存/备份/原子交换；任一步失败回滚。永久删除必须二次确认并删除完整聊天、推理、工具时间线和草稿；取消路径零副作用。
+- Windows 与 macOS 共用 `window.VibekitsHost` / `window.chrome.webview` 消息语义。Windows runtime 打包同一 `vibekits-session-rebind.mjs`，CI 使用内置 Node 实跑迁移测试并检查 helper、manifest、官方 Harness payload 均进入 EXE bundle，不允许只在 macOS 代码路径存在。
+- Windows 专项同时修复新版 MSVC coroutine 兼容和可选 GPU Engine 性能计数器长时间阻塞；不修改 Flutter 第三方插件源码，资源工具在性能计数器不可用时返回明确降级状态。
+- 共享自动回归共 659 项通过、15 项仅因真实设备/网络/Release 环境跳过、0 失败，`flutter analyze --no-pub` 为 0 issue。最终 Windows run `33667794795` 完整通过固定 Harness runtime、24 项交互、Agent 集成、本地工具桥、LAN MCP、共享 widgets、Windows EXE 编译和内置 payload 验证；因此上述最近交互优化不是 macOS 独占实现。
+- macOS 独有工作只有 WKWebView 原生点击恢复、Developer ID、Hardened Runtime/JIT entitlement、Universal arm64+x86_64、macOS 12+、Apple 公证和 Gatekeeper。这些发布安全门禁不应移植到 Windows；Windows 对应交付门禁是 EXE 编译、自包含 Harness runtime/WebView2 payload 和共享行为测试。
+- 正式 macOS 产物为 `bin/Vibekits.app` 与 `bin/Vibekits-1.9.0-dev.150+2150-macos-universal-notarized.zip`；完整 UI、MCP、双平台 CI、公证和哈希证据统一见 `acceptance/V1_9_0_DEV150_RELEASE_ACCEPTANCE_2026-09-03.md`。
