@@ -686,7 +686,10 @@ void main() {
       expect(approvals, 0, reason: '资源探针是只读工具');
     },
     skip: !Platform.isWindows,
-    timeout: const Timeout(Duration(seconds: 20)),
+    // A cold Windows runner can spend the service's full 12-second bounded
+    // probe budget starting PowerShell/WMI before Flutter test overhead. Keep
+    // the product timeout strict while giving CI enough orchestration margin.
+    timeout: const Timeout(Duration(seconds: 45)),
   );
 
   test('新增微工具由能力清单自动进入 Harness 并可直接调用', () async {

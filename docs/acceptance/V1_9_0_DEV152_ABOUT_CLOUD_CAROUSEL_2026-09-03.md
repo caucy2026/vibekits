@@ -38,5 +38,6 @@
 - 关于页所在主导航及共享 Widget 回归：21/21 通过；合计 23/23。
 - 生产云端清单与真实图片完整性：1/1 通过。
 - `flutter build macos --release --no-pub`：成功，产物 `build/macos/Build/Products/Release/Vibekits.app`，668.8 MB。
+- 首轮 Windows CI 的产品静态分析、Harness UI 24 项及 Agent 集成均通过，但冷启动资源探针碰到测试外层 20 秒门限；产品探针自身 12 秒边界保持不变，仅把 CI 编排余量调整为 45 秒后复跑完整 Windows 门禁。
 
 结论：dev.152 已实现真实云端多图、非阻塞启动、完整缓存、原子切换和离线回退；不再把静态本地区域声明为最终“关于我们”设计。
