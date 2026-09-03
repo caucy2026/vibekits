@@ -1415,3 +1415,8 @@
 - 共享自动回归共 659 项通过、15 项仅因真实设备/网络/Release 环境跳过、0 失败，`flutter analyze --no-pub` 为 0 issue。最终 Windows run `33667794795` 完整通过固定 Harness runtime、24 项交互、Agent 集成、本地工具桥、LAN MCP、共享 widgets、Windows EXE 编译和内置 payload 验证；因此上述最近交互优化不是 macOS 独占实现。
 - macOS 独有工作只有 WKWebView 原生点击恢复、Developer ID、Hardened Runtime/JIT entitlement、Universal arm64+x86_64、macOS 12+、Apple 公证和 Gatekeeper。这些发布安全门禁不应移植到 Windows；Windows 对应交付门禁是 EXE 编译、自包含 Harness runtime/WebView2 payload 和共享行为测试。
 - 正式 macOS 产物为 `bin/Vibekits.app` 与 `bin/Vibekits-1.9.0-dev.150+2150-macos-universal-notarized.zip`；完整 UI、MCP、双平台 CI、公证和哈希证据统一见 `acceptance/V1_9_0_DEV150_RELEASE_ACCEPTANCE_2026-09-03.md`。
+# 2026-09-03 · dev.153 KEMI 市场自升级与双平台发布门禁
+
+- 接入 KEMI 商店公开更新接口；Windows/macOS 启动自动检查，并在“关于我们”提供状态、手动检查和下载入口。下载只接受 HTTPS 和平台白名单扩展名，必须同时通过精确字节数与 SHA-256 校验。
+- macOS Universal/macOS 12+ Release 已完成 Developer ID 签名、Apple 公证 `Accepted`（`4e9ef05e-5817-402c-b0a0-0c12e016141a`）、票据装订与 Gatekeeper 验证。
+- 首轮 Windows CI 绿灯包经解包发现缺少内置 Git，判定为假成功并禁止发布。工作流现强制准备固定 Harness/MinGit/Mihomo/QEMU，并调用 `verify_windows_bundle.ps1` 做完整运行时门禁；后续只接受修正工作流产物。

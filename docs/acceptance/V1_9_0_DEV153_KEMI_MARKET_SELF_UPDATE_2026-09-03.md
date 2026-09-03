@@ -20,10 +20,21 @@
 - 协议测试确认 `package_name/version_code/os` 完整并拒绝 HTTP 安装包。
 - macOS Release 构建：通过，App 669.9 MB。
 - `verify_macos_release_compat.sh`：App、Harness、ADB、7-Zip、Git 均满足 Universal 与 macOS 12+ 门禁。
+- Developer ID：34 个 Mach-O 完成时间戳签名和严格验证；内置 Node 的 JIT entitlement 保持有效。
+- Apple 公证：`Accepted`，Submission ID `4e9ef05e-5817-402c-b0a0-0c12e016141a`；staple/validate 与 Gatekeeper `Notarized Developer ID` 通过。
+- 最终 macOS ZIP：263,093,194 bytes；SHA-256 `f50fdaecb3f70a316681eff5f61692668781a5a648ec6fefd9845c41d716606c`。
+
+## Windows 假成功复盘与修复
+
+首轮 CI `33719086936` 虽然为绿色，但其 ZIP 只验证了 EXE 和 Harness 两个文件，解包审计发现缺少内置 Git；该包已明确作废，禁止上架。根因是 Visual Studio 多配置生成器下 `CMAKE_BUILD_TYPE` 为空，使 CMake 中按该变量判断的 Release 缺件分支没有触发，同时工作流没有调用仓库已有的完整 `verify_windows_bundle.ps1`。
+
+提交 `a5ccea83cf10c22aa3642e8095ecf7d60a067cc0` 修复发布门禁：构建前准备固定 Harness、MinGit、Mihomo 和 QEMU；增加自更新测试；构建后调用完整验证脚本检查 30 项必需文件、版本、Git HTTPS helpers 和 Harness JS 语法。只有新工作流全部通过并重新取得产物哈希后，Windows 包才可上架。
+
+该提交触发的 CI `33725694793` 又正确暴露了第二个环境耦合：`prepare_mihomo_runtime.ps1` 默认从 runner 并不存在的 `C:\Program Files\Clash Verge\verge-mihomo.exe` 复制内核。现已改为下载 Mihomo 官方 `v1.19.29` Windows amd64 Release ZIP，并在解压前核对固定 SHA-256；三个 GeoData 文件也逐一执行固定 SHA-256 校验。外部已安装 Clash Verge 仍可作为显式参数输入，但不再是 CI 或正式构建的隐含依赖。
 
 ## 上架前剩余硬门禁
 
-1. 当前源码提交可追溯，Windows Actions Release 构建及产物下载成功。
+1. 修正后的 Windows Actions Release 构建及完整产物下载成功。
 2. macOS Developer ID、Hardened Runtime、时间戳、Apple 公证 Accepted、staple、Gatekeeper 全部通过。
 3. 登录 KEMI 开发者后台，读取管理员发布规范，核对或创建 macOS/Windows 两条同包名、不同 `os_type` 的应用记录。
 4. 上传最终产物后记录市场返回的下载 URL、字节数和 SHA-256，并从公开更新接口以旧版本号真实查询两平台。
