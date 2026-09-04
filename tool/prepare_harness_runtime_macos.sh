@@ -125,6 +125,12 @@ NODE="$NODE_DIST/bin/node"
     tar -xzf "$STAGING/$TARBALL" -C "$DESTINATION" --strip-components=1
   }
 
+  KOFFI_VERSION="$("$NODE" -e '
+    const pkg = require(process.argv[1]);
+    if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) process.exit(2);
+    process.stdout.write(pkg.version);
+  ' "$PACKAGE_ROOT/node_modules/koffi/package.json")"
+
   # npm selects optional native packages for the build host. GitHub macos-14
   # currently runs on Intel, while local release machines may be Apple Silicon.
   # Materialize both architectures explicitly so a clean checkout produces the
@@ -132,11 +138,11 @@ NODE="$NODE_DIST/bin/node"
   # architecture selection.
   install_native_package '@img/sharp-darwin-arm64@0.35.4' '@img/sharp-darwin-arm64'
   install_native_package '@img/sharp-libvips-darwin-arm64@1.3.3' '@img/sharp-libvips-darwin-arm64'
-  install_native_package '@koromix/koffi-darwin-arm64@3.1.6' '@koromix/koffi-darwin-arm64'
+  install_native_package "@koromix/koffi-darwin-arm64@$KOFFI_VERSION" '@koromix/koffi-darwin-arm64'
   install_native_package '@vscode/ripgrep-darwin-arm64@1.18.0' '@vscode/ripgrep-darwin-arm64'
   install_native_package '@img/sharp-darwin-x64@0.35.4' '@img/sharp-darwin-x64'
   install_native_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
-  install_native_package '@koromix/koffi-darwin-x64@3.1.6' '@koromix/koffi-darwin-x64'
+  install_native_package "@koromix/koffi-darwin-x64@$KOFFI_VERSION" '@koromix/koffi-darwin-x64'
   install_native_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
 
   # node-pty ships every platform in one package. A macOS runtime needs only
