@@ -13,7 +13,9 @@
 
 `GET /kd-api/api/store/update/check?package_name=com.caucy.vibekits&version_code=2155&os=windows`
 
-服务端返回 HTTP JSON 业务错误，消息为数据库查询引用不存在字段。该问题属于 KEMI 市场服务端数据库/查询契约故障。旧客户端把非成功业务状态转成 `FormatException` 并直接显示在“关于我们”，因此 macOS 与 Windows 同时出现“更新服务响应格式不兼容”。
+服务端返回 HTTP 200，但 JSON 业务状态为 400，消息是 `Unknown column 'a.names' in 'field list'`。该问题属于 KEMI 市场服务端数据库/查询契约故障。旧客户端把非成功业务状态转成 `FormatException` 并直接显示在“关于我们”，因此 macOS 与 Windows 同时出现“更新服务响应格式不兼容”。
+
+2026-09-04 再次按线上文档交叉验证：蛇形参数、驼峰参数、`windows`、`macos` 以及不存在的探测包名，全部在进入包名/版本判断前返回同一个 `a.names` 错误；与此同时 `/api/store/apps` 与 `/api/store/apps/{app_id}` 正常返回，其中 `names` 可由正常应用查询结构生成。由此可以排除 VibeKits 包名、版本号和 `os` 参数错误，并把故障收敛到服务端 `store/update/check` 路由的 SQL 投影：代码读取了生产 `apps` 别名 `a` 上不存在的 `names` 列，或者对应数据库 migration 未部署。服务端应复用正常详情/列表的名称映射，或部署与代码匹配的 schema；客户端不得通过改参数或忽略业务状态绕过。
 
 dev.156 已修正客户端故障隔离和展示边界，但不能伪造生产更新成功；服务端恢复前，真实生产正向升级仍须标记为外部阻塞。
 
