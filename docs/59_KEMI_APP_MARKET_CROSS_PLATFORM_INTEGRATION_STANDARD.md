@@ -6,7 +6,7 @@
 >
 > 适用对象：需要接入 KEMI 应用中心、自更新或发布到 KEMI 市场的所有 APP 研发、测试与发布人员
 >
-> 最后核对：2026-09-03
+> 最后核对：2026-09-04（已对照线上 Windows/macOS 自升级文档，并复核生产接口故障）
 > 线上规范优先级：若本文与线上文档冲突，立即停止发布，以线上规范为准更新本文后再继续。
 
 ## 1. 目标和完成定义
@@ -156,6 +156,18 @@ GET https://kemi.newlinksz.com/kd-api/api/store/update/check
 
 包名在同一产品跨平台时可以相同，但查询必须同时带平台。版本比较只使用严格递增的整数 `version_code`；`version_name` 只用于用户展示。
 
+更新检查必须同时满足 HTTP 与业务信封两层成功：
+
+```text
+HTTP status 为 2xx
+JSON status == 200
+data 是对象
+data.has_update 是 boolean
+```
+
+HTTP 200 只表示服务器返回了 JSON，不代表更新查询成功。`status != 200` 时不得继续读取
+`has_update`，也不得把失败伪装成“当前已是最新版本”。
+
 ### 5.2 检查策略
 
 - 启动后异步检查，不能阻塞首页和离线使用；
@@ -167,7 +179,37 @@ GET https://kemi.newlinksz.com/kd-api/api/store/update/check
 - 普通更新允许稍后处理；只有后台明确设置 `force_update` 且产品负责人批准时才阻断关键流程；
 - 同一版本用户已忽略后，除非 `force_update` 改变或远端版本再次提升，否则不要重复打扰。
 
-### 5.3 下载状态机
+### 5.3 服务端契约故障诊断与 2026-09-04 生产事故
+
+后台更新失败时，客户端先归一化为稳定错误码，再写有界脱敏日志：
+
+| 稳定错误码 | 判定 | 自更新 UI |
+|---|---|---|
+| `update_http_error` | HTTP 非 2xx | 静默，不创建页面卡片 |
+| `update_business_error` | HTTP 成功但 JSON `status != 200` | 静默，不把服务端 `msg` 展示给用户 |
+| `update_invalid_envelope` | JSON/`data`/`has_update` 类型错误 | 静默，不伪装无更新 |
+| `update_backend_schema_mismatch` | 脱敏诊断确认服务端 SQL/schema 不一致 | 静默并阻断发布闭环 |
+
+2026-09-04 生产接口曾返回：
+
+```json
+{
+  "status": 400,
+  "msg": "Unknown column 'a.names' in 'field list'",
+  "data": null
+}
+```
+
+交叉验证使用了蛇形参数、驼峰参数、`windows`、`macos`、真实包名和不存在包名，结果均在业务筛选
+前返回同一错误；同时应用列表与应用详情正常。因此根因不是客户端 `package_name`、
+`version_code` 或 `os`，而是服务端 `/api/store/update/check` 路由的 SQL 投影与生产数据库 schema
+不一致：查询读取了别名 `a` 上不存在的 `names` 列，或对应 migration 未部署。
+
+服务端修复必须复用正常列表/详情的多语言名称映射，或部署与代码严格匹配的 schema。客户端不得
+通过删除 `os`、改参数名、忽略业务状态或硬编码 `has_update=false` 绕过。修复后必须执行第 9.2
+节的完整对照探测，才能恢复发布。
+
+### 5.4 下载状态机
 
 ```text
 idle → checking → available → downloading → verifying → readyToInstall
@@ -177,7 +219,7 @@ idle → checking → available → downloading → verifying → readyToInstall
 
 状态必须持久、可恢复且可解释。失败必须保留当前可运行版本；临时文件以 `.part` 写入，验证成功后再原子改名。取消、失败和退出时清理不完整文件。
 
-### 5.4 强制安全校验顺序
+### 5.5 强制安全校验顺序
 
 1. URL 可解析且 scheme 为 HTTPS；
 2. 平台字段与当前系统一致；
@@ -358,6 +400,8 @@ Android 按线上文档使用 APK 专用上传凭证。接口字段可能演进�
 | `signature_invalid` | 平台签名/身份无效 | 禁止安装并建议重新下载 |
 | `user_cancelled` | 用户取消下载、UAC 或安装 | 安静返回可重试状态 |
 | `install_launch_failed` | 系统安装程序未启动 | 保留已验证文件并给出位置 |
+| `update_business_error` | 更新接口业务状态失败 | 本 APP 自更新静默；只写有界脱敏诊断 |
+| `update_backend_schema_mismatch` | 更新路由与数据库 schema 不一致 | 阻断发布；不得提示“已是最新版” |
 
 日志不得包含密码、Bearer token、上传 token、Cookie、私钥或完整用户目录；URL 查询中若含临时签名也必须脱敏。
 
@@ -389,6 +433,16 @@ Android 按线上文档使用 APK 专用上传凭证。接口字段可能演进�
 4. 旧版本码检查得到 `has_update=true`；
 5. 当前版本码检查得到 `has_update=false`；
 6. CDN HEAD/完整下载成功，字节数和 SHA 一致。
+
+更新接口异常时必须追加三路对照，不得反复修改客户端碰运气：
+
+1. 用当前真实包名调用更新检查；
+2. 用明确不存在的探测包名调用同一接口；
+3. 读取同平台应用列表与目标 `app_id` 详情；
+4. 若真实包名和不存在包名在业务筛选前返回相同 SQL/schema 错误，而列表/详情正常，则判定为
+   更新路由服务端故障；保存 HTTP 状态、业务状态和脱敏错误类别，禁止保存 Token 或完整临时 URL；
+5. 服务端修复后重新执行旧版本 `has_update=true`、当前版本 `has_update=false`、不存在包名
+   `has_update=false` 以及另一平台不串包四项验证。
 
 生产只读联调不得使用发布 token，也不得改变线上数据。
 
@@ -498,6 +552,8 @@ security:
 - 禁止省略桌面端 `os`；
 - 禁止仅凭扩展名判断 ZIP 平台；
 - 禁止只校验 HTTP 200 就启动安装；
+- 禁止把 HTTP 200 内的业务 `status != 200` 当作无更新或成功；
+- 禁止在关于页、应用中心或全局弹窗展示服务端 SQL、字段名、响应正文与 `FormatException`；
 - 禁止缺少大小或 SHA 时继续安装；
 - 禁止使用 shell 字符串拼接用户可控路径；
 - 禁止同一 `(package_name, os_type)` 创建重复记录；
