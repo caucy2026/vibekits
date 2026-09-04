@@ -60,6 +60,7 @@ class _VibekitsAppState extends State<VibekitsApp> {
   HarnessToolServer? _externalToolServer;
   HarnessStatusIpcPublisher? _harnessStatusPublisher;
   Future<void>? _settingsLoad;
+  int? _announcedUpdateBuild;
 
   @override
   void initState() {
@@ -76,7 +77,51 @@ class _VibekitsAppState extends State<VibekitsApp> {
       unawaited(_startHarnessStatusPublisher());
     }
     if (!_isFlutterTest) MarketingCacheService.instance.start();
-    if (!_isFlutterTest) unawaited(AppUpdateService.instance.start());
+    if (!_isFlutterTest) {
+      AppUpdateService.instance.snapshot.addListener(_handleAppUpdate);
+      unawaited(AppUpdateService.instance.start());
+    }
+  }
+
+  void _handleAppUpdate() {
+    final AppUpdateSnapshot update = AppUpdateService.instance.snapshot.value;
+    if (!mounted ||
+        update.phase != AppUpdatePhase.available ||
+        _announcedUpdateBuild == update.versionCode) {
+      return;
+    }
+    _announcedUpdateBuild = update.versionCode;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final BuildContext? context = _navigatorKey.currentContext;
+      if (!mounted || context == null) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: !update.forceUpdate,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          key: const Key('global-app-update-dialog'),
+          title: Text('发现新版本 ${update.versionName}'),
+          content: Text(
+            update.releaseNotes.isEmpty
+                ? '新版本已经通过应用市场发布。是否现在下载并安装？'
+                : update.releaseNotes,
+          ),
+          actions: <Widget>[
+            if (!update.forceUpdate)
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('稍后'),
+              ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                unawaited(AppUpdateService.instance.downloadAndInstall());
+              },
+              child: const Text('下载并安装'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Future<void> _startHarnessStatusPublisher() async {
@@ -286,6 +331,9 @@ class _VibekitsAppState extends State<VibekitsApp> {
       unawaited(LanPeerDiscoveryService.instance.stop());
     }
     if (!_isFlutterTest) MarketingCacheService.instance.stop();
+    if (!_isFlutterTest) {
+      AppUpdateService.instance.snapshot.removeListener(_handleAppUpdate);
+    }
     if (widget.settingsController == null) _settings.dispose();
     super.dispose();
   }

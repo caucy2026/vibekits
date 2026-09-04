@@ -135,9 +135,10 @@ class AppUpdateService {
         message: '发现新版本 ${remote.versionName}',
       );
     } on Object catch (error) {
+      debugPrint('App update check failed: $error');
       snapshot.value = AppUpdateSnapshot(
         phase: AppUpdatePhase.failed,
-        message: '检查更新失败：$error',
+        message: '暂时无法检查更新，请稍后重试',
       );
     }
   }

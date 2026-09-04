@@ -1444,3 +1444,9 @@
 - Windows 正式 ZIP 283,303,960 bytes、SHA-256 `ec9a9e6f5757f1883d03c883e053539a10551125d2f001f089783dedd85eeb86`；自包含 Harness/Git/ADB/7-Zip/Mihomo/QEMU 复核通过。
 - macOS Universal 正式 ZIP 263,121,804 bytes、SHA-256 `9928a81e4d5d7edf49d02682978afecb4078a91118b4a18a637af2954e9cfb91`；Apple 公证 `Accepted`（`e9bc35ed-868b-4cf1-9160-be79de5265a9`），staple、Gatekeeper 和签名后真实本机 Harness 工具桥通过。
 - KEMI 市场既有 Windows app_id 54、macOS app_id 53 已更新至 dev.155，保持上架且非强制更新；公开列表、CDN 长度/SHA、旧版 `has_update=true` 和当前版 `has_update=false` 均闭环。详细证据见 `docs/acceptance/V1_9_0_DEV155_MARKET_RELEASE_2026-09-03.md`。
+# 2026-09-04 · dev.156 双平台自更新入口纠正
+
+- 复现 macOS 与 Windows 共用的更新失败：市场公开更新接口返回 `status=400`，服务端消息为数据库字段错误；客户端此前又把该响应转成 `FormatException` 原文显示在“关于我们”，形成跨平台错误暴露。
+- 从“关于我们”彻底移除本 APP 更新卡片；“应用中心”继续只负责浏览和安装当前平台的其他市场应用，也不承载本 APP 检查更新。
+- 自更新保留为 Windows/macOS 共用的后台能力：当前版本或失败时不占页面，失败只写诊断日志；只有服务端严格确认存在更高版本时才弹出独立全局提示，由用户选择稍后或下载并安装。
+- 版本统一提升为 `1.9.0-dev.156+2156`，LMCP appVersion/catalogRevision 和 Windows Release 门禁同步更新。历史 dev.153 文档已标注旧入口合同作废，统一标准文档已改为新规则。

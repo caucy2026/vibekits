@@ -141,6 +141,7 @@ Windows 和 macOS 请求必须传 `os=windows` 或 `os=macos`。省略 `os` 可�
 - 校验元数据不完整的应用可以查看，但“安装”必须禁用并解释缺少的字段。
 - 下载和安装必须由用户明确触发；不得在浏览列表时后台下载大文件。
 - 官方插件市场和 KEMI 应用中心是两个独立功能，不能互相替换数据源或入口。
+- 应用中心只负责浏览和安装市场内其他应用，不承载“本 APP 检查更新”卡片，也不得显示本 APP 后台更新检查错误。
 
 ## 5. 本 APP 自更新
 
@@ -158,7 +159,9 @@ GET https://kemi.newlinksz.com/kd-api/api/store/update/check
 ### 5.2 检查策略
 
 - 启动后异步检查，不能阻塞首页和离线使用；
-- 设置或“关于我们”提供手动检查；
+- “关于我们”和“应用中心”均不放置本 APP 的更新卡片或手动检查入口；关于页只展示产品、版本、能力和隐私信息，应用中心只展示当前平台市场目录；
+- 只有确认 `has_update=true` 且远端整数版本更高时，才显示独立的全局更新提示，由用户选择稍后或下载并安装；
+- 后台检查失败必须静默记录诊断，不得把 `FormatException`、HTTP 响应、数据库字段、URL 或堆栈直接展示给普通用户；
 - 网络失败采用有上限的退避，不连续弹窗；
 - `has_update=false` 清除旧提示；
 - 普通更新允许稍后处理；只有后台明确设置 `force_update` 且产品负责人批准时才阻断关键流程；
@@ -448,7 +451,9 @@ platforms:
     packageFormat: ".apk"
 update:
   checkOnStartup: true
-  manualCheckEntry: "关于我们"
+  manualCheckEntry: null
+  presentation: "global-prompt-only-when-update-available"
+  backgroundFailure: "silent"
   forceUpdate: false
 security:
   requireHttps: true

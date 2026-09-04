@@ -128,6 +128,8 @@ void main() {
     expect(find.byKey(const Key('about-us-page')), findsOneWidget);
     expect(find.text('本地优先的智能体与工程工具箱'), findsOneWidget);
     expect(find.text(AppVersion.display), findsOneWidget);
+    expect(find.byKey(const Key('about-update-card')), findsNothing);
+    expect(find.text('检查更新'), findsNothing);
 
     await pressPrimaryWithKey(LogicalKeyboardKey.digit2);
     expect(find.text('打开压缩包'), findsOneWidget);

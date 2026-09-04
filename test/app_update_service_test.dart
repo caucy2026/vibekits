@@ -37,7 +37,7 @@ void main() {
       requestUri.queryParameters['package_name'],
       AppUpdateService.packageName,
     );
-    expect(requestUri.queryParameters['version_code'], '2155');
+    expect(requestUri.queryParameters['version_code'], '2156');
     expect(requestUri.queryParameters['os'], 'macos');
     expect(service.snapshot.value.phase, AppUpdatePhase.current);
     service.dispose();
@@ -75,7 +75,36 @@ void main() {
     );
     await service.check();
     expect(service.snapshot.value.phase, AppUpdatePhase.failed);
-    expect(service.snapshot.value.message, contains('HTTPS'));
+    expect(service.snapshot.value.message, '暂时无法检查更新，请稍后重试');
+    expect(service.snapshot.value.message, isNot(contains('FormatException')));
+    service.dispose();
+    await server.close(force: true);
+  });
+
+  test('服务端错误不会把内部异常文本暴露给界面', () async {
+    final HttpServer server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    server.listen((HttpRequest request) async {
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode(<String, Object?>{
+          'status': 400,
+          'msg': "Unknown column 'a.names' in 'field list'",
+          'data': null,
+        }),
+      );
+      await request.response.close();
+    });
+    final AppUpdateService service = AppUpdateService(
+      apiRoot: 'http://${server.address.host}:${server.port}',
+      platformOverride: 'windows',
+    );
+    await service.check();
+    expect(service.snapshot.value.phase, AppUpdatePhase.failed);
+    expect(service.snapshot.value.message, '暂时无法检查更新，请稍后重试');
+    expect(service.snapshot.value.message, isNot(contains('Unknown column')));
     service.dispose();
     await server.close(force: true);
   });
