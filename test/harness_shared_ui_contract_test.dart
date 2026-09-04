@@ -29,10 +29,21 @@ void main() {
   });
 
   test('official plugin settings and inventory remain composed', () {
-    final String composition = File(
-      'native/harness/macos/runtime/node_modules/'
-      '@deepseek-ai/dsh-web-app/cordis.patch.yml',
-    ).readAsStringSync();
+    final List<File> candidates = <File>[
+      File(
+        'native/harness/windows/runtime/node_modules/'
+        '@deepseek-ai/dsh-web-app/cordis.patch.yml',
+      ),
+      File(
+        'native/harness/macos/runtime/node_modules/'
+        '@deepseek-ai/dsh-web-app/cordis.patch.yml',
+      ),
+    ];
+    final File runtimeComposition = candidates.firstWhere(
+      (File candidate) => candidate.existsSync(),
+      orElse: () => throw StateError('prepared Harness runtime is missing'),
+    );
+    final String composition = runtimeComposition.readAsStringSync();
 
     expect(composition, contains('@deepseek-ai/dsh-host-plugin-inventory'));
     expect(

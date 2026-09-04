@@ -177,6 +177,9 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
   install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-parent-watchdog.mjs"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
     COMPONENT Runtime)
+  install(FILES "${CMAKE_SOURCE_DIR}/../native/harness/vibekits-session-rebind.mjs"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/harness"
+    COMPONENT Runtime)
   install(FILES
     "${CMAKE_SOURCE_DIR}/../tool/start_vibekits_mcp.ps1"
     "${CMAKE_SOURCE_DIR}/../tool/start_vibekits_mcp_ssh.ps1"
