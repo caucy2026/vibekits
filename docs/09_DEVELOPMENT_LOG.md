@@ -1450,4 +1450,5 @@
 - 从“关于我们”彻底移除本 APP 更新卡片；“应用中心”继续只负责浏览和安装当前平台的其他市场应用，也不承载本 APP 检查更新。
 - 自更新保留为 Windows/macOS 共用的后台能力：当前版本或失败时不占页面，失败只写诊断日志；只有服务端严格确认存在更高版本时才弹出独立全局提示，由用户选择稍后或下载并安装。
 - 发布前完整回归发现官方 DSH 当前解析到 Koffi 3.2.1，而 macOS runtime 脚本仍强制植入 3.1.6 原生包；已改为读取本轮 Koffi JS 包的精确语义版本并安装同版本 arm64/x64 原生包。重建 Universal runtime 后官方 Harness 本地模型集成测试恢复通过，避免旧 CI 缓存掩盖架构/版本错配。
+- Windows CI 的拆分门禁确认失败点为 Mihomo GeoData：上游 `latest` 在 2026-09-04 更新了 Country/GeoIP/GeoSite，旧固定哈希正确拒绝新字节。已按 GitHub Release API 公布的三项 SHA-256 更新固定值；仍逐文件校验，不降级为无校验下载。
 - 版本统一提升为 `1.9.0-dev.156+2156`，LMCP appVersion/catalogRevision 和 Windows Release 门禁同步更新。历史 dev.153 文档已标注旧入口合同作废，统一标准文档已改为新规则。
