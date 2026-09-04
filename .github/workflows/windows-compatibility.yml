@@ -48,12 +48,17 @@ jobs:
           & .\native\harness\windows\runtime\node.exe .\tool\test_harness_session_rebind.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Harness rebind verification failed' }
 
-      - name: Prepare pinned Windows tool runtimes
+      - name: Prepare pinned Windows Git runtime
         shell: pwsh
-        run: |
-          .\tool\prepare_git_runtime.ps1
-          .\tool\prepare_mihomo_runtime.ps1
-          .\tool\prepare_qemu_runtime.ps1
+        run: .\tool\prepare_git_runtime.ps1
+
+      - name: Prepare pinned Windows Mihomo runtime
+        shell: pwsh
+        run: .\tool\prepare_mihomo_runtime.ps1
+
+      - name: Prepare pinned Windows QEMU runtime
+        shell: pwsh
+        run: .\tool\prepare_qemu_runtime.ps1
 
       - name: Analyze shared application
         run: flutter analyze --no-pub
