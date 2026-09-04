@@ -38,27 +38,32 @@ dev.156 已修正客户端故障隔离和展示边界，但不能伪造生产更
 ## 5. macOS 候选证据
 
 - App：`build/macos/Build/Products/Release/Vibekits.app`
-- ZIP：`build/macos/Build/Products/Release/Vibekits-1.9.0-dev.156+2156-macos-universal-notarized.zip`
-- ZIP 大小：263,110,734 bytes
-- ZIP SHA-256：`361d6c89726ab3d314d79c88fe30ca7c81b82695833b499b39c5f534363e5c86`
+- ZIP：`build/macos/Build/Products/Release/Vibekits-1.9.0-dev.156+2156-macos-universal-notarized-v2.zip`
+- ZIP 大小：263,110,746 bytes
+- ZIP SHA-256：`3fe972feefc54db0b100cd46727e3c2a25b3614fc085a5a27cbcc0709a33ef3b`
 - Developer ID：`Developer ID Application: zhen ji (26T5WV4GLP)`
-- Apple 公证：Accepted，Submission ID `7ef176e0-300c-4066-8944-32fef48db04d`
+- Apple 公证：Accepted，Submission ID `2804bc87-485e-468a-a1b0-c45de0b149b8`
 - staple/validate：通过
 - Gatekeeper：`accepted`，`source=Notarized Developer ID`
+- 主程序架构：`x86_64 arm64`；`LSMinimumSystemVersion=12.0`
+- 最终 ZIP 解压后的 App 再次通过 `codesign --verify --deep --strict`、staple validate 与 Gatekeeper；首次并行调用代码签名服务曾瞬时返回 internal error，串行重试后所有校验通过，不能把该瞬时结果误判为包损坏。
 - 真实 About 页面检查：版本显示 dev.156，页面中不存在检查更新卡片。
 
 该文件仍是发布候选，Windows 门禁完成前不得复制到 `bin`、不得更新市场。
 
 ## 6. Windows 门禁状态
 
-- GitHub Windows Release 已把 Harness、Git、Mihomo、QEMU、Analyze、Test、Build、Compatibility 拆为独立步骤。
-- Mihomo 上游 `latest` GeoData 在 2026-09-04 更新；脚本仍执行固定 SHA-256 校验，仅刷新为官方 Release API 对应值，没有关闭完整性校验。
-- 真机 `192.168.3.58` 的 SSH 主机指纹与项目文档一致，TCP/22 可达；项目指定公钥当前被 Windows 拒绝，因此尚未执行 D 盘增量构建、安装、交互、性能和自升级真机验收。
-- 禁止尝试未登记私钥。需由 Windows 端恢复项目指定公钥，或让已连接的 Windows Codex 任务更新 `authorized_keys` 后继续。
+- GitHub Windows Release run `33853280232` 全绿，产物版本为 `1.9.0-dev.156+2156`。
+- CI 外层产物：`Vibekits-1.9.0-dev.156+2156-windows-x64-ci.zip`，275,041,480 bytes，SHA-256 `ae712d09ad065fc590ea3808e6c782df0e88499c4bcae6c51436cf265641cd47`。
+- 真机 `192.168.3.58` 已在 `D:\KEMI-Test` 下载并核对外层产物；解出的正式内层 ZIP 为 283,270,754 bytes，SHA-256 `6aef285928d4d2dbb3029afec20260257334dbc03bec50b85136f4f7d31875ca`，与包内摘要一致。
+- 隔离目录三次启动均在 5 秒检查点保持运行，工作集约 93–95 MB；Harness、ADB、Git、7-Zip、Mihomo、QEMU 运行时均随包存在，不依赖开发工具链。
+- 真机 `Get-AuthenticodeSignature` 结果仍为 `NotSigned`。这不影响已完成的“能运行”验证，但不满足第 59 号规范的 Windows 正式发布签名门禁，因此不能把该包标为已完成正式发布。
 
 ## 7. 发布判定
 
-当前判定：**macOS 候选通过；双平台正式发布暂缓**。
+当前判定：**macOS 正式包通过；Windows 可运行但未签名；双平台市场记录仍保持 dev.155，正式发布暂缓**。
+
+2026-09-04 发布前再次请求生产接口，macOS 与 Windows 均仍返回业务状态 400 和同一 `a.names` SQL/schema 错误。依照第 59 号规范，即使包上传成功也不能完成旧版正向发现与当前版反向无更新验证，因此本次没有执行上传或覆盖线上记录。
 
 正式发布必须同时满足：
 
