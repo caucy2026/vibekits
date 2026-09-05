@@ -84,11 +84,13 @@ ToolSpec _plusTool({
 
 /// 完整能力清单。左侧导航只展示独立工作区，微工具由集合工作区消费。
 final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
-  const ToolSpec(
+  ToolSpec(
     id: 'stopwatch',
     name: '秒表（1/100 秒）',
     group: ToolGroups.time,
     description: '圆形时钟与数字同步显示，支持开始、暂停、计次和复位，精度 0.01 秒。',
+    paramLabel: '秒数',
+    run: (String input, String params) => TimeTools.stopwatchFormat(input),
   ),
   const ToolSpec(
     id: 'programmer_calculator',
@@ -912,6 +914,11 @@ class ToolUsageContract {
 /// targets and credentials behave; adding only a button is not sufficient.
 const Map<String, ToolUsageContract> devToolUsageContracts =
     <String, ToolUsageContract>{
+      'stopwatch': ToolUsageContract(
+        repeatUse: '保留当前计时和计次，直到用户明确复位',
+        multiTarget: '单工作区单计时器；计次用于记录多个阶段',
+        secretHandling: '不处理凭据',
+      ),
       'programmer_calculator': ToolUsageContract(
         repeatUse: '保留当前表达式直到用户清空',
         multiTarget: '单工作区连续计算，无目标账户',

@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/presentation/stopwatch_workspace.dart';
+import 'package:vibekits/features/dev_tools/domain/time_tools.dart';
+import 'package:vibekits/features/dev_tools/domain/tool_result.dart';
 
 void main() {
+  test('Harness 秒表接口按百分之一秒截断格式化', () {
+    final ToolResult result = TimeTools.stopwatchFormat('3661.239');
+    expect(result, isA<ToolSuccess>());
+    expect((result as ToolSuccess).output, '01:01:01.23');
+  });
+
   test('秒表按一秒一百分格式化且不四舍五入', () {
     expect(formatStopwatchDuration(Duration.zero), '00:00:00.00');
     expect(

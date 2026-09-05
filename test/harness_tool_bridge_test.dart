@@ -527,6 +527,16 @@ void main() {
     }
   });
 
+  test('每个独立开发工具都有完整重复使用合同', () {
+    for (final ToolSpec workspace in devToolRegistry) {
+      expect(
+        devToolUsageContracts.containsKey(workspace.id),
+        isTrue,
+        reason: '${workspace.id} 缺少重复使用、多目标与秘密处理合同',
+      );
+    }
+  });
+
   test('智能体能力自检保证所有公开工具都有本地执行器', () async {
     final Directory runtime = Directory.systemTemp.createTempSync(
       'vibekits_capability_runtime_',

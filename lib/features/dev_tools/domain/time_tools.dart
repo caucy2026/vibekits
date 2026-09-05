@@ -4,6 +4,24 @@ import 'tool_result.dart';
 abstract final class TimeTools {
   static String _two(int value) => value.toString().padLeft(2, '0');
 
+  /// 把秒数按秒表的一秒一百分规则格式化，不进行四舍五入。
+  static ToolResult stopwatchFormat(String input) {
+    final double? seconds = double.tryParse(input.trim());
+    if (seconds == null || !seconds.isFinite || seconds < 0) {
+      return const ToolFailure('秒表格式化失败：请输入非负秒数');
+    }
+    final int totalHundredths = (seconds * 100).floor();
+    final int hundredths = totalHundredths % 100;
+    final int totalSeconds = totalHundredths ~/ 100;
+    final int displaySeconds = totalSeconds % 60;
+    final int minutes = (totalSeconds ~/ 60) % 60;
+    final int hours = totalSeconds ~/ 3600;
+    return ToolSuccess(
+      '${_two(hours)}:${_two(minutes)}:${_two(displaySeconds)}.'
+      '${_two(hundredths)}',
+    );
+  }
+
   static String _formatDateTime(DateTime dateTime, {required bool utc}) {
     final DateTime value = utc ? dateTime.toUtc() : dateTime;
     final String zone = utc ? 'UTC' : '本地';
