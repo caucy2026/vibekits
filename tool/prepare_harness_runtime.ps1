@@ -1,7 +1,7 @@
 param(
   [string]$NodeDirectory = "C:\Program Files\nodejs",
   [string]$OutputDirectory = "native\harness\windows\runtime",
-  [string]$PackageVersion = "0.1.1-rc.2"
+  [string]$PackageVersion = "0.1.2-rc.1"
 )
 
 $ErrorActionPreference = 'Stop'

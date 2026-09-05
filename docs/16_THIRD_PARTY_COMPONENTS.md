@@ -60,9 +60,9 @@ ADB 已将 Google Android SDK Platform-Tools 的 `adb.exe`、两个必需 DLL、
 
 ## DeepSeek Harness 可选运行时
 
-- 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；2026-08-27 通过官方 npm registry 查询并固定的 CLI 版本：`@deepseek-ai/dsh@0.1.1-rc.2`。
+- 上游：`https://github.com/deepseek-ai/deepseek-harness`；许可证：MIT；2026-09-06 通过官方 npm registry 查询并固定的 CLI 版本：`@deepseek-ai/dsh@0.1.2-rc.1`。
 - 状态：官方仍是 Developer Preview，存在破坏性变更风险；Vibekits 保留可替换进程适配层，并将固定的 Node、CLI 与生产依赖打入安装包。
-- 发布前 Windows 由 `tool/prepare_harness_runtime.ps1`、macOS 由 `tool/prepare_harness_runtime_macos.sh` 固定安装 `@deepseek-ai/dsh@0.1.1-rc.2`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。macOS 脚本从 nodejs.org 下载最低兼容的 Node 22.19.0 arm64/x64 官方归档并逐项核对官方 `SHASUMS256.txt`，使用 `lipo` 生成 Universal Node，同时显式补齐 sharp、libvips、koffi、ripgrep 和 node-pty 的 x64/arm64 原生包。上游可选 `node-addon-require-builtin` Darwin 二进制要求 macOS 15，故不打包；所有启动固定传 `--expose-internals` 使用 Node 官方能力。运行时不调用 npm/npx、不联网安装，也不依赖用户 PATH。
+- 发布前 Windows 由 `tool/prepare_harness_runtime.ps1`、macOS 由 `tool/prepare_harness_runtime_macos.sh` 固定安装 `@deepseek-ai/dsh@0.1.2-rc.1`，解析官方 package 的 CLI 入口，并把 Node、完整生产依赖、manifest、profile 和 `@deepseek-ai/dsh-web-app` 打入安装包。macOS 脚本从 nodejs.org 下载最低兼容的 Node 22.19.0 arm64/x64 官方归档并逐项核对官方 `SHASUMS256.txt`，使用 `lipo` 生成 Universal Node，同时显式补齐 sharp、libvips、koffi、ripgrep 和 node-pty 的 x64/arm64 原生包。上游可选 `node-addon-require-builtin` Darwin 二进制要求 macOS 15，故不打包；所有启动固定传 `--expose-internals` 使用 Node 官方能力。运行时不调用 npm/npx、不联网安装，也不依赖用户 PATH。
 - DeepSeek API Key 由官方 Harness 的 Settings → Models 页面录入，写入 `$DSH_HOME/.credentials.yaml`；Web 子进程不注入 `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL` 或 `DEEPSEEK_BASE_URL`，避免把官方字段锁成只读并确保设置热更新。旧版系统凭据只做一次迁移，密钥不进入源码、安装包、普通设置或日志。
 - Windows Release 内置官方包已实启 `dsh web`，本机 URL 返回 HTTP 200 且可正常 Ctrl+C 停止。2026-08-31 macOS Universal Release 也已完成真实启动：界面显示“Harness 就绪”，官方 DSH 实际调用 `vibekits.system.capability_check` 成功并以 `exitCode=0` 结束；详见 `56_MACOS_SELF_CONTAINED_HARNESS_ACCEPTANCE_2026-08-31.md`。正式 Developer ID 签名、公证及 Intel 实机仍是发布门槛。
 

@@ -10,7 +10,8 @@ async function replaceOnce(relativePath, before, after, marker = after) {
   // patched result (for example an existing menu action followed by a new
   // action). Check the complete result first, otherwise every build injects
   // the same patch again.
-  if (source.includes(marker)) return;
+  const markers = Array.isArray(marker) ? marker : [marker];
+  if (markers.some((candidate) => source.includes(candidate))) return;
   const first = source.indexOf(before);
   if (first < 0) {
     throw new Error(`Harness patch target not found: ${relativePath}`);
@@ -25,10 +26,10 @@ async function replaceOnce(relativePath, before, after, marker = after) {
   );
 }
 
-async function replaceOneOf(relativePath, candidates, after) {
+async function replaceOneOf(relativePath, candidates, after, compatibleMarkers = []) {
   const filename = join(runtime, relativePath);
   const source = await readFile(filename, 'utf8');
-  if (source.includes(after)) return;
+  if (source.includes(after) || compatibleMarkers.some((marker) => source.includes(marker))) return;
   const matches = candidates.filter((candidate) => source.includes(candidate));
   if (matches.length !== 1) {
     throw new Error(`Harness patch target count ${matches.length}: ${relativePath}`);
@@ -99,6 +100,7 @@ await replaceOneOf(
 \t\t\t\tcustom: "自定义"
 \t\t\t}[value] ?? displayPresetName(name);
 \t\t}`,
+  [`"preset.fullAccess": "完全权限"`],
 );
 
 await replaceOnce(
@@ -114,6 +116,10 @@ await replaceOnce(
 \t\t\t\tcustom: "自定义"
 \t\t\t}[option.value] ?? displayName(option.name);
 \t\t}`,
+  [
+    `"access.preset.fullAccess": "完全权限"`,
+    `"danger-full-access": "完全访问"`,
+  ],
 );
 
 await replaceOneOf(
@@ -308,18 +314,19 @@ await replaceOnce(
 
 const permissionFile =
   'node_modules/@deepseek-ai/dsh-client-ui-permission-presets/lib/client.js';
-for (const [before, after] of [
-  ['确认启用 Full access？', '确认启用完全访问？'],
-  ['启用 Full access 后', '启用完全访问后'],
-  ['启用 Full access', '启用完全访问'],
+for (const [candidates, after] of [
+  [['确认启用 Full access？', '确认启用完全权限？'], '确认启用完全访问？'],
+  [['启用 Full access 后', '启用完全权限后'], '启用完全访问后'],
+  [['启用 Full access', '启用完全权限'], '启用完全访问'],
 ]) {
   const filename = join(runtime, permissionFile);
   const source = await readFile(filename, 'utf8');
-  if (!source.includes(before)) {
-    if (source.includes(after)) continue;
-    throw new Error(`Harness permission locale target not found: ${before}`);
+  if (source.includes(after)) continue;
+  const matches = candidates.filter((candidate) => source.includes(candidate));
+  if (matches.length !== 1) {
+    throw new Error(`Harness permission locale target count ${matches.length}: ${candidates.join(' | ')}`);
   }
-  await writeFile(filename, source.split(before).join(after), 'utf8');
+  await writeFile(filename, source.split(matches[0]).join(after), 'utf8');
 }
 
 // Official DSH heals its profile fallback by walking the complete transitive
@@ -332,16 +339,21 @@ for (const [before, after] of [
 // node_modules directory.
 const appBootFile =
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js';
-await replaceOnce(
-  appBootFile,
-  'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync',
-  'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync',
-  'readlinkSync, rmSync, symlinkSync',
+const appBootSource = await readFile(join(runtime, appBootFile), 'utf8');
+const usesLockedModuleFallback = appBootSource.includes(
+  'async function healProfilesModuleFallback(options)',
 );
-await replaceRegexOnce(
-  appBootFile,
-  /function healProfilesModuleFallback\(installAnchor, home = resolveDshHome\(\)\) \{[\s\S]*?\n\}\n(?=\/\*\*\n\* Read a profile's manifest\.)/g,
-  `function healProfilesModuleFallback(installAnchor, home = resolveDshHome()) {
+if (!usesLockedModuleFallback) {
+  await replaceOnce(
+    appBootFile,
+    'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync',
+    'existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync',
+    'readlinkSync, rmSync, symlinkSync',
+  );
+  await replaceRegexOnce(
+    appBootFile,
+    /function healProfilesModuleFallback\(installAnchor, home = resolveDshHome\(\)\) \{[\s\S]*?\n\}\n(?=\/\*\*\n\* Read a profile's manifest\.)/g,
+    `function healProfilesModuleFallback(installAnchor, home = resolveDshHome()) {
 	const modulesDir = join(join(home, PROFILES_DIR), "node_modules");
 	const runtimeModules = dirname(dirname(dirname(installAnchor)));
 	let stat;
@@ -358,7 +370,8 @@ await replaceRegexOnce(
 	mkdirSync(dirname(modulesDir), { recursive: true });
 	symlinkSync(runtimeModules, modulesDir, "junction");
 }`,
-  'const runtimeModules = dirname(dirname(dirname(installAnchor)));',
-);
+    'const runtimeModules = dirname(dirname(dirname(installAnchor)));',
+  );
+}
 
 console.log(`Patched Harness Web runtime: ${runtime}`);

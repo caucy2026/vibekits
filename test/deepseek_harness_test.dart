@@ -115,7 +115,11 @@ void main() {
     web.validate();
     agent.validate();
     officialWeb.validate();
-    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.1-rc.2');
+    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.2-rc.1');
+    expect(
+      DeepSeekHarnessService.sharedAgentHomeDirectory().path,
+      endsWith('${Platform.pathSeparator}.codex'),
+    );
     expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains('--yes')));
@@ -398,7 +402,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v22.19.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),
@@ -542,7 +546,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),
@@ -606,7 +610,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),
@@ -686,7 +690,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),
@@ -815,7 +819,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
             runAgent: (_) async => handles[launchedCount++],
@@ -972,7 +976,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),
@@ -1156,7 +1160,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v22.19.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.1-rc.2',
+              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
               message: 'Harness 已就绪',
             ),
           ),

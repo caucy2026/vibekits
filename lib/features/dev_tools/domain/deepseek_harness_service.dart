@@ -31,7 +31,7 @@ class HarnessEnvironmentReport {
 
 class HarnessLaunchSpec {
   const HarnessLaunchSpec({required this.workspace, this.port = 3080});
-  static const String packageSpec = '@deepseek-ai/dsh@0.1.1-rc.2';
+  static const String packageSpec = '@deepseek-ai/dsh@0.1.2-rc.1';
   final String workspace;
   final int port;
   Uri get url => Uri.parse('http://127.0.0.1:$port');
@@ -731,6 +731,20 @@ abstract final class DeepSeekHarnessService {
     );
   }
 
+  /// Shared user-agent root used by the official Harness skill filesystem.
+  ///
+  /// DSH scans `<DSH_AGENTS_HOME>/skills`. Pointing that root at `.codex`
+  /// lets Harness and Codex consume the same global skill bundles without
+  /// copying them into the app-owned Harness profile.
+  static Directory sharedAgentHomeDirectory() {
+    final String base = Platform.isWindows
+        ? (Platform.environment['USERPROFILE'] ??
+              Platform.environment['LOCALAPPDATA'] ??
+              Directory.systemTemp.path)
+        : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
+    return Directory('$base${Platform.pathSeparator}.codex');
+  }
+
   static Future<Directory> _prepareHarnessHome(
     String approvalPluginPath, {
     bool includeApprovalBridge = true,
@@ -963,6 +977,7 @@ Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
     <String, String>{
       'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
       'VIBEKITS_PARENT_PID': '$pid',
+      'DSH_AGENTS_HOME': DeepSeekHarnessService.sharedAgentHomeDirectory().path,
     };
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {

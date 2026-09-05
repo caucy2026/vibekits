@@ -105,7 +105,7 @@ Release Xcode 阶段会调用 `tool/package_harness_runtime_macos.sh`，将 Harn
 
 dev.145 曾用 Flutter 3.41.9/Dart 3.11.5 验证 Universal/Rosetta。dev.146 不再声明“外壳 10.15、部分工具 11/12”的分裂边界：Xcode、CocoaPods 和 Info.plist 最低版本统一为 macOS 12.0，Release 脚本扫描 App 内所有 Mach-O，任一切片的 `minos` 高于 12.0 即失败。
 
-官方 DSH 0.1.1-rc.2 的依赖使用 Node 22 API，内置 Harness 继续使用最低可行 Node 22.19.0；不为了降低数字而换成会缺失 `node:util.parseEnv` 的 Node 18。因为用户要求的是 macOS 12+全功能，而不是更旧系统上仅能打开空外壳。
+官方 DSH 0.1.2-rc.1 的依赖继续使用 Node 22 API，内置 Harness 保持最低可行 Node 22.19.0；不为了降低数字而换成会缺失 `node:util.parseEnv` 的 Node 18。Windows 隔离候选已通过兼容补丁、跨项目会话重绑定和真实 Web 预热；macOS Universal、签名、公证和双平台 100 次退出重启仍须重新验收，不能沿用 rc.2 证据。
 
 当前机器已恢复 `Developer ID Application: zhen ji (26T5WV4GLP)` 和可连接 Apple 的 `KEMI_NOTARY` profile。dev.146 精确候选的主程序、ADB、Harness、Git、7-Zip 及全部 frameworks 已用该身份逐项签名，内置 Node 额外保留 JIT entitlement；Hardened Runtime、时间戳、深度严格验签、ARM64 App、Rosetta App 和 Intel DSH/ADB/7-Zip/Git 实际执行均通过。生产 LMCP 客户端已对先启动的目标节点完成 `last_result` 只读调用并取得 verified 报告；真实模型驱动 Harness 仍会把局域网 MCP 实例/目录发给已配置的 DeepSeek 服务，因此该步必须在用户明确同意数据出站后执行。Apple 公证必须在此门禁通过后提交，不能提前复用旧票据。
 

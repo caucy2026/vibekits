@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # full-function macOS 12+ application. The release verifier rejects any bundled
 # Mach-O that requires a system newer than macOS 12.
 NODE_VERSION="${NODE_VERSION:-22.19.0}"
-DSH_VERSION="${DSH_VERSION:-0.1.1-rc.2}"
+DSH_VERSION="${DSH_VERSION:-0.1.2-rc.1}"
 TARGET="${1:-$PROJECT_ROOT/native/harness/macos/runtime}"
 DOWNLOADS="$PROJECT_ROOT/.tmp/harness-runtime-macos-downloads"
 STAGING="$PROJECT_ROOT/.tmp/harness-runtime-macos-staging"

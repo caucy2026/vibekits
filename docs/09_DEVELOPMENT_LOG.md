@@ -1458,3 +1458,12 @@
 - macOS 与 Windows 共用同一份 Flutter 实现和工具注册表，不维护平台分叉界面。
 - 版本统一提升为 `1.9.0-dev.157+2157`，同步 LMCP `appVersion`、`catalogRevision`、Windows Release 校验和产物名称。
 - 发布门禁要求 macOS Universal（x86_64+arm64）、最低 macOS 12、Developer ID 签名、公证和 staple；Windows 必须在 D 盘真机节点完成 Release 构建、隔离启动与运行时检查后才允许更新 KEMI 商场。
+
+# 2026-09-06 · Harness 0.1.2-rc.1 升级候选
+
+- 官方 npm registry 最新候选从 `@deepseek-ai/dsh@0.1.1-rc.2` 提升为 `0.1.2-rc.1`；Windows 和 macOS 准备脚本、运行时常量及当前规范统一固定新版本，运行阶段仍禁止 npm/npx 漂移下载。
+- 首次隔离构建由补丁门禁正确拒绝：新版权限插件已重构为官方本地化字典，App Boot 也换成带跨进程文件锁的模块回退实现，旧补丁目标不再存在。
+- 兼容补丁现同时识别 rc.2 旧结构和 rc.1 新结构：保留官方中文权限标签并统一“完全访问”产品措辞；新版锁定模块回退不再套用旧 junction 优化。
+- D 盘干净候选已完成 491 个生产包、27 个必需 peer、兼容补丁、跨项目会话重绑定测试和真实 `dsh web --no-open` 预热；旧 Windows 运行时备份保留在 D 盘以便回退。
+- 本轮仅证明 Windows 运行时构建和启动门禁通过。模型端到端 MCP、离线包验证、100 次完整退出重启、macOS Universal/签名/公证仍需重新执行，通过前不得把历史 rc.2 发布证据冒充新版本证据。
+- 确认 Harness 0.1.2-rc.1 自带 `dsh-skill`、`dsh-skill-filesystem` 与 `dsh-tool-skill`：支持全局目录、实时刷新、目录投影和按需加载。VibeKits 启动环境新增 `DSH_AGENTS_HOME=<用户目录>/.codex`，使 Harness 与 Codex 直接共享 `.codex/skills`，无需复制或维护第二份技能。

@@ -11,7 +11,7 @@
 | R3 压缩全格式 | P0 压缩格式的识别/列表/解压能力表与后端组合 | ZIP/RAR/7z/TAR/单流/ISO 均有真实夹具和错误证据 |
 | R4 程序员工具扩展 | 高价值开源算法分批移植并接入搜索/拖放 | 每批固定上游、许可证、测试向量和融合入口 |
 | R4B 硬件调试 | 串口枚举、完整帧参数、文本/HEX 收发、日志与取消 | 原生资产加载；Windows/macOS 真实设备回环；关闭无残留句柄 |
-| R4A Harness（智能体） | 编译期打包官方 `@deepseek-ai/dsh@0.1.1-rc.2`、Node、profile 和默认 provider；Codex 风格自有界面；ACP/工具桥接；会话、计划和审批事件 | 新机只输入 Key 即运行且发送阶段零下载；双平台实启/停止/失败证据；文件/命令与 Vibekits ADB 等工具真实执行；凭据与权限边界明确；连续 100 次完整退出后不得残留 APP 子进程 |
+| R4A Harness（智能体） | 编译期打包官方 `@deepseek-ai/dsh@0.1.2-rc.1`、Node、profile 和默认 provider；Codex 风格自有界面；ACP/工具桥接；会话、计划和审批事件 | 新机只输入 Key 即运行且发送阶段零下载；双平台实启/停止/失败证据；文件/命令与 Vibekits ADB 等工具真实执行；凭据与权限边界明确；连续 100 次完整退出后不得残留 APP 子进程 |
 | R5 macOS 基线 | macOS 工程、平台接口、Finder/废纸篓/WKWebView/ONNX | arm64 Release 构建和五模块主路径实机证据 |
 | R6 双平台发布 | 安装、签名、公证/代码签名、升级、许可证清单 | Windows/macOS 分别达到发布门槛 |
 

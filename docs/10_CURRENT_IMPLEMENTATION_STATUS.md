@@ -112,7 +112,9 @@ Base64、URL、JSON/YAML/XML、时间、正则、哈希、网络查询等同构�
 
 `v1.9.0-dev.84+94` 将 Clash Verge 与轻量虚拟机拆为两个独立工具：Clash 内部使用标准 8 项导航和浅蓝选中态，QEMU 不再占用 Clash 栏目且无需代理运行。Windows 关闭窗口改为隐藏到系统托盘并保留显式后台服务；只有托盘“退出并停止后台服务”才结束进程树。
 
-Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.1-rc.2` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
+Windows 的 Harness 正式入口已改为内置 `@deepseek-ai/dsh@0.1.2-rc.1` 的 `dsh web`，由 WebView2 直接嵌入官方 `@deepseek-ai/dsh-web-app` 生产界面。旧 Flutter Codex 风格壳、“最后 12000 字符”续话、40 会话/80 消息限制和自制推理时间线不再是 Windows 用户路径。
+
+Harness 原生 Skills 已启用：VibeKits 将官方 `DSH_AGENTS_HOME` 指向当前用户 `.codex`，因此 Harness 直接扫描与 Codex 共用的 `.codex/skills`，支持 `<name>/SKILL.md`、YAML `name/description`、相对 `references/scripts/assets`、按需加载和目录动态刷新。Codex 专用 `agents/openai.yaml` 由 Harness 忽略，不影响技能加载；不复制技能到 Harness profile，避免双份内容漂移。
 
 DSH、Node 和全部 npm 依赖均从 Release 同级 `tools/harness` 本地启动，启动阶段不执行 npm 下载。Windows 首次扫描新 Release 目录时官方 DSH 组合 Web profile 可能超过 60 秒：dev.30 启用持久化 Node 编译缓存，将存活进程等待上限改为 3 分钟并每 5 秒显示真实已用时间；进程退出则立即失败，且 stdout/stderr 在退出前排空到调试日志，不再因旧的固定窗口误判后循环重启。
 
@@ -186,7 +188,7 @@ HEIF/HEIC、AVIF、JPEG XL 和相机 RAW 尚无统一内置解码器；不能把
 3. HEIF/AVIF/JXL/RAW 的一致内置解码、ICC 色彩管理和动画播放仍需专门后端。
 4. MySQL/MariaDB 成功连接尚缺本机真实服务证据；API 脱敏历史已经进入 dev.119，数据库写会话和 Git 写操作辅助仍需后续闭环。
 5. 串口原生资产与失败路径已验证，但当前机器没有物理 COM 设备；Windows/macOS 真实 USB 串口回环仍未完成。
-6. Windows 已打包官方 `@deepseek-ai/dsh@0.1.1-rc.2` 并通过本地兼容模型端点实启；模型发起 MCP SHA-256、APP 执行、结果回传和最终回复全链路通过。真实 DeepSeek Key、macOS 实启与 ACP 原生会话仍待验证。
+6. Windows 已打包官方 `@deepseek-ai/dsh@0.1.2-rc.1` 并通过隔离候选运行时的补丁、会话重绑定和 Web 预热门禁；模型端到端调用、100 次完整退出重启和 macOS Release 仍须按升级门禁重新验收。
 7. Windows 安装器/卸载清理、代码签名、自动升级；macOS 签名、公证和 DMG 发布仍未完成。
 8. macOS 实机未完成前，项目不能标记为“双平台正式发布完成”。
 9. SSH/SFTP/转发仍需真实服务端证据；系统远程桌面仍需 Windows 真实目标与 macOS 实机证据；ADB 通用命令终端与智能体会话授权已接入，文件可视化、Logcat 流式视图、截图、APK 安装向导和无线配对仍需真机逐项验收。

@@ -244,7 +244,7 @@ ADB 作为开发工具页的独立高频工作区，调用用户已安装的 And
 
 一级导航和其他工具保留 Vibekits 简洁桌面壳；Harness 工作台不再由 Flutter 仿制。Windows 必须直接嵌入固定版本的 DeepSeek 官方 Harness Web 生产产物，官方 UI 和 Host 共同作为工作区、会话、对话、模型、权限、工具调用树、目标/计划、后台任务、子智能体、用户问题、插件/技能和设置的唯一数据源。Vibekits 只做桌面容器与工具扩展，不改造官方信息架构。精确对齐见 `19_OFFICIAL_HARNESS_WEB_PARITY.md`。
 
-- 只采用 DeepSeek 官方 `deepseek-ai/deepseek-harness` 与官方 npm 包；当前参考并固定 `@deepseek-ai/dsh@0.1.1-rc.2`，升级必须重新跑接口兼容、许可证和 100 次完整退出重启检查；开发者预览阶段必须明确提示接口可能变化。
+- 只采用 DeepSeek 官方 `deepseek-ai/deepseek-harness` 与官方 npm 包；当前参考并固定 `@deepseek-ai/dsh@0.1.2-rc.1`，升级必须重新跑接口兼容、许可证和 100 次完整退出重启检查；开发者预览阶段必须明确提示接口可能变化。
 - Harness 运行时、Node.js、固定依赖、headless profile、默认 DeepSeek provider/model 配置和 Vibekits 工具桥接必须在编译/打包阶段准备并随 Release 发布。用户电脑不需要 Node/npm/npx；运行时禁止下载包、安装依赖或首次初始化 profile。
 - 用户首次使用只执行“输入 API Key → 选择模型 → 发送任务”。Key 保存后立即做有界连通性验证；验证成功才能显示“可运行”。任务发送阶段必须直接启动已打包运行时，离线缺件时明确报告安装包损坏，绝不能回退到 `npx --yes` 在线安装。
 - 用户先选择允许代理访问的项目目录，再像 Codex 一样在底部输入任务；输出进入有界缓冲并按固定频率刷新，不能按 stdout 分块重绘完整 Markdown；停止使用独立控制通道并终止完整进程树，不依赖繁忙 UI 线程及时处理。
