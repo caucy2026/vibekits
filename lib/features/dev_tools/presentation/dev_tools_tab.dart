@@ -27,6 +27,7 @@ import 'remote_workspace.dart';
 import 'windows_test_node_workspace.dart';
 import 'serial_port_workspace.dart';
 import 'system_resource_workspace.dart';
+import 'stopwatch_workspace.dart';
 import 'utility_collection_workspace.dart';
 
 /// T4 开发工具 Tab。
@@ -427,6 +428,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
     }
     if (tool.id == 'programmer_calculator') {
       return const ProgrammerCalculatorWorkspace();
+    }
+    if (tool.id == 'stopwatch') {
+      return const StopwatchWorkspace();
     }
     if (tool.id == 'system_resources') {
       return SystemResourceWorkspace(inspector: widget.systemResourceInspector);

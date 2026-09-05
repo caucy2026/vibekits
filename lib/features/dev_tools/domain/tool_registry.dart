@@ -85,6 +85,12 @@ ToolSpec _plusTool({
 /// 完整能力清单。左侧导航只展示独立工作区，微工具由集合工作区消费。
 final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
   const ToolSpec(
+    id: 'stopwatch',
+    name: '秒表（1/100 秒）',
+    group: ToolGroups.time,
+    description: '圆形时钟与数字同步显示，支持开始、暂停、计次和复位，精度 0.01 秒。',
+  ),
+  const ToolSpec(
     id: 'programmer_calculator',
     name: '程序员计算器（HEX/DEC）',
     group: ToolGroups.calculate,
@@ -95,7 +101,8 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     id: 'system_resources',
     name: '资源诊断（CPU/GPU）',
     group: ToolGroups.system,
-    description: '采样 Windows、macOS、Android 的 CPU、内存、GPU、磁盘和 Top 进程，也可通过内置 ADB 分析 Android 设备。',
+    description:
+        '采样 Windows、macOS、Android 的 CPU、内存、GPU、磁盘和 Top 进程，也可通过内置 ADB 分析 Android 设备。',
     aiUseWhen: '用户说系统卡顿、发热、快死机、内存不足、CPU/GPU 占用高或想找异常进程时。',
     aiAvoidWhen: '一次快照不能证明间歇性问题；不得据此直接结束进程或删除文件。',
     aiExamples: <String>['帮我分析当前系统为什么卡', '检查这台 Android 设备的 CPU、内存和磁盘'],
@@ -204,7 +211,8 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     id: 'git_workspace',
     name: '版本控制（Git）',
     group: ToolGroups.sourceControl,
-    description: '查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。',
+    description:
+        '查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。',
     harnessToolIds: <String>[
       'vibekits.git.inspect',
       'vibekits.git.list_remote_refs',
@@ -820,6 +828,7 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
 ];
 
 const Set<String> _standaloneToolIds = <String>{
+  'stopwatch',
   'programmer_calculator',
   'system_resources',
   'database_manager',
