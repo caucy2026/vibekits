@@ -1452,3 +1452,9 @@
 - 发布前完整回归发现官方 DSH 当前解析到 Koffi 3.2.1，而 macOS runtime 脚本仍强制植入 3.1.6 原生包；已改为读取本轮 Koffi JS 包的精确语义版本并安装同版本 arm64/x64 原生包。重建 Universal runtime 后官方 Harness 本地模型集成测试恢复通过，避免旧 CI 缓存掩盖架构/版本错配。
 - Windows CI 的拆分门禁确认失败点为 Mihomo GeoData：上游 `latest` 在 2026-09-04 更新了 Country/GeoIP/GeoSite，旧固定哈希正确拒绝新字节。已按 GitHub Release API 公布的三项 SHA-256 更新固定值；仍逐文件校验，不降级为无校验下载。
 - 版本统一提升为 `1.9.0-dev.156+2156`，LMCP appVersion/catalogRevision 和 Windows Release 门禁同步更新。历史 dev.153 文档已标注旧入口合同作废，统一标准文档已改为新规则。
+# 2026-09-05 · dev.157 百分之一秒秒表与双平台发布
+
+- 开发工具新增“秒表（1/100 秒）”，使用单调计时源，数字显示为 `HH:MM:SS.cc`，并提供 100 等分表盘、开始/暂停/继续、计次和复位。
+- macOS 与 Windows 共用同一份 Flutter 实现和工具注册表，不维护平台分叉界面。
+- 版本统一提升为 `1.9.0-dev.157+2157`，同步 LMCP `appVersion`、`catalogRevision`、Windows Release 校验和产物名称。
+- 发布门禁要求 macOS Universal（x86_64+arm64）、最低 macOS 12、Developer ID 签名、公证和 staple；Windows 必须在 D 盘真机节点完成 Release 构建、隔离启动与运行时检查后才允许更新 KEMI 商场。
