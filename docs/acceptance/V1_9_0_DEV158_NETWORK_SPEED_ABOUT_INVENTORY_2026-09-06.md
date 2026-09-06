@@ -25,6 +25,13 @@
 - Harness 调用：风险等级为 `controlsDevice`，未经批准不会产生测速流量。
 - 联合回归：70 项通过，1 项仅因环境门禁跳过，0 项失败。
 
-## 尚未执行
+## GitHub 双平台云端构建
 
-本记录是源码与自动化测试门禁，不等同于正式发布。macOS Universal 构建、Developer ID/Apple 公证、Windows 真机 Release、KEMI 商场更新均须在后续明确发布任务中单独闭环。
+- 最终源码提交：`370bb5ed23affc0c6c52e7c403030b7e8a0fc961`，包含同事提交的 Harness 0.1.2-rc.1、共享 Skills、GitHub CLI 与统一智能体 CLI MCP，以及本次网络测速和关于页清单。
+- macOS Release run `34028402765`：成功；完成 Universal x86_64+arm64、macOS 12+、Harness/ADB/7-Zip/Git/GitHub CLI 和 ad-hoc 云端验证。artifact `9987938014`，名称 `Vibekits-macOS-101`，大小 265,954,640 bytes，GitHub artifact SHA-256 `2a3cf6630f613df423ab26e010b2d4c62224089806e66574c6ae1f08492c9861`。
+- Windows Compatibility run `34028402857`：成功；完成 Analyze、Harness UI/Agent/MCP、自更新、共享 UI、Release EXE、自包含运行时和打包验证。artifact `9987941419`，名称 `Vibekits-1.9.0-dev.158-2158-windows-x64`，大小 292,107,517 bytes，GitHub artifact SHA-256 `d9f683ce2f2db1e07ef15b5b9bf79704de755d0e11d4a765f7e0225b2a45365e`。
+- 两项 artifact 创建于 2026-09-06，GitHub 当前保留至 2026-09-20。仓库此前没有 GitHub Releases/tag 附件发布约定，因此本轮沿用现有 Actions artifact 云端交付，不另建冲突渠道。
+
+## 发布边界
+
+GitHub macOS 流水线提供的是经过 Universal、最低系统和 ad-hoc 签名验证的云端候选，不是 Apple Developer ID 公证包。若要向 KEMI 商场或终端用户正式分发 macOS 包，仍须执行 Developer ID、notarytool、staple 和 Gatekeeper 门禁；本轮未把云端候选误称为 Apple 公证包，也未更新 KEMI 商场。
