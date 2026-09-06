@@ -34,6 +34,7 @@ ditto "$TEMP_ROOT/arm64/gh_${VERSION}_macOS_arm64/LICENSE" "$TARGET/LICENSE"
 cat > "$TARGET/vibekits-github-cli-runtime.json" <<EOF
 {"distribution":"GitHub CLI","version":"$VERSION","platform":"macos","architecture":"universal","sources":{"amd64Sha256":"$AMD64_SHA","arm64Sha256":"$ARM64_SHA"},"license":"MIT"}
 EOF
-"$TARGET/bin/gh" --version | head -n 1
+GH_VERSION_OUTPUT="$("$TARGET/bin/gh" --version)"
+printf '%s\n' "${GH_VERSION_OUTPUT%%$'\n'*}"
 lipo -archs "$TARGET/bin/gh"
 echo "Prepared Universal GitHub CLI runtime: $TARGET"

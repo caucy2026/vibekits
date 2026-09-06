@@ -98,7 +98,7 @@ jobs:
             bash ./tool/prepare_github_cli_runtime_macos.sh
           fi
           test -x native/github_cli/macos/runtime/bin/gh
-          native/github_cli/macos/runtime/bin/gh --version | head -n 1
+          native/github_cli/macos/runtime/bin/gh --version
 
       - name: Analyze macOS platform integration
         run: >-

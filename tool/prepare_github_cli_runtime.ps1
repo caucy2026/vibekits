@@ -25,8 +25,10 @@ try {
   if ($null -eq $ghItem) { throw 'Archive does not contain bin\gh.exe' }
   $source = Split-Path -Parent $ghItem.Directory.FullName
   $gh = $ghItem.FullName
-  $reported = (& $gh --version | Select-Object -First 1).Trim()
-  if ($LASTEXITCODE -ne 0 -or $reported -notmatch '^gh version 2\.100\.0') { throw "Unexpected GitHub CLI version: $reported" }
+  $versionOutput = @(& $gh --version)
+  $versionExitCode = $LASTEXITCODE
+  $reported = ($versionOutput | Select-Object -First 1).Trim()
+  if ($versionExitCode -ne 0 -or $reported -notmatch '^gh version 2\.100\.0') { throw "Unexpected GitHub CLI version: $reported" }
   if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
   New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
   Move-Item -LiteralPath $source -Destination $target
