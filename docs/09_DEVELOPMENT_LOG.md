@@ -1498,3 +1498,6 @@
 - macOS 干净 runner 首次执行新增准备步骤时进一步发现脚本文件模式为 `100644`；workflow 改为显式使用 `bash` 执行，使行为不依赖 checkout 后的可执行位，同时不改动跨平台工具文件而打断正在运行的 Windows 流水线。
 - Windows GitHub CLI 下载、SHA 和版本文本均正确，但 `gh --version | Select-Object -First 1` 让生产者遇到提前关闭的管道并留下非零退出码，形成假失败。Windows/macOS 统一改为先完整收集版本输出和真实退出码，再解析首行；workflow 不再用 `head` 截断 CLI 输出。
 - 最终 GitHub commit `370bb5e` 的 macOS run `34028402765` 与 Windows run `34028402857` 全部成功。云端 artifact 分别为 macOS `9987938014`（265,954,640 bytes，SHA-256 `2a3cf6630f613df423ab26e010b2d4c62224089806e66574c6ae1f08492c9861`）和 Windows `9987941419`（292,107,517 bytes，SHA-256 `d9f683ce2f2db1e07ef15b5b9bf79704de755d0e11d4a765f7e0225b2a45365e`）。
+- macOS 内层候选重新以 Developer ID 签名并完成 Apple 公证 `Accepted`（Submission ID `75b32bad-5ab5-4781-9402-95a51f3c2291`），最终公证后 ZIP 为 289,335,310 bytes、SHA-256 `39a57c120ad1a5a6026a0dfe4e3037f5c69d4091d8fcc6f1d90c485891e37e09`；隔离解包、staple、Gatekeeper、x86_64+arm64、macOS 12+ 和 CDN 回下载真实启动均通过。
+- Windows 最终 ZIP 为 299,209,367 bytes、SHA-256 `a3600a4329072b6cdc2623257aec92c83bd3ef21b5208b2a21e68410387b06dc`；192.168.3.58 的 D 盘隔离环境通过 33 项运行时门禁和三次进程级启动。本包 Authenticode 仍为 `NotSigned`，仅按负责人已接受的未签名测试包范围发布。
+- KEMI 商场既有 macOS `app_id=53` 与 Windows `app_id=54` 已免审更新到 dev.158/2158，保持上架且非强制更新。管理员唯一记录、公开平台列表、旧版可更新、当前版无更新以及 CDN 全量大小/SHA 均闭环；完整证据见 `docs/acceptance/V1_9_0_DEV158_MARKET_RELEASE_2026-09-06.md`。
