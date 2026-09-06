@@ -148,3 +148,19 @@ while IFS= read -r -d '' GIT_ITEM; do
   esac
 done < <(find "$GIT_DESTINATION" -type f -print0)
 echo "Packaged Git runtime: $GIT_DESTINATION/bin/git"
+
+# Package the pinned Universal GitHub CLI so Harness/MCP callers do not depend
+# on Homebrew or a system gh installation.
+GH_SOURCE="$PROJECT_ROOT/native/github_cli/macos/runtime"
+GH_DESTINATION="$APP_BUNDLE/Contents/Resources/tools/github-cli"
+if [ ! -x "$GH_SOURCE/bin/gh" ] || [ ! -f "$GH_SOURCE/vibekits-github-cli-runtime.json" ]; then
+  echo "Official Universal GitHub CLI runtime is missing." >&2
+  echo "Run tool/prepare_github_cli_runtime_macos.sh before Release packaging." >&2
+  exit 7
+fi
+rm -rf "$GH_DESTINATION"
+mkdir -p "$GH_DESTINATION"
+ditto "$GH_SOURCE" "$GH_DESTINATION"
+chmod 755 "$GH_DESTINATION/bin/gh"
+codesign --force --sign - "$GH_DESTINATION/bin/gh"
+echo "Packaged GitHub CLI runtime: $GH_DESTINATION/bin/gh"

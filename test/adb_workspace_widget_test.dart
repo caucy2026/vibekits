@@ -70,7 +70,16 @@ void main() {
       ),
     );
 
-    await tester.tap(find.widgetWithText(ListTile, '安卓调试（ADB）'));
+    final Finder adbEntry = find.byKey(
+      const ValueKey<String>('dev-tool-nav-adb_workspace'),
+    );
+    await tester.drag(
+      find.byKey(const Key('dev-tools-sidebar')),
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
+    expect(adbEntry, findsOneWidget);
+    await tester.tap(adbEntry);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.text('ADB 设备'), findsOneWidget);

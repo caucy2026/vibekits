@@ -108,6 +108,8 @@ void main() {
         prompt: '完成最小联调',
         apiKey: 'test-key',
         baseUrl: 'http://127.0.0.1:${model.port}',
+        harnessHomeDirectory:
+            '${workspace.path}${Platform.pathSeparator}harness-home',
         approveTool: (_) async {
           nativeApprovals++;
           return true;

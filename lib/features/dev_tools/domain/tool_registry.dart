@@ -243,10 +243,29 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     offline: false,
     harnessToolIds: <String>[
       'vibekits.github.diagnose',
+      'vibekits.github.cli_inspect',
+      'vibekits.github.cli_auth_status',
+      'vibekits.github.cli_execute',
       'vibekits.github.proxy_candidates',
       'vibekits.github.proxy_plan',
       'vibekits.github.proxy_apply',
       'vibekits.github.proxy_rollback',
+    ],
+  ),
+  const ToolSpec(
+    id: 'agent_cli',
+    name: '智能体 CLI 编排',
+    group: ToolGroups.ai,
+    description:
+        '统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。',
+    offline: false,
+    harnessToolIds: <String>[
+      'vibekits.agent_cli.catalog',
+      'vibekits.agent_cli.inspect',
+      'vibekits.agent_cli.execute',
+      'vibekits.agent_cli.task_start',
+      'vibekits.agent_cli.task_status',
+      'vibekits.agent_cli.task_cancel',
     ],
   ),
   const ToolSpec(

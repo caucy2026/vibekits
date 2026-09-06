@@ -62,11 +62,18 @@ for ITEM in \
   "$APP_BUNDLE/Contents/Resources/tools/harness/bin/node" \
   "$APP_BUNDLE/Contents/Resources/tools/7zip/7zz" \
   "$APP_BUNDLE/Contents/Resources/tools/git/bin/git" \
+  "$APP_BUNDLE/Contents/Resources/tools/github-cli/bin/gh" \
   "$APP_BUNDLE/Contents/Frameworks/App.framework/Versions/A/App" \
   "$APP_BUNDLE/Contents/Frameworks/FlutterMacOS.framework/Versions/A/FlutterMacOS"; do
   require_file "$ITEM"
   require_arches "$ITEM"
 done
+
+if ! "$APP_BUNDLE/Contents/Resources/tools/github-cli/bin/gh" --version | \
+  grep -E '^gh version 2\.100\.0' >/dev/null; then
+  echo "Bundled GitHub CLI version is not 2.100.0." >&2
+  exit 5
+fi
 
 GIT_MACHO_COUNT=0
 while IFS= read -r -d '' ITEM; do
@@ -156,4 +163,4 @@ while IFS= read -r -d '' ITEM; do
 done < <(find "$APP_BUNDLE/Contents" -type f \
   \( -perm -111 -o -name '*.dylib' -o -name '*.node' \) -print0)
 
-echo "Verified full-function Universal macOS 12+ Release: Harness, 7-Zip, Git and App=$APP_BUNDLE"
+echo "Verified full-function Universal macOS 12+ Release: Harness, 7-Zip, GitHub CLI, Git and App=$APP_BUNDLE"

@@ -217,6 +217,19 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     "Bundled Git runtime is missing. Run tool/prepare_git_runtime.ps1 before Release packaging.")
 endif()
 
+# Official GitHub CLI. The private runtime makes MCP/Harness gh calls work on a
+# clean machine without requiring a PATH installation.
+set(GITHUB_CLI_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/github_cli/windows/runtime")
+if(EXISTS "${GITHUB_CLI_RUNTIME_DIR}/bin/gh.exe" AND
+   EXISTS "${GITHUB_CLI_RUNTIME_DIR}/vibekits-github-cli-runtime.json")
+  install(DIRECTORY "${GITHUB_CLI_RUNTIME_DIR}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/github-cli"
+    COMPONENT Runtime)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(FATAL_ERROR
+    "Bundled GitHub CLI is missing. Run tool/prepare_github_cli_runtime.ps1 before Release packaging.")
+endif()
+
 # Official Google Android Platform-Tools runtime. Keeping adb and both of its
 # Windows DLL dependencies beside each other makes the ADB workspace fully
 # self-contained and avoids relying on ANDROID_HOME or PATH.

@@ -487,7 +487,7 @@ void main() {
       sourceLabel: '插件下载缓存规则',
       modified: DateTime(2020),
     );
-    int diskReads = 0;
+    bool deletionStarted = false;
     int? persistedTotal;
     int? persistedRuns;
     await tester.pumpWidget(
@@ -517,6 +517,7 @@ void main() {
                   required void Function(CleanupDeleteProgress progress)
                   onProgress,
                 }) async {
+                  deletionStarted = true;
                   onProgress(
                     const CleanupDeleteProgress(completed: 1, total: 1),
                   );
@@ -533,12 +534,11 @@ void main() {
                   );
                 },
             diskSnapshotReader: (String path) {
-              diskReads++;
               return DiskSpaceSnapshot(
                 path: path,
-                availableBytes: diskReads <= 2 ? 5000 : 7000,
+                availableBytes: deletionStarted ? 7000 : 5000,
                 totalBytes: 10000,
-                freeBytes: diskReads <= 2 ? 5000 : 7000,
+                freeBytes: deletionStarted ? 7000 : 5000,
               );
             },
             onCleanupStatsChanged: (int total, int runs) async {

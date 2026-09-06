@@ -56,6 +56,9 @@ migrate_working_dir/
 /native/git/windows/runtime/
 /native/git/macos/runtime/
 /native/lark_cli/windows/runtime/
+/native/github_cli/windows/runtime/
+/native/github_cli/macos/runtime/
+/native/github_cli/linux/runtime/
 
 # Local verification output
 /_build*.txt

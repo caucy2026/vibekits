@@ -58,6 +58,7 @@ class HarnessAgentRequest {
     this.baseUrl = DeepSeekHarnessService.defaultBaseUrl,
     this.model = DeepSeekHarnessService.defaultModel,
     this.debugDirectory = '',
+    this.harnessHomeDirectory = '',
     this.permissionMode = HarnessAgentPermissionMode.assisted,
     this.approveTool,
     this.toolBridge,
@@ -69,6 +70,7 @@ class HarnessAgentRequest {
   final String baseUrl;
   final String model;
   final String debugDirectory;
+  final String harnessHomeDirectory;
   final HarnessAgentPermissionMode permissionMode;
   final HarnessToolApproval? approveTool;
   final VibekitsHarnessToolBridge? toolBridge;
@@ -97,6 +99,10 @@ class HarnessAgentRequest {
     if (debugDirectory.trim().isNotEmpty &&
         !Directory(debugDirectory.trim()).isAbsolute) {
       throw const FormatException('调试目录必须是绝对路径');
+    }
+    if (harnessHomeDirectory.trim().isNotEmpty &&
+        !Directory(harnessHomeDirectory.trim()).isAbsolute) {
+      throw const FormatException('Harness Home 必须是绝对路径');
     }
   }
 }
@@ -464,6 +470,9 @@ abstract final class DeepSeekHarnessService {
     );
     final Directory harnessHome = await _prepareHarnessHome(
       runtime.approvalPluginPath,
+      directory: request.harnessHomeDirectory.trim().isEmpty
+          ? null
+          : Directory(request.harnessHomeDirectory.trim()),
     );
     final Directory nodeCompileCache = await _prepareNodeCompileCache(
       runtime,
@@ -748,8 +757,9 @@ abstract final class DeepSeekHarnessService {
   static Future<Directory> _prepareHarnessHome(
     String approvalPluginPath, {
     bool includeApprovalBridge = true,
+    Directory? directory,
   }) async {
-    final Directory home = officialHarnessHomeDirectory();
+    final Directory home = directory ?? officialHarnessHomeDirectory();
     await home.create(recursive: true);
     // Old native acceptance probes used a fresh TEMP workspace on every run.
     // Their orphaned session folders are not real user workspaces and can be

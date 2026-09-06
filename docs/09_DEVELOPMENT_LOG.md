@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-06 · 1.9.0-dev.158+2158 · 内置 GitHub CLI 与 MCP 等价调用
+
+- 内置官方 GitHub CLI `2.100.0`，Windows x64、macOS Universal 和 Linux amd64/arm64 使用固定发布资产与 SHA-256 校验，不依赖系统 PATH、Homebrew 或用户预装 `gh`；准备过程的下载、解压与缓存均位于项目 D 盘。
+- 新增 `vibekits.github.cli_inspect`、`vibekits.github.cli_auth_status`、`vibekits.github.cli_execute` 三个 Harness/MCP 接口。执行接口接收逐项参数数组和可选工作目录，覆盖官方 `repo/pr/issue/run/release/api` 等命令且不经过 shell；关闭交互、分页、更新提示和遥测，限制输出长度，过滤令牌并禁止 `auth token` 与令牌参数。
+- 本地 Harness 直接使用同一工具目录；LMCP 远程调用沿用设备配对、工具级授权、风险审批和审计记录。只读运行时/授权检查标为 `readOnly`，通用 GitHub 命令标为 `controlsDevice`，避免远端写仓库、合并 PR 或触发工作流绕过授权。
+- Windows 与 macOS Release 打包及校验门禁加入 `gh` 本体和运行时 manifest；Linux 提供相同目录合同。版本、LMCP `appVersion` 与 `catalogRevision=2158` 同步提升。
+
 ## 2026-09-03 · 1.9.0-dev.152+2152 · 同系列产品云端图片与完整离线缓存
 
 - 经产品方明确授权，VibeKits “关于我们”接入同系列产品资源 `kemi_s1_xc`；真实清单当前为版本 1.0.2、5 张图片。上一版 dev.151 的“仅本地产品区”不再作为最终设计。
@@ -1467,3 +1474,13 @@
 - D 盘干净候选已完成 491 个生产包、27 个必需 peer、兼容补丁、跨项目会话重绑定测试和真实 `dsh web --no-open` 预热；旧 Windows 运行时备份保留在 D 盘以便回退。
 - 本轮仅证明 Windows 运行时构建和启动门禁通过。模型端到端 MCP、离线包验证、100 次完整退出重启、macOS Universal/签名/公证仍需重新执行，通过前不得把历史 rc.2 发布证据冒充新版本证据。
 - 确认 Harness 0.1.2-rc.1 自带 `dsh-skill`、`dsh-skill-filesystem` 与 `dsh-tool-skill`：支持全局目录、实时刷新、目录投影和按需加载。VibeKits 启动环境新增 `DSH_AGENTS_HOME=<用户目录>/.codex`，使 Harness 与 Codex 直接共享 `.codex/skills`，无需复制或维护第二份技能。
+
+# 2026-09-06 · dev.158 GitHub CLI 与统一智能体 CLI MCP
+
+- Windows 自包含包新增固定 GitHub CLI 2.100.0，并通过准备脚本、SHA-256、CMake 打包和发布验证器闭环；macOS/Linux 提供同合同的固定版本准备脚本，运行时不依赖用户另外安装 `gh`。
+- Harness/MCP 新增 GitHub CLI 检查、认证状态和受控执行接口；禁止读取/传入 token，全部参数以 argv 直接执行并对输出脱敏。
+- 新增 Codex、Claude Code、GitHub Copilot CLI、Cursor Agent、Gemini CLI、Aider、OpenCode 的统一动态目录、检查、同步执行及长任务 start/status/cancel 六接口。未安装提供方明确返回不可用，不冒充、不自动下载。
+- 长任务具有内部 taskId、终态、超时、幂等取消、并行 stdout/stderr 收集、256 KiB 输出边界和进程树生命周期绑定；远程调用继续服从 LMCP/2 配对、授权、风险审批和审计。
+- 官方 Harness 集成测试新增独立 `harnessHomeDirectory`，测试只使用 D 盘临时配置，不再污染或依赖用户真实 Harness profile；ADB 与清理 UI 用例改为验证真实懒加载/清理后容量变化，不再依赖脆弱文本位置。
+- Windows 验收：Analyze 0 issue；顺序全量测试 684 通过、14 个真实设备/联网环境门禁跳过、0 失败；Debug 自包含构建通过，包内 Git 2.55.0.windows.3、GitHub CLI 2.100.0 和 33 项运行时验证通过。Release 候选因正在运行的 dev.157 进程锁定而未覆盖。
+- 设计、接口、验收步骤见 `docs/60_GITHUB_CLI_HARNESS_MCP_API.md`、`docs/61_UNIFIED_AGENT_CLI_HARNESS_MCP_STANDARD.md`；实测证据见 `docs/acceptance/V1_9_0_DEV158_CLI_MCP_2026-09-06.md`。

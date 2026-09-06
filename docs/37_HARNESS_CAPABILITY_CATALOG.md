@@ -5,11 +5,11 @@
 ## 数量口径
 
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
-- 开发工具业务能力条目：79。
-- 开发工具独立工作区入口：19。
-- Harness 定义接口：186。
-- Harness 当前可执行接口：164。
-- 当前不可公开接口：22。
+- 开发工具业务能力条目：81。
+- 开发工具独立工作区入口：20。
+- Harness 定义接口：197。
+- Harness 当前可执行接口：174。
+- 当前不可公开接口：23。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
@@ -77,26 +77,43 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 
 | 模块 | 定义接口数 |
 | --- | ---: |
-| 系统诊断 | 45 |
+| 时间文本 | 11 |
+| 系统诊断 | 46 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
 | 计算调试 | 9 |
 | 编码转换 | 13 |
-| 网络开发 | 25 |
-| 时间文本 | 10 |
-| 智能开发 | 1 |
+| 网络开发 | 28 |
+| 智能开发 | 7 |
 | 音频调试 | 6 |
 | 远程连接 | 33 |
 | 数据库 | 5 |
 | 版本控制 | 10 |
 | 虚拟化 | 3 |
 
-## 系统诊断（定义 45）
+## 时间文本（定义 11）
+
+| 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `vibekits.case_convert` | `case_convert` | 命名风格转换 | 是 | 转换大小写、snake、kebab、camel、Pascal 和标题格式。 适合：需要确定、离线地完成命名风格转换时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用命名风格转换处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.date_to_timestamp` | `date_to_timestamp` | 日期转时间戳 | 是 | 将日期时间转为 Unix 秒/毫秒时间戳。 适合：用户明确需要“日期转时间戳”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.glob_test` | `glob_test` | Glob 匹配测试 | 是 | 测试路径是否匹配 *, ** 和 ? glob。 适合：需要确定、离线地完成Glob 匹配测试时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用Glob 匹配测试处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.line_ending_normalize` | `line_ending_normalize` | 换行符规范化 | 是 | 统一为 LF 或 CRLF，不修改原文件。 适合：需要确定、离线地完成换行符规范化时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用换行符规范化处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.line_sort` | `line_sort` | 文本行排序 | 是 | 按 Unicode 顺序排列文本行。 适合：需要确定、离线地完成文本行排序时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本行排序处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.line_unique` | `line_unique` | 文本行去重 | 是 | 保持首次出现顺序删除重复行。 适合：需要确定、离线地完成文本行去重时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本行去重处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.regex_escape` | `regex_escape` | 正则字面量转义 | 是 | 把普通文本安全转义为正则字面量。 适合：需要确定、离线地完成正则字面量转义时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用正则字面量转义处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.regex_test` | `regex_test` | 正则测试 | 是 | 测试正则表达式，参数为模式，输入为文本。 适合：用户明确需要“正则测试”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.stopwatch` | `stopwatch` | 秒表（1/100 秒） | 是 | 圆形时钟与数字同步显示，支持开始、暂停、计次和复位，精度 0.01 秒。 适合：用户明确需要“秒表（1/100 秒）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+
+## 系统诊断（定义 46）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
+| `vibekits.agent_cli` | `agent_cli` | 智能体 CLI 编排 | 否（环境/接线门禁） | 统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。 适合：用户明确需要“智能体 CLI 编排”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.cleaner.analyze_drive` | `cleaner__analyze_drive` | 分析磁盘占用 | 是 | 同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。 | `readOnly` | `root`* (string), `maxResults` (integer；默认=50；最小=10；最大=200) |
@@ -215,7 +232,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.url_decode` | `url_decode` | URL 解码 | 是 | 对百分号编码进行解码。 适合：用户明确需要“URL 解码”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.url_encode` | `url_encode` | URL 编码 | 是 | 对文本进行百分号编码。 适合：用户明确需要“URL 编码”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 网络开发（定义 25）
+## 网络开发（定义 28）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -226,6 +243,9 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.capture.stop` | `capture__stop` | 停止并保存网络抓包 | 是 | 停止当前抓包，刷新 PCAP 文件并返回实际包数、协议统计和保存路径。 | `controlsDevice` | `{}` |
 | `vibekits.cidr_calc` | `cidr_calc` | IP/CIDR 计算 | 是 | 计算 IPv4 CIDR 的网络地址、广播地址与可用数量。 适合：用户明确需要“IP/CIDR 计算”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.dns_lookup` | `dns_lookup` | DNS 查询 | 是 | 查询域名的 A/AAAA 记录。 适合：用户明确需要“DNS 查询”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.github.cli_auth_status` | `github__cli_auth_status` | 检查 GitHub CLI 授权 | 是 | 非交互执行 gh auth status，可检查 GitHub.com 或企业主机；不会返回认证令牌。 | `readOnly` | `hostname` (string) |
+| `vibekits.github.cli_execute` | `github__cli_execute` | 执行 GitHub CLI | 是 | 以参数数组直接调用 APP 内置官方 gh，不经过 shell。支持 repo、pr、issue、run、release、api 等命令；关闭交互提示，禁止通过参数传入或读取令牌，远程调用需授权。 | `controlsDevice` | `arguments`* (array), `workingDirectory` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=3600) |
+| `vibekits.github.cli_inspect` | `github__cli_inspect` | 检查内置 GitHub CLI | 是 | 只读返回 APP 内置官方 gh 的版本、平台和运行时路径；不依赖系统 PATH。 | `readOnly` | `{}` |
 | `vibekits.github.diagnose` | `github__diagnose` | GitHub 网络诊断 | 是 | 并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。 | `readOnly` | `{}` |
 | `vibekits.github.proxy_apply` | `github__proxy_apply` | 应用 GitHub 专用代理 | 是 | 只修改 http.https://github.com.proxy；随后真实 ls-remote，失败自动恢复旧值。 | `writesData` | `planId`* (string), `digest`* (string) |
 | `vibekits.github.proxy_candidates` | `github__proxy_candidates` | 发现 GitHub 代理候选 | 是 | 只读发现 Mihomo/Clash 的真实回环监听端口，不读取订阅、节点或配置正文。 | `readOnly` | `{}` |
@@ -245,25 +265,16 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.tcp_port` | `tcp_port` | TCP 端口测试 | 是 | 测试 host:port 是否可连接。 适合：用户明确需要“TCP 端口测试”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.url_parse` | `url_parse` | URL 分解 | 是 | 分解 URL 为 scheme/host/port/path/query/fragment。 适合：用户明确需要“URL 分解”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 时间文本（定义 10）
+## 智能开发（定义 7）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `vibekits.case_convert` | `case_convert` | 命名风格转换 | 是 | 转换大小写、snake、kebab、camel、Pascal 和标题格式。 适合：需要确定、离线地完成命名风格转换时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用命名风格转换处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.date_to_timestamp` | `date_to_timestamp` | 日期转时间戳 | 是 | 将日期时间转为 Unix 秒/毫秒时间戳。 适合：用户明确需要“日期转时间戳”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.glob_test` | `glob_test` | Glob 匹配测试 | 是 | 测试路径是否匹配 *, ** 和 ? glob。 适合：需要确定、离线地完成Glob 匹配测试时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用Glob 匹配测试处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.line_ending_normalize` | `line_ending_normalize` | 换行符规范化 | 是 | 统一为 LF 或 CRLF，不修改原文件。 适合：需要确定、离线地完成换行符规范化时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用换行符规范化处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.line_sort` | `line_sort` | 文本行排序 | 是 | 按 Unicode 顺序排列文本行。 适合：需要确定、离线地完成文本行排序时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本行排序处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.line_unique` | `line_unique` | 文本行去重 | 是 | 保持首次出现顺序删除重复行。 适合：需要确定、离线地完成文本行去重时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本行去重处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.regex_escape` | `regex_escape` | 正则字面量转义 | 是 | 把普通文本安全转义为正则字面量。 适合：需要确定、离线地完成正则字面量转义时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用正则字面量转义处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.regex_test` | `regex_test` | 正则测试 | 是 | 测试正则表达式，参数为模式，输入为文本。 适合：用户明确需要“正则测试”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-
-## 智能开发（定义 1）
-
-| 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
-| --- | --- | --- | --- | --- | --- | --- |
+| `vibekits.agent_cli.catalog` | `agent_cli__catalog` | 列出智能体 CLI | 是 | 实时发现 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 和 OpenCode；返回真实路径、来源、版本与协议能力，不触发登录或任务。 | `readOnly` | `{}` |
+| `vibekits.agent_cli.execute` | `agent_cli__execute` | 执行智能体 CLI | 是 | 以参数数组同步调用指定智能体 CLI，不经过 shell、不接受 stdin、不允许参数携带密钥；适合短任务，远程调用必须审批。 | `controlsDevice` | `providerId`* (string；枚举=codex/claude/copilot/cursor/gemini/aider/opencode), `arguments`* (array), `workingDirectory` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=3600) |
+| `vibekits.agent_cli.inspect` | `agent_cli__inspect` | 检查智能体 CLI | 是 | 重新解析一个智能体 CLI 并执行有界版本探测；未安装时明确返回 unavailable，不自动替换提供方。 | `readOnly` | `providerId`* (string；枚举=codex/claude/copilot/cursor/gemini/aider/opencode) |
+| `vibekits.agent_cli.task_cancel` | `agent_cli__task_cancel` | 取消智能体 CLI 长任务 | 是 | 只取消当前 VibeKits 实例创建的任务；重复取消幂等，不能按外部 PID 杀进程。 | `controlsDevice` | `taskId`* (string) |
+| `vibekits.agent_cli.task_start` | `agent_cli__task_start` | 启动智能体 CLI 长任务 | 是 | 启动后立即返回 taskId；后台并行读取 stdout/stderr，并由 VibeKits 管理超时和进程树。 | `controlsDevice` | `providerId`* (string；枚举=codex/claude/copilot/cursor/gemini/aider/opencode), `arguments`* (array), `workingDirectory` (string), `timeoutSeconds` (integer；默认=3600；最小=5；最大=86400) |
+| `vibekits.agent_cli.task_status` | `agent_cli__task_status` | 查询智能体 CLI 长任务 | 是 | 按 taskId 返回运行状态、PID、退出码、有界输出和截断证据；终态保留30分钟。 | `readOnly` | `taskId`* (string) |
 | `vibekits.next_action_recommendation` | `next_action_recommendation` | 下一步建议 | 是 | 识别文件、设备、连接或报告，返回最有价值的下一步工具动作。 适合：当用户给出一个对象但没有指定操作，或当前工具已产生结果时。 不适合：用户已明确指定工具和操作时不要增加额外步骤。 示例：为 adb://192.168.3.63:5555 推荐下一步 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
 ## 音频调试（定义 6）

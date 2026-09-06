@@ -26,6 +26,8 @@ $required = @(
   'tools\git\mingw64\bin\git-remote-http.exe',
   'tools\git\mingw64\bin\git-remote-https.exe',
   'tools\git\vibekits-git-runtime.json',
+  'tools\github-cli\bin\gh.exe',
+  'tools\github-cli\vibekits-github-cli-runtime.json',
   'tools\adb\adb.exe',
   'tools\adb\AdbWinApi.dll',
   'tools\adb\AdbWinUsbApi.dll',
@@ -80,10 +82,15 @@ foreach ($helperName in @('git-remote-http.exe', 'git-remote-https.exe')) {
     throw "Bundled Git is missing HTTPS helper: $helperName"
   }
 }
+$gh = Join-Path $bundle 'tools\github-cli\bin\gh.exe'
+$ghVersion = (& $gh --version | Select-Object -First 1).Trim()
+if ($LASTEXITCODE -ne 0 -or $ghVersion -notmatch '^gh version 2\.100\.0') {
+  throw "Bundled GitHub CLI failed: $ghVersion"
+}
 $node = Join-Path $bundle 'tools\harness\node.exe'
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-approval.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness approval plugin syntax check failed' }
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness session rebind helper syntax check failed' }
 
-Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; required runtimes: $($required.Count)"
+Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; $ghVersion; required runtimes: $($required.Count)"
