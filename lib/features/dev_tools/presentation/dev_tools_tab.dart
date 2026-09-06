@@ -20,6 +20,7 @@ import 'file_search_workspace.dart';
 import 'git_workspace.dart';
 import 'github_diagnostics_workspace.dart';
 import 'network_virtualization_workspace.dart';
+import 'network_speed_workspace.dart';
 import 'packet_capture_workspace.dart';
 import 'harness_tool_activity_dialog.dart';
 import 'programmer_calculator_workspace.dart';
@@ -509,6 +510,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
         initialHistory: widget.initialApiRequestHistory,
         onHistoryChanged: widget.onApiRequestHistoryChanged,
       );
+    }
+    if (tool.id == 'network_speed') {
+      return const NetworkSpeedWorkspace();
     }
     if (tool.id == 'packet_capture') {
       return const PacketCaptureWorkspace();

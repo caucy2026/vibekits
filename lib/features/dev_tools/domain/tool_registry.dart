@@ -9,6 +9,7 @@ import 'encoding_tools.dart';
 import 'file_tools.dart';
 import 'format_tools.dart';
 import 'network_tools.dart';
+import 'network_speed_service.dart';
 import 'micro_benchmark_service.dart';
 import 'time_tools.dart';
 import 'tool_result.dart';
@@ -191,6 +192,31 @@ final List<ToolSpec> allDevToolRegistry = <ToolSpec>[
     description: '发送有界 HTTP 请求，查看状态、响应头、耗时和正文。',
     offline: false,
     harnessToolIds: <String>['vibekits.http.request'],
+  ),
+  ToolSpec(
+    id: 'network_speed',
+    name: '网络测速（Speed Test）',
+    group: ToolGroups.network,
+    description: '分阶段测量公网延迟、抖动、下载带宽和上传带宽，显示实时进度并支持随时停止。',
+    offline: false,
+    aiUseWhen: '需要验证当前设备公网连接的上下行带宽、延迟或抖动时。',
+    aiAvoidWhen: '用户未同意产生测试流量、按流量计费，或只需要局域网吞吐时不要运行。',
+    aiExamples: const <String>['测试当前网络的下载速度、上传速度和延迟'],
+    runAsync: (String input, String params) async {
+      try {
+        final String endpoint = input.trim();
+        final NetworkSpeedResult result = await NetworkSpeedService(
+          server: endpoint.isEmpty
+              ? Uri.https('speed.cloudflare.com', '')
+              : Uri.parse(endpoint),
+        ).run();
+        return ToolSuccess(
+          const JsonEncoder.withIndent('  ').convert(result.toJson()),
+        );
+      } on Object catch (error) {
+        return ToolFailure('$error');
+      }
+    },
   ),
   const ToolSpec(
     id: 'packet_capture',
@@ -857,6 +883,7 @@ const Set<String> _standaloneToolIds = <String>{
   'serial_port',
   'adb_workspace',
   'api_workspace',
+  'network_speed',
   'packet_capture',
   'git_workspace',
   'file_diff',
@@ -982,6 +1009,11 @@ const Map<String, ToolUsageContract> devToolUsageContracts =
         repeatUse: '保存最近 30 个方法、URL 和非敏感请求头',
         multiTarget: '多个接口历史并存，可一键恢复',
         secretHandling: '不保存正文、Authorization、Cookie、Token 或 API Key',
+      ),
+      'network_speed': ToolUsageContract(
+        repeatUse: '每次重新采样当前链路，不用历史结果替代实时测速',
+        multiTarget: '默认测试公开节点；指定服务器时按服务器来源分别解释结果',
+        secretHandling: '只传输随机空白测试数据，不上传用户文件或凭据',
       ),
       'packet_capture': ToolUsageContract(
         repeatUse: '保留 PCAP 文件，重新打开后可继续分析',

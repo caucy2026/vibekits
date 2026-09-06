@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
 import '../../../app/app_version.dart';
+import '../domain/about_capability_manifest.dart';
 import '../domain/marketing_cache_service.dart';
 
 class AboutTab extends StatefulWidget {
@@ -27,24 +28,32 @@ class _AboutTabState extends State<AboutTab> {
     _Capability(
       Icons.auto_awesome_outlined,
       '智能体与扩展',
-      '官方 Harness 工作区、会话、权限、Skills、设置与插件清单。',
+      '保留官方 Harness 的项目、独立会话、草稿、并行任务、停止、权限、Skills、设置与插件生态。',
     ),
-    _Capability(Icons.hub_outlined, 'MCP 协同', '本机与局域网能力发现、证书校验、授权、调度和结果验真。'),
+    _Capability(
+      Icons.hub_outlined,
+      'MCP 协同',
+      '发现本机与局域网能力，完成身份与证书校验、持久授权、空闲实例调度、异步结果查询和证据验真。',
+    ),
     _Capability(
       Icons.folder_zip_outlined,
       '压缩文件',
-      '安全查看、创建与提取压缩包，提供路径和容量边界检查。',
+      '查看、创建、提取与校验压缩包；执行路径穿越、容量、文件数量和覆盖策略边界检查。',
     ),
     _Capability(
       Icons.cleaning_services_outlined,
       '系统清理',
-      '扫描可清理空间，先生成可核对计划，再执行受控清理。',
+      '扫描缓存、日志及临时文件，先生成可核对计划，再执行受控清理，避免误删用户数据。',
     ),
-    _Capability(Icons.article_outlined, '文档阅读', '查看文本、结构化数据与受支持的二进制文档内容。'),
+    _Capability(
+      Icons.article_outlined,
+      '文档与数据',
+      '读取文本、源码、配置、Office、PDF、图片、数据库、模型和音频等已登记格式。',
+    ),
     _Capability(
       Icons.construction_outlined,
       '开发工具',
-      'ADB、网络、数据库、串口、音频及格式转换等工程工具。',
+      '覆盖 ADB、网络测速与诊断、数据库、串口、音频、转换、哈希、时间及工程计算；下方提供完整清单。',
     ),
   ];
 
@@ -143,6 +152,12 @@ class _AboutTabState extends State<AboutTab> {
                     );
                   },
                 ),
+                const SizedBox(height: 24),
+                _inventorySummary(context),
+                const SizedBox(height: 24),
+                _formatInventory(context),
+                const SizedBox(height: 24),
+                _toolInventory(context),
                 const SizedBox(height: 24),
                 _privacy(context),
               ],
@@ -358,6 +373,107 @@ class _AboutTabState extends State<AboutTab> {
     ],
   );
 
+  Widget _inventorySummary(BuildContext context) => Column(
+    key: const Key('about-capability-summary'),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text('能力全景', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 6),
+      Text(
+        '数字直接来自应用正在使用的格式路由表和工具注册表，新增或移除能力时会同步变化。',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+      const SizedBox(height: 14),
+      Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: <Widget>[
+          _SummaryMetric(
+            '文件扩展名',
+            AboutCapabilityManifest.supportedExtensionCount,
+          ),
+          _SummaryMetric('特殊文件名', AboutCapabilityManifest.specialFileNameCount),
+          _SummaryMetric('开发工具', AboutCapabilityManifest.toolCount),
+          _SummaryMetric(
+            '独立工作区',
+            AboutCapabilityManifest.independentWorkspaceCount,
+          ),
+          _SummaryMetric(
+            'Harness 工具入口',
+            AboutCapabilityManifest.harnessEntryCount,
+          ),
+        ],
+      ),
+    ],
+  );
+
+  Widget _formatInventory(BuildContext context) => _InventorySection(
+    key: const Key('about-format-inventory'),
+    icon: Icons.description_outlined,
+    title: '支持格式与自有数据说明',
+    description: '按实际路由清单逐项列出。点击分类可查看完整扩展名；未登记格式不会在这里被宣传为已支持。',
+    children: AboutCapabilityManifest.formatGroups
+        .map(
+          (group) => ExpansionTile(
+            key: Key('about-format-group-${group.title}'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 14),
+            title: Text('${group.title} · ${group.values.length} 项'),
+            subtitle: Text(group.description),
+            children: <Widget>[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: group.values
+                      .map((value) => Chip(label: Text(value)))
+                      .toList(),
+                ),
+              ),
+            ],
+          ),
+        )
+        .toList(),
+  );
+
+  Widget _toolInventory(BuildContext context) => _InventorySection(
+    key: const Key('about-tool-inventory'),
+    icon: Icons.construction_outlined,
+    title: '全部开发工具',
+    description: '按开发工具页的真实注册表分组；每项标明用途以及需要联网还是可本地运行。',
+    children: AboutCapabilityManifest.toolGroups
+        .map(
+          (group) => ExpansionTile(
+            key: Key('about-tool-group-${group.title}'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 10),
+            title: Text('${group.title} · ${group.tools.length} 项'),
+            children: group.tools
+                .map(
+                  (tool) => ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.only(left: 12, right: 4),
+                    leading: const Icon(Icons.build_outlined, size: 20),
+                    title: Text(tool.name),
+                    subtitle: Text(tool.description),
+                    trailing: Tooltip(
+                      message: tool.offline ? '本地可用' : '需要网络或外部设备',
+                      child: Icon(
+                        tool.offline
+                            ? Icons.offline_bolt_outlined
+                            : Icons.public,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        )
+        .toList(),
+  );
+
   Widget _privacy(BuildContext context) => Container(
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
@@ -425,4 +541,79 @@ class _Capability {
   final IconData icon;
   final String title;
   final String description;
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric(this.label, this.value);
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 156,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    decoration: BoxDecoration(
+      color: context.vibe.panelRaised,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: context.vibe.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          '$value',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+      ],
+    ),
+  );
+}
+
+class _InventorySection extends StatelessWidget {
+  const _InventorySection({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.children,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: context.vibe.panelRaised,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: context.vibe.border),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Icon(icon, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        Text(description, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        ...children,
+      ],
+    ),
+  );
 }

@@ -5,10 +5,10 @@
 ## 数量口径
 
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
-- 开发工具业务能力条目：81。
-- 开发工具独立工作区入口：20。
-- Harness 定义接口：197。
-- Harness 当前可执行接口：174。
+- 开发工具业务能力条目：82。
+- 开发工具独立工作区入口：21。
+- Harness 定义接口：198。
+- Harness 当前可执行接口：175。
 - 当前不可公开接口：23。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -79,12 +79,12 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | --- | ---: |
 | 时间文本 | 11 |
 | 系统诊断 | 46 |
+| 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
 | 加密生成 | 9 |
 | 计算调试 | 9 |
 | 编码转换 | 13 |
-| 网络开发 | 28 |
 | 智能开发 | 7 |
 | 音频调试 | 6 |
 | 远程连接 | 33 |
@@ -159,6 +159,40 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.workflow.record_start` | `workflow__record_start` | 开始语义示教 | 是 | 开始学习一次真实工作流。记录目标、可变输入、后续 MCP 工具意图、结构化参数、结果证据和成功标准；不录制鼠标坐标。 | `writesData` | `name`* (string), `goal`* (string), `successCriteria`* (array), `variables` (array) |
 | `vibekits.workflow.record_stop` | `workflow__record_stop` | 完成语义示教 | 是 | 停止当前示教，把捕获的工具调用编译为可参数化语义 Skill，包含逐步验证和环境变化恢复策略。 | `writesData` | `notes` (string) |
 
+## 网络开发（定义 29）
+
+| 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `vibekits.capture.analyze` | `capture__analyze` | 分析 PCAP 流量 | 是 | 只读统计协议、字节数和 Top 端点，给智能体提供可核验的网络流量证据。 | `readOnly` | `path`* (string) |
+| `vibekits.capture.read` | `capture__read` | 读取 PCAP 数据包 | 是 | 只读解析标准 PCAP，返回时间、协议、源、目标、长度及汇总；不会修改原文件。 | `readOnly` | `path`* (string), `maxPackets` (integer；最小=1；最大=10000) |
+| `vibekits.capture.start` | `capture__start` | 开始网络抓包 | 是 | 使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。 | `controlsDevice` | `outputPath` (string), `filter` (string), `maxPackets` (integer；最小=0；最大=1000000) |
+| `vibekits.capture.status` | `capture__status` | 检查网络抓包状态 | 是 | 只读返回内置 WinDivert 抓包内核、当前任务、已收包数、输出 PCAP 和最近错误。 | `readOnly` | `{}` |
+| `vibekits.capture.stop` | `capture__stop` | 停止并保存网络抓包 | 是 | 停止当前抓包，刷新 PCAP 文件并返回实际包数、协议统计和保存路径。 | `controlsDevice` | `{}` |
+| `vibekits.cidr_calc` | `cidr_calc` | IP/CIDR 计算 | 是 | 计算 IPv4 CIDR 的网络地址、广播地址与可用数量。 适合：用户明确需要“IP/CIDR 计算”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.dns_lookup` | `dns_lookup` | DNS 查询 | 是 | 查询域名的 A/AAAA 记录。 适合：用户明确需要“DNS 查询”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.github.cli_auth_status` | `github__cli_auth_status` | 检查 GitHub CLI 授权 | 是 | 非交互执行 gh auth status，可检查 GitHub.com 或企业主机；不会返回认证令牌。 | `readOnly` | `hostname` (string) |
+| `vibekits.github.cli_execute` | `github__cli_execute` | 执行 GitHub CLI | 是 | 以参数数组直接调用 APP 内置官方 gh，不经过 shell。支持 repo、pr、issue、run、release、api 等命令；关闭交互提示，禁止通过参数传入或读取令牌，远程调用需授权。 | `controlsDevice` | `arguments`* (array), `workingDirectory` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=3600) |
+| `vibekits.github.cli_inspect` | `github__cli_inspect` | 检查内置 GitHub CLI | 是 | 只读返回 APP 内置官方 gh 的版本、平台和运行时路径；不依赖系统 PATH。 | `readOnly` | `{}` |
+| `vibekits.github.diagnose` | `github__diagnose` | GitHub 网络诊断 | 是 | 并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。 | `readOnly` | `{}` |
+| `vibekits.github.proxy_apply` | `github__proxy_apply` | 应用 GitHub 专用代理 | 是 | 只修改 http.https://github.com.proxy；随后真实 ls-remote，失败自动恢复旧值。 | `writesData` | `planId`* (string), `digest`* (string) |
+| `vibekits.github.proxy_candidates` | `github__proxy_candidates` | 发现 GitHub 代理候选 | 是 | 只读发现 Mihomo/Clash 的真实回环监听端口，不读取订阅、节点或配置正文。 | `readOnly` | `{}` |
+| `vibekits.github.proxy_plan` | `github__proxy_plan` | 预览 GitHub 专用代理 | 是 | 读取现有 host-scoped Git 配置，生成带旧值、摘要、到期时间和回滚动作的短期计划。 | `readOnly` | `candidateId`* (string) |
+| `vibekits.github.proxy_rollback` | `github__proxy_rollback` | 恢复 GitHub 代理旧值 | 是 | 按计划保存的原值精确恢复 GitHub host-scoped Git 代理。 | `writesData` | `planId`* (string), `digest`* (string) |
+| `vibekits.http.request` | `http__request` | 发送 HTTP 请求 | 是 | 发送有界 HTTP 请求并返回状态、响应头和正文；所有请求均需确认目标。 | `controlsDevice` | `method`* (string；枚举=GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), `url`* (string), `headers` (object), `body` (string) |
+| `vibekits.http_status_lookup` | `http_status_lookup` | HTTP 状态码查询 | 是 | 查询常见 HTTP 状态码名称和类别。 适合：需要确定、离线地完成HTTP 状态码查询时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用HTTP 状态码查询处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.mime_lookup` | `mime_lookup` | MIME 类型查询 | 是 | 按文件扩展名查询常见 MIME 类型。 适合：需要确定、离线地完成MIME 类型查询时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用MIME 类型查询处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.network_speed` | `network_speed` | 网络测速（Speed Test） | 是 | 分阶段测量公网延迟、抖动、下载带宽和上传带宽，显示实时进度并支持随时停止。 适合：需要验证当前设备公网连接的上下行带宽、延迟或抖动时。 不适合：用户未同意产生测试流量、按流量计费，或只需要局域网吞吐时不要运行。 示例：测试当前网络的下载速度、上传速度和延迟 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
+| `vibekits.proxy.start` | `proxy__start` | 启动 Clash Verge 内核 | 是 | 使用用户明确选择的 YAML 配置启动内置 Mihomo；不自动修改系统代理或 TUN。 | `controlsDevice` | `configPath`* (string), `dataDirectory`* (string), `systemProxyPort` (integer；最小=1；最大=65535) |
+| `vibekits.proxy.stop` | `proxy__stop` | 停止 Clash Verge 内核 | 是 | 停止由 Vibekits 启动的 Mihomo 子进程。 | `controlsDevice` | `dataDirectory` (string) |
+| `vibekits.proxy.system_apply` | `proxy__system_apply` | 启用 Windows 系统代理 | 是 | 保存当前用户代理后，把 Windows 系统代理切换到本机 Mihomo 端口；可由恢复工具还原。 | `controlsDevice` | `port`* (integer；最小=1；最大=65535), `dataDirectory`* (string) |
+| `vibekits.proxy.system_restore` | `proxy__system_restore` | 恢复 Windows 原系统代理 | 是 | 从 Vibekits 备份恢复启用代理前的 Windows 用户代理设置。 | `controlsDevice` | `dataDirectory`* (string) |
+| `vibekits.query_build` | `query_build` | 查询参数生成 | 是 | 把 JSON 对象编码为 URL query string。 适合：需要确定、离线地完成查询参数生成时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用查询参数生成处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.query_parse` | `query_parse` | 查询参数解析 | 是 | 把 URL query string 解析为保留重复键的 JSON。 适合：需要确定、离线地完成查询参数解析时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用查询参数解析处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.runtime.inspect` | `runtime__inspect` | 检查代理与虚拟机运行时 | 是 | 只读检查 Vibekits 发布包中的 Mihomo 与 QEMU 版本和绝对路径。 | `readOnly` | `{}` |
+| `vibekits.runtime.status` | `runtime__status` | 读取代理与虚拟机状态 | 是 | 只读返回 Mihomo/QEMU 运行状态、进程号和有界日志。 | `readOnly` | `{}` |
+| `vibekits.tcp_port` | `tcp_port` | TCP 端口测试 | 是 | 测试 host:port 是否可连接。 适合：用户明确需要“TCP 端口测试”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.url_parse` | `url_parse` | URL 分解 | 是 | 分解 URL 为 scheme/host/port/path/query/fragment。 适合：用户明确需要“URL 分解”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+
 ## 文件工具（定义 7）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
@@ -231,39 +265,6 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.unicode_unescape` | `unicode_unescape` | Unicode 反转义 | 是 | 将 \uXXXX 转义序列还原为字符。 适合：用户明确需要“Unicode 反转义”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.url_decode` | `url_decode` | URL 解码 | 是 | 对百分号编码进行解码。 适合：用户明确需要“URL 解码”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.url_encode` | `url_encode` | URL 编码 | 是 | 对文本进行百分号编码。 适合：用户明确需要“URL 编码”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-
-## 网络开发（定义 28）
-
-| 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `vibekits.capture.analyze` | `capture__analyze` | 分析 PCAP 流量 | 是 | 只读统计协议、字节数和 Top 端点，给智能体提供可核验的网络流量证据。 | `readOnly` | `path`* (string) |
-| `vibekits.capture.read` | `capture__read` | 读取 PCAP 数据包 | 是 | 只读解析标准 PCAP，返回时间、协议、源、目标、长度及汇总；不会修改原文件。 | `readOnly` | `path`* (string), `maxPackets` (integer；最小=1；最大=10000) |
-| `vibekits.capture.start` | `capture__start` | 开始网络抓包 | 是 | 使用 APP 内置 WinDivert 在后台抓取本机网络包，按过滤器筛选并持续保存为标准 PCAP。Windows 首次加载驱动需要管理员权限。 | `controlsDevice` | `outputPath` (string), `filter` (string), `maxPackets` (integer；最小=0；最大=1000000) |
-| `vibekits.capture.status` | `capture__status` | 检查网络抓包状态 | 是 | 只读返回内置 WinDivert 抓包内核、当前任务、已收包数、输出 PCAP 和最近错误。 | `readOnly` | `{}` |
-| `vibekits.capture.stop` | `capture__stop` | 停止并保存网络抓包 | 是 | 停止当前抓包，刷新 PCAP 文件并返回实际包数、协议统计和保存路径。 | `controlsDevice` | `{}` |
-| `vibekits.cidr_calc` | `cidr_calc` | IP/CIDR 计算 | 是 | 计算 IPv4 CIDR 的网络地址、广播地址与可用数量。 适合：用户明确需要“IP/CIDR 计算”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.dns_lookup` | `dns_lookup` | DNS 查询 | 是 | 查询域名的 A/AAAA 记录。 适合：用户明确需要“DNS 查询”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.github.cli_auth_status` | `github__cli_auth_status` | 检查 GitHub CLI 授权 | 是 | 非交互执行 gh auth status，可检查 GitHub.com 或企业主机；不会返回认证令牌。 | `readOnly` | `hostname` (string) |
-| `vibekits.github.cli_execute` | `github__cli_execute` | 执行 GitHub CLI | 是 | 以参数数组直接调用 APP 内置官方 gh，不经过 shell。支持 repo、pr、issue、run、release、api 等命令；关闭交互提示，禁止通过参数传入或读取令牌，远程调用需授权。 | `controlsDevice` | `arguments`* (array), `workingDirectory` (string), `timeoutSeconds` (integer；默认=300；最小=5；最大=3600) |
-| `vibekits.github.cli_inspect` | `github__cli_inspect` | 检查内置 GitHub CLI | 是 | 只读返回 APP 内置官方 gh 的版本、平台和运行时路径；不依赖系统 PATH。 | `readOnly` | `{}` |
-| `vibekits.github.diagnose` | `github__diagnose` | GitHub 网络诊断 | 是 | 并行检查 DNS、TLS、HTTPS、SSH 端口、代理和 hosts，只读不改系统。 | `readOnly` | `{}` |
-| `vibekits.github.proxy_apply` | `github__proxy_apply` | 应用 GitHub 专用代理 | 是 | 只修改 http.https://github.com.proxy；随后真实 ls-remote，失败自动恢复旧值。 | `writesData` | `planId`* (string), `digest`* (string) |
-| `vibekits.github.proxy_candidates` | `github__proxy_candidates` | 发现 GitHub 代理候选 | 是 | 只读发现 Mihomo/Clash 的真实回环监听端口，不读取订阅、节点或配置正文。 | `readOnly` | `{}` |
-| `vibekits.github.proxy_plan` | `github__proxy_plan` | 预览 GitHub 专用代理 | 是 | 读取现有 host-scoped Git 配置，生成带旧值、摘要、到期时间和回滚动作的短期计划。 | `readOnly` | `candidateId`* (string) |
-| `vibekits.github.proxy_rollback` | `github__proxy_rollback` | 恢复 GitHub 代理旧值 | 是 | 按计划保存的原值精确恢复 GitHub host-scoped Git 代理。 | `writesData` | `planId`* (string), `digest`* (string) |
-| `vibekits.http.request` | `http__request` | 发送 HTTP 请求 | 是 | 发送有界 HTTP 请求并返回状态、响应头和正文；所有请求均需确认目标。 | `controlsDevice` | `method`* (string；枚举=GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), `url`* (string), `headers` (object), `body` (string) |
-| `vibekits.http_status_lookup` | `http_status_lookup` | HTTP 状态码查询 | 是 | 查询常见 HTTP 状态码名称和类别。 适合：需要确定、离线地完成HTTP 状态码查询时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用HTTP 状态码查询处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.mime_lookup` | `mime_lookup` | MIME 类型查询 | 是 | 按文件扩展名查询常见 MIME 类型。 适合：需要确定、离线地完成MIME 类型查询时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用MIME 类型查询处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.proxy.start` | `proxy__start` | 启动 Clash Verge 内核 | 是 | 使用用户明确选择的 YAML 配置启动内置 Mihomo；不自动修改系统代理或 TUN。 | `controlsDevice` | `configPath`* (string), `dataDirectory`* (string), `systemProxyPort` (integer；最小=1；最大=65535) |
-| `vibekits.proxy.stop` | `proxy__stop` | 停止 Clash Verge 内核 | 是 | 停止由 Vibekits 启动的 Mihomo 子进程。 | `controlsDevice` | `dataDirectory` (string) |
-| `vibekits.proxy.system_apply` | `proxy__system_apply` | 启用 Windows 系统代理 | 是 | 保存当前用户代理后，把 Windows 系统代理切换到本机 Mihomo 端口；可由恢复工具还原。 | `controlsDevice` | `port`* (integer；最小=1；最大=65535), `dataDirectory`* (string) |
-| `vibekits.proxy.system_restore` | `proxy__system_restore` | 恢复 Windows 原系统代理 | 是 | 从 Vibekits 备份恢复启用代理前的 Windows 用户代理设置。 | `controlsDevice` | `dataDirectory`* (string) |
-| `vibekits.query_build` | `query_build` | 查询参数生成 | 是 | 把 JSON 对象编码为 URL query string。 适合：需要确定、离线地完成查询参数生成时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用查询参数生成处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.query_parse` | `query_parse` | 查询参数解析 | 是 | 把 URL query string 解析为保留重复键的 JSON。 适合：需要确定、离线地完成查询参数解析时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用查询参数解析处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.runtime.inspect` | `runtime__inspect` | 检查代理与虚拟机运行时 | 是 | 只读检查 Vibekits 发布包中的 Mihomo 与 QEMU 版本和绝对路径。 | `readOnly` | `{}` |
-| `vibekits.runtime.status` | `runtime__status` | 读取代理与虚拟机状态 | 是 | 只读返回 Mihomo/QEMU 运行状态、进程号和有界日志。 | `readOnly` | `{}` |
-| `vibekits.tcp_port` | `tcp_port` | TCP 端口测试 | 是 | 测试 host:port 是否可连接。 适合：用户明确需要“TCP 端口测试”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.url_parse` | `url_parse` | URL 分解 | 是 | 分解 URL 为 scheme/host/port/path/query/fragment。 适合：用户明确需要“URL 分解”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
 ## 智能开发（定义 7）
 

@@ -1484,3 +1484,11 @@
 - 官方 Harness 集成测试新增独立 `harnessHomeDirectory`，测试只使用 D 盘临时配置，不再污染或依赖用户真实 Harness profile；ADB 与清理 UI 用例改为验证真实懒加载/清理后容量变化，不再依赖脆弱文本位置。
 - Windows 验收：Analyze 0 issue；顺序全量测试 684 通过、14 个真实设备/联网环境门禁跳过、0 失败；Debug 自包含构建通过，包内 Git 2.55.0.windows.3、GitHub CLI 2.100.0 和 33 项运行时验证通过。Release 候选因正在运行的 dev.157 进程锁定而未覆盖。
 - 设计、接口、验收步骤见 `docs/60_GITHUB_CLI_HARNESS_MCP_API.md`、`docs/61_UNIFIED_AGENT_CLI_HARNESS_MCP_STANDARD.md`；实测证据见 `docs/acceptance/V1_9_0_DEV158_CLI_MCP_2026-09-06.md`。
+
+# 2026-09-06 · dev.158 网络带宽测速与关于页完整能力清单
+
+- 开发工具新增“网络测速（Speed Test）”，Windows 与 macOS 共用同一 Flutter 服务和界面。默认使用公开测速节点，依次执行 5 次延迟、100 KB/1 MB/5 MB 渐进下载、100 KB/500 KB/2 MB 渐进上传。
+- 结果展示延迟中位数、抖动（绝对偏差中位数）、下载 P90 和上传 P90；运行中显示阶段、进度、实时 Mbps，并可随时停止。上传内容仅为内存生成的空白测试字节，不读取或发送用户文件、项目、凭据。
+- “关于我们”改为由 `SupportedFileTypes` 和 `allDevToolRegistry` 生成能力全景、格式分类和全部工具明细；不再维护容易过期的手写宣传清单，并明确 VibeKits 不发明私有文档后缀。
+- Harness 发起网络测速时按 `controlsDevice` 风险请求确认，避免智能体未经用户同意产生公网流量；用户直接点击“开始测速”本身即为本次明确操作。
+- 版本保持统一的 `1.9.0-dev.158+2158`，与同版本 GitHub CLI/统一智能体 CLI MCP 合并交付；LMCP `appVersion`、`catalogRevision` 与 Windows Release 门禁一致。测速专项联合回归 70 项通过、1 项环境跳过；正式双平台流水线结果另行记录。

@@ -5165,7 +5165,8 @@ class VibekitsHarnessToolBridge {
     'batch_rename' || 'duplicate_files' => HarnessToolRisk.writesData,
     'serial_port' ||
     'adb_workspace' ||
-    'remote_workspace' => HarnessToolRisk.controlsDevice,
+    'remote_workspace' ||
+    'network_speed' => HarnessToolRisk.controlsDevice,
     _ => HarnessToolRisk.readOnly,
   };
 
