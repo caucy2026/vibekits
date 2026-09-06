@@ -52,6 +52,10 @@ jobs:
         shell: pwsh
         run: .\tool\prepare_git_runtime.ps1
 
+      - name: Prepare pinned Windows GitHub CLI runtime
+        shell: pwsh
+        run: .\tool\prepare_github_cli_runtime.ps1
+
       - name: Prepare pinned Windows Mihomo runtime
         shell: pwsh
         run: .\tool\prepare_mihomo_runtime.ps1
