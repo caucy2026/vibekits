@@ -1495,3 +1495,4 @@
 - 首轮 Windows 云端流水线被固定 GeoData 哈希门禁拦截；核对 MetaCubeX 官方 2026-09-06 Release API 的资产摘要后，同步更新 `Country.mmdb`、`geoip.dat`、`geosite.dat` 三项 SHA-256，保留逐文件强校验，不使用跳过警告或关闭门禁的方式发布。
 - 首轮 macOS 云端流水线在 Release 打包阶段发现新加入的 GitHub CLI 已有准备脚本和包内验证，但 workflow 未执行准备步骤。现把 Universal GitHub CLI runtime 加入独立准备门禁与缓存键，避免本地残留掩盖干净 runner 缺件。
 - Windows 在完成 Analyze、Harness/MCP/共享 UI 测试和 Release EXE 编译后，也由包完整性门禁发现 `gh.exe` 未进入产物；根因同样是 workflow 有准备脚本但漏调。现增加独立 Windows GitHub CLI 准备步骤，仍由 CMake 打包及 `verify_windows_bundle.ps1` 双重核验。
+- macOS 干净 runner 首次执行新增准备步骤时进一步发现脚本文件模式为 `100644`；workflow 改为显式使用 `bash` 执行，使行为不依赖 checkout 后的可执行位，同时不改动跨平台工具文件而打断正在运行的 Windows 流水线。

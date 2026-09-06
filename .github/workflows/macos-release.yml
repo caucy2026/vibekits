@@ -95,7 +95,7 @@ jobs:
         run: |
           if [[ ! -x native/github_cli/macos/runtime/bin/gh || \
                 ! -f native/github_cli/macos/runtime/vibekits-github-cli-runtime.json ]]; then
-            ./tool/prepare_github_cli_runtime_macos.sh
+            bash ./tool/prepare_github_cli_runtime_macos.sh
           fi
           test -x native/github_cli/macos/runtime/bin/gh
           native/github_cli/macos/runtime/bin/gh --version | head -n 1
