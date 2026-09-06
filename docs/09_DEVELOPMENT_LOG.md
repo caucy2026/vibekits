@@ -1493,3 +1493,4 @@
 - Harness 发起网络测速时按 `controlsDevice` 风险请求确认，避免智能体未经用户同意产生公网流量；用户直接点击“开始测速”本身即为本次明确操作。
 - 版本保持统一的 `1.9.0-dev.158+2158`，与同版本 GitHub CLI/统一智能体 CLI MCP 合并交付；LMCP `appVersion`、`catalogRevision` 与 Windows Release 门禁一致。测速专项联合回归 70 项通过、1 项环境跳过；正式双平台流水线结果另行记录。
 - 首轮 Windows 云端流水线被固定 GeoData 哈希门禁拦截；核对 MetaCubeX 官方 2026-09-06 Release API 的资产摘要后，同步更新 `Country.mmdb`、`geoip.dat`、`geosite.dat` 三项 SHA-256，保留逐文件强校验，不使用跳过警告或关闭门禁的方式发布。
+- 首轮 macOS 云端流水线在 Release 打包阶段发现新加入的 GitHub CLI 已有准备脚本和包内验证，但 workflow 未执行准备步骤。现把 Universal GitHub CLI runtime 加入独立准备门禁与缓存键，避免本地残留掩盖干净 runner 缺件。

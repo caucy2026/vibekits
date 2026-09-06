@@ -42,6 +42,7 @@ jobs:
             native/harness/macos/runtime
             native/7zip/macos/runtime
             native/git/macos/runtime
+            native/github_cli/macos/runtime
           key: >-
             vibekits-macos12-runtimes-v1-${{
             hashFiles('tool/prepare_harness_runtime_macos.sh',
@@ -49,7 +50,8 @@ jobs:
             'tool/list_harness_required_peers.mjs',
             'native/harness/*.mjs',
             'tool/prepare_7zip_runtime_macos.sh',
-            'tool/prepare_git_runtime_macos.sh') }}
+            'tool/prepare_git_runtime_macos.sh',
+            'tool/prepare_github_cli_runtime_macos.sh') }}
 
       - name: Prepare Universal Harness runtime
         shell: bash
@@ -87,6 +89,16 @@ jobs:
           fi
           test -x native/git/macos/runtime/bin/git
           test -x native/git/macos/runtime/libexec/git-core/git-remote-https
+
+      - name: Prepare Universal GitHub CLI runtime
+        shell: bash
+        run: |
+          if [[ ! -x native/github_cli/macos/runtime/bin/gh || \
+                ! -f native/github_cli/macos/runtime/vibekits-github-cli-runtime.json ]]; then
+            ./tool/prepare_github_cli_runtime_macos.sh
+          fi
+          test -x native/github_cli/macos/runtime/bin/gh
+          native/github_cli/macos/runtime/bin/gh --version | head -n 1
 
       - name: Analyze macOS platform integration
         run: >-
