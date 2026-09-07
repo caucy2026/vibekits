@@ -1508,3 +1508,4 @@
 - 关闭桌面端启动自更新：启动不再请求更新接口，不再弹出升级或自动下载；保留独立 `check()` 供未来经设计的手动入口使用。
 - 服务端误报 `has_update=true` 但返回版本不高于当前版本时，客户端稳定归为“当前已是最新版本”，不弹窗、不进入失败循环。
 - 版本同步到 `1.9.0-dev.159+2159`，LMCP `appVersion` 与 `catalogRevision=2159` 同步。
+- Windows 首轮 CI 被 GeoData 强校验正确拦截；对照 MetaCubeX 官方 2026-09-07 Release API 后，只更新已变化的 `geosite.dat` 固定 SHA-256 为 `7f42e9e1f08894bc03d7c18f129b1c3967d4a0f477937a981071354ae9262aa3`，`Country.mmdb` 与 `geoip.dat` 摘要保持不变；未关闭校验或忽略警告。
