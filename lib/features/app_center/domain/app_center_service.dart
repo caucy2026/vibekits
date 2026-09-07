@@ -6,6 +6,9 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../../app/app_update_service.dart';
+import '../../../app/app_version.dart';
+
 typedef AppCenterCatalogLoader =
     Future<AppCenterCatalog> Function({String? category, String keyword});
 typedef AppCenterEnvelopeLoader = Future<Object?> Function(Uri uri);
@@ -123,11 +126,15 @@ class AppCenterService {
     String? platformOverride,
     AppCenterCatalogLoader? loader,
     AppCenterEnvelopeLoader? envelopeLoader,
+    String currentPackageName = AppUpdateService.packageName,
+    int currentVersionCode = AppVersion.build,
   }) : _client = client ?? HttpClient(),
        _apiRoot = apiRoot,
        _platformOverride = platformOverride,
        _loader = loader,
-       _envelopeLoader = envelopeLoader;
+       _envelopeLoader = envelopeLoader,
+       _currentPackageName = currentPackageName,
+       _currentVersionCode = currentVersionCode;
 
   static const String _defaultApiRoot = 'https://kemi.newlinksz.com/kd-api';
 
@@ -136,6 +143,15 @@ class AppCenterService {
   final String? _platformOverride;
   final AppCenterCatalogLoader? _loader;
   final AppCenterEnvelopeLoader? _envelopeLoader;
+  final String _currentPackageName;
+  final int _currentVersionCode;
+
+  bool isCurrentVersion(AppCenterItem item) =>
+      item.packageName == _currentPackageName &&
+      item.versionCode <= _currentVersionCode;
+
+  bool canDownload(AppCenterItem item) =>
+      item.hasVerifiedInstaller && !isCurrentVersion(item);
 
   String? get platformName {
     if (_platformOverride != null) return _platformOverride;
@@ -196,6 +212,9 @@ class AppCenterService {
     ValueChanged<double>? onProgress,
   }) async {
     final String? os = platformName;
+    if (isCurrentVersion(item)) {
+      throw StateError('当前已是最新版本');
+    }
     if (os == null ||
         !item.supportsPlatform(os) ||
         !item.hasVerifiedInstaller) {

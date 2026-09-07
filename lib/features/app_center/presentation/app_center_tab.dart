@@ -372,6 +372,8 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   @override
   Widget build(BuildContext context) {
     final AppCenterItem item = widget.item;
+    final bool isCurrentVersion = widget.service.isCurrentVersion(item);
+    final bool canDownload = widget.service.canDownload(item);
     return AlertDialog(
       key: const Key('app-center-details'),
       title: Row(
@@ -419,6 +421,10 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 const SizedBox(height: 12),
                 const Text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'),
               ],
+              if (isCurrentVersion) ...<Widget>[
+                const SizedBox(height: 12),
+                const Text('当前已是最新版本，无需重复下载。'),
+              ],
               if (_progress != null) ...<Widget>[
                 const SizedBox(height: 16),
                 LinearProgressIndicator(value: _progress),
@@ -438,11 +444,13 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
         ),
         FilledButton.icon(
           key: const Key('app-center-install'),
-          onPressed: item.hasVerifiedInstaller && _progress == null
-              ? _install
-              : null,
-          icon: const Icon(Icons.download_rounded),
-          label: const Text('下载并安装'),
+          onPressed: canDownload && _progress == null ? _install : null,
+          icon: Icon(
+            isCurrentVersion
+                ? Icons.check_circle_outline
+                : Icons.download_rounded,
+          ),
+          label: Text(isCurrentVersion ? '已是最新版' : '下载并安装'),
         ),
       ],
     );

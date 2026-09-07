@@ -60,7 +60,6 @@ class AppUpdateService {
   final ValueNotifier<AppUpdateSnapshot> snapshot =
       ValueNotifier<AppUpdateSnapshot>(const AppUpdateSnapshot());
   _RemoteUpdate? _remote;
-  bool _started = false;
 
   static String? get platformName {
     if (Platform.isWindows) return 'windows';
@@ -68,10 +67,11 @@ class AppUpdateService {
     return null;
   }
 
+  /// Automatic startup checks are intentionally disabled. A future manual
+  /// update action may call [check] explicitly, but launching the app must not
+  /// contact the update service or display an update prompt.
   Future<void> start() async {
-    if (_started || (_platformOverride ?? platformName) == null) return;
-    _started = true;
-    await check();
+    return;
   }
 
   void dispose() {
@@ -113,6 +113,9 @@ class AppUpdateService {
       if (rawData is! Map<String, Object?>) {
         throw const FormatException('更新服务缺少 data');
       }
+      if (rawData['has_update'] is! bool) {
+        throw const FormatException('更新服务缺少有效 has_update');
+      }
       if (rawData['has_update'] != true) {
         _remote = null;
         snapshot.value = const AppUpdateSnapshot(
@@ -123,7 +126,12 @@ class AppUpdateService {
       }
       final _RemoteUpdate remote = _RemoteUpdate.fromJson(rawData, os: os);
       if (remote.versionCode <= AppVersion.build) {
-        throw const FormatException('更新版本号没有高于当前版本');
+        _remote = null;
+        snapshot.value = const AppUpdateSnapshot(
+          phase: AppUpdatePhase.current,
+          message: '当前已是最新版本',
+        );
+        return;
       }
       _remote = remote;
       snapshot.value = AppUpdateSnapshot(

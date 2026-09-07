@@ -73,6 +73,7 @@ void main() {
   testWidgets('应用中心显示平台、分类、应用详情和安全安装状态', (tester) async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
+      currentVersionCode: 1,
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[
           AppCenterCategory(name: '探索', isExplore: true),
@@ -103,6 +104,60 @@ void main() {
           .widget<FilledButton>(find.byKey(const Key('app-center-install')))
           .onPressed,
       isNotNull,
+    );
+  });
+
+  for (final String os in <String>['macos', 'windows']) {
+    testWidgets('$os 当前版本显示最新版且下载按钮不可点击', (tester) async {
+      final AppCenterService service = AppCenterService(
+        platformOverride: os,
+        currentVersionCode: 2159,
+        loader: ({category, keyword = ''}) async => AppCenterCatalog(
+          categories: const <AppCenterCategory>[],
+          apps: <AppCenterItem>[
+            AppCenterItem.fromJson(<String, Object?>{
+              ..._itemJson(os: os),
+              'version_code': 2159,
+            }),
+          ],
+          total: 1,
+        ),
+      );
+      addTearDown(service.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AppCenterTab(service: service)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('app-center-item-53')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('当前已是最新版本，无需重复下载。'), findsOneWidget);
+      expect(find.text('已是最新版'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('app-center-install')))
+            .onPressed,
+        isNull,
+      );
+    });
+  }
+
+  test('服务层拒绝重复下载当前版本', () async {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+      currentVersionCode: 2159,
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'macos'),
+      'version_code': 2159,
+    });
+
+    await expectLater(
+      service.downloadAndOpen(item),
+      throwsA(isA<StateError>()),
     );
   });
 }

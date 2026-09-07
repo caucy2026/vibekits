@@ -1501,3 +1501,10 @@
 - macOS 内层候选重新以 Developer ID 签名并完成 Apple 公证 `Accepted`（Submission ID `75b32bad-5ab5-4781-9402-95a51f3c2291`），最终公证后 ZIP 为 289,335,310 bytes、SHA-256 `39a57c120ad1a5a6026a0dfe4e3037f5c69d4091d8fcc6f1d90c485891e37e09`；隔离解包、staple、Gatekeeper、x86_64+arm64、macOS 12+ 和 CDN 回下载真实启动均通过。
 - Windows 最终 ZIP 为 299,209,367 bytes、SHA-256 `a3600a4329072b6cdc2623257aec92c83bd3ef21b5208b2a21e68410387b06dc`；192.168.3.58 的 D 盘隔离环境通过 33 项运行时门禁和三次进程级启动。本包 Authenticode 仍为 `NotSigned`，仅按负责人已接受的未签名测试包范围发布。
 - KEMI 商场既有 macOS `app_id=53` 与 Windows `app_id=54` 已免审更新到 dev.158/2158，保持上架且非强制更新。管理员唯一记录、公开平台列表、旧版可更新、当前版无更新以及 CDN 全量大小/SHA 均闭环；完整证据见 `docs/acceptance/V1_9_0_DEV158_MARKET_RELEASE_2026-09-06.md`。
+# 2026-09-07 · dev.159 应用中心当前版本门禁与关闭启动自更新
+
+- macOS/Windows 应用中心共用稳定包名与整数版本码比较；当市场中 VibeKits 版本不高于当前版本时，显示“已是最新版”并禁用下载。
+- 下载服务层增加相同门禁，防止绕过 UI 重复下载当前或更旧版本。
+- 关闭桌面端启动自更新：启动不再请求更新接口，不再弹出升级或自动下载；保留独立 `check()` 供未来经设计的手动入口使用。
+- 服务端误报 `has_update=true` 但返回版本不高于当前版本时，客户端稳定归为“当前已是最新版本”，不弹窗、不进入失败循环。
+- 版本同步到 `1.9.0-dev.159+2159`，LMCP `appVersion` 与 `catalogRevision=2159` 同步。
