@@ -1509,3 +1509,6 @@
 - 服务端误报 `has_update=true` 但返回版本不高于当前版本时，客户端稳定归为“当前已是最新版本”，不弹窗、不进入失败循环。
 - 版本同步到 `1.9.0-dev.159+2159`，LMCP `appVersion` 与 `catalogRevision=2159` 同步。
 - Windows 首轮 CI 被 GeoData 强校验正确拦截；对照 MetaCubeX 官方 2026-09-07 Release API 后，只更新已变化的 `geosite.dat` 固定 SHA-256 为 `7f42e9e1f08894bc03d7c18f129b1c3967d4a0f477937a981071354ae9262aa3`，`Country.mmdb` 与 `geoip.dat` 摘要保持不变；未关闭校验或忽略警告。
+- GitHub macOS run `34115703453` 与 Windows run `34115703573` 完整成功。macOS 最终 Universal/macOS 12+ 公证包 289,331,928 bytes、SHA-256 `93d6a4bc3677f7ec5379597bae2205a086abb50a9162e5b6c1ee0d06cc9e9bfd`，Apple 公证 `Accepted`（Submission ID `1ba3e8d4-8bcc-4cf8-931a-61e0359158ed`）；Windows 最终包 299,191,243 bytes、SHA-256 `24928b3741914ddf879df8c3bde3bdb71e9efc8a201cc482cc4c08428f5ea334`，在 192.168.3.58 / Windows 10.0.19045 的 D 盘隔离环境通过 33 项运行时门禁及三次启动，Authenticode 仍为 `NotSigned`。
+- KEMI 商场既有 macOS `app_id=53`、Windows `app_id=54` 已免审更新至 dev.159/2159，保持上架、可取消更新。公开详情与 CDN 回下载大小/SHA 完全一致；两端 2158→2159 返回可更新，两端当前 2159 均返回 `has_update=false` 且空下载 URL。本轮没有更新 Newlink Common。
+- 外部分发核对：Uptodown 账号登录返回用户名或密码错误，尚未形成提交；本机只有 Developer ID 站外分发证书，没有 Mac App Store 分发/安装证书、provisioning profile 或 App Store Connect API 密钥，因此 Apple 商店上传尚未开始。完整证据见 `docs/acceptance/V1_9_0_DEV159_MARKET_RELEASE_2026-09-07.md`。
