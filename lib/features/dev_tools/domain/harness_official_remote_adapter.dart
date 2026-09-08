@@ -122,7 +122,10 @@ class HarnessOfficialRemoteAdapter {
 
   /// WebSocket is a downlink only in official DSH; command traffic uses HTTP.
   /// No reconnect here: the session owner must resnapshot before resuming UI.
-  Stream<Map<String, dynamic>> events({bool host = false}) async* {
+  Stream<Map<String, dynamic>> events({
+    bool host = false,
+    void Function()? onConnected,
+  }) async* {
     if (_closed) throw StateError('REMOTE_ADAPTER_CLOSED');
     final uri = endpoint.replace(
       scheme: 'ws',
@@ -136,6 +139,7 @@ class HarnessOfficialRemoteAdapter {
     _sockets.add(socket);
     socket.pingInterval = const Duration(seconds: 20);
     try {
+      onConnected?.call();
       await for (final frame in socket) {
         if (frame is! String || utf8.encode(frame).length > maxFrameBytes) {
           throw const FormatException('Invalid official event frame');

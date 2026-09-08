@@ -60,5 +60,9 @@
 
 ## 外部分发状态
 
-- Uptodown 尚未提交审核：开发者后台仍停留在登录页，使用此前提供的 `caucy2002@163.com` 与密码登录时明确返回 `Username or password are incorrect`。因此不得标记为“审核中”或“已发布”。
+### 2026-09-08 后台实时复核
+
+已使用原有独立网站凭据成功登录 Uptodown。`Your Apps 2` 表格实际显示 VibeKits 与 KEMI Send，两项状态均为 `Pending revision`，Publication date 与 Last update 均为 `-`。这证明原有条目存在，但不能声称已正式上架。后续详情操作再次超时，尚未读取编辑意见；不据此推断需要重新提交。以下早前“实时状态待复核”记录已由本次表格证据更新。
+
+- Uptodown 状态更正（2026-09-08）：此前把邮箱授权码误用作网站密码，登录失败不能证明尚未注册或提交。历史会话记录显示原账号已创建并验证，Vibekits 应用 ID 为 `1000852511`，已上传安装包、图标和 3 张截图，历史界面曾显示“待修订”。已从原钥匙串记录找回独立网站凭据；当前浏览器操作超时，实时审核状态仍待复核。KEMI Send 也必须同时核查，不能将历史记录或登录尝试当作当前发布成功证据。凭据不得写入文档。
 - 本机现有 Apple 身份只有 `Developer ID Application: zhen ji (26T5WV4GLP)`，足够完成站外公证分发，但没有 Mac App Store 所需的商店分发/安装证书，没有 provisioning profile，也未发现 App Store Connect API `.p8` 密钥。Apple 商店上传尚未开始；需要在有效 Apple Developer/App Store Connect 团队中创建对应 App ID/记录并取得商店分发资产后，才能生成 Mac App Store 沙盒构建并提交审核。

@@ -14,6 +14,12 @@ import '../../dev_tools/domain/harness_startup_recovery.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_legacy_modules.dart';
+import '../../dev_tools/domain/harness_remote_controller_session.dart';
+import '../../dev_tools/domain/harness_remote_execution.dart';
+import '../../dev_tools/domain/harness_remote_host_runtime.dart';
+import '../../dev_tools/domain/harness_remote_identity.dart';
+import '../../dev_tools/domain/harness_remote_peer_store.dart';
+import '../../dev_tools/domain/harness_remote_pairing_service.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
@@ -26,6 +32,7 @@ import '../../dev_tools/domain/mcp_tool_reputation_store.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
+import '../../dev_tools/presentation/harness_remote_read_only_panel.dart';
 import 'mcp_exposure_consent_dialog.dart';
 import 'mcp_reputation_badge.dart';
 import 'harness_webview_bridge.dart';
@@ -125,6 +132,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Timer? _restartTimer;
   Timer? _stabilityTimer;
   bool _disposing = false;
+  final HarnessRemoteHostRuntime _remoteHostRuntime =
+      HarnessRemoteHostRuntime();
 
   @override
   void initState() {
@@ -382,6 +391,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           _startupRecovery.markStable();
         }
       });
+      unawaited(_startRemoteHost(session.url));
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.ready,
         message: 'Harness 已就绪',
@@ -459,6 +469,20 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _restartTimer?.cancel();
     _startupRecovery.markStable();
     unawaited(_start(retries: 2, preserveWebview: _webviewReady));
+  }
+
+  Future<void> _startRemoteHost(Uri endpoint) async {
+    try {
+      await HarnessRemotePairingHost.instance.start();
+      await _remoteHostRuntime.stop();
+      await _remoteHostRuntime.start(endpoint);
+    } on Object catch (error) {
+      // Remote assistance is optional and must not make the local Harness
+      // unusable. Preserve a bounded diagnostic for the user instead.
+      if (mounted) {
+        setState(() => _status = 'Harness 已就绪；远程协助监听未启动：$error');
+      }
+    }
   }
 
   static String _workspaceLabel(String workspace) {
@@ -1162,6 +1186,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _loadingStateSubscription?.cancel();
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
+    unawaited(_remoteHostRuntime.stop());
+    unawaited(HarnessRemotePairingHost.instance.stop());
     widget.onRunningChanged?.call(false);
     HarnessWorkStatusHub.publish(
       phase: HarnessWorkPhase.stopped,
@@ -1988,6 +2014,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         builder: (BuildContext context) => _HarnessRemoteShareDialog(
           configuredExecutable: widget.rustDeskExecutable,
           webClientUrl: widget.rustDeskWebClientUrl,
+          onPaired: () async {
+            final session = _session;
+            if (session != null) await _startRemoteHost(session.url);
+          },
         ),
       ),
     );
@@ -2359,10 +2389,12 @@ class _HarnessRemoteShareDialog extends StatefulWidget {
   const _HarnessRemoteShareDialog({
     required this.configuredExecutable,
     required this.webClientUrl,
+    required this.onPaired,
   });
 
   final String configuredExecutable;
   final String webClientUrl;
+  final Future<void> Function() onPaired;
 
   @override
   State<_HarnessRemoteShareDialog> createState() =>
@@ -2370,14 +2402,34 @@ class _HarnessRemoteShareDialog extends StatefulWidget {
 }
 
 class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
-  late final Future<RustDeskHostInfo> _host = _inspectHost();
+  late Future<RustDeskHostInfo> _host = _inspectHost();
+  late Future<List<RustDeskHarnessIncomingConnection>> _incoming =
+      _loadIncoming();
+  late Future<List<HarnessRemotePeer>> _rememberedPeers =
+      HarnessRemotePeerStore().load();
+  Timer? _incomingTimer;
+  final TextEditingController _remoteId = TextEditingController();
+  final TextEditingController _remoteWorkspaceId = TextEditingController();
+  bool _forceRelay = false;
+  bool _connecting = false;
   String _message = '';
-  String _resolvedWebClientUrl = '';
+  HarnessRemoteControllerSession? _remoteSession;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_resolveWebClientUrl());
+    _incomingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) setState(() => _incoming = _loadIncoming());
+    });
+  }
+
+  @override
+  void dispose() {
+    _incomingTimer?.cancel();
+    unawaited(_remoteSession?.close());
+    _remoteId.dispose();
+    _remoteWorkspaceId.dispose();
+    super.dispose();
   }
 
   Future<RustDeskHostInfo> _inspectHost() async {
@@ -2392,150 +2444,554 @@ class _HarnessRemoteShareDialogState extends State<_HarnessRemoteShareDialog> {
     return host;
   }
 
-  Future<void> _resolveWebClientUrl() async {
-    final String configured = widget.webClientUrl.trim();
-    final String resolved = configured.isNotEmpty
-        ? configured
-        : await RustDeskHarnessShareService.discoverWebClientUrl();
-    if (mounted) setState(() => _resolvedWebClientUrl = resolved);
+  Future<List<RustDeskHarnessIncomingConnection>> _loadIncoming() async {
+    final RustDeskHostInfo host = await _host;
+    if (!host.available || host.executable.isEmpty) return const [];
+    try {
+      return await RustDeskHarnessShareService.connections(host.executable);
+    } on Object {
+      return const [];
+    }
+  }
+
+  Future<void> _decide(
+    RustDeskHostInfo host,
+    RustDeskHarnessIncomingConnection connection,
+    bool allow,
+  ) async {
+    try {
+      await RustDeskHarnessShareService.decideConnection(
+        host.executable,
+        connectionId: connection.connectionId,
+        allow: allow,
+      );
+      if (!mounted) return;
+      setState(() {
+        _message = allow
+            ? '已允许 ${connection.peerName.isEmpty ? connection.peerId : connection.peerName} 本次连接'
+            : '已拒绝 ${connection.peerName.isEmpty ? connection.peerId : connection.peerName}';
+        _incoming = _loadIncoming();
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '授权操作失败：$error');
+    }
   }
 
   Future<void> _launchHost(RustDeskHostInfo host) async {
     try {
       await RustDeskHarnessShareService.launchHost(host.executable);
       RustDeskHarnessLinkStatusHub.clientFound();
-      if (mounted) setState(() => _message = 'KEMI远程办公已启动，等待状态协议连接');
+      if (mounted) {
+        setState(() {
+          _message = '独立 Harness 中继服务已启动，正在等待服务器确认 ID';
+          _host = _inspectHost();
+        });
+      }
     } on Object catch (error) {
       if (mounted) setState(() => _message = '启动失败：$error');
     }
   }
 
-  Future<void> _openWeb() async {
+  Future<void> _connectRemote(RustDeskHostInfo host) async {
+    if (_connecting) return;
+    setState(() {
+      _connecting = true;
+      _message = '正在建立 Harness ${_forceRelay ? '强制中继' : '直连/中继'}数据通道…';
+    });
     try {
-      await RustDeskHarnessShareService.openWebClient(_resolvedWebClientUrl);
-      if (mounted) setState(() => _message = '已打开KEMI远程办公网页端');
+      await _remoteSession?.close();
+      _remoteSession = null;
+      final routingId = _remoteId.text.trim();
+      final peers = await HarnessRemotePeerStore().load();
+      final matching = peers.where((peer) => peer.routingId == routingId);
+      HarnessRemotePeer peer;
+      if (matching.isEmpty || !matching.first.connectionReady) {
+        final workspaceId = _remoteWorkspaceId.text.trim();
+        if (workspaceId.isEmpty) {
+          throw StateError('REMOTE_PAIRING_REQUIRED：首次连接请输入执行端显示的工作区 ID');
+        }
+        if (!host.callable || host.id.isEmpty) {
+          throw StateError('本机 Harness ID 尚未完成中继注册，不能发起配对');
+        }
+        final approval = await HarnessRemotePairingClient().pair(
+          executable: host.executable,
+          localRoutingId: host.id,
+          remoteRoutingId: routingId,
+          requestedWorkspaceIds: <String>{workspaceId},
+          requestedOperations: HarnessRemoteExecution.sessionOperations,
+          forceRelay: _forceRelay,
+        );
+        peer = approval.controllerRecord(remembered: true);
+        _message = '首次配对完成，核对码 ${approval.comparisonCode}；正在建立正式通道';
+      } else {
+        peer = matching.first;
+      }
+      final session = await HarnessRemoteControllerSession.connect(
+        executable: host.executable,
+        peer: peer,
+        identity: await HarnessRemoteIdentityStore.instance.loadOrCreate(),
+        forceRelay: _forceRelay,
+        // The project/status projection is rendered directly from the model.
+        // Official conversation event injection remains a separate gate.
+        applyOfficialEvents: (_) async {},
+        restoreOfficialSnapshot: (_) async {},
+      );
+      if (!mounted) {
+        await session.close();
+        return;
+      }
+      setState(() {
+        _remoteSession = session;
+        _message = '端到端证书与 Harness hello 已通过，正在同步远端项目状态';
+      });
+      await HarnessRemotePeerStore().save(
+        peer.connectedNow(transport: _forceRelay ? 'relay' : 'direct'),
+      );
+      if (mounted) {
+        setState(() => _rememberedPeers = HarnessRemotePeerStore().load());
+      }
     } on Object catch (error) {
-      if (mounted) setState(() => _message = '打开失败：$error');
+      if (mounted) setState(() => _message = '连接失败：$error');
+    } finally {
+      if (mounted) setState(() => _connecting = false);
+    }
+  }
+
+  Future<void> _disconnectRemote() async {
+    final session = _remoteSession;
+    if (session == null) return;
+    setState(() {
+      _remoteSession = null;
+      _message = '正在断开 Harness 数据通道…';
+    });
+    await session.close();
+    RustDeskHarnessLinkStatusHub.disconnected();
+    if (mounted) setState(() => _message = 'Harness 数据通道已断开');
+  }
+
+  Future<void> _approvePairing(
+    RustDeskHostInfo host,
+    HarnessRemotePendingPairing pending,
+  ) async {
+    try {
+      final nativeConnections = await RustDeskHarnessShareService.connections(
+        host.executable,
+      );
+      final nativeAuthorized = nativeConnections.any(
+        (connection) =>
+            connection.peerId == pending.request.routingId &&
+            connection.authorized &&
+            !connection.disconnected,
+      );
+      if (!nativeAuthorized) {
+        throw StateError('PAIRING_NATIVE_CALLER_NOT_AUTHORIZED');
+      }
+      final approval = await HarnessRemotePairingHost.instance.approve(
+        nonce: pending.request.nonce,
+        hostRoutingId: host.id,
+        grantedWorkspaceIds: pending.request.requestedWorkspaceIds,
+        grantedOperations: pending.request.requestedOperations.intersection(
+          HarnessRemoteExecution.sessionOperations,
+        ),
+      );
+      await widget.onPaired();
+      if (mounted) {
+        setState(
+          () => _message =
+              '已持久授权 ${pending.request.routingId}；双方核对码 ${approval.comparisonCode}',
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '首次配对失败：$error');
+    }
+  }
+
+  Future<void> _forgetPeer(String routingId) async {
+    await HarnessRemotePeerStore().forget(routingId);
+    if (_remoteSession?.peer.routingId == routingId) {
+      await _disconnectRemote();
+    }
+    if (mounted) {
+      setState(() {
+        _rememberedPeers = HarnessRemotePeerStore().load();
+        _message = '已从本机连接历史移除 $routingId；执行端授权需在执行端撤销';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Harness 远程分享'),
+    title: const Text('Harness 远程协助'),
     content: SizedBox(
       width: 520,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          StreamBuilder<HarnessWorkSnapshot>(
-            stream: HarnessWorkStatusHub.changes,
-            initialData: HarnessWorkStatusHub.latest,
-            builder:
-                (
-                  BuildContext context,
-                  AsyncSnapshot<HarnessWorkSnapshot> snapshot,
-                ) {
-                  final HarnessWorkSnapshot status =
-                      snapshot.data ?? HarnessWorkStatusHub.latest;
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      status.busy ? Icons.sync_rounded : Icons.task_alt_rounded,
-                    ),
-                    title: Text(status.message),
-                    subtitle: Text(
-                      status.target.isEmpty ? '只分享阶段、工具名和脱敏目标' : status.target,
-                    ),
-                  );
-                },
-          ),
-          const Divider(),
-          StreamBuilder<RustDeskHarnessLinkSnapshot>(
-            stream: RustDeskHarnessLinkStatusHub.changes,
-            initialData: RustDeskHarnessLinkStatusHub.latest,
-            builder:
-                (
-                  BuildContext context,
-                  AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
-                ) {
-                  final RustDeskHarnessLinkSnapshot link =
-                      snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    leading: Icon(
-                      link.connected
-                          ? Icons.check_circle_rounded
-                          : Icons.radio_button_unchecked_rounded,
-                      color: link.connected
-                          ? const Color(0xFF16845B)
-                          : Theme.of(context).colorScheme.outline,
-                    ),
-                    title: Text(link.message),
-                    subtitle: const Text('只有完成本机协议握手且心跳有效才显示已连接'),
-                  );
-                },
-          ),
-          const Divider(),
-          FutureBuilder<RustDeskHostInfo>(
-            future: _host,
-            builder:
-                (
-                  BuildContext context,
-                  AsyncSnapshot<RustDeskHostInfo> snapshot,
-                ) {
-                  if (!snapshot.hasData) {
-                    return const LinearProgressIndicator();
-                  }
-                  final RustDeskHostInfo host = snapshot.data!;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SelectableText(host.message),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: <Widget>[
-                          FilledButton.icon(
-                            onPressed: host.available
-                                ? () => _launchHost(host)
-                                : null,
-                            icon: const Icon(Icons.desktop_windows_outlined),
-                            label: const Text('启动KEMI远程办公'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _resolvedWebClientUrl.isEmpty
-                                ? null
-                                : _openWeb,
-                            icon: const Icon(Icons.open_in_browser_outlined),
-                            label: const Text('打开网页端'),
-                          ),
-                        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            StreamBuilder<HarnessWorkSnapshot>(
+              stream: HarnessWorkStatusHub.changes,
+              initialData: HarnessWorkStatusHub.latest,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<HarnessWorkSnapshot> snapshot,
+                  ) {
+                    final HarnessWorkSnapshot status =
+                        snapshot.data ?? HarnessWorkStatusHub.latest;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        status.busy
+                            ? Icons.sync_rounded
+                            : Icons.task_alt_rounded,
                       ),
-                      if (_resolvedWebClientUrl.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 8),
-                        SelectableText(
-                          '网页端：$_resolvedWebClientUrl',
-                          style: const TextStyle(fontSize: 11),
+                      title: Text(status.message),
+                      subtitle: Text(
+                        status.target.isEmpty
+                            ? '只分享阶段、工具名和脱敏目标'
+                            : status.target,
+                      ),
+                    );
+                  },
+            ),
+            const Divider(),
+            StreamBuilder<RustDeskHarnessLinkSnapshot>(
+              stream: RustDeskHarnessLinkStatusHub.changes,
+              initialData: RustDeskHarnessLinkStatusHub.latest,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
+                  ) {
+                    final RustDeskHarnessLinkSnapshot link =
+                        snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      leading: Icon(
+                        link.connected
+                            ? Icons.check_circle_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: link.connected
+                            ? const Color(0xFF16845B)
+                            : Theme.of(context).colorScheme.outline,
+                      ),
+                      title: Text(link.message),
+                      subtitle: const Text('只有完成本机协议握手且心跳有效才显示已连接'),
+                    );
+                  },
+            ),
+            const Divider(),
+            FutureBuilder<RustDeskHostInfo>(
+              future: _host,
+              builder: (BuildContext context, AsyncSnapshot<RustDeskHostInfo> snapshot) {
+                if (!snapshot.hasData) {
+                  return const LinearProgressIndicator();
+                }
+                final RustDeskHostInfo host = snapshot.data!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    SelectableText(host.message),
+                    if (host.id.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        host.id,
+                        key: const Key('harness-relay-routing-id'),
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        FilledButton.icon(
+                          onPressed: host.available
+                              ? () => _launchHost(host)
+                              : null,
+                          icon: const Icon(Icons.hub_outlined),
+                          label: const Text('启动 Harness 中继'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: host.callable && host.id.isNotEmpty
+                              ? () async {
+                                  await Clipboard.setData(
+                                    ClipboardData(text: host.id),
+                                  );
+                                  if (mounted) {
+                                    setState(
+                                      () => _message = '已复制 Harness 本机 ID',
+                                    );
+                                  }
+                                }
+                              : null,
+                          icon: const Icon(Icons.copy_rounded),
+                          label: const Text('复制本机 ID'),
+                        ),
+                        IconButton(
+                          tooltip: '刷新中继注册状态',
+                          onPressed: () => setState(() {
+                            _host = _inspectHost();
+                          }),
+                          icon: const Icon(Icons.refresh_rounded),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    FutureBuilder<List<RustDeskHarnessIncomingConnection>>(
+                      future: _incoming,
+                      builder: (BuildContext context, snapshot) {
+                        final connections =
+                            snapshot.data ??
+                            const <RustDeskHarnessIncomingConnection>[];
+                        final pending = connections
+                            .where(
+                              (connection) =>
+                                  !connection.authorized &&
+                                  !connection.disconnected,
+                            )
+                            .toList();
+                        if (pending.isEmpty) {
+                          return const Text(
+                            '当前没有等待确认的连接。首次连接必须在这里明确允许；不使用默认固定密码。',
+                            style: TextStyle(fontSize: 12),
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              '等待授权',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            for (final connection in pending)
+                              ListTile(
+                                key: Key(
+                                  'harness-remote-approval-${connection.connectionId}',
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  connection.peerName.isEmpty
+                                      ? connection.peerId
+                                      : connection.peerName,
+                                ),
+                                subtitle: Text('调用方 ID：${connection.peerId}'),
+                                trailing: Wrap(
+                                  spacing: 6,
+                                  children: <Widget>[
+                                    TextButton(
+                                      onPressed: () =>
+                                          _decide(host, connection, false),
+                                      child: const Text('拒绝'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          _decide(host, connection, true),
+                                      child: const Text('允许本次连接'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    StreamBuilder<List<HarnessRemotePendingPairing>>(
+                      stream: HarnessRemotePairingHost.instance.changes,
+                      initialData: HarnessRemotePairingHost.instance.pending,
+                      builder: (context, snapshot) {
+                        final rows = snapshot.data ?? const [];
+                        if (rows.isEmpty) return const SizedBox.shrink();
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const SizedBox(height: 10),
+                            Text(
+                              '首次证书配对',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            for (final pending in rows)
+                              ListTile(
+                                key: Key(
+                                  'harness-pairing-${pending.request.nonce}',
+                                ),
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('调用方 ${pending.request.routingId}'),
+                                subtitle: Text(
+                                  '工作区：${pending.request.requestedWorkspaceIds.join(', ')}\n'
+                                  '证书：${pending.request.certificateSha256.substring(0, 16)}…',
+                                ),
+                                trailing: Wrap(
+                                  spacing: 6,
+                                  children: <Widget>[
+                                    TextButton(
+                                      onPressed: () => unawaited(
+                                        HarnessRemotePairingHost.instance
+                                            .reject(pending.request.nonce),
+                                      ),
+                                      child: const Text('拒绝'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          _approvePairing(host, pending),
+                                      child: const Text('确认并记住'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    FutureBuilder<List<HarnessRemotePeer>>(
+                      future: _rememberedPeers,
+                      builder: (context, snapshot) {
+                        final peers = snapshot.data ?? const [];
+                        if (peers.isEmpty) return const SizedBox.shrink();
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            const SizedBox(height: 10),
+                            Text(
+                              '已配对设备',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            for (final peer in peers)
+                              ListTile(
+                                key: Key('harness-peer-${peer.routingId}'),
+                                contentPadding: EdgeInsets.zero,
+                                onTap: () {
+                                  _remoteId.text = peer.routingId;
+                                  setState(
+                                    () => _message =
+                                        '已选择 ${peer.routingId}，可直接重新连接',
+                                  );
+                                },
+                                leading: const Icon(Icons.devices_rounded),
+                                title: Text(peer.routingId),
+                                subtitle: Text(
+                                  '${peer.lastTransport == 'relay' ? '中继' : '直连'} · '
+                                  '${peer.workspaceIds.length} 个工作区 · '
+                                  '${peer.lastConnectedAt.toLocal()}',
+                                ),
+                                trailing: IconButton(
+                                  tooltip: '从本机历史移除',
+                                  onPressed: () => _forgetPeer(peer.routingId),
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      '连接另一台 Harness',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: TextField(
+                            key: const Key('harness-remote-peer-id'),
+                            controller: _remoteId,
+                            enabled: host.available && !_connecting,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: '对方 Harness ID',
+                              hintText: '输入 6～16 位数字 ID',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          key: const Key('harness-remote-connect'),
+                          onPressed: host.available && !_connecting
+                              ? () => _connectRemote(host)
+                              : null,
+                          icon: _connecting
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.link_rounded),
+                          label: const Text('连接'),
+                        ),
+                        if (_remoteSession != null) ...<Widget>[
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            key: const Key('harness-remote-disconnect'),
+                            onPressed: _disconnectRemote,
+                            icon: const Icon(Icons.link_off_rounded),
+                            label: const Text('断开'),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      key: const Key('harness-remote-workspace-id'),
+                      controller: _remoteWorkspaceId,
+                      enabled: !_connecting,
+                      decoration: const InputDecoration(
+                        labelText: '首次配对的远端工作区 ID',
+                        helperText: '仅首次连接需要；执行端将再次显示并确认这个最小授权范围',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: _forceRelay,
+                      onChanged: _connecting
+                          ? null
+                          : (bool? value) =>
+                                setState(() => _forceRelay = value ?? false),
+                      title: const Text('强制经 HBBS/HBBR 中继验收'),
+                      subtitle: const Text('默认先尝试点对点，失败自动走中继；此选项用于验证纯中继路径。'),
+                    ),
+                    if (_remoteSession != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 280,
+                        child: HarnessRemoteReadOnlyPanel(
+                          peerRoutingId: _remoteSession!.peer.routingId,
+                          model: _remoteSession!.model,
+                          onDisconnect: () => unawaited(_disconnectRemote()),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      HarnessRemoteCommandPanel(
+                        model: _remoteSession!.model,
+                        client: _remoteSession!.client,
+                        allowedOperations: _remoteSession!.peer.operations,
+                      ),
                     ],
-                  );
-                },
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'KEMI远程办公底层兼容 RustDesk，通过 hbbs/hbbr 查看并操作本机 Vibekits。'
-            'hbbr 不是通用 JSON 中继，因此不会把 API Key、提示词或文件正文发送给它。',
-            style: TextStyle(fontSize: 12),
-          ),
-          if (_message.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(_message),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '本机 ID 来自独立 Harness 网络身份，必须经过 hbbs 注册确认。连接优先直连，'
+              '失败时由 hbbr 原样中继端到端加密的 Harness 协议；它不复用远程桌面 ID、密码或历史，'
+              '也不传输桌面视频。',
+              style: TextStyle(fontSize: 12),
+            ),
+            if (_message.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(_message),
+            ],
           ],
-        ],
+        ),
       ),
     ),
     actions: <Widget>[

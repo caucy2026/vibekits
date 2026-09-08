@@ -1,7 +1,23 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
+
+final class _FakeManagedProcess implements RustDeskManagedProcess {
+  final _exit = Completer<int>();
+  bool terminated = false;
+
+  @override
+  Future<int> get exitCode => _exit.future;
+
+  @override
+  bool terminate() {
+    terminated = true;
+    if (!_exit.isCompleted) _exit.complete(0);
+    return true;
+  }
+}
 
 void main() {
   test('RustDesk 网页端只接受无凭据 HTTP/HTTPS 地址', () {
@@ -43,7 +59,7 @@ void main() {
     );
   });
 
-  test('RustDesk 真实路径通过官方 get-id 读取设备 ID', () async {
+  test('仅显示中继服务器确认后的独立 Harness 设备 ID', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_test_',
     );
@@ -57,13 +73,44 @@ void main() {
       configuredExecutable: executable.path,
       runner: (String path, List<String> arguments) async {
         expect(path, executable.path);
-        expect(arguments, const <String>['--get-id']);
-        return ProcessResult(1, 0, '123456789', '');
+        expect(arguments, const <String>['--vibekits-harness-status']);
+        return ProcessResult(
+          1,
+          0,
+          '{"routingId":"1234567890","callable":true,'
+              '"rendezvousOnline":true,'
+              '"registrationKeyConfirmed":true,"state":"registered"}',
+          '',
+        );
       },
     );
     expect(info.available, isTrue);
-    expect(info.id, '123456789');
-    expect(info.message, 'KEMI办公 ID：123456789');
+    expect(info.id, '1234567890');
+    expect(info.callable, isTrue);
+    expect(info.message, contains('中继服务已确认'));
+  });
+
+  test('候选 ID 未获服务器确认时不可呼叫', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_pending_',
+    );
+    final File executable = File('${temporary.path}/RustDesk');
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final RustDeskHostInfo info = await RustDeskHarnessShareService.inspect(
+      configuredExecutable: executable.path,
+      runner: (_, __) async => ProcessResult(
+        1,
+        0,
+        '{"routingId":"1234567890","callable":false,'
+            '"rendezvousOnline":true,'
+            '"registrationKeyConfirmed":false,'
+            '"state":"registration_pending"}',
+        '',
+      ),
+    );
+    expect(info.callable, isFalse);
+    expect(info.message, contains('正在向中继服务器注册'));
   });
 
   test('启动 RustDesk 使用参数数组且不经过 shell', () async {
@@ -80,9 +127,125 @@ void main() {
       executable.path,
       launcher: (String path, List<String> arguments) async {
         launched = path;
-        expect(arguments, isEmpty);
+        expect(arguments, const <String>['--vibekits-harness-service']);
       },
     );
     expect(launched, executable.path);
+  });
+
+  test('Harness 隧道使用独立数字 ID 和固定回环目标', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_harness_tunnel_',
+    );
+    final File executable = File('${temporary.path}/HarnessRelay');
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    await RustDeskHarnessShareService.launchTunnel(
+      executable.path,
+      routingId: '1554650784',
+      localPort: 32147,
+      forceRelay: true,
+      launcher: (String path, List<String> arguments) async {
+        expect(path, executable.path);
+        expect(arguments, const <String>[
+          '--vibekits-harness-tunnel',
+          '1554650784',
+          '32147',
+          '127.0.0.1',
+          '32146',
+          '--relay',
+        ]);
+      },
+    );
+  });
+
+  test('受管 Harness 隧道可由 UI 可靠断开且幂等', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_harness_managed_tunnel_',
+    );
+    final File executable = File('${temporary.path}/HarnessRelay');
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final process = _FakeManagedProcess();
+    final lease = await RustDeskHarnessShareService.openTunnel(
+      executable.path,
+      routingId: '1554650784',
+      localPort: 32147,
+      launcher: (path, arguments) async {
+        expect(path, executable.path);
+        expect(arguments, const <String>[
+          '--vibekits-harness-tunnel',
+          '1554650784',
+          '32147',
+          '127.0.0.1',
+          '32146',
+        ]);
+        return process;
+      },
+    );
+    expect(lease.closed, isFalse);
+    await lease.close();
+    await lease.close();
+    expect(lease.closed, isTrue);
+    expect(process.terminated, isTrue);
+    expect(await lease.exitCode, 0);
+  });
+
+  test('Harness 隧道拒绝桌面 ID 文本和特权端口', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_harness_tunnel_invalid_',
+    );
+    final File executable = File('${temporary.path}/HarnessRelay');
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    expect(
+      () => RustDeskHarnessShareService.launchTunnel(
+        executable.path,
+        routingId: 'VH-ABC',
+        localPort: 32147,
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => RustDeskHarnessShareService.launchTunnel(
+        executable.path,
+        routingId: '1554650784',
+        localPort: 80,
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('读取等待授权连接并按 connectionId 明确允许', () async {
+    final calls = <List<String>>[];
+    Future<ProcessResult> runner(String _, List<String> arguments) async {
+      calls.add(arguments);
+      return ProcessResult(
+        1,
+        0,
+        '{"ok":true,"state":"awaiting_approval","connections":['
+            '{"connectionId":17,"peerId":"1554000001",'
+            '"peerName":"Harness B","authorized":false,'
+            '"disconnected":false}]}',
+        '',
+      );
+    }
+
+    final connections = await RustDeskHarnessShareService.connections(
+      '/Harness',
+      runner: runner,
+    );
+    expect(connections.single.peerName, 'Harness B');
+    expect(connections.single.authorized, isFalse);
+    await RustDeskHarnessShareService.decideConnection(
+      '/Harness',
+      connectionId: 17,
+      allow: true,
+      runner: runner,
+    );
+    expect(calls, [
+      ['--vibekits-harness-connections'],
+      ['--vibekits-harness-authorize', '17'],
+    ]);
   });
 }

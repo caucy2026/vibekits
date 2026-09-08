@@ -1,5 +1,15 @@
 # Vibekits 开发日志
 
+## 2026-09-08 · 1.9.0-dev.163+2163 · Harness 独立 ID 与中继入口
+
+- Harness 远程协助网络层使用独立 `VibekitsHarness` 配置/IPC 命名空间和持久数字路由 ID；真实 HBBS `kemi-chat.newlinksz.com:21116` 已确认 ID `1554650784` 在线、注册公钥确认且停止重启不漂移，不复用 KEMI 远程办公 ID。
+- 执行端增加无桌面连接授权 IPC，远程分享面板逐次显示调用方 ID/名称并提供“拒绝/允许本次连接”；只接受目标为 `127.0.0.1/localhost` 的 Harness 端口转发，桌面、文件、终端及任意 LAN 代理均拒绝，没有产品默认密码。
+- 控制端增加对方数字 Harness ID 输入、默认直连/失败自动 HBBR、强制中继验收开关；隧道固定转发到执行端回环 `32146`，命令用参数数组启动、不经过 shell。端口转发启动不等于连接成功，证书、授权、hello、心跳与快照全部通过后才可显示在线。
+- 只读同步已实现协议版本协商、connectionId 心跳、项目级 phase/busy 投影、断线保留过期内容和重连快照门禁；13 项中继/mTLS/同步/UI 定向测试通过，静态分析 0 issue。
+- 补齐首次配对与控制闭环：回环配对端口 `32145` 只有在 RustDesk 原生调用方已授权且 routingId 一致时才允许确认；双端交换公开证书、一次性 nonce 与六位核对码，证书/身份不一致或扩大 workspace/operation 均失败关闭。授权存储升级 v2，旧的仅指纹记录必须重新配对。
+- 端口转发升级为受管 lease，关闭窗口、主动断开或失败都会终止对应原生进程；已配对连接按“RustDesk → mTLS → hello → 官方快照”进入在线。远程面板已接入项目/会话、stale、发送、反馈、独立停止和断开，低并发远程协助及主 UI 回归 `46/46` 通过。
+- 发现当前分支仍为 dev.160，而并行快照已使用 dev.162；为避免版本倒退，本轮统一提升到 dev.163+2163。拒收并恢复构建机镜像源造成的锁文件漂移后，按 Git 锁定依赖重新构建 macOS 候选成功（769.6 MB）；Info.plist、AppVersion 与 LMCP revision 一致，主程序 `arm64+x86_64`、两切片最低 macOS 12.0，完整随包工具兼容检查和 ad-hoc 深度验签通过。Android 63 尚未内置独立 Harness 网络引擎，当前钥匙串也没有 Developer ID 身份；双机真机与正式发布仍是阻断门禁。
+
 ## 2026-09-07 · 1.9.0-dev.159+2159 · Release 内置 KEMI S1 硬件调试技能
 
 - 将 `kemi-s1-hardware-debug` 作为 Harness 正式内置技能纳入 Windows 与 macOS runtime；随包包含 `SKILL.md`、界面元数据、S1 串口/ADB 参数和 HiV730 Git 路由文档，不再依赖构建机的 `CODEX_HOME`、用户预装技能或系统盘残留文件。
@@ -1518,4 +1528,13 @@
 - Windows 首轮 CI 被 GeoData 强校验正确拦截；对照 MetaCubeX 官方 2026-09-07 Release API 后，只更新已变化的 `geosite.dat` 固定 SHA-256 为 `7f42e9e1f08894bc03d7c18f129b1c3967d4a0f477937a981071354ae9262aa3`，`Country.mmdb` 与 `geoip.dat` 摘要保持不变；未关闭校验或忽略警告。
 - GitHub macOS run `34115703453` 与 Windows run `34115703573` 完整成功。macOS 最终 Universal/macOS 12+ 公证包 289,331,928 bytes、SHA-256 `93d6a4bc3677f7ec5379597bae2205a086abb50a9162e5b6c1ee0d06cc9e9bfd`，Apple 公证 `Accepted`（Submission ID `1ba3e8d4-8bcc-4cf8-931a-61e0359158ed`）；Windows 最终包 299,191,243 bytes、SHA-256 `24928b3741914ddf879df8c3bde3bdb71e9efc8a201cc482cc4c08428f5ea334`，在 192.168.3.58 / Windows 10.0.19045 的 D 盘隔离环境通过 33 项运行时门禁及三次启动，Authenticode 仍为 `NotSigned`。
 - KEMI 商场既有 macOS `app_id=53`、Windows `app_id=54` 已免审更新至 dev.159/2159，保持上架、可取消更新。公开详情与 CDN 回下载大小/SHA 完全一致；两端 2158→2159 返回可更新，两端当前 2159 均返回 `has_update=false` 且空下载 URL。本轮没有更新 Newlink Common。
-- 外部分发核对：Uptodown 账号登录返回用户名或密码错误，尚未形成提交；本机只有 Developer ID 站外分发证书，没有 Mac App Store 分发/安装证书、provisioning profile 或 App Store Connect API 密钥，因此 Apple 商店上传尚未开始。完整证据见 `docs/acceptance/V1_9_0_DEV159_MARKET_RELEASE_2026-09-07.md`。
+- 外部分发核对（2026-09-08 更正）：此前 Uptodown 登录误用了邮箱授权码，不能据此断言尚未提交。历史记录证实原账号已验证、Vibekits 条目 `1000852511` 已有包及素材，历史状态为“待修订”；独立网站凭据已找回，当前实时审核结果仍待后台复核，KEMI Send 同步核查。Apple 当前本机检查仅确认 Developer ID 站外分发身份，不能据有限搜索断言整个账户不存在商店资产；商店上传尚未取得完成证据。详见 `docs/acceptance/V1_9_0_DEV159_MARKET_RELEASE_2026-09-07.md`。
+
+# 2026-09-08～09 · dev.163 Harness 远程协助第一阶段
+
+- KEMI/RustDesk 增加独立 `VibekitsHarness` 配置与 IPC 命名空间、独立数字 routingId、HBBS 注册确认状态、等待连接/允许/拒绝控制和固定回环 PORT_FORWARD 启动参数；不得复用 KEMI 远程办公 ID、密码或桌面会话。
+- VibeKits 增加首次证书配对、双端身份/nonce/授权范围绑定、持久证书固定、受管隧道生命周期、回环 mTLS、hello/心跳、项目/会话快照、命令账本、显式发送、执行反馈、独立停止、断线 stale、历史连接与主动断开。首次授权必须由执行端明确确认，保存后的相同证书与范围才免重复询问。
+- 远程输入草稿按 `peer routingId + workspaceId + sessionId` 隔离；Widget 回归验证 `s1=111`、`s2=222` 往返切换均恢复，不把未发送文本同步到执行端。
+- 当前远程协助组合回归累计 40 项通过，8 个生产文件定向 analyze 为 0 issue；RustDesk 独立路由单测 2/2 通过。完整证据与剩余硬门禁见 `docs/acceptance/HARNESS_RELAY_ID_GATE_2026-09-08.md`。
+- 精确 macOS 候选为 `1.9.0.163+2163`、Universal `x86_64+arm64`、macOS 12+，内置 Harness/ADB/7-Zip/GitHub CLI/Git 兼容门禁通过；最终候选已用 Developer ID、Hardened Runtime 和安全时间戳从内到外签署 35 个 Mach-O 并严格验签。Apple 公证、staple、Gatekeeper 与真实下载尚未执行，禁止复制到正式 `bin` 或商场。
+- 63 上 KEMI远程办公与 VibeKits APK 的系统签名标识一致，可采用同签名保护的 bound service；但现有 Android Rust 核心没有独立 Harness Binder，且 PORT_FORWARD 主循环在移动端被编译排除。Android/63、Windows 58（D 盘低于 30 GiB）、两不同 routingId 直连/HBBR 和完整官方 DSH 时间线仍是发布硬门禁。

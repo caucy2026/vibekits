@@ -1,5 +1,6 @@
 import 'harness_official_remote_adapter.dart';
 import 'harness_remote_commands.dart';
+import 'harness_remote_ledger.dart';
 
 /// Server-owned grant. Neither identity nor scope is read from wire payloads.
 class HarnessRemoteGrant {
@@ -20,8 +21,13 @@ class HarnessRemoteExecution {
   HarnessRemoteExecution({
     required this.adapter,
     required this.workspaceForSession,
+    HarnessRemoteLedger? ledger,
   }) {
-    _gate = HarnessRemoteCommandGate(authorize: _authorize, execute: _execute);
+    _gate = HarnessRemoteCommandGate(
+      authorize: _authorize,
+      execute: _execute,
+      executeClaimed: ledger?.execute,
+    );
   }
 
   final HarnessOfficialRemoteAdapter adapter;

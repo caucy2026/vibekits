@@ -8,27 +8,38 @@ import 'harness_remote_inventory.dart';
 import 'harness_remote_event_log.dart';
 import 'harness_remote_server_connection.dart';
 import 'harness_remote_tls_channel.dart';
+import 'harness_remote_ledger.dart';
+import 'harness_work_status.dart';
 
 /// Explicitly enabled remote host, independent from desktop-sharing identity.
 /// Constructing a host does not listen or grant access. UI pairing must supply
 /// the dedicated TLS identity and approved certificate-to-peer mapping.
 class HarnessRemoteHost {
-  HarnessRemoteHost({required Uri officialEndpoint}) {
+  HarnessRemoteHost({
+    required Uri officialEndpoint,
+    required this.ledger,
+    HarnessWorkRegistrySnapshot Function()? workSnapshot,
+  }) : _workSnapshot =
+           workSnapshot ?? (() => HarnessWorkStatusHub.registryLatest) {
     _adapter = HarnessOfficialRemoteAdapter(officialEndpoint);
     inventory = HarnessRemoteInventory(_adapter);
     execution = HarnessRemoteExecution(
       adapter: _adapter,
       workspaceForSession: inventory.workspaceForSession,
+      ledger: ledger,
     );
   }
   late final HarnessOfficialRemoteAdapter _adapter;
+  final HarnessRemoteLedger ledger;
+  final HarnessWorkRegistrySnapshot Function() _workSnapshot;
   late final HarnessRemoteInventory inventory;
   late final HarnessRemoteExecution execution;
   SecureServerSocket? _listener;
   StreamSubscription<SecureSocket>? _subscription;
   final Map<String, String> _approved = {};
   final Map<HarnessRemoteServerConnection, String> _connections = {};
-  final HarnessRemoteEventLog _journal = HarnessRemoteEventLog(
+  HarnessRemoteEventLog _journal = _newJournal();
+  static HarnessRemoteEventLog _newJournal() => HarnessRemoteEventLog(
     epoch: List.generate(
       24,
       (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
@@ -37,6 +48,7 @@ class HarnessRemoteHost {
   bool _eventsLive = false;
   bool _closed = false;
   bool _starting = false;
+  final Completer<void> _shutdown = Completer<void>();
   int? get port => _listener?.port;
 
   void approveCertificate(String sha256, HarnessRemoteGrant grant) {
@@ -120,23 +132,38 @@ class HarnessRemoteHost {
   }
 
   Future<void> _pumpEvents() async {
-    try {
-      // await-for preserves event order while authoritative scope resolves.
-      await for (final event in _adapter.events()) {
-        if (_closed) break;
-        final payload = event['payload'] as Map;
-        final sessionId = payload['sessionId'];
-        if (sessionId is! String) continue;
-        final workspaceId = await inventory.workspaceForSession(sessionId);
-        if (_closed) break;
-        if (workspaceId == null) continue; // Never leak an unscoped event.
-        _journal.append(workspaceId, event);
-        _eventsLive = true;
+    var failures = 0;
+    while (!_closed) {
+      try {
+        await for (final event in _adapter.events(
+          onConnected: () {
+            // No replay contract exists on the official WebSocket. Every new
+            // stream starts a new epoch, forcing clients to reload history.
+            _journal = _newJournal();
+            _eventsLive = true;
+          },
+        )) {
+          if (_closed) break;
+          final payload = event['payload'] as Map;
+          final sessionId = payload['sessionId'];
+          if (sessionId is! String) continue;
+          final workspaceId = await inventory.workspaceForSession(sessionId);
+          if (_closed) break;
+          if (workspaceId == null) continue;
+          _journal.append(workspaceId, event);
+          failures = 0;
+        }
+      } catch (_) {
+        // Keep errors out of the wire; stale is observable through readState.
+      } finally {
+        _eventsLive = false;
       }
-    } catch (_) {
-      // Retain last events for diagnostics; report stale until re-established.
-    } finally {
-      _eventsLive = false;
+      if (_closed) break;
+      failures = min(failures + 1, 5);
+      await Future.any([
+        _shutdown.future,
+        Future<void>.delayed(Duration(milliseconds: 250 * (1 << failures))),
+      ]);
     }
   }
 
@@ -162,24 +189,61 @@ class HarnessRemoteHost {
     // Capture cursor BEFORE inventory: clients may replay duplicate updates,
     // but must not skip changes that arrived while inventory was loading.
     final sequence = _journal.sequence;
+    final epoch = _journal.epoch;
     final rows = await inventory.visibleWorkspaces(scope);
+    final work = _workSnapshot();
     final currentScope = execution.visibleWorkspaceIds(peerId);
     if (currentScope.isEmpty) throw StateError('REMOTE_PERMISSION_DENIED');
+    if (_journal.epoch != epoch) {
+      return {'ok': true, 'live': false, 'snapshotRequired': true};
+    }
     return {
       'ok': true,
-      'epoch': _journal.epoch,
+      'epoch': epoch,
       'sequence': sequence,
       'live': _eventsLive,
       'workspaces': [
         for (final row in rows)
-          if (currentScope.contains(row['workspaceId'])) row,
+          if (currentScope.contains(row['workspaceId']))
+            _withWorkState(row, work),
       ],
+    };
+  }
+
+  Map<String, dynamic> _withWorkState(
+    Map<String, dynamic> workspace,
+    HarnessWorkRegistrySnapshot snapshot,
+  ) {
+    final String workspaceId = workspace['workspaceId'] as String;
+    final String title = workspace['title'] as String;
+    final matches =
+        snapshot.tasks
+            .where(
+              (task) =>
+                  task.workspaceRef == workspaceId ||
+                  task.workspaceLabel == title,
+            )
+            .toList()
+          ..sort((a, b) => b.streamSequence.compareTo(a.streamSequence));
+    final latest = matches.isEmpty ? null : matches.first;
+    final busy = matches.where((task) => task.busy).toList();
+    return <String, dynamic>{
+      ...workspace,
+      'phase': busy.isNotEmpty
+          ? busy.first.phase.wireName
+          : latest?.phase.wireName ?? HarnessWorkPhase.ready.wireName,
+      'busyTaskCount': busy.length,
+      if (latest != null) ...{
+        'statusMessage': latest.message,
+        'statusUpdatedAt': latest.updatedAt.toUtc().toIso8601String(),
+      },
     };
   }
 
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _shutdown.complete();
     _approved.clear();
     await _subscription?.cancel();
     await _listener?.close();
@@ -188,5 +252,6 @@ class HarnessRemoteHost {
     _connections.clear();
     await Future.wait(connections.map((connection) => connection.close()));
     await execution.close();
+    await ledger.close();
   }
 }

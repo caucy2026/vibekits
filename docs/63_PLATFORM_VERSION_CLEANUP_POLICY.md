@@ -21,3 +21,7 @@
 ## 验证
 
 2026-09-08：静态分析通过；cleanup_os_profile、cleanup_platform_policy、cleanup_targets、cleanup_decision_engine、cleanup_background_runner 共 41 项测试通过。仅测试临时目录；未对用户磁盘执行清理。Android 原生 SDK 通道仍需随 APK 在 63 验收。
+
+Android Release 已通过 assembleRelease（含 R8、lintVital），版本 1.9.0-dev.160 / 2160。APK 位于 build/app/outputs/apk/release/app-release.apk，SHA-256 为 bbd1a42e2b5e7129d005546d46fe2810148af555faebe4d329e601d11d1a8b3c。
+
+63 覆盖安装未通过：INSTALL_FAILED_UPDATE_INCOMPATIBLE。现有 dev.123 与本机新包使用不同 Android Debug 证书（旧证书 SHA-256 0f44faa7cfa94b3059d432f637c1dc50f073cdc09b72d11060033e1238b3ac12，新证书 fc84f538928007fb20d1ee43b8fb6bde465708c694b86fdd6a012fef19e2d5aa）。未卸载、未清除旧应用数据；不能算真机验收通过。后续需原签名密钥，或另行明确授权的数据迁移/安装方案。本包并非正式发布签名包。

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'harness_remote_commands.dart';
 import 'harness_remote_connection.dart';
@@ -38,6 +39,10 @@ class HarnessRemoteServerConnection {
   Future<void> _outbound = Future<void>.value();
   bool _closed = false;
   final Completer<void> _done = Completer<void>();
+  final String _connectionId = List<String>.generate(
+    16,
+    (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
   Future<void> get done => _done.future;
 
   void _receive(String raw) {
@@ -72,7 +77,31 @@ class HarnessRemoteServerConnection {
   Future<void> _dispatch(String id, Map<String, dynamic> payload) async {
     Map<String, Object?> response;
     try {
-      if (payload['kind'] == 'read-state' && readState != null) {
+      if (payload['kind'] == 'hello' &&
+          payload['protocol'] == 'vibekits.harness.remote' &&
+          payload['minVersion'] == 1 &&
+          payload['maxVersion'] == 1) {
+        response = {
+          'ok': true,
+          'protocol': 'vibekits.harness.remote',
+          'version': 1,
+          'connectionId': _connectionId,
+          'authenticatedControllerId': channel.authenticatedPeerId,
+          'capabilities': const [
+            'read-state',
+            'heartbeat',
+            'session-actions',
+            'independent-cancel',
+          ],
+        };
+      } else if (payload['kind'] == 'heartbeat' &&
+          payload['connectionId'] == _connectionId) {
+        response = {
+          'ok': true,
+          'connectionId': _connectionId,
+          'serverTimeUtc': DateTime.now().toUtc().toIso8601String(),
+        };
+      } else if (payload['kind'] == 'read-state' && readState != null) {
         response = await readState!(channel.authenticatedPeerId, payload);
       } else {
         for (final key in [

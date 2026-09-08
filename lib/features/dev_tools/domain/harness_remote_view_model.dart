@@ -9,9 +9,14 @@ import 'harness_remote_workspace_client.dart';
 /// Lifecycle projection only. Conversation payloads are still official DSH
 /// envelopes and are handed to the official UI adapter, never rewritten here.
 class HarnessRemoteViewModel extends ChangeNotifier {
-  HarnessRemoteViewModel(this.client, {required this.applyOfficialEvents}) {
+  HarnessRemoteViewModel(
+    this.client, {
+    required this.applyOfficialEvents,
+    required this.restoreOfficialSnapshot,
+  }) {
     _stateSubscription = client.connection.states.listen((state) {
       if (state != HarnessRemoteConnectionState.connected) {
+        _generation++;
         _cursor.disconnected();
         _live = false;
         if (!_disposed) notifyListeners();
@@ -20,12 +25,20 @@ class HarnessRemoteViewModel extends ChangeNotifier {
   }
   final HarnessRemoteWorkspaceClient client;
   final Future<void> Function(List<Map<String, dynamic>>) applyOfficialEvents;
+
+  /// Reload official project/session projections and selected history before
+  /// committing the cursor. A directory listing alone is not a restored UI.
+  final Future<void> Function(List<Map<String, dynamic>>)
+  restoreOfficialSnapshot;
   final HarnessRemoteSyncCursor _cursor = HarnessRemoteSyncCursor();
   late final StreamSubscription<HarnessRemoteConnectionState>
   _stateSubscription;
   Timer? _timer;
   bool _disposed = false;
   bool _polling = false;
+  bool _negotiated = false;
+  DateTime? _lastHeartbeat;
+  int _generation = 0;
   bool _live = false;
   Duration? _roundTrip;
   String? _error;
@@ -51,14 +64,31 @@ class HarnessRemoteViewModel extends ChangeNotifier {
       return;
     }
     _polling = true;
+    final generation = _generation;
+    bool current() =>
+        !_disposed &&
+        generation == _generation &&
+        client.connection.state == HarnessRemoteConnectionState.connected;
     final watch = Stopwatch()..start();
     try {
+      if (!_negotiated) {
+        await client.negotiate();
+        if (!current()) return;
+        _negotiated = true;
+        _lastHeartbeat = DateTime.now();
+      } else if (_lastHeartbeat == null ||
+          DateTime.now().difference(_lastHeartbeat!) >=
+              const Duration(seconds: 5)) {
+        _roundTrip = await client.heartbeat();
+        if (!current()) return;
+        _lastHeartbeat = DateTime.now();
+      }
       final snapshot = _cursor.stale;
       final result = await client.readState(
         epoch: snapshot ? null : _cursor.epoch,
         sequence: snapshot ? null : _cursor.sequence,
       );
-      if (_disposed) return;
+      if (!current()) return;
       if (result['ok'] != true) throw StateError('REMOTE_STATE_UNAVAILABLE');
       if (result['snapshotRequired'] == true) {
         _cursor.connected();
@@ -75,12 +105,15 @@ class HarnessRemoteViewModel extends ChangeNotifier {
             !rows.every((row) => row is Map<String, dynamic>)) {
           throw const FormatException('Invalid workspace snapshot');
         }
-        _workspaces = List.unmodifiable(
+        final restored = List<Map<String, dynamic>>.unmodifiable(
           rows.map(
             (row) =>
                 Map<String, dynamic>.unmodifiable(row as Map<String, dynamic>),
           ),
         );
+        await restoreOfficialSnapshot(restored);
+        if (!current()) return;
+        _workspaces = restored;
         _cursor.acceptSnapshot(epoch: epoch, sequence: sequence);
       } else {
         final rows = result['events'];
@@ -117,7 +150,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
         }
         if (decision == HarnessRemoteEventDecision.apply) {
           await applyOfficialEvents(envelopes);
-          if (_disposed) return;
+          if (!current()) return;
           _cursor.acceptBatch(
             epoch: epoch,
             afterSequence: after,
@@ -131,6 +164,8 @@ class HarnessRemoteViewModel extends ChangeNotifier {
       _error = null;
     } catch (_) {
       if (!_disposed) {
+        _negotiated = false;
+        _lastHeartbeat = null;
         _live = false;
         _error = '远程状态同步中断，保留最后记录';
         _cursor.connected();
@@ -144,6 +179,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _generation++;
     _timer?.cancel();
     unawaited(_stateSubscription.cancel());
     super.dispose();

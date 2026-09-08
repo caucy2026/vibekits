@@ -52,6 +52,7 @@ class HarnessRemoteCommandGate {
   HarnessRemoteCommandGate({
     required this.authorize,
     required this.execute,
+    this.executeClaimed,
     this.capacity = 4096,
   }) {
     if (capacity <= 0) throw ArgumentError.value(capacity, 'capacity');
@@ -59,6 +60,12 @@ class HarnessRemoteCommandGate {
 
   final HarnessRemoteAuthorizer authorize;
   final HarnessRemoteExecutor execute;
+  final Future<Map<String, dynamic>> Function(
+    String peerId,
+    HarnessRemoteCommand command,
+    Future<Map<String, Object?>> Function() action,
+  )?
+  executeClaimed;
   final int capacity;
   final Map<(String, String), (String, Future<String>)> _commands = {};
 
@@ -84,16 +91,24 @@ class HarnessRemoteCommandGate {
     final completion = Completer<String>();
     // Claim synchronously before invoking any user code, including reentrancy.
     _commands[key] = (command.fingerprint, completion.future);
-    unawaited(_run(command, completion));
+    unawaited(_run(authenticatedPeerId, command, completion));
     return jsonDecode(await completion.future) as Map<String, dynamic>;
   }
 
   Future<void> _run(
+    String peerId,
     HarnessRemoteCommand command,
     Completer<String> completion,
   ) async {
     try {
-      completion.complete(jsonEncode(await execute(command)));
+      final claim = executeClaimed;
+      completion.complete(
+        jsonEncode(
+          claim == null
+              ? await execute(command)
+              : await claim(peerId, command, () => execute(command)),
+        ),
+      );
     } catch (error, stack) {
       completion.completeError(error, stack);
     }
