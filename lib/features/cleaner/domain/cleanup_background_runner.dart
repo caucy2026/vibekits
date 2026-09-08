@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:flutter/services.dart';
 
 import 'cleanup_deleter.dart';
 import 'cleanup_platform_policy.dart';
@@ -24,31 +25,48 @@ abstract final class CleanupBackgroundRunner {
     String harnessDebugDirectory = '',
     String bundledRuleDatabase = '',
     CleanupPlatform? platform,
-  }) => Isolate.run(() {
-    final CleanupPlatform targetPlatform = platform ?? CleanupPlatform.current;
-    final List<CleanupScanTarget> targets = List<CleanupScanTarget>.of(
-      CleanupTargetDiscovery.discover(
-        harnessDebugDirectory: harnessDebugDirectory,
-        appCacheDirectory: appCacheDirectory,
-        platform: targetPlatform,
-      ),
-    );
-    if (bundledRuleDatabase.trim().isNotEmpty) {
-      final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
-        bundledRuleDatabase,
-        platform: targetPlatform.wireName,
-      );
-      final Set<String> ids = targets
-          .map((CleanupScanTarget target) => target.id)
-          .toSet();
-      targets.addAll(
-        database.targets.where(
-          (CleanupScanTarget target) => ids.add(target.id),
+  }) async {
+    int? androidSdk;
+    if ((platform ?? CleanupPlatform.current) == CleanupPlatform.android &&
+        Platform.isAndroid) {
+      try {
+        androidSdk = await const MethodChannel(
+          'vibekits/cleanup-platform',
+        ).invokeMethod<int>('sdkInt');
+      } on PlatformException {
+        androidSdk = null;
+      } on MissingPluginException {
+        androidSdk = null;
+      }
+    }
+    return Isolate.run(() {
+      final CleanupPlatform targetPlatform =
+          platform ?? CleanupPlatform.current;
+      final List<CleanupScanTarget> targets = List<CleanupScanTarget>.of(
+        CleanupTargetDiscovery.discover(
+          harnessDebugDirectory: harnessDebugDirectory,
+          appCacheDirectory: appCacheDirectory,
+          platform: targetPlatform,
+          androidSdk: androidSdk,
         ),
       );
-    }
-    return targets;
-  }, debugName: 'vibekits-cleanup-target-discovery');
+      if (bundledRuleDatabase.trim().isNotEmpty) {
+        final CleanupRuleDatabaseResult database = CleanupRuleDatabase.parse(
+          bundledRuleDatabase,
+          platform: targetPlatform.wireName,
+        );
+        final Set<String> ids = targets
+            .map((CleanupScanTarget target) => target.id)
+            .toSet();
+        targets.addAll(
+          database.targets.where(
+            (CleanupScanTarget target) => ids.add(target.id),
+          ),
+        );
+      }
+      return targets;
+    }, debugName: 'vibekits-cleanup-target-discovery');
+  }
 
   static Future<CleanupScanResult> scanTargets(
     List<CleanupScanTarget> targets, {
