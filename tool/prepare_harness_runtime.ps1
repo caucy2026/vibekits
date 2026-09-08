@@ -85,7 +85,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-android-
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-session-rebind.mjs') -Destination $target
 $builtInSkills = Join-Path $target 'builtin-skills'
 New-Item -ItemType Directory -Path $builtInSkills | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot '.skills-publish\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
 if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }

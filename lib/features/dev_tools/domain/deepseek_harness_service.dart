@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../../app/platform_process_lifecycle.dart';
 import '../../../app/platform_storage_layout.dart';
 import 'harness_session_store.dart';
+import 'harness_legacy_modules.dart';
 import 'harness_runtime_log_store.dart';
 import 'harness_tool_bridge.dart';
 import 'harness_tool_server.dart';
@@ -476,6 +477,7 @@ abstract final class DeepSeekHarnessService {
           ? null
           : Directory(request.harnessHomeDirectory.trim()),
     );
+    await migrateHarnessLegacyModules(harnessHome, runtime.cliPath);
     final Directory nodeCompileCache = await _prepareNodeCompileCache(
       runtime,
       harnessHome,
@@ -582,6 +584,7 @@ abstract final class DeepSeekHarnessService {
       runtime,
       harnessHome,
     );
+    await migrateHarnessLegacyModules(harnessHome, runtime.cliPath);
     await migrateLegacyCredentialToOfficialStore(
       request.apiKey,
       harnessHome: harnessHome,
@@ -752,8 +755,14 @@ abstract final class DeepSeekHarnessService {
   }) {
     final Map<String, String> env = environment ?? Platform.environment;
     final String configuredHome = env['CODEX_HOME']?.trim() ?? '';
-    if (configuredHome.isNotEmpty && p.isAbsolute(configuredHome)) {
-      return Directory(p.normalize(configuredHome));
+    if (configuredHome.isNotEmpty) {
+      if (p.isAbsolute(configuredHome)) {
+        return Directory(p.normalize(configuredHome));
+      }
+      final p.Context windowsPaths = p.Context(style: p.Style.windows);
+      if (windowsPaths.isAbsolute(configuredHome)) {
+        return Directory(windowsPaths.normalize(configuredHome));
+      }
     }
 
     final String base = Platform.isWindows
@@ -1539,11 +1548,13 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     });
     _stdout = _process.stdout
         .transform(const Utf8Decoder())
-        .listen((String chunk) => _forward('stdout', chunk));
+        .transform(const LineSplitter())
+        .listen((String line) => _forward('stdout', '$line\n'));
     _stdoutDone = _stdout.asFuture<void>();
     _stderr = _process.stderr
         .transform(const Utf8Decoder())
-        .listen((String chunk) => _forward('stderr', chunk));
+        .transform(const LineSplitter())
+        .listen((String line) => _forward('stderr', '$line\n'));
     _stderrDone = _stderr.asFuture<void>();
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
@@ -1584,10 +1595,17 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
   bool _logDirty = false;
 
   void _forward(String channel, String chunk) {
+    final announced = harnessAnnouncedUrl(chunk, url);
+    if (announced != null) {
+      url = announced;
+    }
     final String safe = DeepSeekHarnessService.redactSensitiveOutput(
       chunk,
-      <String>[_apiKey],
-    );
+      <String>[
+        _apiKey,
+        if (url.queryParameters['token'] != null) url.queryParameters['token']!,
+      ],
+    ).replaceAll(RegExp(r'([?&]token=)[^\s&]+'), r'$1<hidden>');
     _log.write('[${DateTime.now().toUtc().toIso8601String()}][$channel] $safe');
     // IOSink is already buffered. A forced disk flush for every Node output
     // chunk can add seconds to DSH startup on Windows and is unnecessary for a
@@ -1597,7 +1615,7 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
   }
 
   @override
-  final Uri url;
+  Uri url;
   @override
   Stream<String> get output => _output.stream;
   @override

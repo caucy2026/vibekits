@@ -5,6 +5,7 @@ import 'cleanup_platform_policy.dart';
 import 'cleanup_whitelist.dart';
 import 'macos_cleanup_rule_catalog.dart';
 import 'windows_cleanup_rule_catalog.dart';
+import 'cleanup_os_profile.dart';
 
 enum CleanupTargetStrategy {
   directoryContents,
@@ -60,6 +61,8 @@ abstract final class CleanupTargetDiscovery {
   static List<CleanupScanTarget> discover({
     Map<String, String>? environment,
     int? windowsBuild,
+    int? macosMajor,
+    int? androidSdk,
     String appCacheDirectory = '',
     String harnessDebugDirectory = '',
     CleanupPlatform? platform,
@@ -70,7 +73,11 @@ abstract final class CleanupTargetDiscovery {
     if (targetPlatform == CleanupPlatform.macos) {
       final String? home = env['HOME'];
       if (home != null && home.trim().isNotEmpty) {
-        _addMacTargets(targets, home, _currentMacosMajor(environment != null));
+        _addMacTargets(
+          targets,
+          home,
+          macosMajor ?? _currentMacosMajor(environment != null),
+        );
       }
       _addHarnessDebugTargets(targets, harnessDebugDirectory);
       return _deduplicate(targets);
@@ -81,6 +88,7 @@ abstract final class CleanupTargetDiscovery {
         env,
         appCacheDirectory: appCacheDirectory,
         harnessDebugDirectory: harnessDebugDirectory,
+        androidSdk: androidSdk,
       );
       return _deduplicate(targets);
     }
@@ -481,7 +489,9 @@ abstract final class CleanupTargetDiscovery {
     Map<String, String> environment, {
     required String appCacheDirectory,
     required String harnessDebugDirectory,
+    int? androidSdk,
   }) {
+    final profile = CleanupOsProfile(androidSdk: androidSdk);
     final List<String> ownedRoots = CleanupPlatformPolicy.androidOwnedRoots(
       environment: environment,
       appCacheDirectory: appCacheDirectory,
@@ -494,12 +504,15 @@ abstract final class CleanupTargetDiscovery {
         label: 'Vibekits 应用缓存',
         path: ownedRoots.first,
         category: CleanupCategory.applicationCache,
-        defaultEnabled: true,
-        minimumAgeHours: 24,
+        defaultEnabled: profile.knownAndroid,
+        minimumAgeHours: profile.knownAndroid ? 24 : 24 * 7,
+        riskLevel: profile.knownAndroid
+            ? CleanupRiskLevel.safe
+            : CleanupRiskLevel.cautious,
         maxDepth: 8,
         maxEntries: 25000,
         safetyNote: '仅本应用私有缓存；不访问共享存储、下载目录或其他应用数据',
-        ruleSource: 'Android 应用沙箱规则',
+        ruleSource: profile.androidStoragePolicy,
       );
     }
     if (harnessDebugDirectory.trim().isNotEmpty &&
@@ -630,7 +643,8 @@ abstract final class CleanupTargetDiscovery {
         if (currentName.isNotEmpty) currentName,
       ],
       riskLevel: CleanupRiskLevel.systemManaged,
-      safetyNote: '只读汇总非当前用户目录；不判定账户已废弃，不读文件正文，不提权、不卸载注册表、不进入 10 GiB 自动恢复计划；请先从 Windows 账户/用户配置删除',
+      safetyNote:
+          '只读汇总非当前用户目录；不判定账户已废弃，不读文件正文，不提权、不卸载注册表、不进入 10 GiB 自动恢复计划；请先从 Windows 账户/用户配置删除',
     );
   }
 
@@ -853,10 +867,9 @@ abstract final class CleanupTargetDiscovery {
   }
 
   static int _currentMacosMajor(bool injectedEnvironment) {
-    if (injectedEnvironment && !Platform.isMacOS) return 99;
-    final Match? match = RegExp(r'Version\s+(\d+)')
-        .firstMatch(Platform.operatingSystemVersion);
-    return match == null ? 99 : int.parse(match.group(1)!);
+    if (injectedEnvironment && !Platform.isMacOS) return 0;
+    return CleanupOsProfile.parseMacosMajor(Platform.operatingSystemVersion) ??
+        0;
   }
 
   static void _addChromiumProfiles(
@@ -1124,7 +1137,10 @@ abstract final class CleanupTargetDiscovery {
     int macosMajor,
   ) {
     for (final MacosCleanupRule rule in MacosCleanupRuleCatalog.rules) {
-      if (!rule.supportsMajor(macosMajor)) continue;
+      final verifiedVersion = CleanupOsProfile(
+        macosMajor: macosMajor,
+      ).knownMacos;
+      if (macosMajor > 0 && !rule.supportsMajor(macosMajor)) continue;
       _addExisting(
         targets,
         id: rule.id,
@@ -1137,19 +1153,23 @@ abstract final class CleanupTargetDiscovery {
           MacosCleanupRuleCategory.developerCache => CleanupCategory.devCache,
           MacosCleanupRuleCategory.logs => CleanupCategory.logs,
         },
-        defaultEnabled: rule.defaultEnabled,
+        defaultEnabled: verifiedVersion && rule.defaultEnabled,
         safetyNote: rule.note,
         minimumAgeHours: rule.minimumAgeHours,
         maxDepth: rule.maxDepth,
         includePatterns: rule.includePatterns,
         excludePatterns: rule.excludePatterns,
         ruleCatalogVersion: MacosCleanupRuleCatalog.version,
-        riskLevel: switch (rule.risk) {
-          MacosCleanupRuleRisk.safe => CleanupRiskLevel.safe,
-          MacosCleanupRuleRisk.cautious => CleanupRiskLevel.cautious,
-          MacosCleanupRuleRisk.systemManaged => CleanupRiskLevel.systemManaged,
-        },
-        ruleSource: 'macOS 规则库 v${MacosCleanupRuleCatalog.version}',
+        riskLevel: !verifiedVersion
+            ? CleanupRiskLevel.cautious
+            : switch (rule.risk) {
+                MacosCleanupRuleRisk.safe => CleanupRiskLevel.safe,
+                MacosCleanupRuleRisk.cautious => CleanupRiskLevel.cautious,
+                MacosCleanupRuleRisk.systemManaged =>
+                  CleanupRiskLevel.systemManaged,
+              },
+        ruleSource:
+            'macOS ${macosMajor > 0 ? macosMajor : "未知"} 规则库 v${MacosCleanupRuleCatalog.version}${verifiedVersion ? "" : " · 版本未验证，仅人工复核"}',
       );
     }
     _addExisting(

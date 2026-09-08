@@ -14,7 +14,9 @@ trap 'rm -rf "$TEMP_ROOT"' EXIT
 for ARCH in amd64 arm64; do
   ARCHIVE="gh_${VERSION}_macOS_${ARCH}.zip"
   URL="https://github.com/cli/cli/releases/download/v${VERSION}/${ARCHIVE}"
-  curl --fail --location --retry 3 "$URL" --output "$TEMP_ROOT/$ARCHIVE"
+  curl --http1.1 --fail --location --retry 3 --retry-all-errors \
+    --connect-timeout 15 --max-time 180 \
+    "$URL" --output "$TEMP_ROOT/$ARCHIVE"
   EXPECTED="$AMD64_SHA"
   [ "$ARCH" = arm64 ] && EXPECTED="$ARM64_SHA"
   ACTUAL="$(shasum -a 256 "$TEMP_ROOT/$ARCHIVE" | awk '{print $1}')"

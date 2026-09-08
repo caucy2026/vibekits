@@ -12,6 +12,7 @@ import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
+import '../../dev_tools/domain/harness_legacy_modules.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
@@ -625,13 +626,16 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         }
         try {
           final HttpClientRequest request = await client
-              .getUrl(url)
+              .getUrl(_session?.url ?? url)
               .timeout(const Duration(milliseconds: 500));
+          // The official token endpoint sets a browser cookie and redirects.
+          // A readiness probe must not follow that redirect without its cookie.
+          request.followRedirects = false;
           final HttpClientResponse response = await request.close().timeout(
             const Duration(milliseconds: 700),
           );
           await response.drain<void>();
-          if (response.statusCode >= 200 && response.statusCode < 500) return;
+          if (response.statusCode >= 200 && response.statusCode < 400) return;
         } on Object {
           // Server is still composing the official Web profile.
         }
@@ -1143,11 +1147,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
               if (_diagnostics.trim().isNotEmpty) ...<Widget>[
                 const SizedBox(height: 10),
                 Text(
-                  _diagnostics
-                      .split('\n')
-                      .where((line) => line.isNotEmpty)
-                      .last,
-                  maxLines: 2,
+                  harnessStartupDiagnostic(_diagnostics),
+                  maxLines: 6,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11,
