@@ -1,0 +1,5 @@
+interface:
+  display_name: "KEMI S1 硬件调试"
+  short_description: "串口持续监控、ADB 操作、Git 溯源并输出分析 MD"
+  default_prompt: "使用 $kemi-s1-hardware-debug：按我提供的 ADB 地址自动发现并持续监控 KEMI S1 串口，通过 ADB 完成设备操作，关联两路证据后用 Git 分析对应源码，并生成 Markdown 分析报告。"
+
