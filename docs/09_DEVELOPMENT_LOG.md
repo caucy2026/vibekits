@@ -1529,3 +1529,7 @@
 - 同步 `pubspec`、`AppVersion` 与 LMCP `appVersion/catalogRevision` 为 `1.9.0-dev.162+2162`。
 - 合并最新云端 `main` 的 dev.160 Harness 启动、远程工作区、清理策略和 Android 构建修复；同时修正跨平台测试中 Windows `CODEX_HOME` 在 macOS 主机上被误判为相对路径的问题。
 - 静态分析通过；本地化、设置持久化、主界面、Harness 启动与远程工作区联合回归 80/80 通过；Universal macOS 12+ Release 构建与全功能兼容性门禁通过。
+- 关闭到后台与最终版本同步后再跑本地化、设置、更新服务、共享 UI 合同及主界面定向回归 43/43，`flutter analyze --no-pub` 为 0 问题。macOS 真实点击窗口关闭后，App 主进程及 Harness/MCP 子进程继续存活；再次打开恢复原进程，未创建第二实例。
+- 最终源码提交为 `51d86392174261bd3a8cc671b7fa2588c576c81b`，已备份至 GitHub `feature/cloud-c697267-multilingual`，远程分支指针与本地 HEAD 一致。
+- GitHub macOS Release run `34198453102` 全部成功，artifact `Vibekits-macOS-110` / ID `10045030410`；Windows Compatibility run `34198456769` 全部成功，artifact `Vibekits-1.9.0-dev.162-2162-windows-x64` / ID `10045177161`。Windows 云端门禁包含 Harness、ADB、Mihomo/QEMU、版本与 bundle 验证。
+- macOS 云端 artifact 是 CI 内部完整性验证包，不是 Developer ID 公证发行包。本机签名服务存在跨进程验签异常，本轮未声称完成 Apple 公证，也未将该 artifact 冒充为商店正式包。
