@@ -184,7 +184,7 @@ for FILE in \
 done
 mkdir -p "$TARGET/builtin-skills"
 ditto \
-  "$PROJECT_ROOT/.skills-publish/kemi-s1-hardware-debug" \
+  "$PROJECT_ROOT/native/harness/builtin-skills/kemi-s1-hardware-debug" \
   "$TARGET/builtin-skills/kemi-s1-hardware-debug"
 
 "$TARGET/bin/node" "$PROJECT_ROOT/tool/patch_harness_runtime.mjs" "$TARGET"
