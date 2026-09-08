@@ -1,5 +1,5 @@
 import 'dart:io';
-import '../lib/features/dev_tools/domain/harness_legacy_modules.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_legacy_modules.dart';
 
 /// Uses the same non-destructive migration as desktop startup.
 Future<void> main(List<String> args) async {

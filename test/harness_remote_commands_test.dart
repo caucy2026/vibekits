@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_remote_commands.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_commands.dart';
 
 HarnessRemoteCommand command({String id = 'c1', String text = 'test'}) =>
     HarnessRemoteCommand(

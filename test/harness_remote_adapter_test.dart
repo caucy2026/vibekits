@@ -2,30 +2,45 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_official_remote_adapter.dart';
-import '../lib/features/dev_tools/domain/harness_remote_event_log.dart';
-import '../lib/features/dev_tools/domain/harness_remote_sync.dart';
-import '../lib/features/dev_tools/domain/harness_remote_commands.dart';
-import '../lib/features/dev_tools/domain/harness_remote_execution.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_official_remote_adapter.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_event_log.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_sync.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_commands.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_execution.dart';
 
 void main() {
   test('official WebSocket downlink retains task payload', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final adapter = HarnessOfficialRemoteAdapter(
-      Uri.parse('http://127.0.0.1:${server.port}'));
+      Uri.parse('http://127.0.0.1:${server.port}'),
+    );
     server.listen((request) async {
       expect(request.uri.path, '/api/events.mux');
       final socket = await WebSocketTransformer.upgrade(request);
-      socket.add(jsonEncode({'type': 'server-request', 'rpcId': 'event1',
-        'method': 'session/event', 'payload': {'type': 'session/event',
-          'sessionId': 's', 'event': {'text': 'progress'}}}));
+      socket.add(
+        jsonEncode({
+          'type': 'server-request',
+          'rpcId': 'event1',
+          'method': 'session/event',
+          'payload': {
+            'type': 'session/event',
+            'sessionId': 's',
+            'event': {'text': 'progress'},
+          },
+        }),
+      );
       await socket.close();
     });
     try {
-      final event = await adapter.events().first.timeout(const Duration(seconds: 5));
+      final event = await adapter.events().first.timeout(
+        const Duration(seconds: 5),
+      );
       expect(event['rpcId'], 'event1');
       expect((event['payload'] as Map)['sessionId'], 's');
-    } finally { await adapter.close(); await server.close(force: true); }
+    } finally {
+      await adapter.close();
+      await server.close(force: true);
+    }
   });
   test(
     'scoped execution reaches HTTP once and revoked callers cannot replay',

@@ -132,8 +132,12 @@ if(EXISTS "${MIHOMO_RUNTIME_DIR}/vibekits-mihomo-runtime.json")
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/mihomo" COMPONENT Runtime)
   install(FILES "${CMAKE_SOURCE_DIR}/../native/mihomo/LICENSE.txt"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/mihomo" COMPONENT Runtime)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(FATAL_ERROR "Bundled Mihomo is missing. Run tool/prepare_mihomo_runtime.ps1.")
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled Mihomo is missing. Run tool/prepare_mihomo_runtime.ps1.\")
+    endif()
+  " COMPONENT Runtime)
 endif()
 
 # Compact QEMU package keeps only x86_64 system emulation, qemu-img, runtime
@@ -142,8 +146,12 @@ set(QEMU_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/qemu/windows/runtime")
 if(EXISTS "${QEMU_RUNTIME_DIR}/vibekits-qemu-runtime.json")
   install(DIRECTORY "${QEMU_RUNTIME_DIR}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/qemu" COMPONENT Runtime)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(FATAL_ERROR "Bundled QEMU is missing. Run tool/prepare_qemu_runtime.ps1.")
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled QEMU is missing. Run tool/prepare_qemu_runtime.ps1.\")
+    endif()
+  " COMPONENT Runtime)
 endif()
 
 # The official DeepSeek Harness is prepared ahead of the Release build by
@@ -200,9 +208,12 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
       DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/lark-cli"
       COMPONENT Runtime)
   endif()
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(FATAL_ERROR
-    "Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.")
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled Harness runtime is missing. Run tool/prepare_harness_runtime.ps1 before Release packaging.\")
+    endif()
+  " COMPONENT Runtime)
 endif()
 
 # Git for Windows MinGit is explicitly intended for embedding. The application
@@ -212,9 +223,12 @@ if(EXISTS "${GIT_RUNTIME_DIR}/vibekits-git-runtime.json")
   install(DIRECTORY "${GIT_RUNTIME_DIR}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/git"
     COMPONENT Runtime)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(FATAL_ERROR
-    "Bundled Git runtime is missing. Run tool/prepare_git_runtime.ps1 before Release packaging.")
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled Git runtime is missing. Run tool/prepare_git_runtime.ps1 before Release packaging.\")
+    endif()
+  " COMPONENT Runtime)
 endif()
 
 # Official GitHub CLI. The private runtime makes MCP/Harness gh calls work on a
@@ -225,9 +239,12 @@ if(EXISTS "${GITHUB_CLI_RUNTIME_DIR}/bin/gh.exe" AND
   install(DIRECTORY "${GITHUB_CLI_RUNTIME_DIR}/"
     DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/github-cli"
     COMPONENT Runtime)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-  message(FATAL_ERROR
-    "Bundled GitHub CLI is missing. Run tool/prepare_github_cli_runtime.ps1 before Release packaging.")
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled GitHub CLI is missing. Run tool/prepare_github_cli_runtime.ps1 before Release packaging.\")
+    endif()
+  " COMPONENT Runtime)
 endif()
 
 # Official Google Android Platform-Tools runtime. Keeping adb and both of its
