@@ -6,7 +6,12 @@ param(
   [hashtable]$ExpectedGeoDataSha256 = @{
     'Country.mmdb' = '031BD6E8DFD62D70B81D2D65CE54A92ED7F21F060ADD17C66E16A2A0E55D3A41'
     'geoip.dat' = '4149E607530F91DA697BAD4696F8C59F0A475AF38E69405E4124438C9886C721'
-    'geosite.dat' = '7F42E9E1F08894BC03D7C18F129B1C3967D4A0F477937A981071354AE9262AA3'
+    'geosite.dat' = 'C5FE9448D979391192F5BD553B5E28C39EFDC9BD857B7C879A7D995FDED0C3FE'
+  },
+  [hashtable]$ExpectedGeoDataAssetId = @{
+    'Country.mmdb' = '549610219'
+    'geoip.dat' = '549610241'
+    'geosite.dat' = '549610285'
   }
 )
 
@@ -49,7 +54,16 @@ foreach ($name in @('Country.mmdb', 'geoip.dat', 'geosite.dat')) {
     $geoSource = Join-Path $cache $name
     if (-not (Test-Path -LiteralPath $geoSource) -or
         (Get-FileHash -LiteralPath $geoSource -Algorithm SHA256).Hash -ne $ExpectedGeoDataSha256[$name]) {
-      Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/$name" -OutFile $geoSource
+      $assetId = $ExpectedGeoDataAssetId[$name]
+      if (-not $assetId) { throw "Missing immutable release asset ID for $name" }
+      Invoke-WebRequest -UseBasicParsing `
+        -Headers @{
+          Accept = 'application/octet-stream'
+          'X-GitHub-Api-Version' = '2022-11-28'
+          'User-Agent' = 'Vibekits-runtime-preparer'
+        } `
+        -Uri "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/assets/$assetId" `
+        -OutFile $geoSource
     }
   }
   $geoHash = (Get-FileHash -LiteralPath $geoSource -Algorithm SHA256).Hash
@@ -66,7 +80,7 @@ $manifest = [ordered]@{
   distribution = 'Official Windows amd64 release archive'
   license = 'MIT'
   archiveSha256 = $ExpectedArchiveSha256
-  geoDataSource = 'https://github.com/MetaCubeX/meta-rules-dat'
+  geoDataSource = 'https://github.com/MetaCubeX/meta-rules-dat release assets 549610219/549610241/549610285'
   geoData = $geoData
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'vibekits-mihomo-runtime.json') -Encoding UTF8
