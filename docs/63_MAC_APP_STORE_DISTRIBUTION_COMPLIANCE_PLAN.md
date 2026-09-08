@@ -38,8 +38,9 @@ VibeKits 当前正式版是面向官网、KEMI 商场和第三方分发站的 De
 
 2026-09-08 实查：
 
-- `security find-identity -v -p codesigning` 返回 `0 valid identities found`。
-- `~/Library/MobileDevice/Provisioning Profiles` 中没有可用 profile。
+- 受限沙箱中的 `security find-identity` 曾误报 `0 valid identities found`；按项目签名手册改在正常 macOS 安全上下文复验后，实际可见 3 个有效 identity，包含 `Developer ID Application: zhen ji (26T5WV4GLP)`。
+- `KEMI_NOTARY` 凭据可访问 Apple Notary Service，历史中有 VibeKits 和 KEMI 的 `Accepted` 记录。这些只证明 Developer ID 站外公证通道可用。
+- `~/Library/MobileDevice/Provisioning Profiles` 中没有可用 profile，有效 identity 中也没有 Mac App Distribution/Mac Installer Distribution 发行证书。
 - 现有 Release entitlements 没有 App Sandbox。
 
 在上述三项未满足前，不得声称 Mac App Store 包可上传。Developer ID Application 只适用站外签名和公证，不等于 Mac App Store 发行证书。
