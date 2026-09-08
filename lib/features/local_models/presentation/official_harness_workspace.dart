@@ -628,6 +628,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           final HttpClientRequest request = await client
               .getUrl(_session?.url ?? url)
               .timeout(const Duration(milliseconds: 500));
+          // The official token endpoint sets a browser cookie and redirects.
+          // A readiness probe must not follow that redirect without its cookie.
+          request.followRedirects = false;
           final HttpClientResponse response = await request.close().timeout(
             const Duration(milliseconds: 700),
           );
