@@ -1533,3 +1533,4 @@
 - 最终源码提交为 `51d86392174261bd3a8cc671b7fa2588c576c81b`，已备份至 GitHub `feature/cloud-c697267-multilingual`，远程分支指针与本地 HEAD 一致。
 - GitHub macOS Release run `34198453102` 全部成功，artifact `Vibekits-macOS-110` / ID `10045030410`；Windows Compatibility run `34198456769` 全部成功，artifact `Vibekits-1.9.0-dev.162-2162-windows-x64` / ID `10045177161`。Windows 云端门禁包含 Harness、ADB、Mihomo/QEMU、版本与 bundle 验证。
 - macOS 云端 artifact 是 CI 内部完整性验证包，不是 Developer ID 公证发行包。本机签名服务存在跨进程验签异常，本轮未声称完成 Apple 公证，也未将该 artifact 冒充为商店正式包。
+- 2026-09-08 复查 Uptodown：仓库内最后一次可验证记录仍是开发者账号登录失败、未生成提交；公开站点搜索未找到 VibeKits 或 KEMI传书的产品页。本次开发者控制台连接超时，因此没有新的后台审核状态证据；在获得成功登录和 Uptodown 提交 ID 前，状态仍必须标记为“未提交”，不得写成“审核中”或“已发布”。
