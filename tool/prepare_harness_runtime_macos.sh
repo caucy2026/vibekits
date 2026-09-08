@@ -83,6 +83,7 @@ NODE="$NODE_DIST/bin/node"
   cd "$PACKAGE_ROOT"
   "$NPM" install --omit=dev --ignore-scripts --legacy-peer-deps \
     --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION" \
+    'esbuild@0.25.9' \
     --registry=https://registry.npmjs.org --cache="$NPM_CACHE" \
     --fetch-timeout=30000 --fetch-retries=1 --loglevel=warn
 
@@ -153,6 +154,15 @@ NODE="$NODE_DIST/bin/node"
     "$PACKAGE_ROOT/node_modules/node-pty/prebuilds/win32-arm64" \
     "$PACKAGE_ROOT/node_modules/node-pty/prebuilds/win32-x64"
 )
+
+WEB_FRONTEND="$PACKAGE_ROOT/node_modules/@deepseek-ai/dsh-web-frontend"
+ditto "$WEB_FRONTEND/dist" "$WEB_FRONTEND/dist-macos12"
+"$NODE" "$PROJECT_ROOT/tool/transpile_harness_web_macos.mjs" \
+  "$WEB_FRONTEND/dist-macos12" \
+  "$PACKAGE_ROOT/node_modules/esbuild/lib/main.js"
+rm -rf \
+  "$PACKAGE_ROOT/node_modules/esbuild" \
+  "$PACKAGE_ROOT/node_modules/@esbuild"
 
 PACKAGE_JSON="$PACKAGE_ROOT/node_modules/@deepseek-ai/dsh/package.json"
 CLI_RELATIVE="$("$NODE" -e '

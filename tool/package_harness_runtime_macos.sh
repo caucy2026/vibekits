@@ -18,6 +18,8 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
    [ ! -f "$SOURCE/vibekits-approval.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-parent-watchdog.mjs" ] || \
    [ ! -f "$SOURCE/vibekits-android-stress-mcp.mjs" ] || \
+  [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html" ] || \
+  [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-web-frontend/dist-macos12/index.html" ] || \
    [ ! -f "$SOURCE/builtin-skills/kemi-s1-hardware-debug/SKILL.md" ] || \
    [ ! -f "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" ]; then
   echo "Bundled macOS Harness runtime is missing or incomplete." >&2
@@ -30,7 +32,9 @@ mkdir -p "$(dirname "$DESTINATION")"
 ditto "$SOURCE" "$DESTINATION"
 cp "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" "$DESTINATION/vibekits-session-rebind.mjs"
 chmod 755 "$DESTINATION/bin/node"
-codesign --force --sign - "$DESTINATION/bin/node"
+codesign --force --options runtime --sign - \
+  --entitlements "$PROJECT_ROOT/macos/Runner/HarnessNodeAdHoc.entitlements" \
+  "$DESTINATION/bin/node"
 echo "Packaged Harness runtime: $DESTINATION"
 
 # Harness ADB tools intentionally resolve an App-private executable instead of

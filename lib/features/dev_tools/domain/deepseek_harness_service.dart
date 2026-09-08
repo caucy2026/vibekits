@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -972,10 +971,6 @@ abstract final class DeepSeekHarnessService {
   }
 
   static List<String> _nodeRuntimeArguments() => <String>[
-    // Rosetta's V8 baseline compiler can fail Hardened Runtime MAP_JIT even
-    // with allow-jit. Jitless mode keeps Intel Harness functional without the
-    // broader allow-unsigned-executable-memory entitlement.
-    if (Platform.isMacOS && Abi.current() == Abi.macosX64) '--jitless',
     if (Platform.isMacOS) '--expose-internals',
   ];
 
@@ -1040,6 +1035,7 @@ class _HarnessRuntime {
     required this.parentWatchdogPath,
     required this.sessionRebindPath,
     required this.builtInSkillsDirectory,
+    required this.macos12WebDistIndexPath,
   });
 
   final String nodeExecutable;
@@ -1051,6 +1047,7 @@ class _HarnessRuntime {
   final String parentWatchdogPath;
   final String sessionRebindPath;
   final Directory builtInSkillsDirectory;
+  final String macos12WebDistIndexPath;
 }
 
 Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
@@ -1058,7 +1055,26 @@ Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
       'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
       'VIBEKITS_PARENT_PID': '$pid',
       'DSH_AGENTS_HOME': DeepSeekHarnessService.sharedAgentHomeDirectory().path,
+      'VIBEKITS_DSH_WEB_DIST_INDEX': ?harnessMacos12WebDistIndex(
+        isMacOS: Platform.isMacOS,
+        operatingSystemVersion: Platform.operatingSystemVersion,
+        compatibilityIndexPath: runtime.macos12WebDistIndexPath,
+      ),
     };
+
+String? harnessMacos12WebDistIndex({
+  required bool isMacOS,
+  required String operatingSystemVersion,
+  required String compatibilityIndexPath,
+}) {
+  if (!isMacOS) return null;
+  final Match? match = RegExp(
+    r'(?:Version|macOS)\s+(\d+)',
+    caseSensitive: false,
+  ).firstMatch(operatingSystemVersion);
+  final int? major = match == null ? null : int.tryParse(match.group(1)!);
+  return major != null && major <= 12 ? compatibilityIndexPath : null;
+}
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {
   final String executableDirectory = File(
@@ -1165,6 +1181,11 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       parentWatchdogPath: parentWatchdog.path,
       sessionRebindPath: sessionRebind.path,
       builtInSkillsDirectory: builtInSkills,
+        macos12WebDistIndexPath:
+            '${root.path}${Platform.pathSeparator}node_modules'
+            '${Platform.pathSeparator}@deepseek-ai${Platform.pathSeparator}'
+            'dsh-web-frontend${Platform.pathSeparator}dist-macos12'
+            '${Platform.pathSeparator}index.html',
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');

@@ -5,5 +5,7 @@
 	<!-- V8 must allocate MAP_JIT pages after Hardened Runtime signing. -->
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
 </dict>
 </plist>

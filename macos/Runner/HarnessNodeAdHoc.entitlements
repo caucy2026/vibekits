@@ -4,6 +4,8 @@
 <dict>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
 	<!-- Ad-hoc signatures do not have a Team ID. This is only used by the
 	     local verification script so Node can load the ad-hoc native addons.
 	     Developer ID releases use HarnessNode.entitlements instead. -->

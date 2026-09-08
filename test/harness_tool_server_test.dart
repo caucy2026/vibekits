@@ -162,7 +162,10 @@ void main() {
         : '$runtime${Platform.pathSeparator}bin${Platform.pathSeparator}node';
     final Process process = await Process.start(
       node,
-      <String>[externalMcp],
+      <String>[
+        if (Platform.isMacOS) '--expose-internals',
+        externalMcp,
+      ],
       environment: <String, String>{
         'VIBEKITS_TOOL_BRIDGE_FILE': connectionFile.path,
       },

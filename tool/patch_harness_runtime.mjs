@@ -374,4 +374,19 @@ if (!usesLockedModuleFallback) {
   );
 }
 
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-web-app/lib/index.js',
+  `function resolveDistIndex() {
+	const require = createRequire(import.meta.url);
+	try {
+		return join(dirname(require.resolve("@deepseek-ai/dsh-web-frontend/package.json")), "dist", "index.html");`,
+  `function resolveDistIndex() {
+	const compatibilityIndex = process.env.VIBEKITS_DSH_WEB_DIST_INDEX;
+	if (compatibilityIndex) return compatibilityIndex;
+	const require = createRequire(import.meta.url);
+	try {
+		return join(dirname(require.resolve("@deepseek-ai/dsh-web-frontend/package.json")), "dist", "index.html");`,
+  'const compatibilityIndex = process.env.VIBEKITS_DSH_WEB_DIST_INDEX;',
+);
+
 console.log(`Patched Harness Web runtime: ${runtime}`);
