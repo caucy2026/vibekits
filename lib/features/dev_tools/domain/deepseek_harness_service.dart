@@ -4,6 +4,8 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:path/path.dart' as p;
+
 import '../../../app/platform_process_lifecycle.dart';
 import '../../../app/platform_storage_layout.dart';
 import 'harness_session_store.dart';
@@ -469,7 +471,7 @@ abstract final class DeepSeekHarnessService {
       bridge: request.toolBridge,
     );
     final Directory harnessHome = await _prepareHarnessHome(
-      runtime.approvalPluginPath,
+      runtime,
       directory: request.harnessHomeDirectory.trim().isEmpty
           ? null
           : Directory(request.harnessHomeDirectory.trim()),
@@ -573,7 +575,7 @@ abstract final class DeepSeekHarnessService {
       bridge: request.toolBridge,
     );
     final Directory harnessHome = await _prepareHarnessHome(
-      runtime.approvalPluginPath,
+      runtime,
       includeApprovalBridge: false,
     );
     final Directory nodeCompileCache = await _prepareNodeCompileCache(
@@ -745,22 +747,33 @@ abstract final class DeepSeekHarnessService {
   /// DSH scans `<DSH_AGENTS_HOME>/skills`. Pointing that root at `.codex`
   /// lets Harness and Codex consume the same global skill bundles without
   /// copying them into the app-owned Harness profile.
-  static Directory sharedAgentHomeDirectory() {
+  static Directory sharedAgentHomeDirectory({
+    Map<String, String>? environment,
+  }) {
+    final Map<String, String> env = environment ?? Platform.environment;
+    final String configuredHome = env['CODEX_HOME']?.trim() ?? '';
+    if (configuredHome.isNotEmpty && p.isAbsolute(configuredHome)) {
+      return Directory(p.normalize(configuredHome));
+    }
+
     final String base = Platform.isWindows
-        ? (Platform.environment['USERPROFILE'] ??
-              Platform.environment['LOCALAPPDATA'] ??
+        ? (env['USERPROFILE'] ??
+              env['LOCALAPPDATA'] ??
               Directory.systemTemp.path)
-        : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
+        : (env['HOME'] ?? Directory.systemTemp.path);
     return Directory('$base${Platform.pathSeparator}.codex');
   }
 
   static Future<Directory> _prepareHarnessHome(
-    String approvalPluginPath, {
+    _HarnessRuntime runtime, {
     bool includeApprovalBridge = true,
     Directory? directory,
   }) async {
     final Directory home = directory ?? officialHarnessHomeDirectory();
     await home.create(recursive: true);
+    await installBundledHarnessSkills(
+      bundledSkillsDirectory: runtime.builtInSkillsDirectory,
+    );
     // Old native acceptance probes used a fresh TEMP workspace on every run.
     // Their orphaned session folders are not real user workspaces and can be
     // rediscovered by DSH as ghost rows even after the session is gone.
@@ -771,7 +784,7 @@ abstract final class DeepSeekHarnessService {
     final String approvalPatch = includeApprovalBridge
         ? '- insert:\n'
               '    - id: vibekits-native-approval\n'
-              '      name: ${jsonEncode(Uri.file(approvalPluginPath).toString())}\n'
+              '      name: ${jsonEncode(Uri.file(runtime.approvalPluginPath).toString())}\n'
         : '';
     final String patchContents =
         '$harnessWebPerformancePatch- insert:\n'
@@ -818,6 +831,58 @@ abstract final class DeepSeekHarnessService {
     }
     await prepareHarnessCapabilityInstructions(directory: home);
     return home;
+  }
+
+  /// Copies app-bundled skills into the catalog scanned by official DSH.
+  /// A clean VibeKits install therefore has its required skills without a
+  /// separate Codex installation or files left behind by the build machine.
+  static Future<List<Directory>> installBundledHarnessSkills({
+    required Directory bundledSkillsDirectory,
+    Directory? agentHome,
+  }) async {
+    if (!await bundledSkillsDirectory.exists()) {
+      throw FileSystemException(
+        '内置 Harness 技能目录缺失',
+        bundledSkillsDirectory.path,
+      );
+    }
+    final Directory skillsRoot = Directory(
+      p.join((agentHome ?? sharedAgentHomeDirectory()).path, 'skills'),
+    );
+    await skillsRoot.create(recursive: true);
+    final List<Directory> installed = <Directory>[];
+    await for (final FileSystemEntity entity in bundledSkillsDirectory.list()) {
+      if (entity is! Directory ||
+          !await File(p.join(entity.path, 'SKILL.md')).exists()) {
+        continue;
+      }
+      final Directory destination = Directory(
+        p.join(skillsRoot.path, p.basename(entity.path)),
+      );
+      await for (final FileSystemEntity child in entity.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        final String target = p.join(
+          destination.path,
+          p.relative(child.path, from: entity.path),
+        );
+        if (child is Directory) {
+          await Directory(target).create(recursive: true);
+        } else if (child is File) {
+          await File(target).parent.create(recursive: true);
+          await child.copy(target);
+        }
+      }
+      installed.add(destination);
+    }
+    if (installed.isEmpty) {
+      throw FileSystemException(
+        '内置 Harness 技能目录中没有有效技能',
+        bundledSkillsDirectory.path,
+      );
+    }
+    return installed;
   }
 
   /// Installs the app-owned instruction block without overwriting user text.
@@ -971,6 +1036,7 @@ class _HarnessRuntime {
     required this.approvalPluginPath,
     required this.parentWatchdogPath,
     required this.sessionRebindPath,
+    required this.builtInSkillsDirectory,
   });
 
   final String nodeExecutable;
@@ -981,6 +1047,7 @@ class _HarnessRuntime {
   final String approvalPluginPath;
   final String parentWatchdogPath;
   final String sessionRebindPath;
+  final Directory builtInSkillsDirectory;
 }
 
 Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
@@ -1054,6 +1121,13 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
     final File sessionRebind = File(
       '${root.path}${Platform.pathSeparator}vibekits-session-rebind.mjs',
     );
+    final Directory builtInSkills = Directory(
+      '${root.path}${Platform.pathSeparator}builtin-skills',
+    );
+    final File kemiSkill = File(
+      '${builtInSkills.path}${Platform.pathSeparator}kemi-s1-hardware-debug'
+      '${Platform.pathSeparator}SKILL.md',
+    );
     final File? mcpServer = mcpCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
@@ -1074,7 +1148,8 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         androidStressMcp == null ||
         approvalPlugin == null ||
         parentWatchdog == null ||
-        !sessionRebind.existsSync()) {
+        !sessionRebind.existsSync() ||
+        !kemiSkill.existsSync()) {
       continue;
     }
     return _HarnessRuntime(
@@ -1086,6 +1161,7 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       approvalPluginPath: approvalPlugin.path,
       parentWatchdogPath: parentWatchdog.path,
       sessionRebindPath: sessionRebind.path,
+      builtInSkillsDirectory: builtInSkills,
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');

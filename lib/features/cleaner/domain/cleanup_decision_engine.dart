@@ -68,6 +68,26 @@ abstract final class CleanupDecisionEngine {
       candidates,
       targetPlatform,
     );
+    final bool Function(String) allowsDeletion =
+        CleanupPlatformPolicy.deletionPredicate(
+          targetPlatform,
+          environment: environment,
+          harnessDebugDirectory: harnessDebugDirectory,
+        );
+    final String separator = targetPlatform == CleanupPlatform.windows
+        ? r'\'
+        : '/';
+    final List<String> normalizedProtectedRoots = roots
+        .map((String root) => _normalize(root, targetPlatform))
+        .toList(growable: false);
+    bool isProtected(String path) {
+      final String candidate = _normalize(path, targetPlatform);
+      return normalizedProtectedRoots.any(
+        (String root) =>
+            candidate == root || candidate.startsWith('$root$separator'),
+      );
+    }
+
     return CleanupDecisionPlan(
       unique
           .map(
@@ -75,9 +95,9 @@ abstract final class CleanupDecisionEngine {
               candidate,
               now: clock,
               freeSpaceRatio: freeSpaceRatio,
-              protectedRoots: roots,
               platform: targetPlatform,
-              environment: environment,
+              allowsDeletion: allowsDeletion,
+              isProtected: isProtected,
               harnessDebugDirectory: harnessDebugDirectory,
             ),
           )
@@ -89,18 +109,13 @@ abstract final class CleanupDecisionEngine {
     CleanupCandidate candidate, {
     required DateTime now,
     required double freeSpaceRatio,
-    required List<String> protectedRoots,
     required CleanupPlatform platform,
-    required Map<String, String>? environment,
+    required bool Function(String) allowsDeletion,
+    required bool Function(String) isProtected,
     required String harnessDebugDirectory,
   }) {
     if (candidate.category != CleanupCategory.recycleBin &&
-        !CleanupPlatformPolicy.allowsDeletion(
-          platform,
-          candidate.path,
-          environment: environment,
-          harnessDebugDirectory: harnessDebugDirectory,
-        )) {
+        !allowsDeletion(candidate.path)) {
       return CleanupDecision(
         candidate: candidate,
         tier: CleanupDecisionTier.protected,
@@ -121,9 +136,7 @@ abstract final class CleanupDecisionEngine {
         explanation: 'Harness 调试证据可能用于定位故障；已统计容量，但必须由用户选择后才清理',
       );
     }
-    if (protectedRoots.any(
-      (String root) => _containsPath(root, candidate.path, platform),
-    )) {
+    if (isProtected(candidate.path)) {
       return CleanupDecision(
         candidate: candidate,
         tier: CleanupDecisionTier.protected,
@@ -160,17 +173,18 @@ abstract final class CleanupDecisionEngine {
         ? -1
         : now.difference(candidate.modified!).inHours;
     final bool knownOwner = candidate.sourceLabel?.trim().isNotEmpty ?? false;
-    final bool cacheLike = <CleanupCategory>{
-      CleanupCategory.userTemp,
-      CleanupCategory.browserCache,
-      CleanupCategory.applicationCache,
-      CleanupCategory.systemCache,
-      CleanupCategory.pluginCache,
-      CleanupCategory.pluginResidual,
-      CleanupCategory.devCache,
-      CleanupCategory.logs,
-      CleanupCategory.debugArtifacts,
-    }.contains(candidate.category);
+    final bool cacheLike = switch (candidate.category) {
+      CleanupCategory.userTemp ||
+      CleanupCategory.browserCache ||
+      CleanupCategory.applicationCache ||
+      CleanupCategory.systemCache ||
+      CleanupCategory.pluginCache ||
+      CleanupCategory.pluginResidual ||
+      CleanupCategory.devCache ||
+      CleanupCategory.logs ||
+      CleanupCategory.debugArtifacts => true,
+      _ => false,
+    };
     final int minimumAutomaticAge = switch (candidate.category) {
       CleanupCategory.userTemp => 24,
       CleanupCategory.debugArtifacts => 24 * 14,
@@ -309,7 +323,7 @@ abstract final class CleanupDecisionEngine {
 
   static String _normalize(String path, CleanupPlatform platform) {
     final String separator = platform == CleanupPlatform.windows ? r'\' : '/';
-    String value = path.replaceAll(RegExp(r'[\\/]'), separator);
+    String value = path.replaceAll('\\', separator).replaceAll('/', separator);
     while (value.endsWith(separator) && value.length > 3) {
       value = value.substring(0, value.length - 1);
     }

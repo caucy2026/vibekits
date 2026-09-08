@@ -70,6 +70,7 @@ dependencies:
   audioplayers: 6.5.1
   # BSD-3-Clause: render the one-time LAN Harness Key onboarding QR locally.
   qr_flutter: ^4.1.0
+  path: ^1.9.1
   path_provider: ^2.1.5
 
 dev_dependencies:

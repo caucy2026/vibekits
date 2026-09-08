@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-07 · 1.9.0-dev.159+2159 · Release 内置 KEMI S1 硬件调试技能
+
+- 将 `kemi-s1-hardware-debug` 作为 Harness 正式内置技能纳入 Windows 与 macOS runtime；随包包含 `SKILL.md`、界面元数据、S1 串口/ADB 参数和 HiV730 Git 路由文档，不再依赖构建机的 `CODEX_HOME`、用户预装技能或系统盘残留文件。
+- APP 启动官方 Harness 前自动把随包技能安装/更新到其实际扫描的 `<DSH_AGENTS_HOME>/skills`，同时继续保留 Codex 与 Harness 共用的动态全局技能目录。独立安装后的 Harness 可直接发现技能，并理解“串口持续监控 + ADB 操作 + Git 溯源 + Markdown 报告”联动流程。
+- 修复该技能 YAML 描述中未引用冒号导致官方 DSH `js-yaml` 拒绝加载的问题；真实 Harness headless 会话已同时发现 `kemi-s1-hardware-debug` 和 `vibekits-remote-node`。
+- Windows/macOS 准备脚本、Release 完整性门禁和应用版本同步更新；新增安装行为单元测试，缺少内置技能时运行时解析和发布检查均 fail-closed。
+
 ## 2026-09-06 · 1.9.0-dev.158+2158 · 内置 GitHub CLI 与 MCP 等价调用
 
 - 内置官方 GitHub CLI `2.100.0`，Windows x64、macOS Universal 和 Linux amd64/arm64 使用固定发布资产与 SHA-256 校验，不依赖系统 PATH、Homebrew 或用户预装 `gh`；准备过程的下载、解压与缓存均位于项目 D 盘。

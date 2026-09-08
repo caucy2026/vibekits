@@ -182,6 +182,10 @@ for FILE in \
   vibekits-session-rebind.mjs; do
   cp "$PROJECT_ROOT/native/harness/$FILE" "$TARGET/$FILE"
 done
+mkdir -p "$TARGET/builtin-skills"
+ditto \
+  "$PROJECT_ROOT/.skills-publish/kemi-s1-hardware-debug" \
+  "$TARGET/builtin-skills/kemi-s1-hardware-debug"
 
 "$TARGET/bin/node" "$PROJECT_ROOT/tool/patch_harness_runtime.mjs" "$TARGET"
 
@@ -191,6 +195,7 @@ cat > "$TARGET/harness-runtime.json" <<EOF
   "nodeVersion": "v$NODE_VERSION",
   "architectures": ["arm64", "x86_64"],
   "nodeArguments": ["--expose-internals"],
+  "builtInSkills": ["kemi-s1-hardware-debug"],
   "cli": "$CLI_RELATIVE"
 }
 EOF

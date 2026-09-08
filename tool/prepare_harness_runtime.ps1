@@ -83,6 +83,9 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-parent-watchdog.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-android-stress-mcp.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-session-rebind.mjs') -Destination $target
+$builtInSkills = Join-Path $target 'builtin-skills'
+New-Item -ItemType Directory -Path $builtInSkills | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot '.skills-publish\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
 if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }
@@ -154,6 +157,7 @@ Get-ChildItem -LiteralPath $profile -Force | Where-Object {
 @{
   version = "@deepseek-ai/dsh@$packageVersion"
   cli = $cliRelative
+  builtInSkills = @('kemi-s1-hardware-debug')
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $target 'harness-runtime.json') -Encoding utf8
 
 Write-Host "Prepared Harness runtime: $target"
