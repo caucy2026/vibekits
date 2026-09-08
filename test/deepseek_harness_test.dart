@@ -63,6 +63,56 @@ void main() {
     expect(safe, contains('[REDACTED]'));
   });
 
+  test('Release 内置技能会安装到 Harness 实际扫描目录', () async {
+    final Directory fixture = await Directory.systemTemp.createTemp(
+      'vibekits_builtin_skill_',
+    );
+    final Directory agentHome = await Directory.systemTemp.createTemp(
+      'vibekits_agent_home_',
+    );
+    addTearDown(() async {
+      if (await fixture.exists()) await fixture.delete(recursive: true);
+      if (await agentHome.exists()) await agentHome.delete(recursive: true);
+    });
+    final Directory source = Directory(
+      '${fixture.path}${Platform.pathSeparator}kemi-s1-hardware-debug',
+    );
+    await source.create(recursive: true);
+    await File(
+      '${source.path}${Platform.pathSeparator}SKILL.md',
+    ).writeAsString('---\nname: kemi-s1-hardware-debug\n---\n');
+    await Directory(
+      '${source.path}${Platform.pathSeparator}references',
+    ).create();
+    await File(
+      '${source.path}${Platform.pathSeparator}references'
+      '${Platform.pathSeparator}s1-profile.md',
+    ).writeAsString('115200 / 8-N-1');
+
+    final List<Directory> installed =
+        await DeepSeekHarnessService.installBundledHarnessSkills(
+          bundledSkillsDirectory: fixture,
+          agentHome: agentHome,
+        );
+
+    expect(installed, hasLength(1));
+    final Directory target = Directory(
+      '${agentHome.path}${Platform.pathSeparator}skills'
+      '${Platform.pathSeparator}kemi-s1-hardware-debug',
+    );
+    expect(
+      await File('${target.path}${Platform.pathSeparator}SKILL.md').exists(),
+      isTrue,
+    );
+    expect(
+      await File(
+        '${target.path}${Platform.pathSeparator}references'
+        '${Platform.pathSeparator}s1-profile.md',
+      ).readAsString(),
+      '115200 / 8-N-1',
+    );
+  });
+
   test('旧 Key 一次迁移到官方可写凭据文件且不覆盖新 Key', () async {
     final Directory home = await Directory.systemTemp.createTemp(
       'vibekits_harness_credentials_',
@@ -117,8 +167,19 @@ void main() {
     officialWeb.validate();
     expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.2-rc.1');
     expect(
-      DeepSeekHarnessService.sharedAgentHomeDirectory().path,
+      DeepSeekHarnessService.sharedAgentHomeDirectory(
+        environment: <String, String>{
+          'USERPROFILE': Directory.systemTemp.path,
+          'HOME': Directory.systemTemp.path,
+        },
+      ).path,
       endsWith('${Platform.pathSeparator}.codex'),
+    );
+    expect(
+      DeepSeekHarnessService.sharedAgentHomeDirectory(
+        environment: <String, String>{'CODEX_HOME': r'D:\Codex\home'},
+      ).path,
+      r'D:\Codex\home',
     );
     expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));

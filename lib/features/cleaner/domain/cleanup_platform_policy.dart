@@ -160,19 +160,42 @@ abstract final class CleanupPlatformPolicy {
     String appCacheDirectory = '',
     String harnessDebugDirectory = '',
   }) {
+    return deletionPredicate(
+      platform,
+      environment: environment,
+      appCacheDirectory: appCacheDirectory,
+      harnessDebugDirectory: harnessDebugDirectory,
+    )(path);
+  }
+
+  /// Builds the platform boundary once for a batch scan. This avoids repeatedly
+  /// normalizing the same protected roots for every discovered candidate.
+  static bool Function(String path) deletionPredicate(
+    CleanupPlatform platform, {
+    Map<String, String>? environment,
+    String appCacheDirectory = '',
+    String harnessDebugDirectory = '',
+  }) {
     final Map<String, String> env = environment ?? Platform.environment;
     switch (platform) {
       case CleanupPlatform.windows:
-        final String normalized = path.replaceAll('/', '\\').toLowerCase();
         final String windows = (env['WINDIR'] ?? r'C:\Windows')
             .replaceAll('/', '\\')
             .toLowerCase();
-        return !containsPath('$windows\\System32', normalized, windows: true) &&
-            !containsPath('$windows\\WinSxS', normalized, windows: true) &&
-            !RegExp(r'^[a-z]:\\?$').hasMatch(normalized);
+        final String system32 = _normalizePath(
+          '$windows\\System32',
+          windows: true,
+        );
+        final String winsxs = _normalizePath('$windows\\WinSxS', windows: true);
+        return (String path) {
+          final String normalized = _normalizePath(path, windows: true);
+          return !_containsNormalized(system32, normalized) &&
+              !_containsNormalized(winsxs, normalized) &&
+              !_isWindowsDriveRoot(normalized);
+        };
       case CleanupPlatform.macos:
         final String home = (env['HOME'] ?? '').trim();
-        if (home.isEmpty) return false;
+        if (home.isEmpty) return (_) => false;
         final List<String> roots = <String>[
           '$home/Library/Caches',
           '$home/Library/Logs',
@@ -191,19 +214,33 @@ abstract final class CleanupPlatformPolicy {
           '$home/go/pkg/mod/cache/download',
           harnessDebugDirectory,
         ].where((String root) => root.trim().isNotEmpty).toList();
-        return roots.any(
-          (String root) => containsPath(root, path, windows: false),
-        );
+        final List<String> normalizedRoots = roots
+            .map((String root) => _normalizePath(root, windows: false))
+            .toList(growable: false);
+        return (String path) {
+          final String normalized = _normalizePath(path, windows: false);
+          return normalizedRoots.any(
+            (String root) => _containsNormalized(root, normalized),
+          );
+        };
       case CleanupPlatform.android:
-        return isAndroidOwnedPath(
-          path,
-          environment: env,
-          appCacheDirectory: appCacheDirectory,
-          harnessDebugDirectory: harnessDebugDirectory,
-        );
+        final List<String> normalizedRoots =
+            androidOwnedRoots(
+                  environment: env,
+                  appCacheDirectory: appCacheDirectory,
+                  harnessDebugDirectory: harnessDebugDirectory,
+                )
+                .map((String root) => _normalizePath(root, windows: false))
+                .toList(growable: false);
+        return (String path) {
+          final String normalized = _normalizePath(path, windows: false);
+          return normalizedRoots.any(
+            (String root) => _containsNormalized(root, normalized),
+          );
+        };
       case CleanupPlatform.linux:
       case CleanupPlatform.unsupported:
-        return false;
+        return (_) => false;
     }
   }
 
@@ -212,17 +249,25 @@ abstract final class CleanupPlatformPolicy {
     String candidate, {
     required bool windows,
   }) {
-    String normalize(String value) {
-      String result = value.replaceAll('\\', '/');
-      while (result.endsWith('/') && result.length > 1) {
-        result = result.substring(0, result.length - 1);
-      }
-      return windows ? result.toLowerCase() : result;
-    }
-
-    final String normalizedRoot = normalize(root);
-    final String normalizedCandidate = normalize(candidate);
-    return normalizedCandidate == normalizedRoot ||
-        normalizedCandidate.startsWith('$normalizedRoot/');
+    final String normalizedRoot = _normalizePath(root, windows: windows);
+    final String normalizedCandidate = _normalizePath(
+      candidate,
+      windows: windows,
+    );
+    return _containsNormalized(normalizedRoot, normalizedCandidate);
   }
+
+  static String _normalizePath(String value, {required bool windows}) {
+    String result = value.replaceAll('\\', '/');
+    while (result.endsWith('/') && result.length > 1) {
+      result = result.substring(0, result.length - 1);
+    }
+    return windows ? result.toLowerCase() : result;
+  }
+
+  static bool _containsNormalized(String root, String candidate) =>
+      candidate == root || candidate.startsWith('$root/');
+
+  static bool _isWindowsDriveRoot(String path) =>
+      path.length == 2 && path.codeUnitAt(1) == 58;
 }
