@@ -848,6 +848,24 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       );
       return;
     }
+    if (payload?['type'] == 'vibekits.inferenceError') {
+      final String code = (payload?['code'] as String? ?? '').trim();
+      final String detail = (payload?['message'] as String? ?? '').trim();
+      final String message = code == 'AUTH'
+          ? 'API 密钥无效，请检查 DeepSeek API Key 后重试。'
+          : detail.isEmpty
+          ? '推理失败，请检查模型配置后重试。'
+          : detail;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      return;
+    }
     if (payload?['type'] == 'vibekits.workspaceSnapshot') {
       final Object? rawWorkspaces = payload?['workspaces'];
       if (rawWorkspaces is! List) return;

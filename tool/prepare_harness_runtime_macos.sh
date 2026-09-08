@@ -162,7 +162,8 @@ ditto "$WEB_FRONTEND/dist" "$WEB_FRONTEND/dist-macos12"
   "$PACKAGE_ROOT/node_modules/esbuild/lib/main.js"
 rm -rf \
   "$PACKAGE_ROOT/node_modules/esbuild" \
-  "$PACKAGE_ROOT/node_modules/@esbuild"
+  "$PACKAGE_ROOT/node_modules/@esbuild" \
+  "$PACKAGE_ROOT/node_modules/.bin/esbuild"
 
 PACKAGE_JSON="$PACKAGE_ROOT/node_modules/@deepseek-ai/dsh/package.json"
 CLI_RELATIVE="$("$NODE" -e '

@@ -84,6 +84,10 @@ void main() {
     );
     expect(injectedUx, contains('window.chrome.webview'));
     expect(injectedUx, contains('window.VibekitsHost'));
+    expect(injectedUx, contains("value === 'AUTH'"));
+    expect(injectedUx, contains('vibekits.inferenceError'));
+    expect(workspace, contains("payload?['type'] == 'vibekits.inferenceError'"));
+    expect(workspace, contains('API 密钥无效，请检查 DeepSeek API Key 后重试。'));
     expect(injectedUx, contains('vibekits-selected-session-actions'));
     expect(injectedUx, contains('[role="treeitem"][aria-selected="true"]'));
   });

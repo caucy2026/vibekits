@@ -43,6 +43,31 @@
     }
   };
 
+  const publishInferenceErrors = () => {
+    const published = window.__vibekitsInferenceErrorSignatures ||= new Set();
+    for (const status of document.querySelectorAll('[role="status"]')) {
+      if (!(status instanceof HTMLElement)) continue;
+      const code = [...status.querySelectorAll('code')]
+        .map((element) => element.textContent?.trim() || '')
+        .find((value) => value === 'AUTH');
+      if (!code) continue;
+      const message = status.textContent?.replace(code, '').trim() || '';
+      const signature = `${code}:${message}`;
+      if (published.has(signature)) continue;
+      published.add(signature);
+      const payload = JSON.stringify({
+        type: 'vibekits.inferenceError',
+        code,
+        message,
+      });
+      if (window.chrome?.webview?.postMessage) {
+        window.chrome.webview.postMessage(payload);
+      } else if (window.VibekitsHost?.postMessage) {
+        window.VibekitsHost.postMessage(payload);
+      }
+    }
+  };
+
   const styleId = 'vibekits-codex-conversation-ux';
   let style = document.getElementById(styleId);
   if (!style) {
@@ -223,10 +248,12 @@
     const observer = new MutationObserver(() => {
       localizeOfficialActions();
       markSelectedSessionActions();
+      publishInferenceErrors();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
   markSelectedSessionActions();
+  publishInferenceErrors();
 
   const findConversationHost = () =>
     [...document.querySelectorAll('[data-conversation-scroll]')]
