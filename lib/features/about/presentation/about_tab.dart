@@ -590,30 +590,36 @@ class _InventorySection extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: context.vibe.panelRaised,
+  Widget build(BuildContext context) => Material(
+    color: context.vibe.panelRaised,
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: context.vibe.border),
+      side: BorderSide(color: context.vibe.border),
     ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(icon, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-            ),
-          ],
-        ),
-        const SizedBox(height: 7),
-        Text(description, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 8),
-        ...children,
-      ],
+    clipBehavior: Clip.antiAlias,
+    child: Padding(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          Text(description, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 8),
+          ...children,
+        ],
+      ),
     ),
   );
 }

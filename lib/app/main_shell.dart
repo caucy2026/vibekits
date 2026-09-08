@@ -261,10 +261,16 @@ class _MainShellState extends State<MainShell> {
     });
     if (needsLoad) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _selectedIndex != index) return;
-        setState(() {
-          if (mobile) _loadedTabs.clear();
-          _loadedTabs.add(index);
+        // Paint the selected navigation state and lightweight placeholder
+        // before constructing a large workspace such as Harness. Without this
+        // frame boundary the first click is held up by WebView/plugin JIT work
+        // and appears unresponsive even though navigation already succeeded.
+        Future<void>.delayed(const Duration(milliseconds: 16), () {
+          if (!mounted || _selectedIndex != index) return;
+          setState(() {
+            if (mobile) _loadedTabs.clear();
+            _loadedTabs.add(index);
+          });
         });
       });
     }
@@ -292,7 +298,7 @@ class _MainShellState extends State<MainShell> {
   void _openSettings() {
     showDialog<void>(
       context: context,
-      builder: (BuildContext context) => _SettingsDialog(
+      builder: (BuildContext context) => _DeferredSettingsDialog(
         initial: widget.settingsController.value,
         onSave: widget.settingsController.update,
       ),
@@ -1223,6 +1229,64 @@ class _StatusPill extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DeferredSettingsDialog extends StatefulWidget {
+  const _DeferredSettingsDialog({required this.initial, required this.onSave});
+
+  final AppSettings initial;
+  final Future<void> Function(AppSettings) onSave;
+
+  @override
+  State<_DeferredSettingsDialog> createState() =>
+      _DeferredSettingsDialogState();
+}
+
+class _DeferredSettingsDialogState extends State<_DeferredSettingsDialog> {
+  bool _ready = false;
+  Timer? _deferTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _deferTimer = Timer(const Duration(milliseconds: 16), () {
+        if (mounted) setState(() => _ready = true);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _deferTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _ready
+      ? _SettingsDialog(initial: widget.initial, onSave: widget.onSave)
+      : AlertDialog(
+          title: const Text('设置'),
+          content: const SizedBox(
+            width: 520,
+            height: 48,
+            child: Align(alignment: Alignment.centerLeft, child: Text('主题')),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                await widget.onSave(widget.initial);
+                if (context.mounted) Navigator.of(context).pop();
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
 }
 
 class _SettingsDialog extends StatefulWidget {
