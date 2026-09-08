@@ -80,3 +80,10 @@ Harness 远程协助不再使用 `VH-...` 证书标签或 KEMI 远程办公 ID �
 2. 控制端目前以原生远程面板显示项目/会话、发送和反馈；完整官方 DSH 对话、推理与工具时间线尚未通过官方 transport adapter 重放，不能宣称与本地视觉和全部操作完全一致。
 3. Windows 节点需先由设备维护方安全释放至少约 600 MiB，使 D 盘达到 30 GiB 门禁，再同步精确源码、D 盘增量构建和真机安装回归。
 4. 当前 Developer ID 候选仍需 Apple Notary `Accepted`、staple、Gatekeeper 与真实下载哈希闭环。远程协助第 1～3 项未完成前不提前发布。
+
+## 2026-09-09 GitHub 合并复验
+
+- 获取 GitHub `origin/main` 后发现同事新增 `3ac6cf7`、`2a4c886` 两笔 Windows 发布门禁/Harness 首帧改动。本轮先以 `04c5c28` 保存远程协助检查点，再无冲突合并 `origin/main`，没有覆盖同事代码。
+- 合并后的 Harness 远程交叉回归扩大为 `56 passed / 0 failed`；主壳、关于页、远程协助 domain/presentation 和官方 Harness 工作区定向 analyze 为 `No issues found`。
+- 第一次精确重建被 Release 门禁以 `Official macOS 7-Zip runtime is missing` 正确拒绝；没有复用旧 App 或系统 7-Zip。随后通过 `prepare_7zip_runtime_macos.sh` 下载并固定校验官方 7-Zip 25.01 Universal 运行时，重建成功。
+- 合并后的最终精确候选再次通过 Universal/macOS 12+ 与 Harness/ADB/7-Zip/GitHub CLI/Git 门禁，并重新以 Developer ID、Hardened Runtime和安全时间戳签署 35 个 Mach-O；内置 Node x86/ARM、JIT 和 DSH 启动验证通过。它仍只是待公证候选，不是 `bin` 正式包。
