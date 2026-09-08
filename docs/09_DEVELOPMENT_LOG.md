@@ -1526,4 +1526,5 @@
 - 主导航、页面说明、主题/语言设置、应用中心的搜索/状态/安装流程，以及关于页的核心产品介绍与能力清单接入本地化；未知新文案安全回退简体中文。
 - 修复设置迁移遗漏 `app-center` 稳定页面 ID 的问题；旧设置缺少语言字段时继续默认简体中文，不改变既有用户界面。
 - 同步 `pubspec`、`AppVersion` 与 LMCP `appVersion/catalogRevision` 为 `1.9.0-dev.161+2161`。
-- 静态分析通过；本地化、设置持久化和主界面回归 28/28 通过；Universal macOS 12+ Release 构建与全功能兼容性门禁通过。
+- 合并最新云端 `main` 的 dev.160 Harness 启动、远程工作区、清理策略和 Android 构建修复；同时修正跨平台测试中 Windows `CODEX_HOME` 在 macOS 主机上被误判为相对路径的问题。
+- 静态分析通过；本地化、设置持久化、主界面、Harness 启动与远程工作区联合回归 80/80 通过；Universal macOS 12+ Release 构建与全功能兼容性门禁通过。
