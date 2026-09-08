@@ -3,7 +3,7 @@ import FlutterMacOS
 import WebKit
 
 @main
-class AppDelegate: FlutterAppDelegate {
+class AppDelegate: FlutterAppDelegate, NSWindowDelegate {
   private var fileChannel: FlutterMethodChannel?
   private var harnessInputChannel: FlutterMethodChannel?
   private var pendingFiles: [String] = []
@@ -13,6 +13,7 @@ class AppDelegate: FlutterAppDelegate {
   private var webViewInputEnabled = true
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
+    mainFlutterWindow?.delegate = self
     mainFlutterWindow?.acceptsMouseMovedEvents = true
     if let controller = mainFlutterWindow?.contentViewController
         as? FlutterViewController {
@@ -167,6 +168,25 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    return false
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    // Closing the visible window must not terminate Harness, MCP discovery or
+    // long-running tools. Keep the process alive and let Dock activation or
+    // the Window menu restore this same Flutter window.
+    sender.orderOut(nil)
+    return false
+  }
+
+  override func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows flag: Bool
+  ) -> Bool {
+    if !flag {
+      mainFlutterWindow?.makeKeyAndOrderFront(nil)
+      sender.activate(ignoringOtherApps: true)
+    }
     return true
   }
 

@@ -119,6 +119,25 @@ void main() {
     expect(watchdog, contains("error?.code !== 'ESRCH'"));
   });
 
+  test('desktop close hides the window while explicit exit stops services', () {
+    final String macRunner = File(
+      'macos/Runner/AppDelegate.swift',
+    ).readAsStringSync();
+    final String windowsRunner = File(
+      'windows/runner/flutter_window.cpp',
+    ).readAsStringSync();
+
+    expect(macRunner, contains('mainFlutterWindow?.delegate = self'));
+    expect(macRunner, contains('func windowShouldClose'));
+    expect(macRunner, contains('sender.orderOut(nil)'));
+    expect(macRunner, contains('return false'));
+    expect(macRunner, contains('applicationShouldHandleReopen'));
+    expect(macRunner, contains('makeKeyAndOrderFront(nil)'));
+    expect(windowsRunner, contains('case WM_CLOSE:'));
+    expect(windowsRunner, contains('::ShowWindow(hwnd, SW_HIDE)'));
+    expect(windowsRunner, contains('kTrayExitCommand'));
+  });
+
   test('session delete and cross-project move bridge both desktop WebViews', () {
     final String patch = File(
       'tool/patch_harness_runtime.mjs',
