@@ -8,10 +8,15 @@ import 'platform_storage_layout.dart';
 
 enum AppLogLevel { error, warning, info, debug }
 
+/// User-selected application language. [system] follows the operating system
+/// on every launch, while the other values are stable, persisted overrides.
+enum AppLanguage { system, simplifiedChinese, traditionalChinese, english }
+
 @immutable
 class AppSettings {
   const AppSettings({
     this.themeMode = ThemeMode.system,
+    this.language = AppLanguage.simplifiedChinese,
     this.restoreLastTab = true,
     this.lastTab = 0,
     this.lastWorkspaceId = 'large-model',
@@ -42,6 +47,7 @@ class AppSettings {
   });
 
   final ThemeMode themeMode;
+  final AppLanguage language;
   final bool restoreLastTab;
   final int lastTab;
   final String lastWorkspaceId;
@@ -72,6 +78,7 @@ class AppSettings {
 
   AppSettings copyWith({
     ThemeMode? themeMode,
+    AppLanguage? language,
     bool? restoreLastTab,
     int? lastTab,
     String? lastWorkspaceId,
@@ -101,6 +108,7 @@ class AppSettings {
     String? rustDeskWebClientUrl,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
+    language: language ?? this.language,
     restoreLastTab: restoreLastTab ?? this.restoreLastTab,
     lastTab: lastTab ?? this.lastTab,
     lastWorkspaceId: lastWorkspaceId ?? this.lastWorkspaceId,
@@ -137,6 +145,7 @@ class AppSettings {
 
   Map<String, Object> toJson() => <String, Object>{
     'themeMode': themeMode.name,
+    'language': language.name,
     'restoreLastTab': restoreLastTab,
     'lastTab': lastTab,
     'lastWorkspaceId': lastWorkspaceId,
@@ -205,6 +214,7 @@ class AppSettings {
       'cleaner',
       'documents',
       'dev-tools',
+      'app-center',
       'about',
     };
     final String storedWorkspace = json['lastWorkspaceId'] is String
@@ -219,6 +229,11 @@ class AppSettings {
 
     return AppSettings(
       themeMode: enumValue(ThemeMode.values, 'themeMode', ThemeMode.system),
+      language: enumValue(
+        AppLanguage.values,
+        'language',
+        AppLanguage.simplifiedChinese,
+      ),
       restoreLastTab: json['restoreLastTab'] is bool
           ? json['restoreLastTab']! as bool
           : true,

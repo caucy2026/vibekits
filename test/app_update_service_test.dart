@@ -63,7 +63,7 @@ void main() {
       requestUri.queryParameters['package_name'],
       AppUpdateService.packageName,
     );
-    expect(requestUri.queryParameters['version_code'], '2159');
+    expect(requestUri.queryParameters['version_code'], '2161');
     expect(requestUri.queryParameters['os'], 'macos');
     expect(service.snapshot.value.phase, AppUpdatePhase.current);
     service.dispose();
@@ -150,8 +150,8 @@ void main() {
               'has_update': true,
               'package_name': AppUpdateService.packageName,
               'os_type': os,
-              'version_name': '1.9.0-dev.159',
-              'version_code': 2159,
+              'version_name': '1.9.0-dev.161',
+              'version_code': 2161,
               'download_url': os == 'macos'
                   ? 'https://example.test/Vibekits.zip'
                   : 'https://example.test/Vibekits.exe',

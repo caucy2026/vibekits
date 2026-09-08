@@ -1519,3 +1519,11 @@
 - GitHub macOS run `34115703453` 与 Windows run `34115703573` 完整成功。macOS 最终 Universal/macOS 12+ 公证包 289,331,928 bytes、SHA-256 `93d6a4bc3677f7ec5379597bae2205a086abb50a9162e5b6c1ee0d06cc9e9bfd`，Apple 公证 `Accepted`（Submission ID `1ba3e8d4-8bcc-4cf8-931a-61e0359158ed`）；Windows 最终包 299,191,243 bytes、SHA-256 `24928b3741914ddf879df8c3bde3bdb71e9efc8a201cc482cc4c08428f5ea334`，在 192.168.3.58 / Windows 10.0.19045 的 D 盘隔离环境通过 33 项运行时门禁及三次启动，Authenticode 仍为 `NotSigned`。
 - KEMI 商场既有 macOS `app_id=53`、Windows `app_id=54` 已免审更新至 dev.159/2159，保持上架、可取消更新。公开详情与 CDN 回下载大小/SHA 完全一致；两端 2158→2159 返回可更新，两端当前 2159 均返回 `has_update=false` 且空下载 URL。本轮没有更新 Newlink Common。
 - 外部分发核对：Uptodown 账号登录返回用户名或密码错误，尚未形成提交；本机只有 Developer ID 站外分发证书，没有 Mac App Store 分发/安装证书、provisioning profile 或 App Store Connect API 密钥，因此 Apple 商店上传尚未开始。完整证据见 `docs/acceptance/V1_9_0_DEV159_MARKET_RELEASE_2026-09-07.md`。
+## 2026-09-08 · 1.9.0-dev.161+2161 · 多语言基础与跨平台一致性
+
+- 从云端 `origin/main` 的 `c697267` 基线建立隔离开发分支，未覆盖主工作区未提交改动。
+- 新增统一的应用本地化层，支持跟随系统、简体中文、繁體中文和 English；选择写入同一份跨平台设置，macOS 与 Windows 共用实现。
+- 主导航、页面说明、主题/语言设置、应用中心的搜索/状态/安装流程，以及关于页的核心产品介绍与能力清单接入本地化；未知新文案安全回退简体中文。
+- 修复设置迁移遗漏 `app-center` 稳定页面 ID 的问题；旧设置缺少语言字段时继续默认简体中文，不改变既有用户界面。
+- 同步 `pubspec`、`AppVersion` 与 LMCP `appVersion/catalogRevision` 为 `1.9.0-dev.161+2161`。
+- 静态分析通过；本地化、设置持久化和主界面回归 28/28 通过；Universal macOS 12+ Release 构建与全功能兼容性门禁通过。

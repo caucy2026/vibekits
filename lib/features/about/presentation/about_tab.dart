@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/app_localizations.dart';
 import '../../../app/app_version.dart';
 import '../domain/about_capability_manifest.dart';
 import '../domain/marketing_cache_service.dart';
@@ -126,10 +127,13 @@ class _AboutTabState extends State<AboutTab> {
                       _marketing(context, value),
                 ),
                 const SizedBox(height: 24),
-                Text('当前版本能力', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  context.l10n.text('当前版本能力'),
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 6),
                 Text(
-                  '以下项目来自当前应用导航和已交付工具，不包含规划中或未经验证的能力。',
+                  context.l10n.text('以下项目来自当前应用导航和已交付工具，不包含规划中或未经验证的能力。'),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 14),
@@ -207,7 +211,7 @@ class _AboutTabState extends State<AboutTab> {
             ),
             const SizedBox(height: 3),
             Text(
-              '本地优先的智能体与工程工具箱',
+              context.l10n.text('本地优先的智能体与工程工具箱'),
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             const SizedBox(height: 5),
@@ -232,12 +236,12 @@ class _AboutTabState extends State<AboutTab> {
             key: const Key('about-marketing-loading'),
             decoration: _decoration(context),
             alignment: Alignment.center,
-            child: const Column(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 CircularProgressIndicator(),
                 SizedBox(height: 14),
-                Text('正在准备系列产品内容…'),
+                Text(context.l10n.text('正在准备系列产品内容…')),
               ],
             ),
           ),
@@ -280,7 +284,9 @@ class _AboutTabState extends State<AboutTab> {
           children: <Widget>[
             Expanded(
               child: Text(
-                value.version.isEmpty ? '系列产品资源' : '系列产品资源 ${value.version}',
+                value.version.isEmpty
+                    ? context.l10n.text('系列产品资源')
+                    : '${context.l10n.text('系列产品资源')} ${value.version}',
                 key: const Key('about-marketing-version'),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
@@ -345,10 +351,15 @@ class _AboutTabState extends State<AboutTab> {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 16),
-          Text('让智能体调用真实工程能力', style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            context.l10n.text('让智能体调用真实工程能力'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           const SizedBox(height: 9),
-          const Text(
-            '统一使用本机工具和经过授权的局域网 MCP，保留调用过程、结果证据与停止控制。当前网络不可用，已安全显示内置产品信息。',
+          Text(
+            context.l10n.text(
+              '统一使用本机工具和经过授权的局域网 MCP，保留调用过程、结果证据与停止控制。当前网络不可用，已安全显示内置产品信息。',
+            ),
           ),
         ],
       ),
@@ -377,10 +388,13 @@ class _AboutTabState extends State<AboutTab> {
     key: const Key('about-capability-summary'),
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
-      Text('能力全景', style: Theme.of(context).textTheme.titleLarge),
+      Text(
+        context.l10n.text('能力全景'),
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
       const SizedBox(height: 6),
       Text(
-        '数字直接来自应用正在使用的格式路由表和工具注册表，新增或移除能力时会同步变化。',
+        context.l10n.text('数字直接来自应用正在使用的格式路由表和工具注册表，新增或移除能力时会同步变化。'),
         style: Theme.of(context).textTheme.bodySmall,
       ),
       const SizedBox(height: 14),
@@ -389,17 +403,23 @@ class _AboutTabState extends State<AboutTab> {
         runSpacing: 10,
         children: <Widget>[
           _SummaryMetric(
-            '文件扩展名',
+            context.l10n.text('文件扩展名'),
             AboutCapabilityManifest.supportedExtensionCount,
           ),
-          _SummaryMetric('特殊文件名', AboutCapabilityManifest.specialFileNameCount),
-          _SummaryMetric('开发工具', AboutCapabilityManifest.toolCount),
           _SummaryMetric(
-            '独立工作区',
+            context.l10n.text('特殊文件名'),
+            AboutCapabilityManifest.specialFileNameCount,
+          ),
+          _SummaryMetric(
+            context.l10n.text('开发工具'),
+            AboutCapabilityManifest.toolCount,
+          ),
+          _SummaryMetric(
+            context.l10n.text('独立工作区'),
             AboutCapabilityManifest.independentWorkspaceCount,
           ),
           _SummaryMetric(
-            'Harness 工具入口',
+            context.l10n.text('Harness 工具入口'),
             AboutCapabilityManifest.harnessEntryCount,
           ),
         ],
@@ -410,8 +430,10 @@ class _AboutTabState extends State<AboutTab> {
   Widget _formatInventory(BuildContext context) => _InventorySection(
     key: const Key('about-format-inventory'),
     icon: Icons.description_outlined,
-    title: '支持格式与自有数据说明',
-    description: '按实际路由清单逐项列出。点击分类可查看完整扩展名；未登记格式不会在这里被宣传为已支持。',
+    title: context.l10n.text('支持格式与自有数据说明'),
+    description: context.l10n.text(
+      '按实际路由清单逐项列出。点击分类可查看完整扩展名；未登记格式不会在这里被宣传为已支持。',
+    ),
     children: AboutCapabilityManifest.formatGroups
         .map(
           (group) => ExpansionTile(
@@ -440,8 +462,8 @@ class _AboutTabState extends State<AboutTab> {
   Widget _toolInventory(BuildContext context) => _InventorySection(
     key: const Key('about-tool-inventory'),
     icon: Icons.construction_outlined,
-    title: '全部开发工具',
-    description: '按开发工具页的真实注册表分组；每项标明用途以及需要联网还是可本地运行。',
+    title: context.l10n.text('全部开发工具'),
+    description: context.l10n.text('按开发工具页的真实注册表分组；每项标明用途以及需要联网还是可本地运行。'),
     children: AboutCapabilityManifest.toolGroups
         .map(
           (group) => ExpansionTile(
@@ -458,7 +480,9 @@ class _AboutTabState extends State<AboutTab> {
                     title: Text(tool.name),
                     subtitle: Text(tool.description),
                     trailing: Tooltip(
-                      message: tool.offline ? '本地可用' : '需要网络或外部设备',
+                      message: context.l10n.text(
+                        tool.offline ? '本地可用' : '需要网络或外部设备',
+                      ),
                       child: Icon(
                         tool.offline
                             ? Icons.offline_bolt_outlined
@@ -488,7 +512,9 @@ class _AboutTabState extends State<AboutTab> {
         const SizedBox(width: 10),
         Expanded(
           child: Text(
-            '隐私与联网：文件默认在本机处理。应用启动后低优先级检查已授权的同系列产品图片；只显示通过 HTTPS、大小、MD5、格式和解码校验的本地缓存，失败时继续使用上次完整缓存或内置内容。',
+            context.l10n.text(
+              '隐私与联网：文件默认在本机处理。应用启动后低优先级检查已授权的同系列产品图片；只显示通过 HTTPS、大小、MD5、格式和解码校验的本地缓存，失败时继续使用上次完整缓存或内置内容。',
+            ),
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
@@ -519,12 +545,12 @@ class _CapabilityCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  item.title,
+                  context.l10n.text(item.title),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  item.description,
+                  context.l10n.text(item.description),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],

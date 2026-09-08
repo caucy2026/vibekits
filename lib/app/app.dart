@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../features/dev_tools/domain/harness_tool_activity_store.dart';
 import '../features/dev_tools/domain/harness_tool_bridge.dart';
@@ -18,6 +19,7 @@ import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../features/dev_tools/presentation/lmcp_inbound_call_overlay.dart';
 import '../features/about/domain/marketing_cache_service.dart';
 import 'app_theme.dart';
+import 'app_localizations.dart';
 import 'app_settings.dart';
 import 'app_version.dart';
 import 'dropped_file_router.dart';
@@ -297,6 +299,13 @@ class _VibekitsAppState extends State<VibekitsApp> {
       theme: VibekitsTheme.light(),
       darkTheme: VibekitsTheme.dark(),
       themeMode: _settings.value.themeMode,
+      locale: VibeLocalizations.localeFor(_settings.value.language),
+      supportedLocales: VibeLocalizations.supportedLocales,
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       builder: (BuildContext context, Widget? child) =>
           LmcpInboundCallOverlay(child: child ?? const SizedBox.shrink()),
       home: MainShell(

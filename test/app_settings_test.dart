@@ -16,6 +16,7 @@ void main() {
     );
     const AppSettings expected = AppSettings(
       themeMode: ThemeMode.dark,
+      language: AppLanguage.traditionalChinese,
       restoreLastTab: true,
       lastTab: 3,
       lastWorkspaceId: 'documents',
@@ -34,7 +35,8 @@ void main() {
       recentDocumentPaths: <String>[r'D:\Docs\one.md', r'D:\Docs\two.log'],
       remoteDatabaseProfiles: <String>['{"id":"postgres-1"}'],
       remoteSessionProfiles: <String>['{"id":"remote-1"}'],
-      serialPortSettings: '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
+      serialPortSettings:
+          '{"portName":"COM7","baudRate":115200,"dataBits":8,"parity":"none","stopBits":1,"flowControl":"none"}',
       serialSendHistory: <String>['status', 'help'],
       adbRecentAddresses: <String>['192.168.3.63:5555', '192.168.3.62:5555'],
       adbCommandHistory: <String>[
@@ -75,6 +77,7 @@ void main() {
     final AppSettings actual = await AppSettingsStore(file: file).load();
 
     expect(actual.themeMode, ThemeMode.system);
+    expect(actual.language, AppLanguage.simplifiedChinese);
     expect(actual.cacheLimitMb, 512);
   });
 

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../app/app_localizations.dart';
 import '../domain/app_center_service.dart';
 
 class AppCenterTab extends StatefulWidget {
@@ -65,7 +66,7 @@ class _AppCenterTabState extends State<AppCenterTab> {
     final String platform = switch (_service.platformName) {
       'windows' => 'Windows',
       'macos' => 'macOS',
-      _ => '当前系统',
+      _ => context.l10n.text('当前系统'),
     };
     return ColoredBox(
       key: const Key('app-center-page'),
@@ -81,13 +82,13 @@ class _AppCenterTabState extends State<AppCenterTab> {
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        '$platform 应用',
+                        '$platform ${context.l10n.text('应用')}',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
                     IconButton(
                       key: const Key('app-center-refresh'),
-                      tooltip: '刷新应用列表',
+                      tooltip: context.l10n.text('刷新应用列表'),
                       onPressed: _loading ? null : _load,
                       icon: const Icon(Icons.refresh_rounded),
                     ),
@@ -95,7 +96,9 @@ class _AppCenterTabState extends State<AppCenterTab> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '仅显示 KEMI 市场中已上架、允许展示且适用于 $platform 的应用。',
+                  Localizations.localeOf(context).languageCode == 'en'
+                      ? 'Only published, visible KEMI Market apps for $platform are shown.'
+                      : '仅显示 KEMI 市场中已上架、允许展示且适用于 $platform 的应用。',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 14),
@@ -105,10 +108,10 @@ class _AppCenterTabState extends State<AppCenterTab> {
                   textInputAction: TextInputAction.search,
                   onSubmitted: (_) => _load(),
                   decoration: InputDecoration(
-                    hintText: '搜索应用名称或简介',
+                    hintText: context.l10n.text('搜索应用名称或简介'),
                     prefixIcon: const Icon(Icons.search_rounded),
                     suffixIcon: IconButton(
-                      tooltip: '搜索',
+                      tooltip: context.l10n.text('搜索'),
                       onPressed: _loading ? null : _load,
                       icon: const Icon(Icons.arrow_forward_rounded),
                     ),
@@ -123,7 +126,7 @@ class _AppCenterTabState extends State<AppCenterTab> {
                       children: <Widget>[
                         ChoiceChip(
                           key: const Key('app-center-category-all'),
-                          label: const Text('全部'),
+                          label: Text(context.l10n.text('全部')),
                           selected: _category == null,
                           onSelected: (_) {
                             setState(() => _category = null);
@@ -167,12 +170,12 @@ class _AppCenterTabState extends State<AppCenterTab> {
     if (_error != null && _catalog == null) {
       return _MessageState(
         icon: Icons.cloud_off_outlined,
-        title: '应用列表加载失败',
+        title: context.l10n.text('应用列表加载失败'),
         message: _error!,
         action: FilledButton.icon(
           onPressed: _load,
           icon: const Icon(Icons.refresh_rounded),
-          label: const Text('重新加载'),
+          label: Text(context.l10n.text('重新加载')),
         ),
       );
     }
@@ -180,8 +183,10 @@ class _AppCenterTabState extends State<AppCenterTab> {
     if (apps.isEmpty) {
       return _MessageState(
         icon: Icons.apps_outlined,
-        title: '暂无符合条件的应用',
-        message: _search.text.trim().isEmpty ? '市场还没有上架当前系统应用。' : '换一个关键词再试试。',
+        title: context.l10n.text('暂无符合条件的应用'),
+        message: context.l10n.text(
+          _search.text.trim().isEmpty ? '市场还没有上架当前系统应用。' : '换一个关键词再试试。',
+        ),
       );
     }
     return Stack(
@@ -277,7 +282,9 @@ class _AppCard extends StatelessWidget {
             const SizedBox(height: 14),
             Expanded(
               child: Text(
-                item.shortDescription.isEmpty ? '暂无简介' : item.shortDescription,
+                item.shortDescription.isEmpty
+                    ? context.l10n.text('暂无简介')
+                    : item.shortDescription,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -349,7 +356,7 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   Future<void> _install() async {
     setState(() {
       _progress = 0;
-      _message = '正在下载并验证安装包…';
+      _message = context.l10n.text('正在下载并验证安装包…');
     });
     try {
       await widget.service.downloadAndOpen(
@@ -358,7 +365,9 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
           if (mounted) setState(() => _progress = value);
         },
       );
-      if (mounted) setState(() => _message = '校验通过，已交给系统打开');
+      if (mounted) {
+        setState(() => _message = context.l10n.text('校验通过，已交给系统打开'));
+      }
     } on Object catch (error) {
       if (mounted) {
         setState(() {
@@ -396,8 +405,16 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 runSpacing: 6,
                 children: <Widget>[
                   Chip(label: Text(item.category)),
-                  Chip(label: Text('版本 ${item.versionName}')),
-                  Chip(label: Text('评分 ${item.rating.toStringAsFixed(1)}')),
+                  Chip(
+                    label: Text(
+                      '${context.l10n.text('版本')} ${item.versionName}',
+                    ),
+                  ),
+                  Chip(
+                    label: Text(
+                      '${context.l10n.text('评分')} ${item.rating.toStringAsFixed(1)}',
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -406,24 +423,26 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                     ? item.longDescription
                     : item.shortDescription.isNotEmpty
                     ? item.shortDescription
-                    : '暂无详细介绍',
+                    : context.l10n.text('暂无详细介绍'),
               ),
               const SizedBox(height: 16),
               Text(
-                '开发者包名：${item.packageName}',
+                '${context.l10n.text('开发者包名')}：${item.packageName}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               Text(
-                '下载量：${item.downloadCount}',
+                '${context.l10n.text('下载量')}：${item.downloadCount}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               if (!item.hasVerifiedInstaller) ...<Widget>[
                 const SizedBox(height: 12),
-                const Text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'),
+                Text(
+                  context.l10n.text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'),
+                ),
               ],
               if (isCurrentVersion) ...<Widget>[
                 const SizedBox(height: 12),
-                const Text('当前已是最新版本，无需重复下载。'),
+                Text(context.l10n.text('当前已是最新版本，无需重复下载。')),
               ],
               if (_progress != null) ...<Widget>[
                 const SizedBox(height: 16),
@@ -440,7 +459,7 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
+          child: Text(context.l10n.text('关闭')),
         ),
         FilledButton.icon(
           key: const Key('app-center-install'),
@@ -450,7 +469,7 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 ? Icons.check_circle_outline
                 : Icons.download_rounded,
           ),
-          label: Text(isCurrentVersion ? '已是最新版' : '下载并安装'),
+          label: Text(context.l10n.text(isCurrentVersion ? '已是最新版' : '下载并安装')),
         ),
       ],
     );

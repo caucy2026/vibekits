@@ -62,6 +62,24 @@ void main() {
     expect(find.text('打开压缩包'), findsNothing);
   });
 
+  testWidgets('英文设置切换主导航且保留稳定页面 ID', (WidgetTester tester) async {
+    final AppSettingsController settings = AppSettingsController();
+    settings.value = const AppSettings(
+      language: AppLanguage.english,
+      lastWorkspaceId: 'app-center',
+    );
+    addTearDown(settings.dispose);
+
+    await tester.pumpWidget(VibekitsApp(settingsController: settings));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Agent (Harness)'), findsWidgets);
+    expect(find.text('App Center'), findsWidgets);
+    expect(find.byKey(const Key('app-center-page')), findsOneWidget);
+    expect(find.text('智能体（Harness）'), findsNothing);
+  });
+
   testWidgets('启动恢复上次一级工作区', (WidgetTester tester) async {
     final AppSettingsController settings = AppSettingsController();
     settings.value = const AppSettings(

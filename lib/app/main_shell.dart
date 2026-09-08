@@ -15,6 +15,7 @@ import '../features/dev_tools/presentation/dev_tools_tab.dart';
 import '../features/dev_tools/domain/remote_session.dart';
 import '../features/local_models/presentation/local_models_tab.dart';
 import 'app_shortcuts.dart';
+import 'app_localizations.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'platform_storage_layout.dart';
@@ -50,7 +51,7 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
-  static const List<String> _tabTitles = <String>[
+  static const List<String> _tabTitleKeys = <String>[
     '智能体（Harness）',
     '解压缩',
     '系统清理',
@@ -80,7 +81,7 @@ class _MainShellState extends State<MainShell> {
     Icons.info_outline_rounded,
   ];
 
-  static const List<String> _tabDescriptions = <String>[
+  static const List<String> _tabDescriptionKeys = <String>[
     '开发智能体（Harness）、任务会话与截图识别（OCR）',
     '安全查看、创建与提取压缩文件',
     '扫描可清理空间并生成可核对报告',
@@ -89,6 +90,14 @@ class _MainShellState extends State<MainShell> {
     '浏览和安装适用于当前系统的 KEMI 市场应用',
     '产品信息、当前版本能力与隐私说明',
   ];
+
+  List<String> get _tabTitles => _tabTitleKeys
+      .map((String value) => context.l10n.text(value))
+      .toList(growable: false);
+
+  List<String> get _tabDescriptions => _tabDescriptionKeys
+      .map((String value) => context.l10n.text(value))
+      .toList(growable: false);
 
   int _selectedIndex = 0;
   AndroidDisplayContext? _androidDisplayContext;
@@ -817,7 +826,7 @@ class _MainShellState extends State<MainShell> {
           if (!compact) ...<Widget>[
             _StatusPill(
               icon: Icons.shield_outlined,
-              label: '隐私优先',
+              label: context.l10n.text('隐私优先'),
               color: context.vibe.success,
             ),
             const SizedBox(width: 8),
@@ -852,7 +861,7 @@ class _MainShellState extends State<MainShell> {
             ),
           IconButton(
             key: const Key('app-settings-button'),
-            tooltip: '设置 (Ctrl+,)',
+            tooltip: '${context.l10n.text('设置')} (Ctrl+,)',
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -1308,7 +1317,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('设置'),
+      title: Text(context.l10n.text('设置')),
       content: SizedBox(
         width: 520,
         child: SingleChildScrollView(
@@ -1318,14 +1327,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               DropdownButtonFormField<ThemeMode>(
                 key: const Key('theme-mode'),
                 initialValue: _value.themeMode,
-                decoration: const InputDecoration(labelText: '主题'),
-                items: const <DropdownMenuItem<ThemeMode>>[
+                decoration: InputDecoration(labelText: context.l10n.text('主题')),
+                items: <DropdownMenuItem<ThemeMode>>[
                   DropdownMenuItem(
                     value: ThemeMode.system,
-                    child: Text('跟随系统'),
+                    child: Text(context.l10n.text('跟随系统')),
                   ),
-                  DropdownMenuItem(value: ThemeMode.light, child: Text('浅色')),
-                  DropdownMenuItem(value: ThemeMode.dark, child: Text('深色')),
+                  DropdownMenuItem(
+                    value: ThemeMode.light,
+                    child: Text(context.l10n.text('浅色')),
+                  ),
+                  DropdownMenuItem(
+                    value: ThemeMode.dark,
+                    child: Text(context.l10n.text('深色')),
+                  ),
                 ],
                 onChanged: (ThemeMode? mode) {
                   if (mode != null) {
@@ -1333,9 +1348,40 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   }
                 },
               ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<AppLanguage>(
+                key: const Key('app-language'),
+                initialValue: _value.language,
+                decoration: InputDecoration(labelText: context.l10n.text('语言')),
+                items: <DropdownMenuItem<AppLanguage>>[
+                  DropdownMenuItem(
+                    value: AppLanguage.system,
+                    child: Text(context.l10n.text('跟随系统')),
+                  ),
+                  DropdownMenuItem(
+                    value: AppLanguage.simplifiedChinese,
+                    child: Text(context.l10n.text('简体中文')),
+                  ),
+                  DropdownMenuItem(
+                    value: AppLanguage.traditionalChinese,
+                    child: Text(context.l10n.text('繁體中文')),
+                  ),
+                  const DropdownMenuItem(
+                    value: AppLanguage.english,
+                    child: Text('English'),
+                  ),
+                ],
+                onChanged: (AppLanguage? language) {
+                  if (language != null) {
+                    setState(
+                      () => _value = _value.copyWith(language: language),
+                    );
+                  }
+                },
+              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('恢复上次打开的标签页'),
+                title: Text(context.l10n.text('恢复上次打开的标签页')),
                 value: _value.restoreLastTab,
                 onChanged: (bool enabled) => setState(
                   () => _value = _value.copyWith(restoreLastTab: enabled),
@@ -1343,7 +1389,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               ),
               DropdownButtonFormField<AppLogLevel>(
                 initialValue: _value.logLevel,
-                decoration: const InputDecoration(labelText: '日志级别'),
+                decoration: InputDecoration(
+                  labelText: context.l10n.text('日志级别'),
+                ),
                 items: AppLogLevel.values
                     .map(
                       (AppLogLevel level) => DropdownMenuItem<AppLogLevel>(
@@ -1491,7 +1539,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(context.l10n.text('取消')),
         ),
         FilledButton(
           onPressed: () async {
@@ -1508,7 +1556,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             );
             if (mounted) navigator.pop();
           },
-          child: const Text('保存'),
+          child: Text(context.l10n.text('保存')),
         ),
       ],
     );
