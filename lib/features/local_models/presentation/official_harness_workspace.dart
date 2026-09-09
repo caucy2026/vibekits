@@ -10,6 +10,7 @@ import 'package:webview_windows/webview_windows.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_session_store.dart';
+import '../../dev_tools/domain/harness_startup_recovery.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_legacy_modules.dart';
@@ -120,6 +121,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _quickActionsExpanded = false;
   int _nativeInputBlockDepth = 0;
   HarnessWorkspaceStatusContext? _workStatusContext;
+  final HarnessStartupRecovery _startupRecovery = HarnessStartupRecovery();
+  Timer? _restartTimer;
+  Timer? _stabilityTimer;
+  bool _disposing = false;
 
   @override
   void initState() {
@@ -163,7 +168,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       }
       _permissionMode = await HarnessAgentPreferencesStore.loadPermissionMode();
       final Future<void> webviewInitialization = _webview.initialize();
-      await _start(webviewInitialization: webviewInitialization);
+      await _start(retries: 2, webviewInitialization: webviewInitialization);
     } on Object catch (error) {
       if (!mounted) return;
       setState(() {
@@ -321,14 +326,13 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           if (!mounted || !identical(_session, session)) return;
           _session = null;
           widget.onRunningChanged?.call(false);
-          setState(() {
-            _loading = false;
-            _status = '官方 Harness 已退出（代码 $code）';
-          });
-          HarnessWorkStatusHub.publish(
-            phase: HarnessWorkPhase.stopped,
-            message: 'Harness 已退出（代码 $code）',
-          );
+          if (_starting) {
+            setState(() {
+              _status = 'Harness 启动进程提前退出（代码 $code），正在恢复…';
+            });
+            return;
+          }
+          _scheduleUnexpectedExitRecovery(code);
         }),
       );
       await _waitUntilReady(session.url);
@@ -346,7 +350,17 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
           unawaited(_installCodexConversationUx());
         });
       }
+      // A listening HTTP port only proves that Node bound the socket. Do not
+      // report Harness ready until the native WebView has completed its first
+      // navigation as well; otherwise the shell can look idle while the real
+      // editor has not received input yet.
+      final Future<void> firstPage = _webview.pageFinished.first.timeout(
+        const Duration(seconds: 45),
+        onTimeout: () => throw TimeoutException('Harness 页面在 45 秒内未完成装载'),
+      );
       await _webview.loadUrl(session.url);
+      await firstPage;
+      if (!mounted || !identical(_session, session)) return;
       await _installCodexConversationUx();
       unawaited(
         Future<void>.delayed(const Duration(milliseconds: 600)).then((_) {
@@ -361,6 +375,12 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         _loading = false;
         _restartOverlay = false;
         _status = '官方 Harness 已就绪（${startup.elapsedMilliseconds} ms）';
+      });
+      _stabilityTimer?.cancel();
+      _stabilityTimer = Timer(const Duration(seconds: 30), () {
+        if (mounted && identical(_session, session) && session.running) {
+          _startupRecovery.markStable();
+        }
       });
       HarnessWorkStatusHub.publish(
         phase: HarnessWorkPhase.ready,
@@ -398,6 +418,47 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         message: 'Harness 启动失败',
       );
     }
+  }
+
+  void _scheduleUnexpectedExitRecovery(int code) {
+    _stabilityTimer?.cancel();
+    final Duration? delay = _startupRecovery.nextDelay();
+    if (delay == null || _disposing) {
+      setState(() {
+        _starting = false;
+        _loading = false;
+        _restartOverlay = false;
+        _status = 'Harness 连续异常退出（最后代码 $code），请查看日志后重试';
+      });
+      HarnessWorkStatusHub.publish(
+        phase: HarnessWorkPhase.failed,
+        message: 'Harness 连续异常退出（代码 $code）',
+      );
+      return;
+    }
+    setState(() {
+      _starting = false;
+      _loading = false;
+      _restartOverlay = _webviewReady;
+      _status =
+          'Harness 异常退出（代码 $code），'
+          '${delay.inMilliseconds} ms 后自动恢复';
+    });
+    HarnessWorkStatusHub.publish(
+      phase: HarnessWorkPhase.starting,
+      message: 'Harness 异常退出，正在自动恢复',
+    );
+    _restartTimer?.cancel();
+    _restartTimer = Timer(delay, () {
+      if (!mounted || _disposing || _session != null) return;
+      unawaited(_start(retries: 1, preserveWebview: _webviewReady));
+    });
+  }
+
+  void _retryManually() {
+    _restartTimer?.cancel();
+    _startupRecovery.markStable();
+    unawaited(_start(retries: 2, preserveWebview: _webviewReady));
   }
 
   static String _workspaceLabel(String workspace) {
@@ -1087,6 +1148,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   @override
   void dispose() {
+    _disposing = true;
+    _restartTimer?.cancel();
+    _stabilityTimer?.cancel();
     if (_pointerDiagnostics) {
       GestureBinding.instance.pointerRouter.removeGlobalRoute(
         _recordFlutterPointer,
@@ -1177,7 +1241,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
               if (!_starting && !_loading) ...<Widget>[
                 const SizedBox(height: 14),
                 FilledButton.icon(
-                  onPressed: _start,
+                  onPressed: _retryManually,
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('重试'),
                 ),

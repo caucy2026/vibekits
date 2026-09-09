@@ -78,6 +78,11 @@ void main() {
         );
       }
       await Link('$modules/linked').create('$bundle/linked');
+      await Directory('$bundle/incomplete').create(recursive: true);
+      await Directory('$bundle/malformed').create(recursive: true);
+      await Directory('$modules/incomplete').create(recursive: true);
+      await Directory('$modules/malformed').create(recursive: true);
+      await File('$modules/malformed/package.json').writeAsString('{broken');
       final session = File('${home.path}/sessions/keep.json');
       await session.parent.create(recursive: true);
       await session.writeAsString('chat history');
@@ -85,9 +90,18 @@ void main() {
         home,
         '$bundle/@deepseek-ai/dsh/lib/bin.js',
       );
-      expect(moved, hasLength(1));
-      expect(await File('${moved.single}/package.json').exists(), isTrue);
+      expect(moved, hasLength(3));
+      expect(
+        moved.any(
+          (String path) =>
+              path.endsWith('@deepseek-ai/dsh') &&
+              File('$path/package.json').existsSync(),
+        ),
+        isTrue,
+      );
       expect(await Directory('$modules/@deepseek-ai/dsh').exists(), isFalse);
+      expect(await Directory('$modules/incomplete').exists(), isFalse);
+      expect(await Directory('$modules/malformed').exists(), isFalse);
       expect(
         await File('$modules/custom-plugin/package.json').exists(),
         isTrue,

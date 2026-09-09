@@ -40,20 +40,25 @@ Future<List<String>> migrateHarnessLegacyModules(
         return;
       }
       final manifest = File('$path/package.json');
-      if (!await manifest.exists()) return;
       Object? value;
-      try {
-        value = jsonDecode(await manifest.readAsString());
-      } on FormatException {
-        return;
+      if (await manifest.exists()) {
+        try {
+          value = jsonDecode(await manifest.readAsString());
+        } on FormatException {
+          // A partially written fallback is still a conflict. Preserve it in
+          // the backup below instead of leaving DSH in a permanent crash loop.
+        }
       }
-      if (value is! Map || value['name'] != name) return;
-      final dsh = value['dsh'];
+      final dsh = value is Map ? value['dsh'] : null;
       if (dsh is Map &&
           dsh['moduleFallback'] is Map &&
           (dsh['moduleFallback'] as Map)['targets'] != null) {
         return;
       }
+      // The path is named after a package shipped in the bundled fallback.
+      // DSH rejects every ordinary directory at that exact location, including
+      // incomplete copies with no/invalid package.json. Quarantine the whole
+      // directory atomically; user packages with other names are untouched.
       // Profiles may live on an external volume through a directory link.
       // Keep backups beside the real modules directory for atomic rename.
       final realModules = Directory(await modules.resolveSymbolicLinks());
