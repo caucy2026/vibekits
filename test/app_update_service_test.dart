@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/app/app_update_service.dart';
+import 'package:vibekits/app/app_version.dart';
 
 void main() {
   for (final String os in <String>['macos', 'windows']) {
@@ -63,7 +64,7 @@ void main() {
       requestUri.queryParameters['package_name'],
       AppUpdateService.packageName,
     );
-    expect(requestUri.queryParameters['version_code'], '2160');
+    expect(requestUri.queryParameters['version_code'], '${AppVersion.build}');
     expect(requestUri.queryParameters['os'], 'macos');
     expect(service.snapshot.value.phase, AppUpdatePhase.current);
     service.dispose();

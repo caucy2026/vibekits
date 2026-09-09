@@ -186,6 +186,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   String _coordinationPeerId = '';
   final HarnessRemoteHostRuntime _remoteHostRuntime =
       HarnessRemoteHostRuntime();
+  late Future<RustDeskHostInfo> _remoteHostSummary;
 
   String _sessionRunKey(String workspace, String sessionId) =>
       '$workspace\u0000$sessionId';
@@ -210,6 +211,19 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   void initState() {
     super.initState();
     _composer.addListener(_captureComposerDraft);
+    _remoteHostSummary = Platform.environment['FLUTTER_TEST'] == 'true'
+        ? Future<RustDeskHostInfo>.value(
+            const RustDeskHostInfo(
+              executable: '',
+              id: 'TEST-ID',
+              available: true,
+              callable: true,
+              message: '测试远程协助身份',
+            ),
+          )
+        : RustDeskHarnessShareService.inspect(
+            configuredExecutable: widget.rustDeskExecutable,
+          );
     _scroll.addListener(_updateScrollToLatest);
     _adoptExternalPrompt();
     unawaited(_loadSettings());
@@ -2453,6 +2467,41 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Widget _buildCoordinationModeBar() {
     final colors = Theme.of(context).colorScheme;
+    if (!Platform.isAndroid) {
+      return Material(
+        color: colors.surfaceContainerLow,
+        child: SizedBox(
+          height: 52,
+          child: Row(
+            children: <Widget>[
+              const SizedBox(width: 14),
+              const Icon(Icons.support_agent_rounded, size: 20),
+              const SizedBox(width: 9),
+              Expanded(
+                child: FutureBuilder<RustDeskHostInfo>(
+                  future: _remoteHostSummary,
+                  builder: (context, snapshot) {
+                    final String id = snapshot.data?.id ?? '';
+                    return Text(
+                      id.isEmpty ? '本机远程协助 ID · 正在注册…' : '本机远程协助 ID：$id',
+                      key: const Key('agent-local-assistance-id'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    );
+                  },
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('agent-remote-assistance-button'),
+                onPressed: _showRemoteShare,
+                icon: const Icon(Icons.screen_share_outlined, size: 18),
+                label: const Text('远程协助'),
+              ),
+              const SizedBox(width: 12),
+            ],
+          ),
+        ),
+      );
+    }
     return Material(
       color: _coordinationMode
           ? colors.tertiaryContainer
@@ -2472,30 +2521,29 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             Expanded(
               child: Text(
                 !_coordinationMode
-                    ? '本地模式 · 操作本机 Harness'
+                    ? '本地模式 · 点击远程协助去连接对方'
                     : _coordinationConnected
-                    ? '协同模式 · 已连接 $_coordinationPeerId'
-                    : '协同模式 · 请连接对应设备 ID；连接前所有操作均已禁止',
+                    ? '远程协助 · 已连接 $_coordinationPeerId'
+                    : '远程协助 · 请连接对应设备 ID；连接前所有操作均已禁止',
                 key: const Key('agent-coordination-status'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
-            Text(_coordinationMode ? '协同' : '本地'),
-            Switch(
+            FilledButton.icon(
               key: const Key('agent-coordination-switch'),
-              value: _coordinationMode,
-              onChanged: (bool enabled) =>
-                  enabled ? _enterCoordinationMode() : _exitCoordinationMode(),
-            ),
-            if (_coordinationMode)
-              TextButton.icon(
-                key: const Key('agent-exit-coordination'),
-                onPressed: _exitCoordinationMode,
-                icon: const Icon(Icons.close_rounded, size: 18),
-                label: const Text('退出协同'),
+              onPressed: _coordinationMode
+                  ? _exitCoordinationMode
+                  : _enterCoordinationMode,
+              icon: Icon(
+                _coordinationMode
+                    ? Icons.stop_screen_share_outlined
+                    : Icons.screen_share_outlined,
+                size: 19,
               ),
+              label: Text(_coordinationMode ? '退出远程协助' : '远程协助'),
+            ),
             const SizedBox(width: 8),
           ],
         ),
@@ -2561,6 +2609,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           initialData: McpCapabilityDirectory.instance.snapshot,
           builder: (_, AsyncSnapshot<McpCapabilitySnapshot> snapshot) =>
               _macRailAction(
+                key: const Key('agent-mcp-local-devices'),
                 icon: Icons.memory_outlined,
                 badge: snapshot.data?.local.length ?? 0,
                 tooltip: '本机 MCP 设备',
@@ -2659,7 +2708,26 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   );
 
   Future<void> _showRemoteShare() async {
-    _enterCoordinationMode();
+    if (Platform.isAndroid) {
+      _enterCoordinationMode();
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => HarnessRemoteShareDialog(
+        configuredExecutable: widget.rustDeskExecutable,
+        webClientUrl: widget.rustDeskWebClientUrl,
+        onPaired: _startDeepSeekRemoteHost,
+        onHostStopped: _stopDeepSeekRemoteHost,
+      ),
+    );
+    if (mounted) {
+      setState(() {
+        _remoteHostSummary = RustDeskHarnessShareService.inspect(
+          configuredExecutable: widget.rustDeskExecutable,
+        );
+      });
+    }
   }
 
   Future<void> _startDeepSeekRemoteHost() async {
@@ -2850,6 +2918,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Widget _macRailAction({
+    Key? key,
     required IconData icon,
     required String tooltip,
     required VoidCallback onPressed,
@@ -2857,6 +2926,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     bool active = false,
     String? caption,
   }) => Tooltip(
+    key: key,
     message: tooltip,
     child: SizedBox(
       width: 52,
@@ -2974,26 +3044,16 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _showMcpDevices(McpCapabilityTier tier) async {
-    final McpCapabilitySnapshot snapshot = await McpCapabilityDirectory.instance
-        .snapshotForTask();
-    final Map<String, McpToolReputation> reputations =
-        await McpCapabilityDirectory.instance.loadReputations();
-    if (!mounted) return;
-    final List<McpDeviceCapability> devices = switch (tier) {
-      McpCapabilityTier.app => snapshot.app,
-      McpCapabilityTier.local => snapshot.local,
-      McpCapabilityTier.lan => snapshot.lan,
-    };
-    int scoredToolCount(McpDeviceCapability device) =>
-        device.tools.where((McpToolInterface tool) {
-          final McpToolReputation? score = reputationForTool(
-            reputations,
-            device,
-            tool,
-          );
-          return score != null &&
-              (score.totalCalls > 0 || score.manualRating != null);
-        }).length;
+    final content = () async {
+      final results = await Future.wait<Object>(<Future<Object>>[
+        McpCapabilityDirectory.instance.snapshotForTask(),
+        McpCapabilityDirectory.instance.loadReputations(),
+      ]);
+      return (
+        snapshot: results[0] as McpCapabilitySnapshot,
+        reputations: results[1] as Map<String, McpToolReputation>,
+      );
+    }();
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
@@ -3005,37 +3065,82 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         content: SizedBox(
           width: 620,
           height: 420,
-          child: devices.isEmpty
-              ? const Center(child: Text('尚未发现设备；列表会在设备上线后自动更新。'))
-              : ListView(
-                  children: <Widget>[
-                    for (final McpDeviceCapability device in devices)
-                      ExpansionTile(
-                        title: Text(device.name),
-                        subtitle: Text(
-                          '${device.hardwareCode} · ${device.tools.length} 个接口'
-                          '${scoredToolCount(device) == 0 ? '' : ' · ${scoredToolCount(device)} 个已评分'}',
-                        ),
+          child:
+              FutureBuilder<
+                ({
+                  McpCapabilitySnapshot snapshot,
+                  Map<String, McpToolReputation> reputations,
+                })
+              >(
+                future: content,
+                builder: (context, state) {
+                  if (state.hasError) {
+                    return Center(child: Text('读取 MCP 目录失败：${state.error}'));
+                  }
+                  if (!state.hasData) {
+                    return const Center(
+                      key: Key('mcp-device-loading'),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          for (final McpToolInterface tool in device.tools)
-                            ListTile(
-                              dense: true,
-                              title: SelectableText(tool.name),
-                              subtitle: Text(
-                                '${tool.description}\n风险：${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
-                              ),
-                              trailing: McpReputationBadge(
-                                reputation: reputationForTool(
-                                  reputations,
-                                  device,
-                                  tool,
-                                ),
-                              ),
-                            ),
+                          CircularProgressIndicator(),
+                          SizedBox(height: 14),
+                          Text('正在读取 MCP 设备与工具目录…'),
                         ],
                       ),
-                  ],
-                ),
+                    );
+                  }
+                  final data = state.data!;
+                  final devices = switch (tier) {
+                    McpCapabilityTier.app => data.snapshot.app,
+                    McpCapabilityTier.local => data.snapshot.local,
+                    McpCapabilityTier.lan => data.snapshot.lan,
+                  };
+                  int scoredToolCount(McpDeviceCapability device) =>
+                      device.tools.where((tool) {
+                        final score = reputationForTool(
+                          data.reputations,
+                          device,
+                          tool,
+                        );
+                        return score != null &&
+                            (score.totalCalls > 0 ||
+                                score.manualRating != null);
+                      }).length;
+                  if (devices.isEmpty) {
+                    return const Center(child: Text('尚未发现设备；列表会在设备上线后自动更新。'));
+                  }
+                  return ListView(
+                    children: <Widget>[
+                      for (final McpDeviceCapability device in devices)
+                        ExpansionTile(
+                          title: Text(device.name),
+                          subtitle: Text(
+                            '${device.hardwareCode} · ${device.tools.length} 个接口'
+                            '${scoredToolCount(device) == 0 ? '' : ' · ${scoredToolCount(device)} 个已评分'}',
+                          ),
+                          children: <Widget>[
+                            for (final McpToolInterface tool in device.tools)
+                              ListTile(
+                                dense: true,
+                                title: SelectableText(tool.name),
+                                subtitle: Text(
+                                  '${tool.description}\n风险：${tool.risk.isEmpty ? '提供者未声明' : tool.risk}',
+                                ),
+                                trailing: McpReputationBadge(
+                                  reputation: reputationForTool(
+                                    data.reputations,
+                                    device,
+                                    tool,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                  );
+                },
+              ),
         ),
         actions: <Widget>[
           TextButton(

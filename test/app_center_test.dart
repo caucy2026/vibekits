@@ -45,6 +45,16 @@ void main() {
     expect(item.hasVerifiedInstaller, isFalse);
   });
 
+  test('Android 原生包名与跨平台商品标识分别解析', () {
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'android_package_name': 'com.vibekits.vibekits',
+    });
+
+    expect(item.packageName, 'com.caucy.vibekits');
+    expect(item.androidPackageName, 'com.vibekits.vibekits');
+  });
+
   test('服务端即使返回错误平台条目，客户端仍会按 platforms 二次过滤', () async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
@@ -107,7 +117,7 @@ void main() {
     );
   });
 
-  for (final String os in <String>['macos', 'windows']) {
+  for (final String os in <String>['macos', 'windows', 'android']) {
     testWidgets('$os 当前版本显示最新版且下载按钮不可点击', (tester) async {
       final AppCenterService service = AppCenterService(
         platformOverride: os,

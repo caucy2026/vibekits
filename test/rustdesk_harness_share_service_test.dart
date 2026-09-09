@@ -154,6 +154,37 @@ void main() {
     expect(info.message, contains('正在向中继服务器注册'));
   });
 
+  test('远程协助关闭时仍显示持久 ID 但绝不标记为可呼叫', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_dormant_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+
+    final RustDeskHostInfo info = await RustDeskHarnessShareService.inspect(
+      configuredExecutable: executable.path,
+      runner: (_, arguments) async => switch (arguments.single) {
+        '--vibekits-harness-status' => ProcessResult(
+          1,
+          0,
+          '{"routingId":null,"callable":false,'
+              '"rendezvousOnline":false,'
+              '"registrationKeyConfirmed":false,"state":"offline"}',
+          '',
+        ),
+        '--vibekits-harness-get-id' => ProcessResult(2, 0, '1554650784\n', ''),
+        _ => throw StateError('unexpected command'),
+      },
+    );
+
+    expect(info.id, '1554650784');
+    expect(info.callable, isFalse);
+    expect(info.message, contains('远程协助未打开'));
+  });
+
   test('启动包内传输引擎使用参数数组且不经过 shell', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_launch_',
@@ -190,6 +221,9 @@ void main() {
       configuredExecutable: executable.path,
       timeout: const Duration(seconds: 1),
       runner: (_, arguments) async {
+        if (arguments.single == '--vibekits-harness-get-id') {
+          return ProcessResult(3, 0, '1554650784\n', '');
+        }
         expect(arguments, const <String>['--vibekits-harness-status']);
         inspections += 1;
         return ProcessResult(

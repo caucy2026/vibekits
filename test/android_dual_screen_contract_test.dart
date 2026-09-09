@@ -3,19 +3,27 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android 默认双屏入口与长按单屏入口完整注册', () {
-    final manifest = File('android/app/src/main/AndroidManifest.xml')
-        .readAsStringSync();
-    final shortcuts = File('android/app/src/main/res/xml/shortcuts.xml')
-        .readAsStringSync();
+  test('Android 默认单屏入口与长按双屏入口完整注册', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final shortcuts = File(
+      'android/app/src/main/res/xml/shortcuts.xml',
+    ).readAsStringSync();
 
     expect(manifest, contains('.DualScreenLaunchActivity'));
     expect(manifest, contains('android.intent.category.LAUNCHER'));
     expect(manifest, isNot(contains('.DualScreenCompanionActivity')));
     expect(manifest, contains('.SingleScreenActivity'));
     expect(manifest, contains('@xml/shortcuts'));
-    expect(shortcuts, contains('android:shortcutId="single_screen"'));
-    expect(shortcuts, contains('action.SINGLE_SCREEN'));
+    expect(
+      RegExp(
+        r'<activity\s+android:name="\.SingleScreenActivity"[\s\S]*?android.intent.category.LAUNCHER',
+      ).hasMatch(manifest),
+      isTrue,
+    );
+    expect(shortcuts, contains('android:shortcutId="dual_screen"'));
+    expect(shortcuts, contains('action.DUAL_SCREEN'));
   });
 
   test('双屏启动从任意屏收敛到 D0 并枚举真实外接屏', () {
@@ -45,8 +53,9 @@ void main() {
 
   test('双屏异显使用唯一 Flutter 状态树而不是第二 Activity', () {
     final shell = File('lib/app/main_shell.dart').readAsStringSync();
-    final displayContext = File('lib/app/android_display_context.dart')
-        .readAsStringSync();
+    final displayContext = File(
+      'lib/app/android_display_context.dart',
+    ).readAsStringSync();
     expect(displayContext, contains("MethodChannel('vibekits/display')"));
     expect(displayContext, contains("role == 'continuous_canvas'"));
     expect(shell, contains('_selectedIndex = 0'));

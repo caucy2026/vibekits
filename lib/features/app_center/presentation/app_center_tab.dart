@@ -65,6 +65,7 @@ class _AppCenterTabState extends State<AppCenterTab> {
     final String platform = switch (_service.platformName) {
       'windows' => 'Windows',
       'macos' => 'macOS',
+      'android' => 'Android',
       _ => '当前系统',
     };
     return ColoredBox(

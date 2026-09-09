@@ -851,16 +851,15 @@ void main() {
 
 Future<void> _openRemoteToolIfNeeded(WidgetTester tester) async {
   if (find.byKey(const Key('remote-host')).evaluate().isNotEmpty) return;
-  Finder entry = find.byKey(
+  // The tool catalog grows over time, so the remote entry may exist in the
+  // tree while being below the viewport. Filter first to keep this helper
+  // independent of catalog ordering and window height.
+  await tester.enterText(find.byKey(const Key('dev-tool-search')), '远程连接');
+  await tester.pump();
+  final Finder entry = find.byKey(
     const ValueKey<String>('dev-tool-nav-remote_workspace'),
   );
-  if (entry.evaluate().isEmpty) {
-    await tester.enterText(find.byKey(const Key('dev-tool-search')), '远程连接');
-    await tester.pump();
-    entry = find.byKey(const ValueKey<String>('dev-tool-nav-remote_workspace'));
-  }
   expect(entry, findsOneWidget);
-  await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pump();
 }

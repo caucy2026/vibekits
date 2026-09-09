@@ -312,7 +312,29 @@ abstract final class RustDeskHarnessShareService {
         runner: runner,
       );
       final Map<String, Object?> payload = _decodeStatus(result);
-      final String id = payload['routingId']?.toString() ?? '';
+      String id = payload['routingId']?.toString() ?? '';
+      if (id.isEmpty) {
+        // The assistance service is deliberately off by default, but users
+        // must still be able to read and share this installation's stable ID.
+        // Reading the persisted ID does not start a listener or make the host
+        // callable; those gates remain controlled by [launchHost].
+        try {
+          final ProcessResult idResult = await _runControlCommand(
+            executable,
+            const <String>['--vibekits-harness-get-id'],
+            timeout: const Duration(seconds: 5),
+            runner: runner,
+          );
+          final String candidate = idResult.stdout.toString().trim();
+          if (idResult.exitCode == 0 &&
+              RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(candidate)) {
+            id = candidate;
+          }
+        } on Object {
+          // Status remains authoritative. Failure to read a dormant identity
+          // must not turn an offline host into a callable one.
+        }
+      }
       final bool online = payload['rendezvousOnline'] == true;
       final bool confirmed = payload['registrationKeyConfirmed'] == true;
       final bool callable = payload['callable'] == true;
@@ -328,7 +350,10 @@ abstract final class RustDeskHarnessShareService {
         message: switch (state) {
           'registered' => 'Harness 本机 ID：$id（中继服务已确认，可连接）',
           'registration_pending' => 'Harness ID 正在向中继服务器注册',
-          'offline' => 'Harness 中继服务离线',
+          'offline' =>
+            id.isEmpty
+                ? 'Harness 中继服务离线；暂未读到本机 ID'
+                : 'Harness 本机 ID：$id（远程协助未打开）',
           'invalid_routing_id' => '中继服务器返回的 Harness ID 无效',
           _ => 'Harness 中继状态不可用：$state',
         },

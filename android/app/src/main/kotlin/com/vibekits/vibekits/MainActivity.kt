@@ -3,6 +3,8 @@ package com.vibekits.vibekits
 import android.app.Presentation
 import android.content.Context
 import android.content.DialogInterface
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.hardware.display.DisplayManager
@@ -26,6 +28,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.RenderMode
 import io.flutter.plugin.common.MethodChannel
+import androidx.core.content.FileProvider
+import java.io.File
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -42,6 +46,7 @@ open class MainActivity : FlutterActivity() {
     private val channelName = "vibekits/credentials"
     private val displayChannelName = "vibekits/display"
     private val harnessRelayChannelName = "vibekits/harness-relay"
+    private val appInstallerChannelName = "vibekits/app-installer"
     private val keyAlias = "VibekitsAndroidCredentialKey"
     private val preferencesName = "vibekits_secure_credentials"
     private var continuousDisplay: ContinuousDisplayCoordinator? = null
@@ -155,6 +160,60 @@ open class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, appInstallerChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "openApkInstaller") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val path = call.argument<String>("path") ?: error("Missing APK path")
+                    val expectedPackage = call.argument<String>("packageName") ?: ""
+                    val expectedVersion = call.argument<Number>("versionCode")?.toLong() ?: 0L
+                    val apk = File(path).canonicalFile
+                    val allowedRoot = cacheDir.canonicalFile
+                    require(apk.isFile && apk.path.startsWith(allowedRoot.path + File.separator)) {
+                        "APK must be a verified file in the application cache"
+                    }
+                    val archiveFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        PackageManager.GET_SIGNING_CERTIFICATES
+                    } else {
+                        @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+                    }
+                    val archive = packageManager.getPackageArchiveInfo(apk.path, archiveFlags)
+                        ?: error("APK package metadata is unreadable")
+                    val hasSigner = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        archive.signingInfo?.apkContentsSigners?.isNotEmpty() == true
+                    } else {
+                        @Suppress("DEPRECATION") archive.signatures?.isNotEmpty() == true
+                    }
+                    require(hasSigner) { "APK signing certificate is missing" }
+                    val actualVersion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        archive.longVersionCode
+                    } else {
+                        @Suppress("DEPRECATION") archive.versionCode.toLong()
+                    }
+                    require(expectedPackage.isEmpty() || archive.packageName == expectedPackage) {
+                        "APK package name does not match the market record"
+                    }
+                    require(expectedVersion <= 0L || actualVersion == expectedVersion) {
+                        "APK version does not match the market record"
+                    }
+                    val uri = FileProvider.getUriForFile(
+                        this,
+                        "$packageName.fileprovider",
+                        apk,
+                    )
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    result.success(null)
+                } catch (error: Exception) {
+                    result.error("APK_INSTALL_ERROR", error.message, null)
                 }
             }
         val relayClient = HarnessRelayClient(applicationContext)

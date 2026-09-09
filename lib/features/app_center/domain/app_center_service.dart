@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../app/app_update_service.dart';
@@ -27,6 +28,7 @@ class AppCenterItem {
     required this.appId,
     required this.name,
     required this.packageName,
+    required this.androidPackageName,
     required this.versionName,
     required this.versionCode,
     required this.category,
@@ -46,6 +48,9 @@ class AppCenterItem {
     appId: _asInt(json['app_id']),
     name: '${json['app_name'] ?? ''}'.trim(),
     packageName: '${json['package_name'] ?? ''}'.trim(),
+    androidPackageName:
+        '${json['android_package_name'] ?? json['application_id'] ?? ''}'
+            .trim(),
     versionName: '${json['version_name'] ?? ''}'.trim(),
     versionCode: _asInt(json['version_code']),
     category: '${json['category'] ?? ''}'.trim(),
@@ -71,6 +76,9 @@ class AppCenterItem {
   final int appId;
   final String name;
   final String packageName;
+
+  /// Android 原生 applicationId。`packageName` 是跨平台商品标识，二者不能混用。
+  final String androidPackageName;
   final String versionName;
   final int versionCode;
   final String category;
@@ -157,6 +165,7 @@ class AppCenterService {
     if (_platformOverride != null) return _platformOverride;
     if (Platform.isWindows) return 'windows';
     if (Platform.isMacOS) return 'macos';
+    if (Platform.isAndroid) return 'android';
     return null;
   }
 
@@ -165,7 +174,7 @@ class AppCenterService {
       return _loader(category: category, keyword: keyword);
     }
     final String? os = platformName;
-    if (os == null) throw UnsupportedError('应用中心仅支持 Windows 和 macOS');
+    if (os == null) throw UnsupportedError('应用中心仅支持 Windows、macOS 和 Android');
     final List<Object?> rawCategories = await _getList(
       Uri.parse('$_apiRoot/api/store/categories'),
     );
@@ -259,7 +268,7 @@ class AppCenterService {
       if (actual != item.sha256) {
         throw const FormatException('安装包 SHA-256 校验失败');
       }
-      await _openInstaller(output.path, extension, os);
+      await _openInstaller(output.path, extension, os, item);
       return output.path;
     } on Object {
       if (await output.exists()) await output.delete();
@@ -308,9 +317,11 @@ class AppCenterService {
 
   static String _allowedExtension(String path, String os) {
     final String lower = path.toLowerCase();
-    final List<String> allowed = os == 'macos'
-        ? const <String>['.dmg', '.pkg', '.zip']
-        : const <String>['.exe', '.msi', '.zip'];
+    final List<String> allowed = switch (os) {
+      'macos' => const <String>['.dmg', '.pkg', '.zip'],
+      'android' => const <String>['.apk'],
+      _ => const <String>['.exe', '.msi', '.zip'],
+    };
     return allowed.firstWhere(
       lower.endsWith,
       orElse: () => throw const FormatException('安装包格式不受支持'),
@@ -321,8 +332,17 @@ class AppCenterService {
     String path,
     String extension,
     String os,
+    AppCenterItem item,
   ) async {
-    if (os == 'macos') {
+    if (os == 'android') {
+      await const MethodChannel(
+        'vibekits/app-installer',
+      ).invokeMethod<void>('openApkInstaller', <String, Object?>{
+        'path': path,
+        'packageName': item.androidPackageName,
+        'versionCode': item.versionCode,
+      });
+    } else if (os == 'macos') {
       await Process.start('open', <String>[
         path,
       ], mode: ProcessStartMode.detached);

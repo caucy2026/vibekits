@@ -136,6 +136,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _disposing = false;
   final HarnessRemoteHostRuntime _remoteHostRuntime =
       HarnessRemoteHostRuntime();
+  late Future<RustDeskHostInfo> _remoteHostSummary;
   final HarnessStartupRecovery _startupRecovery = HarnessStartupRecovery();
   Timer? _restartTimer;
   Timer? _stabilityTimer;
@@ -144,6 +145,19 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   @override
   void initState() {
     super.initState();
+    _remoteHostSummary = Platform.environment['FLUTTER_TEST'] == 'true'
+        ? Future<RustDeskHostInfo>.value(
+            const RustDeskHostInfo(
+              executable: '',
+              id: 'TEST-ID',
+              available: true,
+              callable: true,
+              message: '测试远程协助身份',
+            ),
+          )
+        : RustDeskHarnessShareService.inspect(
+            configuredExecutable: widget.rustDeskExecutable,
+          );
     if (_pointerDiagnostics) {
       _pointerDiagnosticLog.writeAsStringSync('');
       GestureBinding.instance.pointerRouter.addGlobalRoute(
@@ -1311,260 +1325,316 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         pasteInsert: () => unawaited(_pasteIntoFocusedWebField()),
         copy: () => unawaited(_copyFromFocusedWebSelection()),
       },
-      child: Row(
+      child: Column(
         children: <Widget>[
+          _buildRemoteAssistanceBar(),
           Expanded(
-            child: Stack(
+            child: Row(
               children: <Widget>[
-                _buildHarnessWebview(),
-                if (_quickActionsExpanded)
-                  Positioned.fill(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () =>
-                          setState(() => _quickActionsExpanded = false),
-                    ),
-                  ),
-                if (_quickActionsExpanded)
-                  Positioned(
-                    right: 8,
-                    top: 50,
-                    child: IgnorePointer(
-                      child: Container(
-                        width: 104,
-                        height: 264,
-                        decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surface.withValues(alpha: 0.90),
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant
-                                .withValues(alpha: 0.55),
+                Expanded(
+                  child: Stack(
+                    children: <Widget>[
+                      _buildHarnessWebview(),
+                      if (_quickActionsExpanded)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: () =>
+                                setState(() => _quickActionsExpanded = false),
                           ),
-                          boxShadow: const <BoxShadow>[
-                            BoxShadow(
-                              color: Color(0x24000000),
-                              blurRadius: 18,
-                              offset: Offset(0, 6),
-                            ),
-                          ],
                         ),
-                      ),
-                    ),
-                  ),
-                if (_quickActionsExpanded) ...<Widget>[
-                  Positioned(
-                    right: 12,
-                    top: 54,
-                    child: _buildMcpExposureControl(),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 98,
-                    child: StreamBuilder<McpCapabilitySnapshot>(
-                      stream: McpCapabilityDirectory.instance.changes,
-                      initialData: McpCapabilityDirectory.instance.snapshot,
-                      builder:
-                          (
-                            BuildContext context,
-                            AsyncSnapshot<McpCapabilitySnapshot> snapshot,
-                          ) {
-                            final int count = snapshot.data?.local.length ?? 0;
-                            return _mcpDeviceButton(
-                              key: const Key('harness-local-mcp-devices'),
-                              icon: Icons.memory_outlined,
-                              label: '本机',
-                              tooltip: '本机 MCP：查看同一台电脑上其他进程提供的接口',
-                              count: count,
-                              onTap: () =>
-                                  _showMcpDevices(McpCapabilityTier.local),
-                            );
-                          },
-                    ),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 142,
-                    child: StreamBuilder<McpCapabilitySnapshot>(
-                      stream: McpCapabilityDirectory.instance.changes,
-                      initialData: McpCapabilityDirectory.instance.snapshot,
-                      builder:
-                          (
-                            BuildContext context,
-                            AsyncSnapshot<McpCapabilitySnapshot> snapshot,
-                          ) {
-                            final int count = snapshot.data?.lan.length ?? 0;
-                            return _mcpDeviceButton(
-                              key: const Key('harness-lan-mcp-devices'),
-                              icon: Icons.hub_outlined,
-                              label: '局域网',
-                              tooltip: '局域网 MCP：查看同一网络内其他设备提供的接口',
-                              count: count,
-                              onTap: () =>
-                                  _showMcpDevices(McpCapabilityTier.lan),
-                            );
-                          },
-                    ),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 186,
-                    child: Material(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surface.withValues(alpha: 0.94),
-                      elevation: 2,
-                      borderRadius: BorderRadius.circular(20),
-                      child: PopupMenuButton<FeishuHarnessTask>(
-                        key: const Key('harness-feishu-tasks'),
-                        tooltip: '把飞书只读任务交给 Harness',
-                        onSelected: (FeishuHarnessTask task) =>
-                            unawaited(_selectFeishuTask(task)),
-                        itemBuilder: (BuildContext context) =>
-                            <PopupMenuEntry<FeishuHarnessTask>>[
-                              for (final FeishuHarnessTask task
-                                  in FeishuHarnessTasks.quickTasks)
-                                PopupMenuItem<FeishuHarnessTask>(
-                                  key: Key('harness-feishu-${task.id}'),
-                                  value: task,
-                                  child: Text(task.label),
+                      if (_quickActionsExpanded)
+                        Positioned(
+                          right: 8,
+                          top: 50,
+                          child: IgnorePointer(
+                            child: Container(
+                              width: 104,
+                              height: 264,
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surface.withValues(alpha: 0.90),
+                                borderRadius: BorderRadius.circular(22),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant
+                                      .withValues(alpha: 0.55),
                                 ),
-                            ],
-                        child: const SizedBox(
-                          width: 92,
-                          height: 36,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: <Widget>[
-                              Icon(Icons.forum_outlined, size: 16),
-                              SizedBox(width: 6),
-                              Text('飞书', style: TextStyle(fontSize: 12)),
-                              SizedBox(width: 4),
-                              Icon(Icons.arrow_drop_down, size: 18),
-                            ],
+                                boxShadow: const <BoxShadow>[
+                                  BoxShadow(
+                                    color: Color(0x24000000),
+                                    blurRadius: 18,
+                                    offset: Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    // Keep this VibeKits extension separate from DSH's native
-                    // "Session log" action at the far-right edge.
-                    right: 12,
-                    top: 274,
-                    child: StreamBuilder<RustDeskHarnessLinkSnapshot>(
-                      stream: RustDeskHarnessLinkStatusHub.changes,
-                      initialData: RustDeskHarnessLinkStatusHub.latest,
-                      builder:
-                          (
-                            BuildContext context,
-                            AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot,
-                          ) {
-                            final RustDeskHarnessLinkSnapshot link =
-                                snapshot.data ??
-                                RustDeskHarnessLinkStatusHub.latest;
-                            final Color indicator = switch (link.phase) {
-                              RustDeskHarnessLinkPhase.connected => const Color(
-                                0xFF16845B,
-                              ),
-                              RustDeskHarnessLinkPhase.clientFound ||
-                              RustDeskHarnessLinkPhase.handshaking =>
-                                const Color(0xFFE99A22),
-                              RustDeskHarnessLinkPhase.incompatible ||
-                              RustDeskHarnessLinkPhase.stale => Theme.of(
-                                context,
-                              ).colorScheme.error,
-                              RustDeskHarnessLinkPhase.disconnected => Theme.of(
-                                context,
-                              ).colorScheme.outline,
-                            };
-                            return Material(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surface.withValues(alpha: 0.94),
-                              elevation: 2,
-                              borderRadius: BorderRadius.circular(20),
-                              child: InkWell(
-                                key: const Key('harness-remote-share'),
-                                borderRadius: BorderRadius.circular(20),
-                                onTap: _showRemoteShare,
-                                child: Tooltip(
-                                  message: link.message,
-                                  child: SizedBox(
-                                    width: 92,
-                                    height: 36,
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: <Widget>[
-                                        Icon(
-                                          Icons.screen_share_outlined,
-                                          size: 16,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        const Text(
-                                          '远程',
-                                          style: TextStyle(fontSize: 12),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          key: const Key(
-                                            'rustdesk-link-indicator',
-                                          ),
-                                          width: 7,
-                                          height: 7,
-                                          decoration: BoxDecoration(
-                                            color: indicator,
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ],
+                      if (_quickActionsExpanded) ...<Widget>[
+                        Positioned(
+                          right: 12,
+                          top: 54,
+                          child: _buildMcpExposureControl(),
+                        ),
+                        Positioned(
+                          right: 12,
+                          top: 98,
+                          child: StreamBuilder<McpCapabilitySnapshot>(
+                            stream: McpCapabilityDirectory.instance.changes,
+                            initialData:
+                                McpCapabilityDirectory.instance.snapshot,
+                            builder:
+                                (
+                                  BuildContext context,
+                                  AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+                                ) {
+                                  final int count =
+                                      snapshot.data?.local.length ?? 0;
+                                  return _mcpDeviceButton(
+                                    key: const Key('harness-local-mcp-devices'),
+                                    icon: Icons.memory_outlined,
+                                    label: '本机',
+                                    tooltip: '本机 MCP：查看同一台电脑上其他进程提供的接口',
+                                    count: count,
+                                    onTap: () => _showMcpDevices(
+                                      McpCapabilityTier.local,
                                     ),
+                                  );
+                                },
+                          ),
+                        ),
+                        Positioned(
+                          right: 12,
+                          top: 142,
+                          child: StreamBuilder<McpCapabilitySnapshot>(
+                            stream: McpCapabilityDirectory.instance.changes,
+                            initialData:
+                                McpCapabilityDirectory.instance.snapshot,
+                            builder:
+                                (
+                                  BuildContext context,
+                                  AsyncSnapshot<McpCapabilitySnapshot> snapshot,
+                                ) {
+                                  final int count =
+                                      snapshot.data?.lan.length ?? 0;
+                                  return _mcpDeviceButton(
+                                    key: const Key('harness-lan-mcp-devices'),
+                                    icon: Icons.hub_outlined,
+                                    label: '局域网',
+                                    tooltip: '局域网 MCP：查看同一网络内其他设备提供的接口',
+                                    count: count,
+                                    onTap: () =>
+                                        _showMcpDevices(McpCapabilityTier.lan),
+                                  );
+                                },
+                          ),
+                        ),
+                        Positioned(
+                          right: 12,
+                          top: 186,
+                          child: Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surface.withValues(alpha: 0.94),
+                            elevation: 2,
+                            borderRadius: BorderRadius.circular(20),
+                            child: PopupMenuButton<FeishuHarnessTask>(
+                              key: const Key('harness-feishu-tasks'),
+                              tooltip: '把飞书只读任务交给 Harness',
+                              onSelected: (FeishuHarnessTask task) =>
+                                  unawaited(_selectFeishuTask(task)),
+                              itemBuilder: (BuildContext context) =>
+                                  <PopupMenuEntry<FeishuHarnessTask>>[
+                                    for (final FeishuHarnessTask task
+                                        in FeishuHarnessTasks.quickTasks)
+                                      PopupMenuItem<FeishuHarnessTask>(
+                                        key: Key('harness-feishu-${task.id}'),
+                                        value: task,
+                                        child: Text(task.label),
+                                      ),
+                                  ],
+                              child: const SizedBox(
+                                width: 92,
+                                height: 36,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: <Widget>[
+                                    Icon(Icons.forum_outlined, size: 16),
+                                    SizedBox(width: 6),
+                                    Text('飞书', style: TextStyle(fontSize: 12)),
+                                    SizedBox(width: 4),
+                                    Icon(Icons.arrow_drop_down, size: 18),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          // Keep this VibeKits extension separate from DSH's native
+                          // "Session log" action at the far-right edge.
+                          right: 12,
+                          top: 274,
+                          child: StreamBuilder<RustDeskHarnessLinkSnapshot>(
+                            stream: RustDeskHarnessLinkStatusHub.changes,
+                            initialData: RustDeskHarnessLinkStatusHub.latest,
+                            builder:
+                                (
+                                  BuildContext context,
+                                  AsyncSnapshot<RustDeskHarnessLinkSnapshot>
+                                  snapshot,
+                                ) {
+                                  final RustDeskHarnessLinkSnapshot link =
+                                      snapshot.data ??
+                                      RustDeskHarnessLinkStatusHub.latest;
+                                  final Color indicator = switch (link.phase) {
+                                    RustDeskHarnessLinkPhase.connected =>
+                                      const Color(0xFF16845B),
+                                    RustDeskHarnessLinkPhase.clientFound ||
+                                    RustDeskHarnessLinkPhase.handshaking =>
+                                      const Color(0xFFE99A22),
+                                    RustDeskHarnessLinkPhase.incompatible ||
+                                    RustDeskHarnessLinkPhase.stale => Theme.of(
+                                      context,
+                                    ).colorScheme.error,
+                                    RustDeskHarnessLinkPhase.disconnected =>
+                                      Theme.of(context).colorScheme.outline,
+                                  };
+                                  return Material(
+                                    color: Theme.of(context).colorScheme.surface
+                                        .withValues(alpha: 0.94),
+                                    elevation: 2,
+                                    borderRadius: BorderRadius.circular(20),
+                                    child: InkWell(
+                                      key: const Key('harness-remote-share'),
+                                      borderRadius: BorderRadius.circular(20),
+                                      onTap: _showRemoteShare,
+                                      child: Tooltip(
+                                        message: link.message,
+                                        child: SizedBox(
+                                          width: 92,
+                                          height: 36,
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: <Widget>[
+                                              Icon(
+                                                Icons.screen_share_outlined,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              const Text(
+                                                '远程',
+                                                style: TextStyle(fontSize: 12),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                key: const Key(
+                                                  'rustdesk-link-indicator',
+                                                ),
+                                                width: 7,
+                                                height: 7,
+                                                decoration: BoxDecoration(
+                                                  color: indicator,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                          ),
+                        ),
+                        Positioned(
+                          right: 12,
+                          top: 230,
+                          child: Material(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surface.withValues(alpha: 0.94),
+                            elevation: 2,
+                            borderRadius: BorderRadius.circular(20),
+                            child: InkWell(
+                              key: const Key('harness-runtime-logs'),
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: _showRuntimeLogs,
+                              child: const Tooltip(
+                                message: '查看 Harness 启动、运行、工具调用和错误日志',
+                                child: SizedBox(
+                                  width: 92,
+                                  height: 36,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: <Widget>[
+                                      Icon(
+                                        Icons.receipt_long_outlined,
+                                        size: 16,
+                                      ),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        '日志',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                    ),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 230,
-                    child: Material(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surface.withValues(alpha: 0.94),
-                      elevation: 2,
-                      borderRadius: BorderRadius.circular(20),
-                      child: InkWell(
-                        key: const Key('harness-runtime-logs'),
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: _showRuntimeLogs,
-                        child: const Tooltip(
-                          message: '查看 Harness 启动、运行、工具调用和错误日志',
-                          child: SizedBox(
-                            width: 92,
-                            height: 36,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: <Widget>[
-                                Icon(Icons.receipt_long_outlined, size: 16),
-                                SizedBox(width: 6),
-                                Text('日志', style: TextStyle(fontSize: 12)),
-                              ],
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
+                _buildQuickActionsRail(),
               ],
             ),
           ),
-          _buildQuickActionsRail(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRemoteAssistanceBar() {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Material(
+      color: colors.surfaceContainerLow,
+      child: SizedBox(
+        height: 44,
+        child: Row(
+          children: <Widget>[
+            const SizedBox(width: 14),
+            const Icon(Icons.support_agent_rounded, size: 19),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FutureBuilder<RustDeskHostInfo>(
+                future: _remoteHostSummary,
+                builder: (BuildContext context, snapshot) {
+                  final String id = snapshot.data?.id ?? '';
+                  return SelectableText(
+                    id.isEmpty ? '本机远程协助 ID · 正在注册…' : '本机远程协助 ID：$id',
+                    key: const Key('official-harness-local-assistance-id'),
+                    maxLines: 1,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  );
+                },
+              ),
+            ),
+            OutlinedButton.icon(
+              key: const Key('official-harness-remote-assistance'),
+              onPressed: _showRemoteShare,
+              icon: const Icon(Icons.screen_share_outlined, size: 18),
+              label: const Text('远程协助'),
+            ),
+            const SizedBox(width: 10),
+          ],
+        ),
       ),
     );
   }
@@ -2826,7 +2896,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('连接协同设备', style: Theme.of(context).textTheme.titleMedium),
+          Text('连接远程设备', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
             _remoteSession == null
@@ -2991,33 +3061,35 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     ),
   );
 
-  Widget _buildEmbeddedMode(RustDeskHostInfo host) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      _buildEmbeddedConnector(host),
-      const SizedBox(height: 8),
-      ExpansionTile(
-        key: const Key('harness-coordination-local-access'),
-        tilePadding: EdgeInsets.zero,
-        leading: const Icon(Icons.shield_outlined),
-        title: const Text('允许别人协助本机'),
-        subtitle: Text('本机 ID ${host.id.isEmpty ? '正在注册…' : host.id}'),
-        children: <Widget>[
-          _buildNativeConnections(host),
-          _buildPendingPairings(host),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _remoteEnabled,
-            onChanged: host.available && !_connecting
-                ? (bool value) => value ? _launchHost(host) : _stopHost()
-                : null,
-            title: Text(_remoteEnabled ? '允许接入已打开' : '允许接入已关闭'),
-          ),
-          SelectableText('本机 Harness ID：${host.id}'),
-        ],
-      ),
-    ],
-  );
+  Widget _buildEmbeddedMode(RustDeskHostInfo host) => Platform.isAndroid
+      ? _buildEmbeddedConnector(host)
+      : Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _buildEmbeddedConnector(host),
+            const SizedBox(height: 8),
+            ExpansionTile(
+              key: const Key('harness-coordination-local-access'),
+              tilePadding: EdgeInsets.zero,
+              leading: const Icon(Icons.shield_outlined),
+              title: const Text('允许别人协助本机'),
+              subtitle: Text('本机 ID ${host.id.isEmpty ? '正在注册…' : host.id}'),
+              children: <Widget>[
+                _buildNativeConnections(host),
+                _buildPendingPairings(host),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _remoteEnabled,
+                  onChanged: host.available && !_connecting
+                      ? (bool value) => value ? _launchHost(host) : _stopHost()
+                      : null,
+                  title: Text(_remoteEnabled ? '允许接入已打开' : '允许接入已关闭'),
+                ),
+                SelectableText('本机 Harness ID：${host.id}'),
+              ],
+            ),
+          ],
+        );
 
   Widget _buildPendingPairings(RustDeskHostInfo host) =>
       StreamBuilder<List<HarnessRemotePendingPairing>>(
@@ -3365,200 +3437,211 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        FutureBuilder<List<HarnessRemotePeer>>(
-                          future: _rememberedPeers,
-                          builder: (context, snapshot) {
-                            final peers = snapshot.data ?? const [];
-                            if (peers.isEmpty) return const SizedBox.shrink();
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                const SizedBox(height: 10),
-                                Text(
-                                  '之前连接过的记录',
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                for (final peer in peers)
-                                  ListTile(
-                                    key: Key('harness-peer-${peer.routingId}'),
-                                    contentPadding: EdgeInsets.zero,
-                                    onTap: () {
-                                      _remoteId.text = peer.routingId;
-                                      setState(
-                                        () => _message =
-                                            '已选择 ${peer.routingId}，可直接重新连接',
-                                      );
-                                    },
-                                    leading: const Icon(Icons.devices_rounded),
-                                    title: Text(peer.routingId),
-                                    subtitle: Text(
-                                      '${peer.lastTransport == 'relay' ? '中继' : '直连'} · '
-                                      '${peer.workspaceIds.length} 个工作区 · '
-                                      '${peer.lastConnectedAt.toLocal()}',
-                                    ),
-                                    trailing: Wrap(
-                                      spacing: 4,
-                                      children: <Widget>[
-                                        FilledButton.tonalIcon(
-                                          key: Key(
-                                            'harness-peer-connect-${peer.routingId}',
-                                          ),
-                                          onPressed:
-                                              _remoteEnabled &&
-                                                  host.available &&
-                                                  !_connecting
-                                              ? () => _connectRemembered(
-                                                  host,
-                                                  peer,
-                                                )
-                                              : null,
-                                          icon: const Icon(
-                                            Icons.link_rounded,
-                                            size: 18,
-                                          ),
-                                          label: const Text('连接'),
-                                        ),
-                                        IconButton(
-                                          tooltip: '从本机历史移除',
-                                          onPressed: () =>
-                                              _forgetPeer(peer.routingId),
-                                          icon: const Icon(
-                                            Icons.delete_outline,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                        if (Platform.isMacOS) ...<Widget>[
+                          const SizedBox(height: 12),
+                          FutureBuilder<List<HarnessRemotePeer>>(
+                            future: _rememberedPeers,
+                            builder: (context, snapshot) {
+                              final peers = snapshot.data ?? const [];
+                              if (peers.isEmpty) return const SizedBox.shrink();
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    '之前连接过的记录',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleSmall,
                                   ),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          '协助另一台 Harness',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                key: const Key('harness-remote-peer-id'),
-                                controller: _remoteId,
-                                enabled:
-                                    _remoteEnabled &&
-                                    host.available &&
-                                    !_connecting,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: '对方 Harness ID',
-                                  hintText: '输入 6～16 位数字 ID',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton.icon(
-                              key: const Key('harness-remote-connect'),
-                              onPressed:
-                                  _remoteEnabled &&
-                                      host.available &&
-                                      !_connecting
-                                  ? () => _connectRemote(host)
-                                  : null,
-                              icon: _connecting
-                                  ? const SizedBox.square(
-                                      dimension: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
+                                  for (final peer in peers)
+                                    ListTile(
+                                      key: Key(
+                                        'harness-peer-${peer.routingId}',
                                       ),
-                                    )
-                                  : const Icon(Icons.link_rounded),
-                              label: const Text('连接'),
-                            ),
-                            if (_remoteSession != null) ...<Widget>[
-                              const SizedBox(width: 8),
-                              OutlinedButton.icon(
-                                key: const Key('harness-remote-disconnect'),
-                                onPressed: _disconnectRemote,
-                                icon: const Icon(Icons.link_off_rounded),
-                                label: const Text('断开'),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          key: const Key('harness-remote-peer-password'),
-                          controller: _remotePassword,
-                          obscureText: _obscureRemotePassword,
-                          enabled: _remoteEnabled && !_connecting,
-                          decoration: InputDecoration(
-                            labelText: '对方协助密码',
-                            helperText: '首次连接默认使用 12345678；已配对记录无需再次输入',
-                            border: const OutlineInputBorder(),
-                            isDense: true,
-                            suffixIcon: IconButton(
-                              tooltip: _obscureRemotePassword ? '显示密码' : '隐藏密码',
-                              onPressed: _remoteEnabled
-                                  ? () => setState(
-                                      () => _obscureRemotePassword =
-                                          !_obscureRemotePassword,
-                                    )
-                                  : null,
-                              icon: Icon(
-                                _obscureRemotePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                            ),
+                                      contentPadding: EdgeInsets.zero,
+                                      onTap: () {
+                                        _remoteId.text = peer.routingId;
+                                        setState(
+                                          () => _message =
+                                              '已选择 ${peer.routingId}，可直接重新连接',
+                                        );
+                                      },
+                                      leading: const Icon(
+                                        Icons.devices_rounded,
+                                      ),
+                                      title: Text(peer.routingId),
+                                      subtitle: Text(
+                                        '${peer.lastTransport == 'relay' ? '中继' : '直连'} · '
+                                        '${peer.workspaceIds.length} 个工作区 · '
+                                        '${peer.lastConnectedAt.toLocal()}',
+                                      ),
+                                      trailing: Wrap(
+                                        spacing: 4,
+                                        children: <Widget>[
+                                          FilledButton.tonalIcon(
+                                            key: Key(
+                                              'harness-peer-connect-${peer.routingId}',
+                                            ),
+                                            onPressed:
+                                                _remoteEnabled &&
+                                                    host.available &&
+                                                    !_connecting
+                                                ? () => _connectRemembered(
+                                                    host,
+                                                    peer,
+                                                  )
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.link_rounded,
+                                              size: 18,
+                                            ),
+                                            label: const Text('连接'),
+                                          ),
+                                          IconButton(
+                                            tooltip: '从本机历史移除',
+                                            onPressed: () =>
+                                                _forgetPeer(peer.routingId),
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          key: const Key('harness-remote-workspace-id'),
-                          controller: _remoteWorkspaceId,
-                          enabled: _remoteEnabled && !_connecting,
-                          decoration: const InputDecoration(
-                            labelText: '首次配对的远端工作区 ID',
-                            helperText: '仅首次连接需要；执行端将再次显示并确认这个最小授权范围',
-                            border: OutlineInputBorder(),
-                            isDense: true,
+                          const SizedBox(height: 14),
+                          Text(
+                            '协助另一台 Harness',
+                            style: Theme.of(context).textTheme.titleSmall,
                           ),
-                        ),
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          value: _forceRelay,
-                          onChanged: !_remoteEnabled || _connecting
-                              ? null
-                              : (bool? value) => setState(
-                                  () => _forceRelay = value ?? false,
+                          const SizedBox(height: 8),
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: TextField(
+                                  key: const Key('harness-remote-peer-id'),
+                                  controller: _remoteId,
+                                  enabled:
+                                      _remoteEnabled &&
+                                      host.available &&
+                                      !_connecting,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: '对方 Harness ID',
+                                    hintText: '输入 6～16 位数字 ID',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
                                 ),
-                          title: const Text('强制经 HBBS/HBBR 中继验收'),
-                          subtitle: const Text(
-                            '默认先尝试点对点，失败自动走中继；此选项用于验证纯中继路径。',
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton.icon(
+                                key: const Key('harness-remote-connect'),
+                                onPressed:
+                                    _remoteEnabled &&
+                                        host.available &&
+                                        !_connecting
+                                    ? () => _connectRemote(host)
+                                    : null,
+                                icon: _connecting
+                                    ? const SizedBox.square(
+                                        dimension: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.link_rounded),
+                                label: const Text('连接'),
+                              ),
+                              if (_remoteSession != null) ...<Widget>[
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  key: const Key('harness-remote-disconnect'),
+                                  onPressed: _disconnectRemote,
+                                  icon: const Icon(Icons.link_off_rounded),
+                                  label: const Text('断开'),
+                                ),
+                              ],
+                            ],
                           ),
-                        ),
-                        if (_remoteSession != null) ...<Widget>[
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 280,
-                            child: HarnessRemoteReadOnlyPanel(
-                              peerRoutingId: _remoteSession!.peer.routingId,
-                              model: _remoteSession!.model,
-                              onDisconnect: () =>
-                                  unawaited(_disconnectRemote()),
+                          const SizedBox(height: 8),
+                          TextField(
+                            key: const Key('harness-remote-peer-password'),
+                            controller: _remotePassword,
+                            obscureText: _obscureRemotePassword,
+                            enabled: _remoteEnabled && !_connecting,
+                            decoration: InputDecoration(
+                              labelText: '对方协助密码',
+                              helperText: '首次连接默认使用 12345678；已配对记录无需再次输入',
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                              suffixIcon: IconButton(
+                                tooltip: _obscureRemotePassword
+                                    ? '显示密码'
+                                    : '隐藏密码',
+                                onPressed: _remoteEnabled
+                                    ? () => setState(
+                                        () => _obscureRemotePassword =
+                                            !_obscureRemotePassword,
+                                      )
+                                    : null,
+                                icon: Icon(
+                                  _obscureRemotePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          HarnessRemoteCommandPanel(
-                            model: _remoteSession!.model,
-                            client: _remoteSession!.client,
-                            allowedOperations: _remoteSession!.peer.operations,
+                          const SizedBox(height: 8),
+                          TextField(
+                            key: const Key('harness-remote-workspace-id'),
+                            controller: _remoteWorkspaceId,
+                            enabled: _remoteEnabled && !_connecting,
+                            decoration: const InputDecoration(
+                              labelText: '首次配对的远端工作区 ID',
+                              helperText: '仅首次连接需要；执行端将再次显示并确认这个最小授权范围',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
                           ),
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            value: _forceRelay,
+                            onChanged: !_remoteEnabled || _connecting
+                                ? null
+                                : (bool? value) => setState(
+                                    () => _forceRelay = value ?? false,
+                                  ),
+                            title: const Text('强制经 HBBS/HBBR 中继验收'),
+                            subtitle: const Text(
+                              '默认先尝试点对点，失败自动走中继；此选项用于验证纯中继路径。',
+                            ),
+                          ),
+                          if (_remoteSession != null) ...<Widget>[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              height: 280,
+                              child: HarnessRemoteReadOnlyPanel(
+                                peerRoutingId: _remoteSession!.peer.routingId,
+                                model: _remoteSession!.model,
+                                onDisconnect: () =>
+                                    unawaited(_disconnectRemote()),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            HarnessRemoteCommandPanel(
+                              model: _remoteSession!.model,
+                              client: _remoteSession!.client,
+                              allowedOperations:
+                                  _remoteSession!.peer.operations,
+                            ),
+                          ],
                         ],
                       ],
                     );

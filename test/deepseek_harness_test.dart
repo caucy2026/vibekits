@@ -175,11 +175,14 @@ void main() {
       ).path,
       endsWith('${Platform.pathSeparator}.codex'),
     );
+    final String configuredAgentHome = Platform.isWindows
+        ? r'D:\Codex\home'
+        : '/opt/Codex/home';
     expect(
       DeepSeekHarnessService.sharedAgentHomeDirectory(
-        environment: <String, String>{'CODEX_HOME': r'D:\Codex\home'},
+        environment: <String, String>{'CODEX_HOME': configuredAgentHome},
       ).path,
-      r'D:\Codex\home',
+      configuredAgentHome,
     );
     expect(web.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
     expect(agent.arguments, isNot(contains(HarnessLaunchSpec.packageSpec)));
@@ -393,43 +396,28 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-local-assistance-id')), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('agent-mcp-local-devices')),
+    );
+    await tester.tap(find.byKey(const Key('agent-mcp-local-devices')));
+    await tester.pump();
+    expect(find.text('本机 MCP 设备'), findsOneWidget);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const Key('agent-tool-rail-more')));
     await tester.tap(find.byKey(const Key('agent-tool-rail-more')));
     await tester.pumpAndSettle();
 
-    expect(find.text('远程协助'), findsOneWidget);
+    expect(find.text('远程协助'), findsWidgets);
     expect(find.text('查看本机 ID 或连接另一台 Harness'), findsOneWidget);
     expect(find.text('MCP 与协同设置'), findsOneWidget);
-    await tester.tap(find.text('远程协助'));
+    await tester.tap(find.text('远程协助').last);
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('agent-coordination-workspace')),
-      findsOneWidget,
-    );
-    expect(find.textContaining('协同模式 · 请连接对应设备 ID'), findsOneWidget);
-    expect(find.byKey(const Key('agent-composer')), findsNothing);
-    expect(
-      find.byKey(const Key('harness-coordination-peer-id')),
-      findsOneWidget,
-    );
-    expect(find.text('默认密码 12345678；连接过的设备通常不需要展开'), findsOneWidget);
-    await tester.tap(
-      find.byKey(const Key('harness-coordination-first-connect-options')),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('harness-coordination-peer-password')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('harness-coordination-connect')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('agent-exit-coordination')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('agent-exit-coordination')));
-    await tester.pumpAndSettle();
+    expect(find.text('Harness 远程协助'), findsOneWidget);
+    expect(find.text('本机 Harness ID'), findsOneWidget);
+    expect(find.byKey(const Key('harness-remote-peer-id')), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
-    expect(find.text('本地模式 · 操作本机 Harness'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
