@@ -5,11 +5,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
 final class _FakeManagedProcess implements RustDeskManagedProcess {
+  _FakeManagedProcess({this.listeningError, this.readyError});
   final _exit = Completer<int>();
+  final Object? listeningError;
+  final Object? readyError;
   bool terminated = false;
 
   @override
   Future<int> get exitCode => _exit.future;
+
+  @override
+  Future<void> waitUntilListening({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    if (listeningError != null) throw listeningError!;
+  }
+
+  @override
+  Future<void> waitUntilReady({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    if (readyError != null) throw readyError!;
+  }
 
   @override
   bool terminate() {
@@ -20,6 +37,27 @@ final class _FakeManagedProcess implements RustDeskManagedProcess {
 }
 
 void main() {
+  test('macOS only uses the VibeKits-bundled headless Harness helper', () {
+    if (!Platform.isMacOS) return;
+    final candidates = RustDeskHarnessShareService.candidateExecutables(
+      configured: '/Applications/KEMI远程办公.app/Contents/MacOS/KEMI远程办公',
+    );
+    expect(candidates.first, endsWith('/vibekits-harness-relay'));
+    expect(
+      candidates,
+      isNot(contains('/Applications/KEMI远程办公.app/Contents/MacOS/KEMI远程办公')),
+    );
+    expect(
+      candidates,
+      isNot(
+        contains(
+          '/Applications/KEMI远程办公.app/Contents/MacOS/'
+          'vibekits-harness-relay',
+        ),
+      ),
+    );
+  });
+
   test('RustDesk 网页端只接受无凭据 HTTP/HTTPS 地址', () {
     expect(
       RustDeskHarnessShareService.validateWebClientUrl(
@@ -64,7 +102,8 @@ void main() {
       'vibekits_rustdesk_test_',
     );
     final File executable = File(
-      '${temporary.path}${Platform.pathSeparator}RustDesk.exe',
+      '${temporary.path}${Platform.pathSeparator}'
+      '${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
     );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
@@ -94,12 +133,14 @@ void main() {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_pending_',
     );
-    final File executable = File('${temporary.path}/RustDesk');
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     final RustDeskHostInfo info = await RustDeskHarnessShareService.inspect(
       configuredExecutable: executable.path,
-      runner: (_, __) async => ProcessResult(
+      runner: (_, _) async => ProcessResult(
         1,
         0,
         '{"routingId":"1234567890","callable":false,'
@@ -113,12 +154,13 @@ void main() {
     expect(info.message, contains('正在向中继服务器注册'));
   });
 
-  test('启动 RustDesk 使用参数数组且不经过 shell', () async {
+  test('启动包内传输引擎使用参数数组且不经过 shell', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_launch_',
     );
     final File executable = File(
-      '${temporary.path}${Platform.pathSeparator}RustDesk.exe',
+      '${temporary.path}${Platform.pathSeparator}'
+      '${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
     );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
@@ -133,11 +175,55 @@ void main() {
     expect(launched, executable.path);
   });
 
+  test('恢复远程协助会启动中继并等待到真实可呼叫状态', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_resume_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    int inspections = 0;
+    bool launched = false;
+    final host = await RustDeskHarnessShareService.ensureHostAvailable(
+      configuredExecutable: executable.path,
+      timeout: const Duration(seconds: 1),
+      runner: (_, arguments) async {
+        expect(arguments, const <String>['--vibekits-harness-status']);
+        inspections += 1;
+        return ProcessResult(
+          1,
+          0,
+          inspections == 1
+              ? '{"routingId":null,"callable":false,'
+                    '"rendezvousOnline":false,'
+                    '"registrationKeyConfirmed":false,"state":"offline"}'
+              : '{"routingId":"1554650784","callable":true,'
+                    '"rendezvousOnline":true,'
+                    '"registrationKeyConfirmed":true,"state":"registered"}',
+          '',
+        );
+      },
+      launcher: (path, arguments) async {
+        launched = true;
+        expect(path, executable.path);
+        expect(arguments, const <String>['--vibekits-harness-service']);
+      },
+    );
+    expect(launched, isTrue);
+    expect(inspections, 2);
+    expect(host.callable, isTrue);
+    expect(host.id, '1554650784');
+  });
+
   test('Harness 隧道使用独立数字 ID 和固定回环目标', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_harness_tunnel_',
     );
-    final File executable = File('${temporary.path}/HarnessRelay');
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     await RustDeskHarnessShareService.launchTunnel(
@@ -163,7 +249,9 @@ void main() {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_harness_managed_tunnel_',
     );
-    final File executable = File('${temporary.path}/HarnessRelay');
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     final process = _FakeManagedProcess();
@@ -191,11 +279,46 @@ void main() {
     expect(await lease.exitCode, 0);
   });
 
+  test('受管 Harness 隧道区分监听就绪与远端传输就绪', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_harness_failed_tunnel_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final process = _FakeManagedProcess(
+      readyError: StateError('HARNESS_TRANSPORT_transport_connect_timeout'),
+    );
+
+    final lease = await RustDeskHarnessShareService.openTunnel(
+      executable.path,
+      routingId: '1554650784',
+      localPort: 32147,
+      launcher: (_, _) async => process,
+    );
+    await expectLater(
+      lease.waitUntilConnected(),
+      throwsA(
+        isA<StateError>().having(
+          (StateError error) => error.message,
+          'message',
+          contains('transport_connect_timeout'),
+        ),
+      ),
+    );
+    await lease.close();
+    expect(process.terminated, isTrue);
+  });
+
   test('Harness 隧道拒绝桌面 ID 文本和特权端口', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_harness_tunnel_invalid_',
     );
-    final File executable = File('${temporary.path}/HarnessRelay');
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     expect(

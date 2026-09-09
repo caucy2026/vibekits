@@ -12,6 +12,39 @@ APP_BUNDLE="$1"
 DESTINATION="$APP_BUNDLE/Contents/Resources/tools/harness"
 LEGACY_DESTINATION="$APP_BUNDLE/Contents/MacOS/tools/harness"
 
+# Harness remote assistance uses only RustDesk's rendezvous/P2P/HBBR byte
+# transport. The helper must live inside VibeKits; discovering another
+# installed RustDesk/KEMI application at runtime is deliberately forbidden.
+RELAY_SOURCE="${VIBEKITS_HARNESS_RELAY_SOURCE:-$PROJECT_ROOT/native/rustdesk/macos/runtime/vibekits-harness-relay}"
+RELAY_DESTINATION="$APP_BUNDLE/Contents/MacOS/vibekits-harness-relay"
+RELAY_LICENSE_SOURCE="$PROJECT_ROOT/third_party/rustdesk-transport/LICENCE"
+RELAY_LICENSE_DESTINATION="$APP_BUNDLE/Contents/Resources/licenses/RustDesk-AGPL-3.0.txt"
+if [ ! -x "$RELAY_SOURCE" ] || [ ! -f "$RELAY_LICENSE_SOURCE" ]; then
+  echo "Bundled macOS Harness RustDesk transport is missing or incomplete." >&2
+  echo "Run tool/prepare_rustdesk_harness_relay_macos.sh before Release packaging." >&2
+  exit 8
+fi
+for RELAY_MARKER in transport_connected transport_connect_timeout; do
+  if ! strings "$RELAY_SOURCE" | grep -F "$RELAY_MARKER" >/dev/null; then
+    echo "Harness RustDesk transport is stale; missing marker: $RELAY_MARKER" >&2
+    exit 8
+  fi
+done
+RELAY_KIND="$(file -b "$RELAY_SOURCE")"
+case "$RELAY_KIND" in
+  Mach-O*) ;;
+  *)
+    echo "Harness RustDesk transport is not a macOS Mach-O executable: $RELAY_KIND" >&2
+    exit 8
+    ;;
+esac
+mkdir -p "$(dirname "$RELAY_DESTINATION")" "$(dirname "$RELAY_LICENSE_DESTINATION")"
+ditto "$RELAY_SOURCE" "$RELAY_DESTINATION"
+ditto "$RELAY_LICENSE_SOURCE" "$RELAY_LICENSE_DESTINATION"
+chmod 755 "$RELAY_DESTINATION"
+codesign --force --sign - "$RELAY_DESTINATION"
+echo "Packaged Harness RustDesk transport: $RELAY_DESTINATION"
+
 if [ ! -f "$SOURCE/harness-runtime.json" ] || \
    [ ! -x "$SOURCE/bin/node" ] || \
    [ ! -f "$SOURCE/vibekits-mcp-server.mjs" ] || \
@@ -56,7 +89,7 @@ if [ -z "$ADB_SOURCE" ] || [ ! -x "$ADB_SOURCE" ]; then
   echo "Set VIBEKITS_ADB_SOURCE or put adb on PATH before Release packaging." >&2
   exit 4
 fi
-ADB_METADATA_SOURCE_DIRECTORY="$(dirname "$ADB_SOURCE")"
+ADB_METADATA_SOURCE_DIRECTORY="${VIBEKITS_ADB_METADATA_SOURCE:-$(dirname "$ADB_SOURCE")}"
 if [ -L "$ADB_SOURCE" ]; then
   ADB_LINK_TARGET="$(readlink "$ADB_SOURCE")"
   if [[ "$ADB_LINK_TARGET" = /* ]]; then

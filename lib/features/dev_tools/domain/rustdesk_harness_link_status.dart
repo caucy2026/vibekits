@@ -21,7 +21,7 @@ class RustDeskHarnessLinkSnapshot {
   factory RustDeskHarnessLinkSnapshot.disconnected() =>
       RustDeskHarnessLinkSnapshot(
         phase: RustDeskHarnessLinkPhase.disconnected,
-        message: '未连接KEMI远程办公',
+        message: '未连接远程 Harness',
         updatedAt: DateTime.now(),
       );
 
@@ -37,12 +37,13 @@ class RustDeskHarnessLinkSnapshot {
       phase == RustDeskHarnessLinkPhase.handshaking;
 }
 
-/// Process-wide, non-blocking projection of the local KEMI remote-office link.
+/// Process-wide, non-blocking projection of the VibeKits message channel.
 ///
-/// Finding or launching the compatible client never means "connected". Only a
+/// Finding or launching the embedded carrier never means "connected". Only a
 /// validated protocol handshake followed by a fresh heartbeat may publish the
-/// connected state. The native RustDesk/KEMI adapter calls [acceptHandshake]
-/// and [acceptHeartbeat]; UI code only listens to [changes].
+/// connected state. The source-built RustDesk carrier calls [acceptHandshake]
+/// and [acceptHeartbeat]; UI code only listens to [changes]. No desktop pixels
+/// or remote-control input are part of this state machine.
 abstract final class RustDeskHarnessLinkStatusHub {
   static const String protocol = 'vibekits.harness.status';
   static const int supportedVersion = 1;
@@ -59,10 +60,10 @@ abstract final class RustDeskHarnessLinkStatusHub {
   static Stream<RustDeskHarnessLinkSnapshot> get changes => _changes.stream;
 
   static void clientFound() =>
-      _publish(RustDeskHarnessLinkPhase.clientFound, '已找到KEMI远程办公，等待状态协议连接');
+      _publish(RustDeskHarnessLinkPhase.clientFound, 'VibeKits 内置 P2P/中继引擎已就绪');
 
   static void handshaking() =>
-      _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验KEMI远程办公状态协议');
+      _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验 Harness 消息协议');
 
   static bool acceptHandshake(Map<String, Object?> hello) {
     handshaking();
@@ -76,7 +77,7 @@ abstract final class RustDeskHarnessLinkStatusHub {
     };
     if (remoteProtocol != protocol || !versions.contains(supportedVersion)) {
       _activePeerId = '';
-      _publish(RustDeskHarnessLinkPhase.incompatible, 'KEMI远程办公状态协议版本不兼容');
+      _publish(RustDeskHarnessLinkPhase.incompatible, 'Harness 消息协议版本不兼容');
       return false;
     }
     _activePeerId = peer;
@@ -126,14 +127,14 @@ abstract final class RustDeskHarnessLinkStatusHub {
     _activePeerId = '';
     _publish(
       RustDeskHarnessLinkPhase.disconnected,
-      reason.trim().isEmpty ? '未连接KEMI远程办公' : _bounded(reason, 160),
+      reason.trim().isEmpty ? '未连接远程 Harness' : _bounded(reason, 160),
     );
   }
 
   static void _markConnected(Duration heartbeatInterval) {
     _publish(
       RustDeskHarnessLinkPhase.connected,
-      'KEMI远程办公已连接',
+      '远程 Harness 消息通道已连接',
       protocolVersion: supportedVersion,
       peerId: _activePeerId,
     );
@@ -146,7 +147,7 @@ abstract final class RustDeskHarnessLinkStatusHub {
       if (_latest.phase != RustDeskHarnessLinkPhase.connected) return;
       _publish(
         RustDeskHarnessLinkPhase.stale,
-        'KEMI远程办公心跳已超时',
+        '远程 Harness 心跳已超时',
         protocolVersion: supportedVersion,
         peerId: _activePeerId,
       );

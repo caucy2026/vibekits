@@ -1351,7 +1351,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Future<void> _pickRustDeskExecutable() async {
     final XFile? selected = await openFile(
       acceptedTypeGroups: const <XTypeGroup>[
-        XTypeGroup(label: 'KEMI远程办公客户端', extensions: <String>['exe']),
+        XTypeGroup(label: 'VibeKits Harness 传输引擎', extensions: <String>['exe']),
       ],
     );
     if (selected != null && mounted) {
@@ -1493,10 +1493,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 key: const Key('rustdesk-executable'),
                 controller: _rustDeskExecutable,
                 decoration: InputDecoration(
-                  labelText: 'KEMI远程办公客户端路径',
-                  helperText: '留空时自动查找兼容的KEMI远程办公客户端',
+                  labelText: 'Harness 传输引擎路径（开发调试）',
+                  helperText: '正式版自动使用 VibeKits 包内引擎，无需安装其他 App',
                   suffixIcon: IconButton(
-                    tooltip: '选择KEMI远程办公程序',
+                    tooltip: '选择 VibeKits Harness 传输引擎',
                     onPressed: _pickRustDeskExecutable,
                     icon: const Icon(Icons.folder_open_outlined),
                   ),

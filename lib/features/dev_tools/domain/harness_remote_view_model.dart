@@ -38,6 +38,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
   bool _polling = false;
   bool _negotiated = false;
   DateTime? _lastHeartbeat;
+  DateTime? _lastSnapshot;
   int _generation = 0;
   bool _live = false;
   Duration? _roundTrip;
@@ -83,7 +84,11 @@ class HarnessRemoteViewModel extends ChangeNotifier {
         if (!current()) return;
         _lastHeartbeat = DateTime.now();
       }
-      final snapshot = _cursor.stale;
+      final bool snapshot =
+          _cursor.stale ||
+          _lastSnapshot == null ||
+          DateTime.now().difference(_lastSnapshot!) >=
+              const Duration(seconds: 2);
       final result = await client.readState(
         epoch: snapshot ? null : _cursor.epoch,
         sequence: snapshot ? null : _cursor.sequence,
@@ -115,6 +120,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
         if (!current()) return;
         _workspaces = restored;
         _cursor.acceptSnapshot(epoch: epoch, sequence: sequence);
+        _lastSnapshot = DateTime.now();
       } else {
         final rows = result['events'];
         final after = result['afterSequence'];

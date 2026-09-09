@@ -365,6 +365,74 @@ void main() {
     );
   });
 
+  testWidgets('右侧更多菜单可进入远程协助而不是无响应占位符', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_agent_more_menu_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            initialWorkspace: workspace.path,
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24.18.0',
+              npxVersion: '11.16.0',
+              message: '运行环境已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('agent-tool-rail-more')));
+    await tester.tap(find.byKey(const Key('agent-tool-rail-more')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('远程协助'), findsOneWidget);
+    expect(find.text('查看本机 ID 或连接另一台 Harness'), findsOneWidget);
+    expect(find.text('MCP 与协同设置'), findsOneWidget);
+    await tester.tap(find.text('远程协助'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('agent-coordination-workspace')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('协同模式 · 请连接对应设备 ID'), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsNothing);
+    expect(
+      find.byKey(const Key('harness-coordination-peer-id')),
+      findsOneWidget,
+    );
+    expect(find.text('默认密码 12345678；连接过的设备通常不需要展开'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('harness-coordination-first-connect-options')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('harness-coordination-peer-password')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('harness-coordination-connect')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('agent-exit-coordination')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('agent-exit-coordination')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
+    expect(find.text('本地模式 · 操作本机 Harness'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('智能体运行中可停止并回到可输入状态', (WidgetTester tester) async {
     final Directory workspace = Directory.systemTemp.createTempSync(
       'vibekits_agent_stop_',

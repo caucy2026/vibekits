@@ -14,6 +14,7 @@ final class HarnessRemotePairingRequest {
     required this.deviceId,
     required this.certificatePem,
     required this.nonce,
+    required this.passwordProof,
     required Set<String> requestedWorkspaceIds,
     required Set<String> requestedOperations,
   }) : certificateSha256 = HarnessRemotePeer.certificatePemSha256(
@@ -30,6 +31,7 @@ final class HarnessRemotePairingRequest {
     required String certificatePem,
     required Set<String> requestedWorkspaceIds,
     required Set<String> requestedOperations,
+    required String password,
     Random? random,
   }) {
     final secure = random ?? Random.secure();
@@ -37,11 +39,23 @@ final class HarnessRemotePairingRequest {
       24,
       (_) => secure.nextInt(256).toRadixString(16).padLeft(2, '0'),
     ).join();
+    final certificateSha256 = HarnessRemotePeer.certificatePemSha256(
+      certificatePem,
+    );
     return HarnessRemotePairingRequest(
       routingId: routingId,
       deviceId: deviceId,
       certificatePem: certificatePem,
       nonce: nonce,
+      passwordProof: computePasswordProof(
+        password: password,
+        routingId: routingId,
+        deviceId: deviceId,
+        certificateSha256: certificateSha256,
+        nonce: nonce,
+        requestedWorkspaceIds: requestedWorkspaceIds,
+        requestedOperations: requestedOperations,
+      ),
       requestedWorkspaceIds: requestedWorkspaceIds,
       requestedOperations: requestedOperations,
     );
@@ -58,6 +72,7 @@ final class HarnessRemotePairingRequest {
       deviceId: row['deviceId']?.toString() ?? '',
       certificatePem: row['certificatePem']?.toString() ?? '',
       nonce: row['nonce']?.toString() ?? '',
+      passwordProof: row['passwordProof']?.toString() ?? '',
       requestedWorkspaceIds: workspaces.cast<String>().toSet(),
       requestedOperations: operations.cast<String>().toSet(),
     );
@@ -68,6 +83,7 @@ final class HarnessRemotePairingRequest {
   final String certificatePem;
   final String certificateSha256;
   final String nonce;
+  final String passwordProof;
   final Set<String> requestedWorkspaceIds;
   final Set<String> requestedOperations;
 
@@ -78,6 +94,7 @@ final class HarnessRemotePairingRequest {
         !RegExp(r'^VH-[A-F0-9]{16,64}$').hasMatch(deviceId) ||
         deviceId != expectedDeviceId ||
         !RegExp(r'^[a-f0-9]{48}$').hasMatch(nonce) ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(passwordProof) ||
         requestedWorkspaceIds.isEmpty ||
         requestedWorkspaceIds.length > 100 ||
         requestedOperations.isEmpty ||
@@ -100,9 +117,54 @@ final class HarnessRemotePairingRequest {
     'certificatePem': certificatePem,
     'certificateSha256': certificateSha256,
     'nonce': nonce,
+    'passwordProof': passwordProof,
     'requestedWorkspaceIds': requestedWorkspaceIds.toList()..sort(),
     'requestedOperations': requestedOperations.toList()..sort(),
   };
+
+  bool verifiesPassword(String password) {
+    final expected = computePasswordProof(
+      password: password,
+      routingId: routingId,
+      deviceId: deviceId,
+      certificateSha256: certificateSha256,
+      nonce: nonce,
+      requestedWorkspaceIds: requestedWorkspaceIds,
+      requestedOperations: requestedOperations,
+    );
+    var difference = 0;
+    for (var index = 0; index < expected.length; index++) {
+      difference |=
+          expected.codeUnitAt(index) ^ passwordProof.codeUnitAt(index);
+    }
+    return difference == 0;
+  }
+
+  static String computePasswordProof({
+    required String password,
+    required String routingId,
+    required String deviceId,
+    required String certificateSha256,
+    required String nonce,
+    required Set<String> requestedWorkspaceIds,
+    required Set<String> requestedOperations,
+  }) {
+    final workspaces = requestedWorkspaceIds.toList()..sort();
+    final operations = requestedOperations.toList()..sort();
+    final payload = <String>[
+      'vibekits-harness-password-v1',
+      routingId,
+      deviceId,
+      certificateSha256,
+      nonce,
+      workspaces.join('\u0000'),
+      operations.join('\u0000'),
+    ].join('\n');
+    return Hmac(
+      sha256,
+      utf8.encode(password),
+    ).convert(utf8.encode(payload)).toString();
+  }
 }
 
 final class HarnessRemotePairingApproval {

@@ -20,6 +20,15 @@ void main() {
       deviceId: controller.deviceId,
       certificatePem: controller.certificatePem,
       nonce: List.filled(48, 'a').join(),
+      passwordProof: HarnessRemotePairingRequest.computePasswordProof(
+        password: '12345678',
+        routingId: '1554650784',
+        deviceId: controller.deviceId,
+        certificateSha256: controller.fingerprint,
+        nonce: List.filled(48, 'a').join(),
+        requestedWorkspaceIds: const {'workspace-1'},
+        requestedOperations: const {'session.history', 'session.prompt'},
+      ),
       requestedWorkspaceIds: const {'workspace-1'},
       requestedOperations: const {'session.history', 'session.prompt'},
     );
@@ -52,6 +61,15 @@ void main() {
       deviceId: identity.deviceId,
       certificatePem: identity.certificatePem,
       nonce: List.filled(48, 'b').join(),
+      passwordProof: HarnessRemotePairingRequest.computePasswordProof(
+        password: '12345678',
+        routingId: '1554650784',
+        deviceId: identity.deviceId,
+        certificateSha256: identity.fingerprint,
+        nonce: List.filled(48, 'b').join(),
+        requestedWorkspaceIds: const {'workspace-1'},
+        requestedOperations: const {'session.history'},
+      ),
       requestedWorkspaceIds: const {'workspace-1'},
       requestedOperations: const {'session.history'},
     );

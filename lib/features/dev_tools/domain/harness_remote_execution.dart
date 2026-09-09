@@ -30,7 +30,7 @@ class HarnessRemoteExecution {
     );
   }
 
-  final HarnessOfficialRemoteAdapter adapter;
+  final HarnessRemoteApiAdapter adapter;
   final Future<String?> Function(String sessionId) workspaceForSession;
   late final HarnessRemoteCommandGate _gate;
   final Map<String, HarnessRemoteGrant> _grants = {};

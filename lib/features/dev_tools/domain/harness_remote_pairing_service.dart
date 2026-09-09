@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'harness_remote_identity.dart';
+import 'harness_remote_access_settings.dart';
 import 'harness_remote_pairing.dart';
 import 'harness_remote_peer_store.dart';
 import 'rustdesk_harness_share_service.dart';
@@ -57,23 +59,32 @@ final class HarnessRemotePendingPairing {
 
 /// Execution-side, loopback-only first-pair endpoint. Native RustDesk approval
 /// is the outer gate; this endpoint adds explicit app approval and certificate
-/// pin persistence. It never uses a product-wide or default password.
+/// pin persistence. A nonce-bound password proof rejects unauthorized pairing
+/// before anything is shown to the operator; the password itself is never sent.
 final class HarnessRemotePairingHost {
   HarnessRemotePairingHost({
     HarnessRemoteIdentityStore? identityStore,
     HarnessRemotePeerStore? peerStore,
+    Future<String> Function()? passwordReader,
+    int listenPort = port,
   }) : _identityStore = identityStore ?? HarnessRemoteIdentityStore.instance,
-       _peerStore = peerStore ?? HarnessRemotePeerStore();
+       _peerStore = peerStore ?? HarnessRemotePeerStore(),
+       _passwordReader =
+           passwordReader ?? HarnessRemoteAccessSettings().loadPassword,
+       _listenPort = listenPort;
 
   static final instance = HarnessRemotePairingHost();
   static const port = 32145;
   final HarnessRemoteIdentityStore _identityStore;
   final HarnessRemotePeerStore _peerStore;
+  final Future<String> Function() _passwordReader;
+  final int _listenPort;
   final Map<String, HarnessRemotePendingPairing> _pending = {};
   final _changes =
       StreamController<List<HarnessRemotePendingPairing>>.broadcast();
   ServerSocket? _listener;
   StreamSubscription<Socket>? _subscription;
+  int? get boundPort => _listener?.port;
 
   List<HarnessRemotePendingPairing> get pending =>
       List.unmodifiable(_pending.values);
@@ -83,7 +94,7 @@ final class HarnessRemotePairingHost {
     if (_listener != null) return;
     final listener = await ServerSocket.bind(
       InternetAddress.loopbackIPv4,
-      port,
+      _listenPort,
       shared: false,
     );
     _listener = listener;
@@ -102,6 +113,14 @@ final class HarnessRemotePairingHost {
           throw const FormatException('Invalid Harness pairing request');
         }
         final request = HarnessRemotePairingRequest.fromJson(decoded);
+        if (!request.verifiesPassword(await _passwordReader())) {
+          await _reply(socket, const {
+            'kind': 'pair-rejected',
+            'version': 1,
+            'code': 'PAIRING_BAD_PASSWORD',
+          });
+          return;
+        }
         if (decoded['certificateSha256'] != request.certificateSha256 ||
             _pending.containsKey(request.nonce)) {
           throw const FormatException('Harness pairing request was modified');
@@ -124,7 +143,13 @@ final class HarnessRemotePairingHost {
           timer,
         );
         _publish();
-      } on Object {
+      } on Object catch (error, stackTrace) {
+        developer.log(
+          'Rejected Harness pairing request: ${error.runtimeType}: $error',
+          name: 'vibekits.harness.pairing',
+          error: error,
+          stackTrace: stackTrace,
+        );
         await _reply(socket, const {
           'kind': 'pair-rejected',
           'version': 1,
@@ -222,6 +247,7 @@ final class HarnessRemotePairingClient {
     required Set<String> requestedWorkspaceIds,
     required Set<String> requestedOperations,
     bool forceRelay = false,
+    String password = HarnessRemoteAccessSettings.defaultPassword,
     Duration timeout = const Duration(minutes: 2),
   }) async {
     final identity = await _identityStore.loadOrCreate();
@@ -231,6 +257,7 @@ final class HarnessRemotePairingClient {
       certificatePem: identity.certificatePem,
       requestedWorkspaceIds: requestedWorkspaceIds,
       requestedOperations: requestedOperations,
+      password: password,
     );
     final localPort = await RustDeskHarnessShareService.allocateTunnelPort();
     final tunnel = await RustDeskHarnessShareService.openTunnel(
@@ -255,6 +282,7 @@ final class HarnessRemotePairingClient {
         }
       }
       if (socket == null) throw StateError('PAIRING_TUNNEL_UNAVAILABLE');
+      await tunnel.waitUntilConnected(timeout: timeout);
       socket.add(utf8.encode('${jsonEncode(request.toJson())}\n'));
       await socket.flush();
       final decoded = jsonDecode(

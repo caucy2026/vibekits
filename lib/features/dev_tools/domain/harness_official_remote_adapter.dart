@@ -2,10 +2,24 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+abstract interface class HarnessRemoteApiAdapter {
+  Future<Map<String, dynamic>> request(
+    Map<String, dynamic> envelope, {
+    Duration timeout = const Duration(seconds: 30),
+  });
+
+  Stream<Map<String, dynamic>> events({
+    bool host = false,
+    void Function()? onConnected,
+  });
+
+  Future<void> close();
+}
+
 /// Execution-side carrier for the official DSH API. Never expose this object
 /// directly to a network listener: authenticated, scoped dispatch owns access.
 /// Remote URLs are deliberately rejected to prevent SSRF and credential leaks.
-class HarnessOfficialRemoteAdapter {
+class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
   HarnessOfficialRemoteAdapter(this.endpoint) {
     if (endpoint.scheme != 'http' ||
         endpoint.host != '127.0.0.1' ||
@@ -28,6 +42,7 @@ class HarnessOfficialRemoteAdapter {
 
   /// Keep official request/response envelopes intact; rpcId is correlation,
   /// not a promise of deduplication. The outer command ledger provides that.
+  @override
   Future<Map<String, dynamic>> request(
     Map<String, dynamic> envelope, {
     Duration timeout = const Duration(seconds: 30),
@@ -122,6 +137,7 @@ class HarnessOfficialRemoteAdapter {
 
   /// WebSocket is a downlink only in official DSH; command traffic uses HTTP.
   /// No reconnect here: the session owner must resnapshot before resuming UI.
+  @override
   Stream<Map<String, dynamic>> events({
     bool host = false,
     void Function()? onConnected,
@@ -159,6 +175,7 @@ class HarnessOfficialRemoteAdapter {
     }
   }
 
+  @override
   Future<void> close() async {
     _closed = true;
     _http.close(force: true);

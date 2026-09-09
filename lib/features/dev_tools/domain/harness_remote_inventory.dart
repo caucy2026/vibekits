@@ -6,7 +6,7 @@ import 'harness_official_remote_adapter.dart';
 /// or caller-provided paths are used to decide ownership of remote sessions.
 class HarnessRemoteInventory {
   HarnessRemoteInventory(this.adapter);
-  final HarnessOfficialRemoteAdapter adapter;
+  final HarnessRemoteApiAdapter adapter;
   final Random _random = Random.secure();
 
   Future<List<Map<String, dynamic>>> _workspaces() async {

@@ -51,6 +51,11 @@ migrate_working_dir/
 # belong in source control.
 /native/harness/macos/runtime/
 
+# Source-built RustDesk rendezvous/P2P/HBBR helper. The preparation recipe,
+# pinned source provenance and license are tracked; the 20+ MiB native build
+# output is regenerated before packaging.
+/native/rustdesk/macos/runtime/
+
 # Prepared official MinGit runtime. The pinned, hash-verified recipe is kept in
 # Git while the extracted redistributable is supplied to Windows packaging.
 /native/git/windows/runtime/

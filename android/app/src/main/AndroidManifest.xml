@@ -20,6 +20,11 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <service
+            android:name=".HarnessRelayService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":vibekits_harness" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

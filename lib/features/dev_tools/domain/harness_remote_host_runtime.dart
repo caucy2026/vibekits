@@ -6,6 +6,7 @@ import 'harness_remote_host.dart';
 import 'harness_remote_identity.dart';
 import 'harness_remote_ledger.dart';
 import 'harness_remote_peer_store.dart';
+import 'harness_official_remote_adapter.dart';
 
 /// Production owner for the execution-side loopback service.
 ///
@@ -26,11 +27,24 @@ final class HarnessRemoteHostRuntime {
   bool get running => _host?.port != null;
 
   Future<bool> start(Uri officialEndpoint) async {
-    if (_host != null) return true;
+    return _start(HarnessOfficialRemoteAdapter(officialEndpoint));
+  }
+
+  Future<bool> startWithAdapter(HarnessRemoteApiAdapter adapter) =>
+      _start(adapter);
+
+  Future<bool> _start(HarnessRemoteApiAdapter adapter) async {
+    if (_host != null) {
+      await adapter.close();
+      return true;
+    }
     final peers = (await _peerStore.load())
         .where((peer) => peer.remembered && peer.connectionReady)
         .toList(growable: false);
-    if (peers.isEmpty) return false;
+    if (peers.isEmpty) {
+      await adapter.close();
+      return false;
+    }
     final identity = await _identityStore.loadOrCreate();
     final directory = Directory(
       '${PlatformStorageLayout.current().settingsDirectory}'
@@ -40,10 +54,7 @@ final class HarnessRemoteHostRuntime {
     final ledger = await HarnessRemoteLedger.open(
       File('${directory.path}${Platform.pathSeparator}commands.jsonl'),
     );
-    final host = HarnessRemoteHost(
-      officialEndpoint: officialEndpoint,
-      ledger: ledger,
-    );
+    final host = HarnessRemoteHost(adapter: adapter, ledger: ledger);
     try {
       for (final peer in peers) {
         host.approveCertificate(

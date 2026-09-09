@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 class RustDeskHostInfo {
   const RustDeskHostInfo({
     required this.executable,
@@ -51,21 +53,93 @@ typedef RustDeskManagedProcessLauncher =
 
 abstract interface class RustDeskManagedProcess {
   Future<int> get exitCode;
+  Future<void> waitUntilListening({Duration timeout});
+  Future<void> waitUntilReady({Duration timeout});
   bool terminate();
 }
 
 final class _IoRustDeskManagedProcess implements RustDeskManagedProcess {
-  const _IoRustDeskManagedProcess(this.process);
+  _IoRustDeskManagedProcess(this.process) {
+    process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(_handleOutput, onDone: _handleOutputDone);
+    process.stderr.transform(utf8.decoder).listen((String chunk) {
+      if (_stderr.length < 4096) {
+        final int remaining = 4096 - _stderr.length;
+        _stderr += chunk.length <= remaining
+            ? chunk
+            : chunk.substring(0, remaining);
+      }
+    });
+    unawaited(
+      process.exitCode.then((int code) {
+        final StateError error = StateError(
+          'HARNESS_TRANSPORT_EXITED: exit=$code'
+          '${_stderr.trim().isEmpty ? '' : ', ${_stderr.trim()}'}',
+        );
+        if (!_listening.isCompleted) _listening.completeError(error);
+        if (!_ready.isCompleted) _ready.completeError(error);
+      }),
+    );
+  }
   final Process process;
+  final Completer<void> _listening = Completer<void>();
+  final Completer<void> _ready = Completer<void>();
+  String _stderr = '';
+
+  void _handleOutput(String line) {
+    if (_ready.isCompleted || line.trim().isEmpty) return;
+    try {
+      final Object? decoded = jsonDecode(line);
+      if (decoded is! Map || decoded['ok'] is! bool) return;
+      if (decoded['ok'] == true && decoded['state'] == 'listener_ready') {
+        if (!_listening.isCompleted) _listening.complete();
+        return;
+      }
+      if (decoded['ok'] == true && decoded['state'] == 'transport_connected') {
+        if (!_listening.isCompleted) _listening.complete();
+        _ready.complete();
+        return;
+      }
+      final String code = decoded['code']?.toString() ?? 'invalid_state';
+      final String message = decoded['message']?.toString() ?? line;
+      final StateError error = StateError('HARNESS_TRANSPORT_$code: $message');
+      if (!_listening.isCompleted) _listening.completeError(error);
+      if (!_ready.isCompleted) _ready.completeError(error);
+    } on FormatException {
+      // Native logging may share stdout in older builds. Ignore non-JSON lines
+      // but never promote them to a connected state.
+    }
+  }
+
+  void _handleOutputDone() {
+    final StateError error = StateError(
+      'HARNESS_TRANSPORT_OUTPUT_CLOSED'
+      '${_stderr.trim().isEmpty ? '' : ': ${_stderr.trim()}'}',
+    );
+    if (!_listening.isCompleted) _listening.completeError(error);
+    if (!_ready.isCompleted) _ready.completeError(error);
+  }
 
   @override
   Future<int> get exitCode => process.exitCode;
 
   @override
+  Future<void> waitUntilListening({
+    Duration timeout = const Duration(seconds: 5),
+  }) => _listening.future.timeout(timeout);
+
+  @override
+  Future<void> waitUntilReady({
+    Duration timeout = const Duration(seconds: 30),
+  }) => _ready.future.timeout(timeout);
+
+  @override
   bool terminate() => process.kill(ProcessSignal.sigterm);
 }
 
-/// Owns exactly one native RustDesk port-forward process.
+/// Owns exactly one native carrier port-forward process.
 ///
 /// Closing this lease is the authoritative disconnect operation. Merely
 /// hiding the remote workspace must never leave a relay running in the
@@ -76,25 +150,41 @@ final class RustDeskHarnessTunnelLease {
     required this.localPort,
     required this.remotePort,
     required this.forceRelay,
-    required RustDeskManagedProcess process,
-  }) : _process = process;
+    RustDeskManagedProcess? process,
+    Future<void> Function()? nativeClose,
+  }) : _process = process,
+       _nativeClose = nativeClose;
 
   final String routingId;
   final int localPort;
   final int remotePort;
   final bool forceRelay;
-  final RustDeskManagedProcess _process;
+  final RustDeskManagedProcess? _process;
+  final Future<void> Function()? _nativeClose;
   bool _closed = false;
 
   bool get closed => _closed;
-  Future<int> get exitCode => _process.exitCode;
+  Future<int> get exitCode => _process?.exitCode ?? Future<int>.value(0);
+
+  Future<void> waitUntilConnected({
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    final process = _process;
+    if (process != null) await process.waitUntilReady(timeout: timeout);
+  }
 
   Future<void> close({Duration timeout = const Duration(seconds: 3)}) async {
     if (_closed) return;
     _closed = true;
-    _process.terminate();
+    if (_nativeClose != null) {
+      await _nativeClose();
+      return;
+    }
+    final process = _process;
+    if (process == null) return;
+    process.terminate();
     try {
-      await _process.exitCode.timeout(timeout);
+      await process.exitCode.timeout(timeout);
     } on TimeoutException {
       // The native process owns no user data. If SIGTERM is delayed, report
       // the lease closed and let the OS reap it; callers must not reuse it.
@@ -102,12 +192,16 @@ final class RustDeskHarnessTunnelLease {
   }
 }
 
-/// Integrates with the official RustDesk client without handling passwords.
+/// Controls VibeKits' source-built RustDesk carrier without desktop sharing.
 ///
-/// `hbbr` is not a generic application-data relay. The official RustDesk host
-/// streams the Vibekits desktop through hbbs/hbbr and the official web client
-/// provides remote interaction. This adapter only discovers/starts that host.
+/// The embedded helper reuses only rendezvous, hole-punching and hbbr byte
+/// transport. VibeKits' own authenticated protocol defines every payload; no
+/// separately installed RustDesk/KEMI app or plugin is a runtime dependency.
 abstract final class RustDeskHarnessShareService {
+  static const MethodChannel _androidRelay = MethodChannel(
+    'vibekits/harness-relay',
+  );
+
   static Future<String> discoverWebClientUrl({File? configFile}) async {
     final List<File> candidates = configFile != null
         ? <File>[configFile]
@@ -150,22 +244,19 @@ abstract final class RustDeskHarnessShareService {
   }
 
   static List<String> candidateExecutables({String configured = ''}) {
-    final List<String> candidates = <String>[];
-    if (configured.trim().isNotEmpty) candidates.add(configured.trim());
-    if (Platform.isWindows) {
-      for (final String? root in <String?>[
-        Platform.environment['ProgramFiles'],
-        Platform.environment['ProgramFiles(x86)'],
-        Platform.environment['LOCALAPPDATA'],
-      ]) {
-        if (root == null || root.trim().isEmpty) continue;
-        candidates.add(
-          '$root${Platform.pathSeparator}RustDesk${Platform.pathSeparator}RustDesk.exe',
-        );
+    final String siblingName = Platform.isWindows
+        ? 'vibekits-harness-relay.exe'
+        : 'vibekits-harness-relay';
+    final List<String> candidates = <String>[
+      '${File(Platform.resolvedExecutable).parent.path}'
+          '${Platform.pathSeparator}$siblingName',
+    ];
+    final String configuredPath = configured.trim();
+    if (configuredPath.isNotEmpty) {
+      final String basename = File(configuredPath).uri.pathSegments.last;
+      if (basename == siblingName) {
+        candidates.add(configuredPath);
       }
-    } else if (Platform.isMacOS) {
-      candidates.add('/Applications/KEMI远程办公.app/Contents/MacOS/KEMI远程办公');
-      candidates.add('/Applications/RustDesk.app/Contents/MacOS/RustDesk');
     }
     return candidates.toSet().toList(growable: false);
   }
@@ -174,6 +265,32 @@ abstract final class RustDeskHarnessShareService {
     String configuredExecutable = '',
     RustDeskProcessRunner? runner,
   }) async {
+    if (Platform.isAndroid) {
+      try {
+        final payload = await _androidJson('inspect');
+        final id = payload['routingId']?.toString() ?? '';
+        final state = payload['state']?.toString() ?? 'invalid_response';
+        return RustDeskHostInfo(
+          executable: 'android://vibekits-harness-relay',
+          id: id,
+          available: true,
+          callable: payload['callable'] == true,
+          rendezvousOnline: payload['rendezvousOnline'] == true,
+          registrationKeyConfirmed: payload['registrationKeyConfirmed'] == true,
+          state: state,
+          message: state == 'registered'
+              ? 'Harness 本机 ID：$id（中继服务已确认，可连接）'
+              : 'Harness 中继状态：$state',
+        );
+      } on Object catch (error) {
+        return RustDeskHostInfo(
+          executable: '',
+          id: '',
+          available: false,
+          message: 'VibeKits 内置 Harness 传输引擎不可用：$error',
+        );
+      }
+    }
     final String executable =
         candidateExecutables(
           configured: configuredExecutable,
@@ -184,14 +301,16 @@ abstract final class RustDeskHarnessShareService {
         executable: '',
         id: '',
         available: false,
-        message: '未找到兼容的 Harness 中继引擎，请在设置中指定路径',
+        message: '未找到 VibeKits 包内 Harness 传输引擎，请重新安装完整应用',
       );
     }
     try {
-      final ProcessResult result = await (runner ?? Process.run)(
+      final ProcessResult result = await _runControlCommand(
         executable,
         const <String>['--vibekits-harness-status'],
-      ).timeout(const Duration(seconds: 8));
+        timeout: const Duration(seconds: 8),
+        runner: runner,
+      );
       final Map<String, Object?> payload = _decodeStatus(result);
       final String id = payload['routingId']?.toString() ?? '';
       final bool online = payload['rendezvousOnline'] == true;
@@ -219,7 +338,7 @@ abstract final class RustDeskHarnessShareService {
         executable: executable,
         id: '',
         available: true,
-        message: '客户端不支持独立 Harness 中继状态，需更新配套网络引擎：$error',
+        message: '包内 Harness 传输引擎响应不兼容，请重新安装当前版本：$error',
       );
     }
   }
@@ -240,12 +359,68 @@ abstract final class RustDeskHarnessShareService {
     String executable, {
     RustDeskProcessLauncher? launcher,
   }) async {
+    if (Platform.isAndroid) {
+      await _androidJson('inspect');
+      return;
+    }
     if (executable.trim().isEmpty || !File(executable).existsSync()) {
-      throw StateError('KEMI远程办公客户端不存在');
+      throw StateError('VibeKits 包内 Harness 传输引擎不存在');
     }
     await (launcher ?? _launchDetached)(executable, const <String>[
       '--vibekits-harness-service',
     ]);
+  }
+
+  /// Makes the native carrier genuinely callable, rather than treating an
+  /// installed executable or an allocated routing ID as a live endpoint.
+  static Future<RustDeskHostInfo> ensureHostAvailable({
+    String configuredExecutable = '',
+    RustDeskProcessRunner? runner,
+    RustDeskProcessLauncher? launcher,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    RustDeskHostInfo host = await inspect(
+      configuredExecutable: configuredExecutable,
+      runner: runner,
+    );
+    if (host.callable) return host;
+    if (!host.available || host.executable.isEmpty) {
+      throw StateError(host.message);
+    }
+    await launchHost(host.executable, launcher: launcher);
+    final deadline = DateTime.now().add(timeout);
+    do {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      host = await inspect(
+        configuredExecutable: configuredExecutable,
+        runner: runner,
+      );
+      if (host.callable) return host;
+    } while (DateTime.now().isBefore(deadline));
+    throw TimeoutException(
+      'HARNESS_RELAY_NOT_CALLABLE: ${host.state}',
+      timeout,
+    );
+  }
+
+  /// Stops the Android-only independent Harness relay process. Desktop hosts
+  /// are process-owned by the signed native client and are not killed through
+  /// an unscoped compatibility command.
+  static Future<void> stopHost({String configuredExecutable = ''}) async {
+    if (Platform.isAndroid) {
+      final response = await _androidJson('stop');
+      if (response['ok'] != true) throw StateError('Harness 中继停止失败');
+      return;
+    }
+    final host = await inspect(configuredExecutable: configuredExecutable);
+    if (!host.available || host.executable.isEmpty) return;
+    final result = await _runControlCommand(host.executable, const <String>[
+      '--vibekits-harness-stop',
+    ], timeout: const Duration(seconds: 5));
+    final payload = _decodeControl(result);
+    if (payload['ok'] != true) {
+      throw StateError(payload['code']?.toString() ?? 'Harness 中继停止失败');
+    }
   }
 
   /// Starts an independent Harness byte tunnel through the configured
@@ -266,6 +441,18 @@ abstract final class RustDeskHarnessShareService {
       localPort: localPort,
       remotePort: remotePort,
     );
+    if (Platform.isAndroid) {
+      final response = await _androidJson('openTunnel', <String, Object?>{
+        'routingId': routingId,
+        'localPort': localPort,
+        'remotePort': remotePort,
+        'forceRelay': forceRelay,
+      });
+      if (response['ok'] != true) {
+        throw StateError(response['code']?.toString() ?? 'Harness 隧道启动失败');
+      }
+      return;
+    }
     await (launcher ?? _launchDetached)(executable, <String>[
       '--vibekits-harness-tunnel',
       routingId,
@@ -293,6 +480,32 @@ abstract final class RustDeskHarnessShareService {
       localPort: localPort,
       remotePort: remotePort,
     );
+    if (Platform.isAndroid) {
+      final response = await _androidJson('openTunnel', <String, Object?>{
+        'routingId': routingId,
+        'localPort': localPort,
+        'remotePort': remotePort,
+        'forceRelay': forceRelay,
+      });
+      if (response['ok'] != true) {
+        throw StateError(response['code']?.toString() ?? 'Harness 隧道启动失败');
+      }
+      return RustDeskHarnessTunnelLease._(
+        routingId: routingId,
+        localPort: localPort,
+        remotePort: remotePort,
+        forceRelay: forceRelay,
+        nativeClose: () async {
+          final result = await _androidRelay.invokeMapMethod<String, Object?>(
+            'closeTunnel',
+            <String, Object?>{'localPort': localPort},
+          );
+          if (result?['ok'] != true) {
+            throw StateError('Harness 隧道关闭失败');
+          }
+        },
+      );
+    }
     final arguments = <String>[
       '--vibekits-harness-tunnel',
       routingId,
@@ -302,6 +515,12 @@ abstract final class RustDeskHarnessShareService {
       if (forceRelay) '--relay',
     ];
     final process = await (launcher ?? _launchManaged)(executable, arguments);
+    try {
+      await process.waitUntilListening();
+    } on Object {
+      process.terminate();
+      rethrow;
+    }
     return RustDeskHarnessTunnelLease._(
       routingId: routingId,
       localPort: localPort,
@@ -317,7 +536,8 @@ abstract final class RustDeskHarnessShareService {
     required int localPort,
     required int remotePort,
   }) {
-    if (executable.trim().isEmpty || !File(executable).existsSync()) {
+    if (!Platform.isAndroid &&
+        (executable.trim().isEmpty || !File(executable).existsSync())) {
       throw StateError('Harness 中继引擎不存在');
     }
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(routingId)) {
@@ -346,35 +566,52 @@ abstract final class RustDeskHarnessShareService {
     String executable, {
     RustDeskProcessRunner? runner,
   }) async {
-    final ProcessResult result = await (runner ?? Process.run)(
+    if (Platform.isAndroid) {
+      final response = await _androidRelay.invokeMapMethod<String, Object?>(
+        'connections',
+      );
+      final raw = response?['json'];
+      final decoded = raw is String ? jsonDecode(raw) : null;
+      if (decoded is! List) {
+        throw const FormatException('Harness 授权列表格式不兼容');
+      }
+      return _decodeConnections(decoded);
+    }
+    final ProcessResult result = await _runControlCommand(
       executable,
       const <String>['--vibekits-harness-connections'],
-    ).timeout(const Duration(seconds: 5));
+      timeout: const Duration(seconds: 5),
+      runner: runner,
+    );
     final Map<String, Object?> payload = _decodeControl(result);
     final Object? rows = payload['connections'];
     if (rows is! List) {
       throw const FormatException('Harness 授权列表格式不兼容');
     }
-    return List<RustDeskHarnessIncomingConnection>.unmodifiable(
-      rows.map((Object? value) {
-        if (value is! Map<String, dynamic> ||
-            value['connectionId'] is! int ||
-            value['peerId'] is! String ||
-            value['peerName'] is! String ||
-            value['authorized'] is! bool ||
-            value['disconnected'] is! bool) {
-          throw const FormatException('Harness 授权记录格式不兼容');
-        }
-        return RustDeskHarnessIncomingConnection(
-          connectionId: value['connectionId'] as int,
-          peerId: value['peerId'] as String,
-          peerName: value['peerName'] as String,
-          authorized: value['authorized'] as bool,
-          disconnected: value['disconnected'] as bool,
-        );
-      }),
-    );
+    return _decodeConnections(rows);
   }
+
+  static List<RustDeskHarnessIncomingConnection> _decodeConnections(
+    List<dynamic> rows,
+  ) => List<RustDeskHarnessIncomingConnection>.unmodifiable(
+    rows.map((Object? value) {
+      if (value is! Map<String, dynamic> ||
+          value['connectionId'] is! int ||
+          value['peerId'] is! String ||
+          value['peerName'] is! String ||
+          value['authorized'] is! bool ||
+          value['disconnected'] is! bool) {
+        throw const FormatException('Harness 授权记录格式不兼容');
+      }
+      return RustDeskHarnessIncomingConnection(
+        connectionId: value['connectionId'] as int,
+        peerId: value['peerId'] as String,
+        peerName: value['peerName'] as String,
+        authorized: value['authorized'] as bool,
+        disconnected: value['disconnected'] as bool,
+      );
+    }),
+  );
 
   static Future<void> decideConnection(
     String executable, {
@@ -382,11 +619,23 @@ abstract final class RustDeskHarnessShareService {
     required bool allow,
     RustDeskProcessRunner? runner,
   }) async {
-    final ProcessResult result =
-        await (runner ?? Process.run)(executable, <String>[
-          allow ? '--vibekits-harness-authorize' : '--vibekits-harness-reject',
-          '$connectionId',
-        ]).timeout(const Duration(seconds: 5));
+    if (Platform.isAndroid) {
+      final response = await _androidRelay.invokeMapMethod<String, Object?>(
+        allow ? 'authorize' : 'reject',
+        <String, Object?>{'connectionId': connectionId},
+      );
+      if (response?['ok'] != true) throw StateError('Harness 授权操作失败');
+      return;
+    }
+    final ProcessResult result = await _runControlCommand(
+      executable,
+      <String>[
+        allow ? '--vibekits-harness-authorize' : '--vibekits-harness-reject',
+        '$connectionId',
+      ],
+      timeout: const Duration(seconds: 5),
+      runner: runner,
+    );
     final Map<String, Object?> payload = _decodeControl(result);
     if (payload['ok'] != true) {
       throw StateError(payload['code']?.toString() ?? 'Harness 授权操作失败');
@@ -404,6 +653,62 @@ abstract final class RustDeskHarnessShareService {
       throw const FormatException('Harness 授权响应格式不兼容');
     }
     return decoded;
+  }
+
+  static Future<Map<String, Object?>> _androidJson(
+    String method, [
+    Map<String, Object?>? arguments,
+  ]) async {
+    final response = await _androidRelay.invokeMapMethod<String, Object?>(
+      method,
+      arguments,
+    );
+    final raw = response?['json'];
+    final decoded = raw is String ? jsonDecode(raw) : null;
+    if (decoded is! Map) {
+      throw const FormatException('Harness Android 中继响应格式不兼容');
+    }
+    return decoded.cast<String, Object?>();
+  }
+
+  /// Runs a short-lived native control command and owns its complete lifetime.
+  ///
+  /// `Future.timeout` on `Process.run` only stops waiting; it does not terminate
+  /// the child process. An incompatible desktop client could therefore leave a
+  /// new GUI/control process behind on every two-second status refresh. The
+  /// production path starts the child explicitly and terminates it on timeout.
+  static Future<ProcessResult> _runControlCommand(
+    String executable,
+    List<String> arguments, {
+    required Duration timeout,
+    RustDeskProcessRunner? runner,
+  }) async {
+    if (runner != null) {
+      return runner(executable, arguments).timeout(timeout);
+    }
+    final Process process = await Process.start(
+      executable,
+      arguments,
+      runInShell: false,
+      mode: ProcessStartMode.normal,
+    );
+    final Future<String> stdout = process.stdout.transform(utf8.decoder).join();
+    final Future<String> stderr = process.stderr.transform(utf8.decoder).join();
+    try {
+      final int exitCode = await process.exitCode.timeout(timeout);
+      return ProcessResult(process.pid, exitCode, await stdout, await stderr);
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigterm);
+      try {
+        await process.exitCode.timeout(const Duration(milliseconds: 500));
+      } on TimeoutException {
+        process.kill(ProcessSignal.sigkill);
+      }
+      throw TimeoutException(
+        'Harness native control command timed out',
+        timeout,
+      );
+    }
   }
 
   static Uri validateWebClientUrl(String value) {
@@ -457,10 +762,6 @@ abstract final class RustDeskHarnessShareService {
       runInShell: false,
       mode: ProcessStartMode.normal,
     );
-    // The native carrier may emit diagnostics, but the product UI consumes
-    // structured link state. Drain both streams so a full pipe cannot stall it.
-    unawaited(process.stdout.drain<void>());
-    unawaited(process.stderr.drain<void>());
     return _IoRustDeskManagedProcess(process);
   }
 }

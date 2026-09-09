@@ -23,6 +23,7 @@ void main() {
     final host = HarnessRemotePairingHost(
       identityStore: identityStore,
       peerStore: peerStore,
+      listenPort: 0,
     );
     await host.start();
     addTearDown(host.stop);
@@ -36,10 +37,19 @@ void main() {
       deviceId: controller.deviceId,
       certificatePem: controller.certificatePem,
       nonce: List.filled(48, 'c').join(),
+      passwordProof: HarnessRemotePairingRequest.computePasswordProof(
+        password: '12345678',
+        routingId: '1554650784',
+        deviceId: controller.deviceId,
+        certificateSha256: controller.fingerprint,
+        nonce: List.filled(48, 'c').join(),
+        requestedWorkspaceIds: const {'w1'},
+        requestedOperations: const {'session.history'},
+      ),
       requestedWorkspaceIds: const {'w1'},
       requestedOperations: const {'session.history'},
     );
-    final socket = await Socket.connect('127.0.0.1', 32145);
+    final socket = await Socket.connect('127.0.0.1', host.boundPort!);
     socket.write('${jsonEncode(request.toJson())}\n');
     await socket.flush();
     await host.changes.firstWhere((rows) => rows.isNotEmpty);
@@ -59,6 +69,50 @@ void main() {
     final approval = HarnessRemotePairingApproval.fromJson(request, response);
     expect(approval.comparisonCode, matches(RegExp(r'^\d{6}$')));
     expect((await peerStore.load()).single.connectionReady, true);
+    await socket.close();
+  });
+
+  test('错误密码在进入用户授权队列前被拒绝且不泄露明文', () async {
+    final identityValues = <String, String>{};
+    final peerValues = <String, String>{};
+    final identityStore = HarnessRemoteIdentityStore(
+      read: (key) async => identityValues[key],
+      write: (key, value) async => identityValues[key] = value,
+    );
+    final host = HarnessRemotePairingHost(
+      identityStore: identityStore,
+      peerStore: HarnessRemotePeerStore(
+        read: (key) async => peerValues[key],
+        write: (key, value) async => peerValues[key] = value,
+      ),
+      passwordReader: () async => 'correct-password',
+      listenPort: 0,
+    );
+    await host.start();
+    addTearDown(host.stop);
+    final controller = await HarnessRemoteIdentityStore(
+      read: (key) async => null,
+      write: (key, value) async {},
+    ).loadOrCreate();
+    final request = HarnessRemotePairingRequest.create(
+      routingId: '1554650784',
+      deviceId: controller.deviceId,
+      certificatePem: controller.certificatePem,
+      requestedWorkspaceIds: const {'w1'},
+      requestedOperations: const {'session.history'},
+      password: 'wrong-password',
+    );
+    final socket = await Socket.connect('127.0.0.1', host.boundPort!);
+    socket.write('${jsonEncode(request.toJson())}\n');
+    await socket.flush();
+    final responseLine = await socket
+        .cast<List<int>>()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .first;
+    expect(responseLine, contains('PAIRING_BAD_PASSWORD'));
+    expect(responseLine, isNot(contains('wrong-password')));
+    expect(host.pending, isEmpty);
     await socket.close();
   });
 }

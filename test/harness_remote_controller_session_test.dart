@@ -15,6 +15,14 @@ final class _Process implements RustDeskManagedProcess {
   @override
   Future<int> get exitCode => exit.future;
   @override
+  Future<void> waitUntilListening({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {}
+  @override
+  Future<void> waitUntilReady({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {}
+  @override
   bool terminate() {
     if (!exit.isCompleted) exit.complete(0);
     return true;

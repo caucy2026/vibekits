@@ -11,7 +11,12 @@ import '../../../app/app_theme.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
+import '../../dev_tools/domain/harness_callback_remote_adapter.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
+import '../../dev_tools/domain/harness_remote_host_runtime.dart';
+import '../../dev_tools/domain/harness_remote_access_settings.dart';
+import '../../dev_tools/domain/harness_remote_pairing_service.dart';
+import '../../dev_tools/domain/harness_remote_peer_store.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
@@ -26,6 +31,8 @@ import 'mcp_exposure_consent_dialog.dart';
 import 'mcp_reputation_badge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
+import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
+import 'official_harness_workspace.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
 typedef AgentCredentialReader = Future<String?> Function(String key);
@@ -76,6 +83,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
     this.remoteWorkspaceLauncher,
     this.screenshotOcrRunner,
     this.downloadDirectory = '',
+    this.rustDeskExecutable = '',
+    this.rustDeskWebClientUrl = '',
   });
 
   final String initialWorkspace;
@@ -101,6 +110,8 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
   final HarnessRemoteWorkspaceLauncher? remoteWorkspaceLauncher;
   final HarnessScreenshotOcrRunner? screenshotOcrRunner;
   final String downloadDirectory;
+  final String rustDeskExecutable;
+  final String rustDeskWebClientUrl;
 
   @override
   State<DeepSeekAgentWorkspace> createState() => _DeepSeekAgentWorkspaceState();
@@ -170,6 +181,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _workspaceSearchOpen = false;
   bool _workspaceCatalogLoading = true;
   bool _showScrollToLatest = false;
+  bool _coordinationMode = false;
+  bool _coordinationConnected = false;
+  String _coordinationPeerId = '';
+  final HarnessRemoteHostRuntime _remoteHostRuntime =
+      HarnessRemoteHostRuntime();
 
   String _sessionRunKey(String workspace, String sessionId) =>
       '$workspace\u0000$sessionId';
@@ -198,6 +214,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _adoptExternalPrompt();
     unawaited(_loadSettings());
     unawaited(_restoreConversation(widget.initialWorkspace));
+    // A remembered, certificate-complete peer must remain usable after an
+    // application restart. The runtime itself fails closed when no approved
+    // peer exists, so this never turns a routing ID into implicit trust.
+    unawaited(_resumeRememberedRemoteHost());
     unawaited(_initializeWorkspaceCatalog());
     // Socket/timer behavior has dedicated LMCP tests. Ordinary widget tests
     // must not start the process-lifetime LAN discovery singleton.
@@ -387,6 +407,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     if (workStatusContext != null) {
       HarnessWorkStatusHub.clearWorkspace(workStatusContext);
     }
+    unawaited(_remoteHostRuntime.stop());
+    unawaited(HarnessRemotePairingHost.instance.stop());
     super.dispose();
   }
 
@@ -1302,8 +1324,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     }
   }
 
-  Future<void> _stop() async {
-    final _HarnessSessionRun? run = _activeRun;
+  Future<void> _stop() => _stopRun(_activeRun);
+
+  Future<void> _stopRun(_HarnessSessionRun? run) async {
     final HarnessAgentHandle? handle = run?.handle;
     if (run == null || handle == null || run.stopping) return;
     final VibekitsHarnessToolBridge? toolBridge = run.toolBridge;
@@ -2379,27 +2402,126 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         // normal 800 px window even though the panel fits comfortably.
         final bool sidebarCanFit = constraints.maxWidth >= 720;
         final bool showSessionSidebar = sidebarCanFit && _sessionSidebarOpen;
-        return Row(
+        return Column(
           children: <Widget>[
-            if (showSessionSidebar) ...<Widget>[
-              SizedBox(width: 236, child: _buildSessionSidebar(environment)),
-              VerticalDivider(width: 1, color: context.vibe.border),
-            ],
+            _buildCoordinationModeBar(),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-                child: _buildChatWorkbench(
-                  environment,
-                  showSessionSidebar: showSessionSidebar,
-                  sidebarCanFit: sidebarCanFit,
-                ),
-              ),
+              child: _coordinationMode
+                  ? HarnessRemoteShareDialog(
+                      key: const Key('agent-coordination-workspace'),
+                      configuredExecutable: widget.rustDeskExecutable,
+                      webClientUrl: widget.rustDeskWebClientUrl,
+                      onPaired: _startDeepSeekRemoteHost,
+                      onHostStopped: _stopDeepSeekRemoteHost,
+                      embedded: true,
+                      onConnectionChanged: (bool connected, String peerId) {
+                        if (!mounted) return;
+                        setState(() {
+                          _coordinationConnected = connected;
+                          _coordinationPeerId = peerId;
+                        });
+                      },
+                    )
+                  : Row(
+                      children: <Widget>[
+                        if (showSessionSidebar) ...<Widget>[
+                          SizedBox(
+                            width: 236,
+                            child: _buildSessionSidebar(environment),
+                          ),
+                          VerticalDivider(width: 1, color: context.vibe.border),
+                        ],
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+                            child: _buildChatWorkbench(
+                              environment,
+                              showSessionSidebar: showSessionSidebar,
+                              sidebarCanFit: sidebarCanFit,
+                            ),
+                          ),
+                        ),
+                        _buildCrossPlatformToolRail(),
+                      ],
+                    ),
             ),
-            _buildCrossPlatformToolRail(),
           ],
         );
       },
     );
+  }
+
+  Widget _buildCoordinationModeBar() {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      color: _coordinationMode
+          ? colors.tertiaryContainer
+          : colors.surfaceContainerLow,
+      child: SizedBox(
+        height: 48,
+        child: Row(
+          children: <Widget>[
+            const SizedBox(width: 14),
+            Icon(
+              _coordinationMode
+                  ? Icons.screen_share_rounded
+                  : Icons.computer_rounded,
+              size: 19,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                !_coordinationMode
+                    ? '本地模式 · 操作本机 Harness'
+                    : _coordinationConnected
+                    ? '协同模式 · 已连接 $_coordinationPeerId'
+                    : '协同模式 · 请连接对应设备 ID；连接前所有操作均已禁止',
+                key: const Key('agent-coordination-status'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(_coordinationMode ? '协同' : '本地'),
+            Switch(
+              key: const Key('agent-coordination-switch'),
+              value: _coordinationMode,
+              onChanged: (bool enabled) =>
+                  enabled ? _enterCoordinationMode() : _exitCoordinationMode(),
+            ),
+            if (_coordinationMode)
+              TextButton.icon(
+                key: const Key('agent-exit-coordination'),
+                onPressed: _exitCoordinationMode,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                label: const Text('退出协同'),
+              ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _enterCoordinationMode() {
+    if (_sessionRuns.isNotEmpty) {
+      _show('本机仍有任务运行，请先停止任务再进入协同模式');
+      return;
+    }
+    _captureComposerDraft();
+    setState(() {
+      _coordinationMode = true;
+      _coordinationConnected = false;
+      _coordinationPeerId = '';
+    });
+  }
+
+  void _exitCoordinationMode() {
+    setState(() {
+      _coordinationMode = false;
+      _coordinationConnected = false;
+      _coordinationPeerId = '';
+    });
   }
 
   Widget _buildCrossPlatformToolRail() => Container(
@@ -2493,7 +2615,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               icon: Icons.screen_share_outlined,
               tooltip: '远程状态：${link.message}',
               active: link.phase == RustDeskHarnessLinkPhase.connected,
-              onPressed: () => _show('远程状态：${link.message}'),
+              onPressed: _showRemoteShare,
             );
           },
         ),
@@ -2502,13 +2624,230 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           tooltip: 'MCP 与协同设置',
           onPressed: _showMacMcpSettings,
         ),
-        const SizedBox(
-          height: 34,
-          child: Tooltip(message: '预留后续功能', child: Icon(Icons.more_horiz)),
+        PopupMenuButton<String>(
+          key: const Key('agent-tool-rail-more'),
+          tooltip: '更多 Harness 操作',
+          onSelected: (String value) {
+            switch (value) {
+              case 'remote':
+                _showRemoteShare();
+              case 'settings':
+                _showMacMcpSettings();
+            }
+          },
+          itemBuilder: (_) => const <PopupMenuEntry<String>>[
+            PopupMenuItem<String>(
+              value: 'remote',
+              child: ListTile(
+                leading: Icon(Icons.screen_share_outlined),
+                title: Text('远程协助'),
+                subtitle: Text('查看本机 ID 或连接另一台 Harness'),
+              ),
+            ),
+            PopupMenuItem<String>(
+              value: 'settings',
+              child: ListTile(
+                leading: Icon(Icons.settings_outlined),
+                title: Text('MCP 与协同设置'),
+              ),
+            ),
+          ],
+          child: const SizedBox(height: 40, child: Icon(Icons.more_horiz)),
         ),
       ],
     ),
   );
+
+  Future<void> _showRemoteShare() async {
+    _enterCoordinationMode();
+  }
+
+  Future<void> _startDeepSeekRemoteHost() async {
+    if (_remoteHostRuntime.running) return;
+    final HarnessCallbackRemoteAdapter adapter = HarnessCallbackRemoteAdapter(
+      _handleRemoteApiRequest,
+    );
+    final bool started = await _remoteHostRuntime.startWithAdapter(adapter);
+    if (!started) {
+      await adapter.close();
+      throw StateError('REMOTE_PAIRING_SCOPE_NOT_PERSISTED');
+    }
+  }
+
+  Future<void> _resumeRememberedRemoteHost() async {
+    if (!HarnessRemoteAccessSettings.enabled) return;
+    try {
+      final peers = await HarnessRemotePeerStore().load();
+      if (!peers.any((peer) => peer.remembered && peer.connectionReady)) return;
+      await RustDeskHarnessShareService.ensureHostAvailable(
+        configuredExecutable: widget.rustDeskExecutable,
+      );
+      await HarnessRemotePairingHost.instance.start();
+      await _startDeepSeekRemoteHost();
+    } on Object {
+      // No remembered peer is the normal first-run state. Remote assistance
+      // remains opt-in and the local Harness must stay fully usable.
+    }
+  }
+
+  Future<void> _stopDeepSeekRemoteHost() async {
+    await _remoteHostRuntime.stop();
+  }
+
+  List<HarnessConversationSession> _remoteSessions(String workspace) =>
+      workspace == _workspace.text.trim()
+      ? _sessions
+      : _workspaceSessions[workspace] ?? const <HarnessConversationSession>[];
+
+  String? _remoteWorkspaceForSession(String sessionId) {
+    final List<String> matches = <String>[
+      for (final String workspace in _workspaceCatalog)
+        if (_remoteSessions(
+          workspace,
+        ).any((session) => session.id == sessionId))
+          workspace,
+    ];
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  Future<Map<String, Object?>> _handleRemoteApiRequest(
+    String method,
+    Map<String, dynamic> payload,
+  ) async {
+    if (!mounted) {
+      return const <String, Object?>{'ok': false, 'code': 'HOST_CLOSED'};
+    }
+    if (method == 'workspace.list') {
+      return <String, Object?>{
+        'ok': true,
+        'value': <String, Object?>{
+          'items': <Map<String, Object?>>[
+            for (final String workspace in _workspaceCatalog)
+              <String, Object?>{
+                'workspaceId': workspace,
+                'title': _workspaceDisplayName(workspace),
+                'sessionIds': <String>[
+                  for (final session in _remoteSessions(workspace)) session.id,
+                ],
+              },
+          ],
+        },
+      };
+    }
+    final String sessionId = payload['sessionId']?.toString() ?? '';
+    final String? workspace = _remoteWorkspaceForSession(sessionId);
+    if (workspace == null) {
+      return const <String, Object?>{'ok': false, 'code': 'SESSION_NOT_FOUND'};
+    }
+    final List<HarnessConversationSession> sessions = _remoteSessions(
+      workspace,
+    );
+    final HarnessConversationSession session = sessions.firstWhere(
+      (candidate) => candidate.id == sessionId,
+    );
+    switch (method) {
+      case 'session.history':
+        return <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{
+            'sessionId': sessionId,
+            'title': session.title,
+            'messages': <Map<String, Object?>>[
+              for (final message in session.messages) message.toJson(),
+            ],
+          },
+        };
+      case 'session.models':
+        return <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{
+            'selected': _model.text.trim(),
+            'items': <String>{..._builtinModels, _model.text.trim()}.toList(),
+          },
+        };
+      case 'session.selectModel':
+        final String model = payload['model']?.toString().trim() ?? '';
+        if (model.isEmpty || model.length > 120) {
+          return const <String, Object?>{'ok': false, 'code': 'INVALID_MODEL'};
+        }
+        _model.text = model;
+        return <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{'model': model},
+        };
+      case 'session.rename':
+        final String title = payload['title']?.toString().trim() ?? '';
+        if (title.isEmpty || title.length > 80) {
+          return const <String, Object?>{'ok': false, 'code': 'INVALID_TITLE'};
+        }
+        await _activateWorkspaceSession(workspace, sessionId);
+        if (!mounted) {
+          return const <String, Object?>{'ok': false, 'code': 'HOST_CLOSED'};
+        }
+        final int index = _sessions.indexWhere(
+          (candidate) => candidate.id == sessionId,
+        );
+        _sessions[index] = _sessions[index].copyWith(
+          title: title,
+          updatedAt: DateTime.now(),
+        );
+        setState(() {});
+        await _persistConversation();
+        return <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{'title': title},
+        };
+      case 'session.prompt':
+        final String text = payload['text']?.toString().trim() ?? '';
+        if (text.isEmpty ||
+            text.length > HarnessConversationStore.maxMessageCharacters) {
+          return const <String, Object?>{'ok': false, 'code': 'INVALID_PROMPT'};
+        }
+        if (_isSessionRunning(workspace, sessionId)) {
+          return const <String, Object?>{'ok': false, 'code': 'SESSION_BUSY'};
+        }
+        if (_apiKey.text.trim().isEmpty) {
+          return const <String, Object?>{
+            'ok': false,
+            'code': 'MODEL_NOT_CONFIGURED',
+          };
+        }
+        await _activateWorkspaceSession(workspace, sessionId);
+        if (!mounted) {
+          return const <String, Object?>{'ok': false, 'code': 'HOST_CLOSED'};
+        }
+        _composer.text = text;
+        await _run();
+        return <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{'sessionId': sessionId, 'completed': true},
+        };
+      case 'session.cancel':
+        final _HarnessSessionRun? run =
+            _sessionRuns[_sessionRunKey(workspace, sessionId)];
+        if (run == null) {
+          return const <String, Object?>{
+            'ok': true,
+            'value': <String, Object?>{'stopped': false},
+          };
+        }
+        await _stopRun(run);
+        return const <String, Object?>{
+          'ok': true,
+          'value': <String, Object?>{'stopped': true},
+        };
+      case 'session.updateQueue':
+        return const <String, Object?>{
+          'ok': false,
+          'code': 'QUEUE_NOT_SUPPORTED',
+        };
+      default:
+        return const <String, Object?>{
+          'ok': false,
+          'code': 'METHOD_NOT_SUPPORTED',
+        };
+    }
+  }
 
   Widget _macRailAction({
     required IconData icon,
@@ -3431,6 +3770,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             tooltip: '重新检查',
             onPressed: _checkEnvironment,
             icon: const Icon(Icons.refresh, size: 18),
+          ),
+          IconButton(
+            key: const Key('agent-remote-assistance'),
+            tooltip: 'Harness 远程协助：本机 ID、首次授权和连接历史',
+            onPressed: _showRemoteShare,
+            icon: const Icon(Icons.screen_share_outlined, size: 19),
           ),
           if (Platform.isAndroid && _apiKey.text.isEmpty)
             OutlinedButton.icon(

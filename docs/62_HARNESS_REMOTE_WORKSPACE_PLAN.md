@@ -1,6 +1,47 @@
 # Harness 完整远程工作区开发与验收
 
-## 当前进度（2026-09-08，本节优先于后续历史记录）
+## 2026-09-09 dev.166 双向远程协助控制面（最新）
+
+- 远程协助默认关闭，但始终呈现独立 Harness 本机 ID；关闭态不启动应用层配对监听或正式项目/会话协议服务。
+- 打开后同一界面既可接受协助，也可输入另一台 Harness ID 主动连接；连接历史保留证书、授权范围、上次通道与时间，可一键重连或移除。
+- 首次配对默认密码为 `12345678`，用户可改为 8～64 字符。线路只发送绑定双方证书、随机 nonce、工作区和操作范围的 HMAC-SHA256 证明，不发送或记录密码明文；错误密码在进入用户授权列表前拒绝。已配对设备仍以固定证书和 mTLS 为准。
+- 默认 P2P/打洞，失败自动走 HBBR；强制中继仅为验收开关。传输内容仍限项目、会话、状态、命令、反馈和停止事件，不含桌面视频或远程输入。
+- dev.165 已在 75 真机完成首次配对、P2P 与强制 HBBR 会话、快照、历史、停止回执、心跳和关闭验证；dev.166 需重新构建后完成 75→本机反向协助闭环。
+
+## 2026-09-09 dev.165 架构收敛（历史）
+
+远程协助不是远程桌面。VibeKits 只从 RustDesk 源码中复用以下三项网络能力：HBBS 数字 ID 注册与寻址、可用时的 P2P 打洞直连、直连失败时的 HBBR 原字节中继。
+
+通道上层只运行 VibeKits 自己的证书配对和 Harness 协议，数据范围固定为项目、会话、状态、命令、执行反馈、停止与心跳。不建立桌面采集、视频、鼠标、键盘、剪贴板、文件传输、终端或任意端口代理能力。
+
+运行时必须自包含：Android 使用 VibeKits APK 内的源码构建 `librustdesk.so` 及私有 `:vibekits_harness` 进程；macOS/Windows 使用 VibeKits 应用包内的 `vibekits-harness-relay` helper。禁止搜索、启动或依赖已安装的 RustDesk、KEMI远程办公或第三方插件。
+
+macOS Release 构建前必须执行 `tool/prepare_rustdesk_harness_relay_macos.sh <helper>`。Release 打包阶段会硬校验 Mach-O 类型、`transport_connected`/`transport_connect_timeout` 状态标记和 RustDesk AGPL 许可证，并将 helper 固定复制到 `Contents/MacOS/vibekits-harness-relay`。任一项缺失立即构建失败，不能用开发机上的外部 RustDesk 兜底。
+
+最小数据路径：`VibeKits UI → 包内传输进程 → HBBS/P2P/HBBR → 对端包内传输进程 → 对端 Harness 执行器`。
+
+dev.164 历史证据使用过外部 KEMI Android service，只证明旧网络路径，不是本版交付基线。dev.165 已把 Android service/JNI 收入 VibeKits 自身包名与私有进程，并删除桌面端外部 App 回退。待重新完成首次配对、真实会话命令/反馈/停止、断线及 Mac/Windows 包内 helper 验收后才能发布。
+
+## 2026-09-09 dev.164 实施状态（历史证据）
+
+本轮已把 Android 63 从“只能显示中继 ID”推进到真实 RustDesk/HBBR 首次证书配对、持久 peer 展示和 `32146` mTLS/hello。首次配对错误授予占位 scope `workspace`，尚未用真实 workspaceId 完成跨机命令闭环，因此仍不是正式发布状态。
+
+- 当时 Android VibeKits 通过同签名 Binder 调用外部 KEMI App 的独立进程。该做法已被 dev.165 的 VibeKits 内置引擎取代，不得再作为正式设计。
+- KEMI Android JNI 库改为 APK 内不压缩/页对齐。63 曾真实复现安装器把 deflate 的 `librustdesk.so` 解出为同长度全零文件并报 `bad ELF magic: 00000000`；修复后独立 Rust 进程可启动并完成 HBBS 注册。
+- 63 实际独立 Harness ID 为 `2414198129`。VibeKits 与 KEMI 正常远程办公身份互不相同。
+- Android DeepSeek Harness 新增同一状态机的远程 API adapter，不建立影子会话库。已映射 `workspace.list`、`session.history/models/selectModel/rename/prompt/cancel`；远程 prompt 使用执行端模型凭据和工具桥，cancel 直接定位目标 workspace/session 的运行实例。`session.updateQueue` 当前明确返回 `QUEUE_NOT_SUPPORTED`，不伪装成功。
+- 项目状态每两秒重新获取执行端权威快照，使 reasoning/toolRunning/ready 转换不依赖只在首次连接时取得的旧快照。
+- UI 增加“停止本机中继”；停止顺序为远程控制会话、首次配对监听、远程 Host、KEMI 独立中继进程。VibeKits Activity 销毁也会解绑，KEMI 专用 Service 销毁后结束专用进程，确保 native rendezvous 线程不成为孤儿。
+- 63 已实测 Activity 强制停止后 `HarnessRelayService.onDestroy` 执行且独立 PID 退出。显式停止按钮和活动连接“强制断开”已在真机显示；真实点击终止后的调用方错误码仍待验收。
+- 紧凑/旋转屏远程对话框现限制为屏幕高度 72% 并统一滚动，首次证书授权卡置顶，避免动作落到应用可触控区域之外。相关远程 transport/身份/配对/授权/账本/mTLS/状态/命令/取消/UI 定向回归 30/30，通过文件静态分析零问题。
+- Android VibeKits 和 KEMI 测试 APK 均构建、同平台证书签名并覆盖安装到 63。macOS Release 编译通过并为 `x86_64 arm64`，本机构建为 ad-hoc（`TeamIdentifier=not set`），未做 Developer ID 重签/公证，禁止作为正式包。
+- macOS 最终重建严格使用 `pub.dev` 的现有锁文件，`jni_flutter=1.0.2`、`sherpa_onnx_macos=1.13.6`；测试期间出现的镜像源/1.13.7 漂移已清除，两个依赖锁文件均未留下改动。
+- Mac 已使用独立 helper ID `1554650784` 与 63 ID `2414198129` 完成一次真实配对，比较码 `400846`；63 已持久显示该 peer。后续真实 scope 重配时，63 原生连接可自动授权，但强制 HBBR 数据面未把正文送达 32145。桌面 helper 现只有在 RustDesk 权威连接状态为 `Connected` 后才开放回环端口并输出 `transport_connected`；未连在 25 秒后以 `transport_connect_timeout`/退出码 2 结束。Flutter 会等待并解析该状态，旧 `listening` 不再算成功。Cargo 和 macOS 发布脚本也会阻止无 Flutter feature 或不含新状态标记的旧 helper 进入正式包。后续新增 Rust 3/3、Flutter 15/15、定向 analyze 零问题；真实强制 HBBR 仍未到达 63 入站列表，因此业务闭环继续 HOLD。
+- Windows 58 的 ED25519 指纹与可信文档一致，公钥登录和 PowerShell 7.6.5 正常；D 盘仅余 `31,448,768,512` bytes（约 29.29 GiB），低于 Windows 真机构建合同的 30 GiB 门禁，本轮没有删除用户数据或启动构建。
+
+仍需硬门禁：以真实 workspaceId 重配；LAN 直连与强制 HBBR 两条路径；真实远程项目、历史、发送、流式反馈、目标会话停止、断线恢复；显式 STOP/强制断开真机点击；Windows D 盘构建与真机回归；macOS Developer ID、公证和最终版本包。全部通过前不复制到 `bin`、不上传商场。
+
+## 历史进度（2026-09-08，仅供追溯，不覆盖上方 dev.164 最新状态）
 
 用户目标未完成，不是可交付远程协助版本。63 当前 dev.160 已安装启动，但以下新代码尚未重建部署，不能把旧 APK 启动成功算作远程验收。
 
@@ -66,7 +107,7 @@
 
 每项保留两个端点版本、连接类型、commandId、epoch/sequence、实际结果与截图。未通过项明确列出，协议单测不算双机完成。
 
-## 当前状态
+## 历史状态（2026-09-08 开发中快照）
 
 已开始阶段 1：新增事件同步游标及丢序、重启、断线、重复事件回归。DSH 双向适配、RustDesk 独立身份/中继和真实远程 UI 尚未接通。
 

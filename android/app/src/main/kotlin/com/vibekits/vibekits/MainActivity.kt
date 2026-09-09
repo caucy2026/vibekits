@@ -41,9 +41,11 @@ import javax.crypto.spec.GCMParameterSpec
 open class MainActivity : FlutterActivity() {
     private val channelName = "vibekits/credentials"
     private val displayChannelName = "vibekits/display"
+    private val harnessRelayChannelName = "vibekits/harness-relay"
     private val keyAlias = "VibekitsAndroidCredentialKey"
     private val preferencesName = "vibekits_secure_credentials"
     private var continuousDisplay: ContinuousDisplayCoordinator? = null
+    private var harnessRelayClient: HarnessRelayClient? = null
 
     protected val isDualMode: Boolean
         get() = intent?.getBooleanExtra(EXTRA_DUAL_MODE, false) == true
@@ -88,6 +90,8 @@ open class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        harnessRelayClient?.close()
+        harnessRelayClient = null
         continuousDisplay?.release()
         continuousDisplay = null
         super.onDestroy()
@@ -150,6 +154,46 @@ open class MainActivity : FlutterActivity() {
                         finishAndRemoveTask()
                         result.success(null)
                     }
+                    else -> result.notImplemented()
+                }
+            }
+        val relayClient = HarnessRelayClient(applicationContext)
+        harnessRelayClient = relayClient
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, harnessRelayChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "inspect" -> relayClient.request(HarnessRelayClient.STATUS, emptyMap(), result)
+                    "connections" -> relayClient.request(HarnessRelayClient.CONNECTIONS, emptyMap(), result)
+                    "authorize" -> relayClient.request(
+                        HarnessRelayClient.AUTHORIZE,
+                        mapOf("connectionId" to (call.argument<Int>("connectionId") ?: -1)),
+                        result,
+                    )
+                    "reject" -> relayClient.request(
+                        HarnessRelayClient.REJECT,
+                        mapOf("connectionId" to (call.argument<Int>("connectionId") ?: -1)),
+                        result,
+                    )
+                    "openTunnel" -> relayClient.request(
+                        HarnessRelayClient.OPEN_TUNNEL,
+                        mapOf(
+                            "routingId" to (call.argument<String>("routingId") ?: ""),
+                            "localPort" to (call.argument<Int>("localPort") ?: -1),
+                            "remotePort" to (call.argument<Int>("remotePort") ?: -1),
+                            "forceRelay" to (call.argument<Boolean>("forceRelay") ?: false),
+                        ),
+                        result,
+                    )
+                    "closeTunnel" -> relayClient.request(
+                        HarnessRelayClient.CLOSE_TUNNEL,
+                        mapOf("localPort" to (call.argument<Int>("localPort") ?: -1)),
+                        result,
+                    )
+                    "stop" -> relayClient.request(
+                        HarnessRelayClient.STOP,
+                        emptyMap(),
+                        result,
+                    )
                     else -> result.notImplemented()
                 }
             }

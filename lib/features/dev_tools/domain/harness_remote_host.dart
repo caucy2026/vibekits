@@ -16,12 +16,16 @@ import 'harness_work_status.dart';
 /// the dedicated TLS identity and approved certificate-to-peer mapping.
 class HarnessRemoteHost {
   HarnessRemoteHost({
-    required Uri officialEndpoint,
+    Uri? officialEndpoint,
+    HarnessRemoteApiAdapter? adapter,
     required this.ledger,
     HarnessWorkRegistrySnapshot Function()? workSnapshot,
   }) : _workSnapshot =
            workSnapshot ?? (() => HarnessWorkStatusHub.registryLatest) {
-    _adapter = HarnessOfficialRemoteAdapter(officialEndpoint);
+    if ((officialEndpoint == null) == (adapter == null)) {
+      throw ArgumentError('Provide exactly one remote API adapter');
+    }
+    _adapter = adapter ?? HarnessOfficialRemoteAdapter(officialEndpoint!);
     inventory = HarnessRemoteInventory(_adapter);
     execution = HarnessRemoteExecution(
       adapter: _adapter,
@@ -29,7 +33,7 @@ class HarnessRemoteHost {
       ledger: ledger,
     );
   }
-  late final HarnessOfficialRemoteAdapter _adapter;
+  late final HarnessRemoteApiAdapter _adapter;
   final HarnessRemoteLedger ledger;
   final HarnessWorkRegistrySnapshot Function() _workSnapshot;
   late final HarnessRemoteInventory inventory;

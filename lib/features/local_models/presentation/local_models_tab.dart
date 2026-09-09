@@ -949,6 +949,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
                   screenshotOcrRunner: _captureScreenshotForHarness,
                   downloadDirectory: _downloadDirectory,
+                  rustDeskExecutable: widget.rustDeskExecutable,
+                  rustDeskWebClientUrl: widget.rustDeskWebClientUrl,
                   externalPrompt: widget.externalHarnessPrompt,
                   externalPromptSerial: widget.externalHarnessPromptSerial,
                 )

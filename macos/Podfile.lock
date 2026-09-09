@@ -5,7 +5,7 @@ PODS:
   - file_selector_macos (0.0.1):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
-  - sherpa_onnx_macos (1.13.6):
+  - sherpa_onnx_macos (1.13.7):
     - FlutterMacOS
   - webview_flutter_wkwebview (0.0.1):
     - Flutter
@@ -34,7 +34,7 @@ SPEC CHECKSUMS:
   audioplayers_darwin: f15e209a3e856d1a7edcf98dc029f484fead2242
   file_selector_macos: 3e56eaea051180007b900eacb006686fd54da150
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  sherpa_onnx_macos: 101a94c73206157f9c128b03f86c8d85f2daa056
+  sherpa_onnx_macos: 6fbfedddfc15ccb07ee4e817fc66ea141dbdbd37
   webview_flutter_wkwebview: 29eb20d43355b48fe7d07113835b9128f84e3af4
 
 PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
