@@ -20,6 +20,7 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
    [ ! -f "$SOURCE/vibekits-android-stress-mcp.mjs" ] || \
   [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html" ] || \
   [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-web-frontend/dist-macos12/index.html" ] || \
+  [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.macos12.js" ] || \
    [ ! -f "$SOURCE/builtin-skills/kemi-s1-hardware-debug/SKILL.md" ] || \
    [ ! -f "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" ]; then
   echo "Bundled macOS Harness runtime is missing or incomplete." >&2

@@ -389,4 +389,13 @@ await replaceOnce(
   'const compatibilityIndex = process.env.VIBEKITS_DSH_WEB_DIST_INDEX;',
 );
 
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-modules/lib/index.js',
+  'clientPath: join(dirname(pkgPath), clientRel),',
+  `clientPath: process.env.VIBEKITS_DSH_WEB_DIST_INDEX
+					? join(dirname(pkgPath), clientRel).replace(/\\.js$/, ".macos12.js")
+					: join(dirname(pkgPath), clientRel),`,
+  'join(dirname(pkgPath), clientRel).replace(/\\.js$/, ".macos12.js")',
+);
+
 console.log(`Patched Harness Web runtime: ${runtime}`);

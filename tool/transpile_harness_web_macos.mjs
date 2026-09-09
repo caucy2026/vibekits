@@ -1,9 +1,10 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const dist = resolve(process.argv[2] ?? '');
 const esbuildModule = resolve(process.argv[3] ?? '');
+const modules = process.argv[4] ? resolve(process.argv[4]) : null;
 if (!process.argv[2] || !process.argv[3]) {
   throw new Error(
     'usage: transpile_harness_web_macos.mjs <dsh-web dist> <esbuild module>',
@@ -31,4 +32,32 @@ for (const name of files) {
   await writeFile(filename, result.code, 'utf8');
 }
 
-console.log(`Transpiled ${files.length} Harness Web assets for Safari 15+`);
+const clientBundles = [];
+async function collectClientBundles(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await collectClientBundles(path);
+    } else if (entry.name === 'client.js' && dirname(path).endsWith('/lib')) {
+      clientBundles.push(path);
+    }
+  }
+}
+
+if (modules !== null) {
+  await collectClientBundles(modules);
+  for (const filename of clientBundles.sort()) {
+    const source = await readFile(filename, 'utf8');
+    const result = await transform(source, {
+      target: 'safari15',
+      format: 'iife',
+      minify: true,
+      legalComments: 'inline',
+    });
+    await writeFile(filename.replace(/\.js$/, '.macos12.js'), result.code, 'utf8');
+  }
+}
+
+console.log(
+  `Transpiled ${files.length} Harness Web assets and ${clientBundles.length} client bundles for Safari 15+`,
+);

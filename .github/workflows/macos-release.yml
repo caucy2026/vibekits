@@ -65,6 +65,7 @@ jobs:
                 ! -f native/harness/macos/runtime/vibekits-android-stress-mcp.mjs || \
                 ! -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html || \
                 ! -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist-macos12/index.html || \
+                ! -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.macos12.js || \
                 ! -f native/harness/macos/runtime/vibekits-session-rebind.mjs ]]; then
             ./tool/prepare_harness_runtime_macos.sh
           fi
@@ -72,6 +73,7 @@ jobs:
           test -f native/harness/macos/runtime/harness-runtime.json
           test -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
           test -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist-macos12/index.html
+          test -f native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.macos12.js
 
       - name: Test Harness cross-project session rebind
         run: native/harness/macos/runtime/bin/node tool/test_harness_session_rebind.mjs

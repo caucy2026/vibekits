@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
 
@@ -42,5 +44,24 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  test('macOS 12 client bundles are isolated from official bundles', () {
+    final Directory package = Directory(
+      'native/harness/macos/runtime/node_modules/@deepseek-ai/'
+      'dsh-client-ui-model-selection/lib',
+    );
+    final File official = File('${package.path}/client.js');
+    final File compatibility = File('${package.path}/client.macos12.js');
+    final String moduleHost = File(
+      'native/harness/macos/runtime/node_modules/@deepseek-ai/'
+      'dsh-client-modules/lib/index.js',
+    ).readAsStringSync();
+
+    expect(official.existsSync(), isTrue);
+    expect(compatibility.existsSync(), isTrue);
+    expect(compatibility.readAsStringSync(), isNot(official.readAsStringSync()));
+    expect(moduleHost, contains('process.env.VIBEKITS_DSH_WEB_DIST_INDEX'));
+    expect(moduleHost, contains('.replace(/\\.js\$/, ".macos12.js")'));
   });
 }

@@ -159,7 +159,8 @@ WEB_FRONTEND="$PACKAGE_ROOT/node_modules/@deepseek-ai/dsh-web-frontend"
 ditto "$WEB_FRONTEND/dist" "$WEB_FRONTEND/dist-macos12"
 "$NODE" "$PROJECT_ROOT/tool/transpile_harness_web_macos.mjs" \
   "$WEB_FRONTEND/dist-macos12" \
-  "$PACKAGE_ROOT/node_modules/esbuild/lib/main.js"
+  "$PACKAGE_ROOT/node_modules/esbuild/lib/main.js" \
+  "$PACKAGE_ROOT/node_modules/@deepseek-ai"
 rm -rf \
   "$PACKAGE_ROOT/node_modules/esbuild" \
   "$PACKAGE_ROOT/node_modules/@esbuild" \
