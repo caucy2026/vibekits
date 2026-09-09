@@ -1055,25 +1055,31 @@ Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
       'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
       'VIBEKITS_PARENT_PID': '$pid',
       'DSH_AGENTS_HOME': DeepSeekHarnessService.sharedAgentHomeDirectory().path,
-      'VIBEKITS_DSH_WEB_DIST_INDEX': ?harnessMacos12WebDistIndex(
+      'VIBEKITS_DSH_WEB_DIST_INDEX': ?harnessLegacyWebKitDistIndex(
         isMacOS: Platform.isMacOS,
         operatingSystemVersion: Platform.operatingSystemVersion,
         compatibilityIndexPath: runtime.macos12WebDistIndexPath,
       ),
     };
 
-String? harnessMacos12WebDistIndex({
+String? harnessLegacyWebKitDistIndex({
   required bool isMacOS,
   required String operatingSystemVersion,
   required String compatibilityIndexPath,
 }) {
   if (!isMacOS) return null;
   final Match? match = RegExp(
-    r'(?:Version|macOS)\s+(\d+)',
+    r'(?:Version|macOS)\s+(\d+)(?:\.(\d+))?',
     caseSensitive: false,
   ).firstMatch(operatingSystemVersion);
   final int? major = match == null ? null : int.tryParse(match.group(1)!);
-  return major != null && major <= 12 ? compatibilityIndexPath : null;
+  final int? minor = match?.group(2) == null
+      ? null
+      : int.tryParse(match!.group(2)!);
+  final bool needsCompatibility = major == 12 ||
+      major == 13 ||
+      (major == 14 && minor != null && minor < 4);
+  return needsCompatibility ? compatibilityIndexPath : null;
 }
 
 Future<_HarnessRuntime> _resolveBundledRuntime() async {

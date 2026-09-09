@@ -12,6 +12,51 @@ if (!process.argv[2] || !process.argv[3]) {
 }
 const { transform } = await import(pathToFileURL(esbuildModule));
 
+function macos12ClientSource(filename, source) {
+  if (filename.endsWith('/dsh-api-gateway/lib/client.js')) {
+    const target = 'AbortSignal.any';
+    if (!source.includes(target)) {
+      throw new Error(`Harness AbortSignal.any target not found: ${filename}`);
+    }
+    return `${source.replaceAll(target, 'macos12AbortSignalAny')}
+function macos12AbortSignalAny(signals) {
+	const controller = new AbortController();
+	const abort = (signal) => controller.abort(signal.reason);
+	for (const signal of signals) {
+		if (signal.aborted) {
+			abort(signal);
+			break;
+		}
+		signal.addEventListener("abort", () => abort(signal), { once: true });
+	}
+	return controller.signal;
+}
+`;
+  }
+  if (!filename.endsWith('/dsh-client-connection/lib/client.js')) return source;
+  const target = 'const send = doFetch ?? ((input, init) => globalThis.fetch(input, init));';
+  if (!source.includes(target)) {
+    throw new Error(`Harness connection fetch target not found: ${filename}`);
+  }
+  return source.replace(target, `const send = doFetch ?? ((input, init = {}) => new Promise((resolve, reject) => {
+			const request = new XMLHttpRequest();
+			request.open(init.method ?? "GET", String(input), true);
+			for (const [name, value] of Object.entries(init.headers ?? {})) request.setRequestHeader(name, String(value));
+			request.onload = () => resolve({
+				ok: request.status >= 200 && request.status < 300,
+				status: request.status,
+				json: () => Promise.resolve(JSON.parse(request.responseText))
+			});
+			request.onerror = () => reject(new Error("Harness RPC network request failed"));
+			request.onabort = () => reject(new Error("Harness RPC network request aborted"));
+			if (init.signal !== void 0) {
+				if (init.signal.aborted) return request.abort();
+				init.signal.addEventListener("abort", () => request.abort(), { once: true });
+			}
+			request.send(init.body ?? null);
+		}));`);
+}
+
 const assets = resolve(dist, 'assets');
 const files = (await readdir(assets))
   .filter((name) => name.endsWith('.js'))
@@ -47,7 +92,10 @@ async function collectClientBundles(directory) {
 if (modules !== null) {
   await collectClientBundles(modules);
   for (const filename of clientBundles.sort()) {
-    const source = await readFile(filename, 'utf8');
+    const source = macos12ClientSource(
+      filename,
+      await readFile(filename, 'utf8'),
+    );
     const result = await transform(source, {
       target: 'safari15',
       format: 'iife',
