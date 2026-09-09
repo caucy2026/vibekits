@@ -50,8 +50,9 @@ LMCP catalogRevision：`2167`
 - 全量 Flutter 测试（串行，避免跨文件共享状态干扰）：`776 passed / 18 skipped / 0 failed`。
 - 相关快速回归：`63/63`。
 - 远程身份与对话框定向回归：`15/15`。
-- 静态检查：本轮产品代码 `0 issue`；测试辅助类保留 1 条既有未使用可选参数 warning，不影响产物。
-- 全量日志：`/private/tmp/vibekits-dev167-full-test.log`。
+- 静态检查：本轮 5 个产品改动文件 `0 issue`；全仓分析无 error，保留测试/验证脚本中的 15 条既有 import/style info 和 1 条未使用可选参数 warning，不影响产物。
+- 全量日志：`/private/tmp/vibekits-dev167-merged-full-test-with-runtime.log`。
+- 源码目录未保存被 `.gitignore` 排除的 7-Zip 构建缓存；全量回归显式使用最终 App 内已签名、已验版本/格式/双架构/minOS 的真实 `7zz`，不是 mock 或跳过测试。
 
 ## Android 75 真机
 
@@ -60,25 +61,25 @@ LMCP catalogRevision：`2167`
 - 包：`versionName=1.9.0-dev.167`，`versionCode=2167`。
 - 冷启动 Activity：`.SingleScreenActivity`。
 - APK 签名：v2/v3 通过；证书 SHA-256 `c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8`。
-- APK SHA-256：`1af50a5ca368b64d576cf7f45f8bbd3fbed232bf174e4e7bd0d346bf03d0c08a`。
+- APK SHA-256：`d1774e498bc4b9593eb1a1a12458e62391798ce4f8cb29a0ac00ef88c6dd321e`。
 - 远程协助界面：只显示连接远程设备、退出、默认密码说明和历史区域；连接前禁用本地操作。
 - 应用中心：识别为“Android 应用”；服务端当前没有 Android 上架项，因此真实返回空列表，未伪造测试商品。
 - 冷启动日志：未发现 VibeKits FATAL/ANR。
 - 证据：
-  - `/private/tmp/vibekits-dev167-final-single.png`
+  - `/private/tmp/vibekits-dev167-merged-pad75.png`
   - `/private/tmp/vibekits-dev167-final-remote-assist.png`
   - `/private/tmp/vibekits-dev167-final-app-center.png`
 
 ## macOS 真机候选
 
 - App：`build/macos/Build/Products/Release/Vibekits.app`。
-- 当前运行 PID：`46665`（验收记录时）。
+- 当前运行 PID：`55181`（验收记录时）。
 - UI 版本：`v1.9.0-dev.167+2167`。
 - 主程序：Universal `x86_64 + arm64`。
 - Developer ID：`Developer ID Application: zhen ji (26T5WV4GLP)`。
 - Hardened Runtime：已开启；36 个 Mach-O 文件逐项签名验证通过；内置 Harness Node 22.19、x86_64 路径和 JIT 启动验证通过。
 - 默认关闭协助时，主界面真实显示独立 ID `1554650784` 和“远程协助”按钮。
-- 证据：`/private/tmp/vibekits-dev167-final-macos-id-visible.png`。
+- 证据：`/private/tmp/vibekits-dev167-merged-macos.png`。
 
 本候选是 Developer ID 已签名的本地验收产物，最后一次重建后尚未重新提交 Apple 公证，因此本报告不把它标记为已公证正式发行包。
 
