@@ -205,6 +205,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 30));
     expect(channel.operations, contains('session.prompt'));
     expect(find.textContaining('执行端已接收命令'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const Key('harness-remote-command-input')),
+          )
+          .controller!
+          .text,
+      isEmpty,
+    );
     await tester.pump(const Duration(milliseconds: 30));
     expect(find.text('远端反馈已同步'), findsOneWidget);
 

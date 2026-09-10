@@ -292,10 +292,18 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
         payload: <String, Object?>{'text': text},
       );
       if (mounted) {
+        final accepted = _isAccepted(result);
         setState(() {
-          _feedback = _isAccepted(result)
+          _feedback = accepted
               ? '执行端已接收命令；运行状态与会话反馈将持续同步，请勿把接收回执当作完成。'
               : '执行端返回：${_compactResult(result)}';
+          if (accepted &&
+              _selected()?.$1 == target.$1 &&
+              _selected()?.$2 == target.$2 &&
+              _draft.text.trim() == text) {
+            _draft.clear();
+            _sessionDrafts[_targetKey(target)] = '';
+          }
         });
         unawaited(_refreshHistory());
       }

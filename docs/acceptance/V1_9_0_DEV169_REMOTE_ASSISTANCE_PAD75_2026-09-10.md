@@ -11,7 +11,7 @@ PAD 75 到本机 Mac Harness 的真实上下行闭环通过：PAD 进入协同�
 - 版本：`1.9.0-dev.169+2169`
 - 包名：`com.vibekits.vibekits`
 - APK：`build/app/outputs/flutter-apk/Vibekits-1.9.0-dev.169+2169-android-pad75.apk`
-- APK SHA-256：`82f83dacb66db74742bc4f147d224a4aaa442e576daf07d8f6ab9da4c155b7a8`
+- APK SHA-256：`dc1adb8df253a4b77f0c06bfb50d022baaa0d7a35500fee7b36f65aac372d086`
 - 签名：APK Signature Scheme v2/v3 通过；证书 SHA-256 与 75 既有覆盖安装基线匹配。
 - 安装：`adb install --no-incremental -r` 返回 `Success`，未卸载、未清数据。
 - 冷启动：`SingleScreenActivity` 前台运行；`versionCode=2169`、`versionName=1.9.0-dev.169`。
@@ -31,7 +31,7 @@ PAD 75 到本机 Mac Harness 的真实上下行闭环通过：PAD 进入协同�
 | 主界面交互 | 通过 | 连接界面和远端工作区直接位于 Harness 主界面，不再使用 `AlertDialog` 弹窗外观。 |
 | 真实已连接门禁 | 通过 | 只在 mTLS/hello 及首个项目快照后显示“已连接 1554650784”。 |
 | 项目快照 | 通过 | 真机显示 `harness`、workspace UUID、17 会话和 `READY`。 |
-| 命令上行 | 通过 | PAD 发送 `Reply exactly REMOTE_DEV169_FINAL_OK. Do not use tools.`，执行端会话出现真实 `user/message`。 |
+| 命令上行 | 通过 | PAD 发送 `Reply exactly REMOTE_DEV169_FINAL_OK. Do not use tools.`，执行端会话出现真实 `user/message`；接收成功后输入框按会话安全清空，避免重复发送。 |
 | 反馈下行 | 通过 | 官方 `session/follow` 记录合并显示 `Harness: REMOTE_DEV169_FINAL_OK`。 |
 | 完成状态 | 通过 | 界面显示“本轮完成 / 远端 Harness 已结束本轮执行”。 |
 | 断线真实性 | 通过 | 执行端停止时 PAD 立即撤销在线状态，显示后台重连，未保留假绿灯。 |
@@ -57,6 +57,7 @@ PAD 75 到本机 Mac Harness 的真实上下行闭环通过：PAD 进入协同�
 - 长任务停止后最终状态：`/private/tmp/dev169-stop-end-before-expand.png`
 - 强制 HBBR 命令与完成反馈：`/private/tmp/dev169-hbbr-latest-23.png`
 - 强制 HBBR 断开后历史：`/private/tmp/dev169-hbbr-history-final.png`
+- 最终签名包接收命令后输入安全清空：`/private/tmp/dev169-final-command-cleared.png`
 
 ## 剩余门禁
 
