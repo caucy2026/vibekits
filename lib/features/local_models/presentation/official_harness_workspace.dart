@@ -1208,7 +1208,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
     unawaited(_remoteHostRuntime.stop());
-    unawaited(HarnessRemotePairingHost.instance.stop());
+    // The first-pair listener belongs to the application-level remote access
+    // switch, not to this responsive workspace widget. A window resize, tab
+    // change, or workspace rebuild must never make an enabled Mac disappear
+    // while a PAD is pairing. The explicit "关闭远程协助" action owns stop().
     widget.onRunningChanged?.call(false);
     HarnessWorkStatusHub.publish(
       phase: HarnessWorkPhase.stopped,
@@ -2684,10 +2687,11 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       HarnessRemoteAccessSettings.setEnabled(true);
       await HarnessRemotePairingHost.instance.start();
       await RustDeskHarnessShareService.launchHost(host.executable);
-      final peers = await HarnessRemotePeerStore().load();
-      if (peers.any((peer) => peer.remembered && peer.connectionReady)) {
-        await widget.onPaired();
-      }
+      // Opening assistance is the explicit user authorization boundary. Start
+      // the application protocol host even when this installation has never
+      // paired before; otherwise a first-time controller can resolve the
+      // routing ID but has no mTLS/hello endpoint to connect to.
+      await widget.onPaired();
       RustDeskHarnessLinkStatusHub.clientFound();
       if (mounted) {
         setState(() {
@@ -2747,6 +2751,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       final peers = await HarnessRemotePeerStore().load();
       final matching = peers.where((peer) => peer.routingId == routingId);
       HarnessRemotePeer peer;
+      var reconnectingRememberedPeer = false;
       if (matching.isEmpty || !matching.first.connectionReady) {
         final workspaceId = _remoteWorkspaceId.text.trim();
         if (workspaceId.isEmpty) {
@@ -2768,17 +2773,50 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
         _message = '首次配对完成，核对码 ${approval.comparisonCode}；正在建立正式通道';
       } else {
         peer = matching.first;
+        reconnectingRememberedPeer = true;
       }
-      final session = await HarnessRemoteControllerSession.connect(
-        executable: host.executable,
-        peer: peer,
-        identity: await HarnessRemoteIdentityStore.instance.loadOrCreate(),
-        forceRelay: _forceRelay,
-        // The project/status projection is rendered directly from the model.
-        // Official conversation event injection remains a separate gate.
-        applyOfficialEvents: (_) async {},
-        restoreOfficialSnapshot: (_) async {},
-      );
+      final identity = await HarnessRemoteIdentityStore.instance.loadOrCreate();
+      HarnessRemoteControllerSession session;
+      try {
+        session = await HarnessRemoteControllerSession.connect(
+          executable: host.executable,
+          peer: peer,
+          identity: identity,
+          forceRelay: _forceRelay,
+          timeout: reconnectingRememberedPeer
+              ? const Duration(seconds: 5)
+              : const Duration(seconds: 25),
+          // The project/status projection is rendered directly from the model.
+          // Official conversation event injection remains a separate gate.
+          applyOfficialEvents: (_) async {},
+          restoreOfficialSnapshot: (_) async {},
+        );
+      } on TimeoutException catch (_) {
+        if (!reconnectingRememberedPeer) rethrow;
+        if (mounted && generation == _connectGeneration) {
+          setState(() => _message = '原授权已失效，正在安全重新配对；请在执行端允许本次连接…');
+        }
+        final approval = await HarnessRemotePairingClient().pair(
+          executable: host.executable,
+          localRoutingId: host.id,
+          remoteRoutingId: routingId,
+          requestedWorkspaceIds: peer.workspaceIds,
+          requestedOperations: peer.operations.intersection(
+            HarnessRemoteExecution.sessionOperations,
+          ),
+          forceRelay: _forceRelay,
+          password: _remotePassword.text,
+        );
+        peer = approval.controllerRecord(remembered: true);
+        session = await HarnessRemoteControllerSession.connect(
+          executable: host.executable,
+          peer: peer,
+          identity: identity,
+          forceRelay: _forceRelay,
+          applyOfficialEvents: (_) async {},
+          restoreOfficialSnapshot: (_) async {},
+        );
+      }
       if (!mounted || generation != _connectGeneration) {
         await session.close();
         return;
@@ -3068,6 +3106,11 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
           children: <Widget>[
             _buildEmbeddedConnector(host),
             const SizedBox(height: 8),
+            // Authorization is time-sensitive. Never hide an incoming native
+            // connection or certificate pairing request inside a collapsed
+            // settings section.
+            _buildNativeConnections(host),
+            _buildPendingPairings(host),
             ExpansionTile(
               key: const Key('harness-coordination-local-access'),
               tilePadding: EdgeInsets.zero,
@@ -3075,8 +3118,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
               title: const Text('允许别人协助本机'),
               subtitle: Text('本机 ID ${host.id.isEmpty ? '正在注册…' : host.id}'),
               children: <Widget>[
-                _buildNativeConnections(host),
-                _buildPendingPairings(host),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: _remoteEnabled,

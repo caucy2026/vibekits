@@ -422,7 +422,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       HarnessWorkStatusHub.clearWorkspace(workStatusContext);
     }
     unawaited(_remoteHostRuntime.stop());
-    unawaited(HarnessRemotePairingHost.instance.stop());
+    // Pairing is application-scoped. Responsive rebuilds and workspace/tab
+    // disposal must not tear down an enabled execution endpoint; only the
+    // explicit remote-assistance switch may stop the singleton listener.
     super.dispose();
   }
 
