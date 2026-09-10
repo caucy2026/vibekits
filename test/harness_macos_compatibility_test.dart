@@ -27,27 +27,30 @@ void main() {
     }
   });
 
-  test('Safari 17.4-era and unknown macOS versions retain official frontend', () {
-    for (final String version in <String>[
-      'Version 11.7.10 (Build 20G1427)',
-      'macOS 14',
-      'macOS 14.4',
-      'macOS 14.7.6',
-      'macOS 15.0',
-      'macOS 26.0',
-      'Darwin Kernel Version 25.0.0',
-    ]) {
-      expect(
-        harnessLegacyWebKitDistIndex(
-          isMacOS: true,
-          operatingSystemVersion: version,
-          compatibilityIndexPath: compatibilityIndex,
-        ),
-        isNull,
-        reason: version,
-      );
-    }
-  });
+  test(
+    'Safari 17.4-era and unknown macOS versions retain official frontend',
+    () {
+      for (final String version in <String>[
+        'Version 11.7.10 (Build 20G1427)',
+        'macOS 14',
+        'macOS 14.4',
+        'macOS 14.7.6',
+        'macOS 15.0',
+        'macOS 26.0',
+        'Darwin Kernel Version 25.0.0',
+      ]) {
+        expect(
+          harnessLegacyWebKitDistIndex(
+            isMacOS: true,
+            operatingSystemVersion: version,
+            compatibilityIndexPath: compatibilityIndex,
+          ),
+          isNull,
+          reason: version,
+        );
+      }
+    },
+  );
 
   test('non-macOS platforms retain the official frontend', () {
     expect(
@@ -74,9 +77,42 @@ void main() {
 
     expect(official.existsSync(), isTrue);
     expect(compatibility.existsSync(), isTrue);
-    expect(compatibility.readAsStringSync(), isNot(official.readAsStringSync()));
+    expect(
+      compatibility.readAsStringSync(),
+      isNot(official.readAsStringSync()),
+    );
     expect(moduleHost, contains('process.env.VIBEKITS_DSH_WEB_DIST_INDEX'));
     expect(moduleHost, contains('.replace(/\\.js\$/, ".macos12.js")'));
+  });
+
+  test('macOS 12 frontend installs legacy WebKit polyfills before boot', () {
+    final Directory package = Directory(
+      'native/harness/macos/runtime/node_modules/@deepseek-ai/'
+      'dsh-web-frontend',
+    );
+    final String official = File(
+      '${package.path}/dist/index.html',
+    ).readAsStringSync();
+    final String compatibility = File(
+      '${package.path}/dist-macos12/index.html',
+    ).readAsStringSync();
+
+    expect(official, isNot(contains('data-vibekits-macos12-polyfill')));
+    expect(official, isNot(contains('Promise.withResolvers')));
+    expect(official, isNot(contains('macos12RegExp')));
+    expect(compatibility, contains('data-vibekits-macos12-polyfill'));
+    expect(compatibility, contains('typeof Promise.withResolvers'));
+    expect(compatibility, contains('const NativeRegExp = RegExp'));
+    expect(compatibility, contains('function macos12RegExp'));
+    expect(
+      compatibility,
+      contains('new NativeRegExp("a^", flags)'),
+    );
+    expect(compatibility, contains('globalThis.RegExp = macos12RegExp'));
+    expect(
+      compatibility.indexOf('data-vibekits-macos12-polyfill'),
+      lessThan(compatibility.indexOf('<script type="module"')),
+    );
   });
 
   test('macOS 12 connection bundle uses the legacy WebKit RPC transport', () {
@@ -84,7 +120,9 @@ void main() {
       'native/harness/macos/runtime/node_modules/@deepseek-ai/'
       'dsh-client-connection/lib',
     );
-    final String official = File('${package.path}/client.js').readAsStringSync();
+    final String official = File(
+      '${package.path}/client.js',
+    ).readAsStringSync();
     final String compatibility = File(
       '${package.path}/client.macos12.js',
     ).readAsStringSync();
@@ -100,7 +138,9 @@ void main() {
       'native/harness/macos/runtime/node_modules/@deepseek-ai/'
       'dsh-api-gateway/lib',
     );
-    final String official = File('${package.path}/client.js').readAsStringSync();
+    final String official = File(
+      '${package.path}/client.js',
+    ).readAsStringSync();
     final String compatibility = File(
       '${package.path}/client.macos12.js',
     ).readAsStringSync();

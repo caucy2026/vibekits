@@ -13,18 +13,23 @@
 3. 选择目录后提示 `directory picker failed: client api: directoryPicker/pick failed: Load failed`。
 4. 修复目录选择请求后，目录选择器能返回，但界面长期停在“正在加载工作区…”。
 5. 智能体不能从 App 聊天框形成完整的用户消息、工具调用和回复记录。
+6. 会话已经完成且投影中包含完整回复，但聊天框只显示推理和工具轨迹，不显示最终Markdown正文。
 
 API Key 不是本次故障根因。相同 Key 的独立推理能够成功；修复Web兼容层后，App 内同一Key也能完成推理和MCP调用。
 
 ## 2. 根因
 
-这是Safari 17.4以前的WKWebView与当前DSH浏览器端代码之间的三层兼容问题。其中XHR的 `Load failed` 已在macOS 12.6.4实机复现；`AbortSignal.any()`缺失覆盖Safari 17.3及更早版本。
+这是Safari 17.4以前的WKWebView与当前DSH浏览器端代码之间的多层兼容问题。其中XHR的 `Load failed` 已在macOS 12.6.4实机复现；`AbortSignal.any()`缺失覆盖Safari 17.3及更早版本。
 
 | 层次 | 旧系统行为 | 结果 | 补丁 |
 |---|---|---|---|
 | JavaScript语法 | 官方主前端和动态 `client.js` 含Safari 15不能解析的现代语法 | 白屏、插件不加载、模型状态不完整 | 用esbuild `target: safari15`生成独立兼容副本 |
+| JavaScript运行期API | Safari 15没有 `Promise.withResolvers()` | 主前端启动期抛错 | 在兼容入口启动模块前安装最小polyfill |
+| Markdown代码高亮 | Shiki在运行期构造含后行断言的正则；Safari 15原生RegExp不能解析 | 高亮组件抛错并使整个最终Markdown节点消失 | 仅在原生构造抛 `SyntaxError`时把该高亮规则退化为永不匹配 |
 | 一元JSON RPC | `dsh-client-connection`默认通过 `globalThis.fetch`访问本地同源RPC；该机WKWebView返回系统级 `Load failed` | `directoryPicker/pick`等RPC失败 | 仅兼容副本使用 `XMLHttpRequest`适配Fetch所需的最小响应接口 |
 | 事件流初始化 | `dsh-api-gateway`调用 `AbortSignal.any()`；该API在Safari 17.4才提供 | WebSocket事件流不能初始化，工作区和会话投影不更新 | 仅兼容副本用 `AbortController`组合多个AbortSignal |
+
+esbuild只能转译源码中的静态语法，不能改写语法库在运行期传给 `RegExp`构造器的pattern。正则降级不改变回复数据和Markdown结构，只会让Safari 15无法理解的个别语法着色规则不匹配；其余规则仍正常工作。
 
 目录选择器能弹出，证明 `directoryPicker/pick`已经到达Host；选中后仍停在“正在加载工作区”，进一步把第二个卡点定位到工作区投影依赖的事件流，而不是文件权限或路径本身。
 
@@ -79,6 +84,7 @@ API Key 不是本次故障根因。相同 Key 的独立推理能够成功；修�
 ### 4.3 WKWebView和Harness Web
 
 - `tool/transpile_harness_web_macos.mjs`以esbuild `target: safari15`生成独立的 `dist-macos12`主前端和48个 `client.macos12.js`动态插件。
+- 兼容主前端在module script之前补齐 `Promise.withResolvers()`，并隔离Safari 15不支持的动态高亮正则，防止高亮失败吞掉最终Markdown正文。
 - 仅在 `dsh-client-connection`兼容副本中使用XHR，解决WKWebView本地同源Fetch的 `Load failed`。
 - 仅在 `dsh-api-gateway`兼容副本中用 `AbortController`组合Signal，替代Safari 17.4以前缺失的 `AbortSignal.any()`。
 - 上游目标代码不存在时立即构建失败，避免升级DSH后静默生成不完整兼容产物。
@@ -86,7 +92,7 @@ API Key 不是本次故障根因。相同 Key 的独立推理能够成功；修�
 
 ### 4.4 自动化回归和改动边界
 
-- `test/harness_macos_compatibility_test.dart`覆盖版本分流、官方/兼容资源隔离、XHR和Abort实现。
+- `test/harness_macos_compatibility_test.dart`覆盖版本分流、官方/兼容资源隔离、入口polyfill执行顺序、XHR和Abort实现。
 - `test/harness_tool_server_test.dart`覆盖macOS Node启动参数，防止重新引入 `--jitless`。
 - 官方DSH `dist`和 `client.js`保持不变；不修改DSH业务协议、MCP服务器、模型选择逻辑、会话格式或其他平台启动逻辑。
 
@@ -132,6 +138,8 @@ API Key 不是本次故障根因。相同 Key 的独立推理能够成功；修�
 - 通过聊天框发送MCP数量查询，消息进入同一App聊天记录；
 - 智能体完成6次工具调用、3条消息，用时约41秒；
 - 会话投影与压缩会话日志均产生更新。
+- 全局技能查询的会话投影包含完整Markdown表格；修复动态正则后，同一WKWebView能在聊天框显示最终标题、文字和表格。
+- 固定Markdown表格A/B请求用时约1秒，最终表格可见，未再发生 `conversation.chat.node` slot崩溃。
 
 该验收不是独立headless进程测试，覆盖了WKWebView、RPC、WebSocket事件流、模型、聊天记录和MCP调用的完整App路径。
 

@@ -12,6 +12,48 @@ if (!process.argv[2] || !process.argv[3]) {
 }
 const { transform } = await import(pathToFileURL(esbuildModule));
 
+const promiseWithResolversPolyfill = `<script data-vibekits-macos12-polyfill>
+if (typeof Promise.withResolvers !== "function") {
+  Object.defineProperty(Promise, "withResolvers", {
+    configurable: true,
+    writable: true,
+    value() {
+      let resolve;
+      let reject;
+      const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      return { promise, resolve, reject };
+    }
+  });
+}
+const NativeRegExp = RegExp;
+function macos12RegExp(pattern, flags) {
+  try {
+    return new NativeRegExp(pattern, flags);
+  } catch (error) {
+    if (error instanceof SyntaxError) return new NativeRegExp("a^", flags);
+    throw error;
+  }
+}
+macos12RegExp.prototype = NativeRegExp.prototype;
+Object.setPrototypeOf(macos12RegExp, NativeRegExp);
+globalThis.RegExp = macos12RegExp;
+</script>`;
+
+const index = resolve(dist, 'index.html');
+const indexSource = await readFile(index, 'utf8');
+const moduleScript = '    <script type="module"';
+if (!indexSource.includes(moduleScript)) {
+  throw new Error(`Harness Web module script not found: ${index}`);
+}
+await writeFile(
+  index,
+  indexSource.replace(moduleScript, `    ${promiseWithResolversPolyfill}\n${moduleScript}`),
+  'utf8',
+);
+
 function macos12ClientSource(filename, source) {
   if (filename.endsWith('/dsh-api-gateway/lib/client.js')) {
     const target = 'AbortSignal.any';
