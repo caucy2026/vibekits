@@ -95,8 +95,20 @@ class AppCenterItem {
   final String osType;
   final List<String> platforms;
 
-  bool supportsPlatform(String platform) =>
-      osType == platform || (osType.isEmpty && platforms.contains(platform));
+  bool supportsPlatform(String platform) {
+    final String normalized = platform.trim().toLowerCase();
+    if (osType.isNotEmpty) return osType == normalized;
+    final Set<String> compatible = switch (normalized) {
+      // The KEMI Android storefront currently returns PAD packages as `pad2`
+      // even when the request is scoped with `os=android`. `all` is the
+      // documented cross-device value used by newly published applications.
+      'android' => const <String>{'android', 'pad2', 'all'},
+      'macos' => const <String>{'macos', 'all'},
+      'windows' => const <String>{'windows', 'all'},
+      _ => <String>{normalized},
+    };
+    return platforms.any(compatible.contains);
+  }
 
   bool get hasVerifiedInstaller {
     final Uri? uri = Uri.tryParse(downloadUrl);
@@ -138,7 +150,7 @@ class AppCenterService {
     AppCenterEnvelopeLoader? envelopeLoader,
     AppCenterInstalledLookup? installedLookup,
     AppCenterApplicationOpener? applicationOpener,
-    String currentPackageName = AppUpdateService.packageName,
+    String? currentPackageName,
     int currentVersionCode = AppVersion.build,
   }) : _client = client ?? HttpClient(),
        _apiRoot = apiRoot,
@@ -147,7 +159,8 @@ class AppCenterService {
        _envelopeLoader = envelopeLoader,
        _installedLookup = installedLookup,
        _applicationOpener = applicationOpener,
-       _currentPackageName = currentPackageName,
+       _currentPackageName =
+           currentPackageName ?? _defaultCurrentPackageName(platformOverride),
        _currentVersionCode = currentVersionCode;
 
   static const String _defaultApiRoot = 'https://kemi.newlinksz.com/kd-api';
@@ -167,6 +180,21 @@ class AppCenterService {
   final AppCenterApplicationOpener? _applicationOpener;
   final String _currentPackageName;
   final int _currentVersionCode;
+
+  static String _defaultCurrentPackageName(String? platformOverride) {
+    final String? platform =
+        platformOverride ??
+        (Platform.isAndroid
+            ? 'android'
+            : Platform.isMacOS
+            ? 'macos'
+            : Platform.isWindows
+            ? 'windows'
+            : null);
+    return platform == 'android'
+        ? 'com.vibekits.vibekits'
+        : AppUpdateService.packageName;
+  }
 
   bool isCurrentVersion(AppCenterItem item) =>
       item.packageName == _currentPackageName &&

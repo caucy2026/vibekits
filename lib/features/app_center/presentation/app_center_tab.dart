@@ -132,21 +132,19 @@ class _AppCenterTabState extends State<AppCenterTab> {
                           },
                         ),
                         const SizedBox(width: 8),
-                        ..._catalog!.categories
-                            .where((entry) => !entry.isExplore)
-                            .map(
-                              (entry) => Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: ChoiceChip(
-                                  label: Text(entry.name),
-                                  selected: _category == entry.name,
-                                  onSelected: (_) {
-                                    setState(() => _category = entry.name);
-                                    unawaited(_load());
-                                  },
-                                ),
-                              ),
+                        ..._catalog!.categories.map(
+                          (entry) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(entry.name),
+                              selected: _category == entry.name,
+                              onSelected: (_) {
+                                setState(() => _category = entry.name);
+                                unawaited(_load());
+                              },
                             ),
+                          ),
+                        ),
                       ],
                     ),
                   ),

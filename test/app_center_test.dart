@@ -103,6 +103,44 @@ void main() {
     expect(item.androidPackageName, 'com.vibekits.vibekits');
   });
 
+  test('Android 兼容市场的 all 与 PAD2 平台标识', () {
+    final AppCenterItem all = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'os_type': null,
+      'platforms': <String>['all'],
+    });
+    final AppCenterItem pad = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'os_type': null,
+      'platforms': <String>['pad2'],
+    });
+    final AppCenterItem windows = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'windows'),
+      'os_type': null,
+      'platforms': <String>['windows'],
+    });
+
+    expect(all.supportsPlatform('android'), isTrue);
+    expect(pad.supportsPlatform('android'), isTrue);
+    expect(windows.supportsPlatform('android'), isFalse);
+  });
+
+  test('Android 当前包使用真实 applicationId 并禁止重复下载', () {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'android',
+      currentVersionCode: 2169,
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem current = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.vibekits.vibekits',
+      'version_code': 2169,
+    });
+
+    expect(service.isCurrentVersion(current), isTrue);
+    expect(service.canDownload(current), isFalse);
+  });
+
   test('服务端即使返回错误平台条目，客户端仍会按 platforms 二次过滤', () async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
@@ -153,6 +191,7 @@ void main() {
 
     expect(find.text('macOS 应用'), findsOneWidget);
     expect(find.text('开发工具'), findsWidgets);
+    expect(find.text('探索'), findsOneWidget);
     expect(find.text('Vibekits'), findsOneWidget);
     await tester.tap(find.byKey(const Key('app-center-item-53')));
     await tester.pumpAndSettle();
@@ -286,6 +325,7 @@ void main() {
           apps: <AppCenterItem>[
             AppCenterItem.fromJson(<String, Object?>{
               ..._itemJson(os: os),
+              if (os == 'android') 'package_name': 'com.vibekits.vibekits',
               'version_code': 2159,
             }),
           ],

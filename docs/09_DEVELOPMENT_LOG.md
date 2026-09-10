@@ -1,5 +1,15 @@
 # Vibekits 开发日志
 
+## 2026-09-10 · 1.9.0-dev.170+2170 · Android 应用中心与商城发布闭环
+
+- 修复 Android 商城把线上 `platforms=[all]` / `platforms=[pad2]` 条目全部误过滤、页面显示空列表的问题；保留平台二次校验，桌面端不会混入 PAD 条目。
+- 恢复“探索”分类入口；Android 使用真实 `applicationId=com.vibekits.vibekits` 判断本 APP 版本，已是最新版时显示明确说明并禁用下载。
+- 新增 KEMI 平台标识、Android 当前包名和探索分类回归测试，定向 22/22 通过，静态检查零问题。
+- 已签名 ARM64 APK 安装到 PAD75 并冷启动；真机加载商城、搜索 VibeKits、打开详情和最新版禁用门禁通过。
+- KEMI 商城 `app_id=71` 已免审覆盖为 dev.170；公共详情/列表、2169→2170 正向更新、2170 负向更新、CDN 字节/SHA-256/v2-v3 签名及 CDN 原包回装均通过。
+- 完整 Flutter 套件结果为 789 通过、18 个显式环境门禁跳过；2 个既有 macOS Keychain 测试在本机固定 10 秒超时，单独重跑仍超时，与本轮 Android 商城改动无关，未隐藏为全绿。
+
+
 ## 2026-09-10 · 1.9.0-dev.169+2169 · PAD→Mac Harness 远程协助闭环
 
 - PAD 固定为协助控制端，不启动入站 Host，不暴露本机被协助 ID；Mac 继续作为被协助执行端。
