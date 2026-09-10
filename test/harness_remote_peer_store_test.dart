@@ -88,7 +88,7 @@ void main() {
     });
     final store = HarnessRemotePeerStore(
       read: (_) async => duplicate,
-      write: (_, __) async {},
+      write: (_, _) async {},
     );
     await expectLater(store.load(), throwsFormatException);
   });

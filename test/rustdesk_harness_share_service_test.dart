@@ -5,9 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
 final class _FakeManagedProcess implements RustDeskManagedProcess {
-  _FakeManagedProcess({this.listeningError, this.readyError});
+  _FakeManagedProcess({this.readyError});
   final _exit = Completer<int>();
-  final Object? listeningError;
   final Object? readyError;
   bool terminated = false;
 
@@ -17,9 +16,7 @@ final class _FakeManagedProcess implements RustDeskManagedProcess {
   @override
   Future<void> waitUntilListening({
     Duration timeout = const Duration(seconds: 5),
-  }) async {
-    if (listeningError != null) throw listeningError!;
-  }
+  }) async {}
 
   @override
   Future<void> waitUntilReady({

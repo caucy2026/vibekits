@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_remote_routing_identity.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_routing_identity.dart';
 
 void main() {
   test('candidate is never callable before exact server confirmation', () {

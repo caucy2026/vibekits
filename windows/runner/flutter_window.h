@@ -39,6 +39,8 @@ class FlutterWindow : public Win32Window {
       file_drop_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       process_lifecycle_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      store_host_channel_;
   // The runner and every child it creates share one kill-on-close job. Closing
   // Vibekits therefore cannot leave tool servers, shells or helper processes
   // consuming CPU in the background.

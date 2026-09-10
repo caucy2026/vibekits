@@ -13,6 +13,8 @@ import '../../../app/app_version.dart';
 typedef AppCenterCatalogLoader =
     Future<AppCenterCatalog> Function({String? category, String keyword});
 typedef AppCenterEnvelopeLoader = Future<Object?> Function(Uri uri);
+typedef AppCenterInstalledLookup = Future<bool> Function(String packageName);
+typedef AppCenterApplicationOpener = Future<bool> Function(String packageName);
 
 @immutable
 class AppCenterCategory {
@@ -134,6 +136,8 @@ class AppCenterService {
     String? platformOverride,
     AppCenterCatalogLoader? loader,
     AppCenterEnvelopeLoader? envelopeLoader,
+    AppCenterInstalledLookup? installedLookup,
+    AppCenterApplicationOpener? applicationOpener,
     String currentPackageName = AppUpdateService.packageName,
     int currentVersionCode = AppVersion.build,
   }) : _client = client ?? HttpClient(),
@@ -141,10 +145,16 @@ class AppCenterService {
        _platformOverride = platformOverride,
        _loader = loader,
        _envelopeLoader = envelopeLoader,
+       _installedLookup = installedLookup,
+       _applicationOpener = applicationOpener,
        _currentPackageName = currentPackageName,
        _currentVersionCode = currentVersionCode;
 
   static const String _defaultApiRoot = 'https://kemi.newlinksz.com/kd-api';
+  static const MethodChannel _desktopHostChannel = MethodChannel(
+    'org.rustdesk.rustdesk/host',
+  );
+  static const Duration _desktopHostTimeout = Duration(seconds: 3);
   static const int _catalogPageSize = 30;
   static const int _maxCatalogPages = 200;
 
@@ -153,6 +163,8 @@ class AppCenterService {
   final String? _platformOverride;
   final AppCenterCatalogLoader? _loader;
   final AppCenterEnvelopeLoader? _envelopeLoader;
+  final AppCenterInstalledLookup? _installedLookup;
+  final AppCenterApplicationOpener? _applicationOpener;
   final String _currentPackageName;
   final int _currentVersionCode;
 
@@ -162,6 +174,51 @@ class AppCenterService {
 
   bool canDownload(AppCenterItem item) =>
       item.hasVerifiedInstaller && !isCurrentVersion(item);
+
+  bool get supportsOpeningInstalledApplications =>
+      platformName == 'windows' || platformName == 'macos';
+
+  Future<bool> isApplicationInstalled(AppCenterItem item) async {
+    if (!supportsOpeningInstalledApplications ||
+        !_isSafePackageName(item.packageName)) {
+      return false;
+    }
+    try {
+      final Future<bool> lookup =
+          _installedLookup?.call(item.packageName) ??
+          _desktopHostChannel
+              .invokeMethod<bool>(
+                'isStoreApplicationInstalled',
+                <String, Object?>{'packageName': item.packageName},
+              )
+              .then((bool? installed) => installed == true);
+      return await lookup.timeout(_desktopHostTimeout, onTimeout: () => false);
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<bool> openApplication(AppCenterItem item) async {
+    if (!supportsOpeningInstalledApplications ||
+        !_isSafePackageName(item.packageName)) {
+      return false;
+    }
+    try {
+      final Future<bool> opener =
+          _applicationOpener?.call(item.packageName) ??
+          _desktopHostChannel
+              .invokeMethod<bool>('openStoreApplication', <String, Object?>{
+                'packageName': item.packageName,
+              })
+              .then((bool? opened) => opened == true);
+      return await opener.timeout(_desktopHostTimeout, onTimeout: () => false);
+    } on Object {
+      return false;
+    }
+  }
+
+  static bool _isSafePackageName(String value) =>
+      value.isNotEmpty && RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(value);
 
   String? get platformName {
     if (_platformOverride != null) return _platformOverride;

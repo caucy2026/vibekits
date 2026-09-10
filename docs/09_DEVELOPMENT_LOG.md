@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-10 · 1.9.0-dev.168+2168 · 应用中心桌面“打开”与 Windows 合同校正
+
+- 应用中心详情页在 macOS/Windows 增加“打开”操作：只有原生系统按稳定包名确认应用已安装时才启用，查询或启动超过 3 秒即失败关闭；Android 不展示桌面操作。
+- macOS 通过 `CFBundleIdentifier + NSWorkspace` 查找并激活应用；Windows 只接受安全包名、绝对 `.exe` 路径和 `HKCU/HKLM\\Software\\KEMI\\AppMarket\\<package_name>\\Executable` 注册记录，当前 VibeKits 可解析自身可执行文件。两端均使用参数化原生 API，不拼接 shell、不用可翻译名称猜路径。
+- 按 2026-09-10 线上 Windows 自更新文档校正旧标准：Windows 当前协议门禁是 `os=windows`、HTTPS、精确大小和 SHA-256，VibeKits 不因缺少 Authenticode 阻断商城打开、下载和更新；macOS 仍保持 Universal macOS 12+、Developer ID、公证和 staple 强制门禁。
+- 版本、LMCP `appVersion` 与 `catalogRevision=2168` 同步提升。应用中心/更新定向测试先行通过；macOS、Windows 真机构建与 KEMI 商城发布证据记录在本版本验收报告。
+
 ## 2026-09-08 · 1.9.0-dev.163+2163 · Harness 独立 ID 与中继入口
 
 - Harness 远程协助网络层使用独立 `VibekitsHarness` 配置/IPC 命名空间和持久数字路由 ID；真实 HBBS `kemi-chat.newlinksz.com:21116` 已确认 ID `1554650784` 在线、注册公钥确认且停止重启不漂移，不复用 KEMI 远程办公 ID。

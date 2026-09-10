@@ -346,6 +346,44 @@ class _AppDetailsDialog extends StatefulWidget {
 class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   double? _progress;
   String? _message;
+  bool _checkingInstalled = false;
+  bool _installed = false;
+  bool _opening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.service.supportsOpeningInstalledApplications) {
+      _checkingInstalled = true;
+      unawaited(_refreshInstalledState());
+    }
+  }
+
+  Future<void> _refreshInstalledState() async {
+    final bool installed = await widget.service.isApplicationInstalled(
+      widget.item,
+    );
+    if (!mounted) return;
+    setState(() {
+      _checkingInstalled = false;
+      _installed = installed;
+    });
+  }
+
+  Future<void> _open() async {
+    if (_opening || _progress != null) return;
+    setState(() {
+      _opening = true;
+      _message = '正在打开已安装应用…';
+    });
+    final bool opened = await widget.service.openApplication(widget.item);
+    if (!mounted) return;
+    setState(() {
+      _opening = false;
+      if (!opened) _installed = false;
+      _message = opened ? '已打开应用' : '未找到已安装应用，已禁用“打开”';
+    });
+  }
 
   Future<void> _install() async {
     setState(() {
@@ -439,6 +477,24 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
         ),
       ),
       actions: <Widget>[
+        if (widget.service.supportsOpeningInstalledApplications)
+          TextButton.icon(
+            key: const Key('app-center-open'),
+            onPressed:
+                _installed &&
+                    !_checkingInstalled &&
+                    !_opening &&
+                    _progress == null
+                ? _open
+                : null,
+            icon: _checkingInstalled || _opening
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.open_in_new_rounded),
+            label: Text(_checkingInstalled ? '检测中' : '打开'),
+          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('关闭'),

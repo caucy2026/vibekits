@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_remote_link_state.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_link_state.dart';
 
 void main() {
   test('first pairing needs approval, authentication and applied snapshot', () {
