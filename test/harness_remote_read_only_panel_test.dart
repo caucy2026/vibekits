@@ -68,7 +68,9 @@ class _Channel implements HarnessRemoteChannel {
             : {
                 'result': {
                   'ok': true,
-                  'value': operation == 'session.prompt'
+                  'value':
+                      operation == 'session.prompt' ||
+                          operation == 'session.cancel'
                       ? {'accepted': true}
                       : <String, Object?>{},
                 },
@@ -209,7 +211,7 @@ void main() {
     await tester.tap(find.byKey(const Key('harness-remote-command-stop')));
     await tester.pump(const Duration(milliseconds: 30));
     expect(channel.operations, contains('session.cancel'));
-    expect(find.textContaining('停止请求已返回'), findsOneWidget);
+    expect(find.textContaining('停止请求已被执行端接受'), findsOneWidget);
     model.dispose();
     unawaited(connection.close());
     await tester.pumpWidget(const SizedBox.shrink());

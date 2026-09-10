@@ -29,6 +29,14 @@ void main() {
       find.byKey(const Key('harness-coordination-peer-id')),
       findsOneWidget,
     );
+    await tester.tap(
+      find.byKey(const Key('harness-coordination-first-connect-options')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('harness-coordination-force-relay')),
+      findsOneWidget,
+    );
     expect(find.text('允许别人协助本机'), findsNothing);
     expect(find.text('本机 Harness ID'), findsNothing);
     expect(

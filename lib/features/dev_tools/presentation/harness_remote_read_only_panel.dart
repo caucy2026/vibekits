@@ -481,7 +481,14 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
         workspaceId: target.$1,
         sessionId: target.$2,
       );
-      if (mounted) setState(() => _feedback = '停止请求已返回：$result');
+      if (mounted) {
+        setState(() {
+          _feedback = _isAccepted(result)
+              ? '停止请求已被执行端接受；正在同步最终状态。'
+              : '停止请求已返回：${_compactResult(result)}';
+        });
+        unawaited(_refreshHistory());
+      }
     } on Object catch (error) {
       if (mounted) setState(() => _feedback = '停止请求失败或结果未知：$error');
     }

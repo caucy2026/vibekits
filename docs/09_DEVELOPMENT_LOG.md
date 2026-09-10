@@ -1554,3 +1554,13 @@
 - 当前远程协助组合回归累计 40 项通过，8 个生产文件定向 analyze 为 0 issue；RustDesk 独立路由单测 2/2 通过。完整证据与剩余硬门禁见 `docs/acceptance/HARNESS_RELAY_ID_GATE_2026-09-08.md`。
 - 精确 macOS 候选为 `1.9.0.163+2163`、Universal `x86_64+arm64`、macOS 12+，内置 Harness/ADB/7-Zip/GitHub CLI/Git 兼容门禁通过；最终候选已用 Developer ID、Hardened Runtime 和安全时间戳从内到外签署 35 个 Mach-O 并严格验签。Apple 公证、staple、Gatekeeper 与真实下载尚未执行，禁止复制到正式 `bin` 或商场。
 - 63 上 KEMI远程办公与 VibeKits APK 的系统签名标识一致，可采用同签名保护的 bound service；但现有 Android Rust 核心没有独立 Harness Binder，且 PORT_FORWARD 主循环在移动端被编译排除。Android/63、Windows 58（D 盘低于 30 GiB）、两不同 routingId 直连/HBBR 和完整官方 DSH 时间线仍是发布硬门禁。
+
+# 2026-09-10 · dev.169 PAD→Mac 远程协助闭环
+
+- PAD 固定为协助控制端，Mac 固定为被协助执行端；PAD 不启动入站 Host，也不显示本机被协助 ID/密码。远程协助入口、未连接禁用态、连接状态、项目、会话、命令、反馈和退出全部收敛到 Harness 主界面。
+- “已连接”只在 mTLS/hello 与首个真实项目快照完成后出现；断线立即撤销在线态并后台重连，执行端恢复后无需再次点击即可重新同步。
+- 远端反馈改用官方 `session/follow`，按用户、Harness 与轮次完成分组显示，合并流式回复并隐藏内部 system reminder；命令草稿按远端设备、项目和会话隔离。
+- 75 真机直连完成命令上行、`REMOTE_DEV169_FINAL_OK` 下行和最终完成状态；长任务 `session.cancel` 返回 `accepted=true` 后立即终止并恢复 `READY`。
+- 首次连接选项增加“强制经 HBBR 中继”验收开关，日常默认关闭并继续 P2P 优先/失败自动中继。75 真机强制中继完成项目同步、命令上行、`HBBR_DEV169_OK` 下行和完成状态，断开历史明确标记“中继 · 1 个工作区”。
+- Android PAD75 候选为 `1.9.0-dev.169+2169`，SHA-256 `82f83dacb66db74742bc4f147d224a4aaa442e576daf07d8f6ab9da4c155b7a8`，APK v2/v3 签名通过并覆盖安装成功；远程协助定向回归 14/14、静态分析 0 issue。完整证据见 `docs/acceptance/V1_9_0_DEV169_REMOTE_ASSISTANCE_PAD75_2026-09-10.md`。
+- 尚未完成的是第二台 Mac 的 Mac↔Mac 异机真机连接验收，以及正式商场发布前独立的 macOS/Windows 发布门禁；不得用未指定的 57 号设备补测或冒充通过。

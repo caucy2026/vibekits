@@ -3372,6 +3372,18 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                       isDense: true,
                     ),
                   ),
+                  CheckboxListTile(
+                    key: const Key('harness-coordination-force-relay'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: _forceRelay,
+                    onChanged: _remoteEnabled && !_connecting
+                        ? (bool? value) =>
+                              setState(() => _forceRelay = value ?? false)
+                        : null,
+                    title: const Text('强制经 HBBR 中继'),
+                    subtitle: const Text('验收用；日常保持关闭，由系统优先 P2P、失败自动中继'),
+                  ),
                 ],
               ),
             if (_remoteSession == null)
