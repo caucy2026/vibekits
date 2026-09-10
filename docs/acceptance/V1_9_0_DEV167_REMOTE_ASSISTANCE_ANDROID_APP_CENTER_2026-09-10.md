@@ -51,6 +51,7 @@ LMCP catalogRevision：`2167`
 - 相关快速回归：`63/63`。
 - 远程身份与对话框定向回归：`15/15`。
 - 本轮静默重连相关回归：`54/54`；macOS Harness WebKit 与共享 UI 定向回归：`13/13`；最终单插件批次回归：`6/6`。
+- 同步上游并加入商城分页保护后的最终联合回归：`50/50`；最终 macOS Release 编译门禁同时发现并修复一次冲突处理造成的启动恢复字段重复，证明交付检查覆盖真实桌面入口而非只依赖单元测试。
 - 静态检查：本轮 5 个产品改动文件 `0 issue`；全仓分析无 error，保留测试/验证脚本中的 15 条既有 import/style info 和 1 条未使用可选参数 warning，不影响产物。
 - 全量日志：`/private/tmp/vibekits-dev167-merged-full-test-with-runtime.log`。
 - 源码目录未保存被 `.gitignore` 排除的 7-Zip 构建缓存；全量回归显式使用最终 App 内已签名、已验版本/格式/双架构/minOS 的真实 `7zz`，不是 mock 或跳过测试。
@@ -76,10 +77,10 @@ LMCP catalogRevision：`2167`
 ## macOS 真机候选
 
 - App：`build/macos/Build/Products/Release/Vibekits.app`。
-- 当前运行 PID：`48705`（最终复测记录时；进程号本身不属于发布契约）。
+- 最终静态候选签名前已停止从构建目录运行的旧进程，避免运行态文件回写污染签名；PID 不属于发布契约。
 - UI 版本：`v1.9.0-dev.167+2167`。
 - 主程序：Universal `x86_64 + arm64`。
-- 主程序 SHA-256：`420d3d5d807b1bb375b9e9f1aaaa2ac32b3101a609c540a8128c104bef7cdbc1`。
+- 主程序 SHA-256：`63be52d31e0105eb6d38ef08922e9cf58f30a25da5523f9cd90d39148b75c390`。
 - Developer ID：`Developer ID Application: zhen ji (26T5WV4GLP)`。
 - Hardened Runtime：已开启；36 个 Mach-O 文件逐项签名验证通过；内置 Harness Node 22.19、x86_64 路径和 JIT 启动验证通过。
 - 默认关闭协助时，主界面真实显示独立 ID `1554650784` 和“远程协助”按钮。
@@ -92,7 +93,14 @@ LMCP catalogRevision：`2167`
 - 排除项：现场系统为 macOS 26.5.2，运行进程中 `VIBEKITS_DSH_WEB_DIST_INDEX` 未设置；macOS 12/13/14.0–14.3 兼容前端没有在本机误启用。
 - 根因：官方启动清单把 44 个应用插件合并到一个 WKWebView 资源请求；页面和 bootstrap 单插件脚本均正常，应用级多插件 combo 请求在进入 Harness 路由前被 WKWebView 拒绝。
 - 修复：保留官方插件、依赖图、UI 和加载协议，只把应用脚本拆成官方客户端原生支持的单插件批次；同时把 URL 上限收紧到 1800 字节。Windows 与 macOS 仍复用同一补丁入口，不形成两套交互代码。
+- 扩展边界：该策略与插件/MCP 总数无关；新增条目只产生新的独立批次，单请求始终保持一个应用脚本且受 1800 字节上限约束，不会恢复为随目录数量增长的超长 URL。MCP 设备和工具界面继续使用懒列表/按项展开。
 - 结果：重建并 Developer ID 重签后，官方 Harness 主界面真实出现侧栏、新建会话、工作区、Agent 预设、输入框、权限和模型选择，错误页消失；36 个 Mach-O 重新逐项验证通过。
+
+### KEMI 应用中心最新契约收口
+
+- 2026-09-10 重新核对线上自升级总览：桌面查询必须显式传 `os=windows` / `os=macos`，只比较整数 `version_code`，Windows/macOS 的下载哈希必须校验；“仅自升级”商品可以不出现在商城列表中。
+- 客户端目录从固定首屏 `pageSize=100` 改为规范 `pageSize=30` 的逐页读取，按稳定身份去重，并用 200 页安全上限阻止异常服务端造成无限请求；超过上限明确失败而不是静默丢商品。
+- 关于页、应用中心仍不展示本 APP 更新错误或检查卡片；只有已验证的更高版本才允许全局提示。同版本/旧版本在 UI 与下载入口双重禁用。
 
 本候选是 Developer ID 已签名的本地验收产物，最后一次重建后尚未重新提交 Apple 公证，因此本报告不把它标记为已公证正式发行包。
 

@@ -145,6 +145,8 @@ class AppCenterService {
        _currentVersionCode = currentVersionCode;
 
   static const String _defaultApiRoot = 'https://kemi.newlinksz.com/kd-api';
+  static const int _catalogPageSize = 30;
+  static const int _maxCatalogPages = 200;
 
   final HttpClient _client;
   final String _apiRoot;
@@ -190,29 +192,54 @@ class AppCenterService {
         .where((entry) => entry.name.isNotEmpty)
         .toList(growable: false);
     final Map<String, String> query = <String, String>{
-      'page': '1',
-      'pageSize': '100',
+      'pageSize': '$_catalogPageSize',
       'os': os,
     };
     if (category != null && category.trim().isNotEmpty) {
       query['category'] = category.trim();
     }
     if (keyword.trim().isNotEmpty) query['keyword'] = keyword.trim();
-    final Map<String, Object?> data = await _getData(
-      Uri.parse('$_apiRoot/api/store/apps').replace(queryParameters: query),
+    final Map<String, AppCenterItem> appsByIdentity = <String, AppCenterItem>{};
+    int total = 0;
+    bool catalogComplete = false;
+    for (int page = 1; page <= _maxCatalogPages; page++) {
+      final Map<String, Object?> data = await _getData(
+        Uri.parse(
+          '$_apiRoot/api/store/apps',
+        ).replace(queryParameters: <String, String>{...query, 'page': '$page'}),
+      );
+      final List<Object?> rawApps = data['list'] is List<Object?>
+          ? data['list']! as List<Object?>
+          : const <Object?>[];
+      final int reportedTotal = AppCenterItem._asInt(data['total']);
+      if (reportedTotal > total) total = reportedTotal;
+      for (final AppCenterItem item
+          in rawApps
+              .whereType<Map<String, Object?>>()
+              .map(AppCenterItem.fromJson)
+              .where((item) => item.supportsPlatform(os))) {
+        final String identity = item.appId > 0
+            ? '${item.appId}'
+            : '${item.packageName}\u0000${item.osType}\u0000${item.versionCode}';
+        appsByIdentity[identity] = item;
+      }
+      if (rawApps.isEmpty ||
+          rawApps.length < _catalogPageSize ||
+          (total > 0 && page * _catalogPageSize >= total)) {
+        catalogComplete = true;
+        break;
+      }
+    }
+    if (!catalogComplete) {
+      throw const FormatException('应用市场分页超过安全上限');
+    }
+    final List<AppCenterItem> apps = appsByIdentity.values.toList(
+      growable: false,
     );
-    final List<Object?> rawApps = data['list'] is List<Object?>
-        ? data['list']! as List<Object?>
-        : const <Object?>[];
-    final List<AppCenterItem> apps = rawApps
-        .whereType<Map<String, Object?>>()
-        .map(AppCenterItem.fromJson)
-        .where((item) => item.supportsPlatform(os))
-        .toList(growable: false);
     return AppCenterCatalog(
       categories: categories,
       apps: apps,
-      total: AppCenterItem._asInt(data['total']),
+      total: total > apps.length ? total : apps.length,
     );
   }
 

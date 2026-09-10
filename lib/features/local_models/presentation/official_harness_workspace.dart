@@ -138,12 +138,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   final HarnessRemoteHostRuntime _remoteHostRuntime =
       HarnessRemoteHostRuntime.shared;
   late Future<RustDeskHostInfo> _remoteHostSummary;
-  final HarnessStartupRecovery _startupRecovery = HarnessStartupRecovery();
-  Timer? _restartTimer;
-  Timer? _stabilityTimer;
   Timer? _remoteAuthorizationTimer;
   bool _remoteAuthorizationInFlight = false;
-  bool _disposing = false;
   String _activeRemoteWorkspaceId = '';
 
   @override

@@ -32,9 +32,57 @@ void main() {
     expect(listRequest.queryParameters['os'], 'macos');
     expect(listRequest.queryParameters['category'], '开发工具');
     expect(listRequest.queryParameters['keyword'], 'Vibe');
+    expect(listRequest.queryParameters['pageSize'], '30');
     expect(catalog.apps.single.name, 'Vibekits');
     expect(catalog.apps.single.hasVerifiedInstaller, isTrue);
     service.dispose();
+  });
+
+  test('应用中心逐页读取并去重，新增商品不会被首屏容量截断', () async {
+    final List<int> requestedPages = <int>[];
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+      envelopeLoader: (uri) async {
+        if (uri.path.endsWith('/api/store/categories')) return <Object?>[];
+        final int page = int.parse(uri.queryParameters['page']!);
+        requestedPages.add(page);
+        if (page == 1) {
+          return <String, Object?>{
+            'total': 31,
+            'list': List<Object?>.generate(
+              30,
+              (int index) => <String, Object?>{
+                ..._itemJson(os: 'macos'),
+                'app_id': index + 1,
+                'package_name': 'com.kemi.app.${index + 1}',
+              },
+            ),
+          };
+        }
+        return <String, Object?>{
+          'total': 31,
+          'list': <Object?>[
+            <String, Object?>{
+              ..._itemJson(os: 'macos'),
+              'app_id': 30,
+              'package_name': 'com.kemi.app.30',
+            },
+            <String, Object?>{
+              ..._itemJson(os: 'macos'),
+              'app_id': 31,
+              'package_name': 'com.kemi.app.31',
+            },
+          ],
+        };
+      },
+    );
+    addTearDown(service.dispose);
+
+    final AppCenterCatalog catalog = await service.load();
+
+    expect(requestedPages, <int>[1, 2]);
+    expect(catalog.apps, hasLength(31));
+    expect(catalog.total, 31);
   });
 
   test('缺少哈希的市场条目保持可见但禁止安装', () {
