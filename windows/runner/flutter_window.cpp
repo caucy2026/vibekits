@@ -18,6 +18,129 @@ constexpr UINT kTrayCallbackMessage = WM_APP + 41;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayOpenCommand = 41001;
 constexpr UINT kTrayExitCommand = 41002;
+constexpr wchar_t kCurrentStorePackageName[] = L"com.caucy.vibekits";
+
+std::wstring Utf16FromUtf8(const std::string& value) {
+  if (value.empty()) return std::wstring();
+  const int size = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                         value.data(),
+                                         static_cast<int>(value.size()),
+                                         nullptr, 0);
+  if (size <= 0) return std::wstring();
+  std::wstring converted(static_cast<size_t>(size), L'\0');
+  if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), converted.data(),
+                            size) != size) {
+    return std::wstring();
+  }
+  return converted;
+}
+
+bool IsSafeStorePackageName(const std::wstring& value) {
+  if (value.empty()) return false;
+  for (const wchar_t character : value) {
+    const bool ascii_alphanumeric =
+        (character >= L'a' && character <= L'z') ||
+        (character >= L'A' && character <= L'Z') ||
+        (character >= L'0' && character <= L'9');
+    if (!(ascii_alphanumeric || character == L'.' ||
+          character == L'_' || character == L'-')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsExistingAbsoluteExecutable(const std::wstring& path) {
+  if (path.size() < 7 || !std::iswalpha(path[0]) || path[1] != L':' ||
+      (path[2] != L'\\' && path[2] != L'/')) {
+    return false;
+  }
+  if (path.size() < 4 || _wcsicmp(path.c_str() + path.size() - 4, L".exe") != 0) {
+    return false;
+  }
+  const DWORD attributes = ::GetFileAttributesW(path.c_str());
+  return attributes != INVALID_FILE_ATTRIBUTES &&
+         (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+std::optional<std::wstring> CurrentExecutablePath() {
+  std::vector<wchar_t> path(32768, L'\0');
+  const DWORD length = ::GetModuleFileNameW(
+      nullptr, path.data(), static_cast<DWORD>(path.size()));
+  if (length == 0 || static_cast<size_t>(length) >= path.size()) {
+    return std::nullopt;
+  }
+  std::wstring value(path.data(), length);
+  return IsExistingAbsoluteExecutable(value)
+             ? std::optional<std::wstring>(std::move(value))
+             : std::nullopt;
+}
+
+std::optional<std::wstring> ReadRegisteredStoreExecutable(
+    HKEY root, REGSAM view, const std::wstring& package_name) {
+  const std::wstring key_path =
+      L"Software\\KEMI\\AppMarket\\" + package_name;
+  HKEY key = nullptr;
+  if (::RegOpenKeyExW(root, key_path.c_str(), 0, KEY_QUERY_VALUE | view,
+                      &key) != ERROR_SUCCESS) {
+    return std::nullopt;
+  }
+  DWORD type = 0;
+  DWORD bytes = 0;
+  LONG status = ::RegQueryValueExW(key, L"Executable", nullptr, &type, nullptr,
+                                   &bytes);
+  if (status != ERROR_SUCCESS ||
+      (type != REG_SZ && type != REG_EXPAND_SZ) || bytes < sizeof(wchar_t) ||
+      bytes > 32768 * sizeof(wchar_t)) {
+    ::RegCloseKey(key);
+    return std::nullopt;
+  }
+  std::vector<wchar_t> buffer(bytes / sizeof(wchar_t) + 1, L'\0');
+  status = ::RegQueryValueExW(
+      key, L"Executable", nullptr, &type,
+      reinterpret_cast<LPBYTE>(buffer.data()), &bytes);
+  ::RegCloseKey(key);
+  if (status != ERROR_SUCCESS) return std::nullopt;
+  std::wstring value(buffer.data());
+  if (type == REG_EXPAND_SZ) {
+    const DWORD expanded_size =
+        ::ExpandEnvironmentStringsW(value.c_str(), nullptr, 0);
+    if (expanded_size == 0 || expanded_size > 32768) return std::nullopt;
+    std::vector<wchar_t> expanded(expanded_size, L'\0');
+    if (::ExpandEnvironmentStringsW(value.c_str(), expanded.data(),
+                                    expanded_size) != expanded_size) {
+      return std::nullopt;
+    }
+    value.assign(expanded.data());
+  }
+  return IsExistingAbsoluteExecutable(value)
+             ? std::optional<std::wstring>(std::move(value))
+             : std::nullopt;
+}
+
+std::optional<std::wstring> ResolveStoreExecutable(
+    const std::wstring& package_name) {
+  if (!IsSafeStorePackageName(package_name)) return std::nullopt;
+  if (_wcsicmp(package_name.c_str(), kCurrentStorePackageName) == 0) {
+    if (auto current = CurrentExecutablePath()) return current;
+  }
+  const struct {
+    HKEY root;
+    REGSAM view;
+  } locations[] = {
+      {HKEY_CURRENT_USER, 0},
+      {HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY},
+      {HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY},
+  };
+  for (const auto& location : locations) {
+    if (auto executable = ReadRegisteredStoreExecutable(
+            location.root, location.view, package_name)) {
+      return executable;
+    }
+  }
+  return std::nullopt;
+}
 
 void TerminateDescendantProcesses(DWORD root_process_id) {
   HANDLE snapshot =
@@ -208,6 +331,56 @@ bool FlutterWindow::OnCreate() {
         child_process_jobs_.emplace(process_id, job);
         result->Success(flutter::EncodableValue(true));
       });
+  store_host_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "org.rustdesk.rustdesk/host",
+          &flutter::StandardMethodCodec::GetInstance());
+  store_host_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+        if (arguments == nullptr) {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        const auto package_entry =
+            arguments->find(flutter::EncodableValue("packageName"));
+        if (package_entry == arguments->end()) {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        const auto* package_utf8 =
+            std::get_if<std::string>(&package_entry->second);
+        if (package_utf8 == nullptr) {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        const auto executable =
+            ResolveStoreExecutable(Utf16FromUtf8(*package_utf8));
+        if (!executable) {
+          result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        if (call.method_name() == "isStoreApplicationInstalled") {
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+        if (call.method_name() != "openStoreApplication") {
+          result->NotImplemented();
+          return;
+        }
+        SHELLEXECUTEINFOW execute{};
+        execute.cbSize = sizeof(execute);
+        execute.fMask = SEE_MASK_NOASYNC;
+        execute.lpVerb = L"open";
+        execute.lpFile = executable->c_str();
+        execute.nShow = SW_SHOWNORMAL;
+        result->Success(
+            flutter::EncodableValue(::ShellExecuteExW(&execute) == TRUE));
+      });
   DragAcceptFiles(GetHandle(), TRUE);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   startup_surface_visible_ = false;
@@ -229,6 +402,7 @@ void FlutterWindow::OnDestroy() {
   DragAcceptFiles(GetHandle(), FALSE);
   file_drop_channel_.reset();
   process_lifecycle_channel_.reset();
+  store_host_channel_.reset();
   for (const auto& entry : child_process_jobs_) {
     ::CloseHandle(entry.second);
   }

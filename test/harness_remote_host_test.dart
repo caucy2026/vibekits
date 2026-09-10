@@ -3,14 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_remote_identity.dart';
-import '../lib/features/dev_tools/domain/harness_remote_ledger.dart';
-import '../lib/features/dev_tools/domain/harness_remote_host.dart';
-import '../lib/features/dev_tools/domain/harness_remote_execution.dart';
-import '../lib/features/dev_tools/domain/harness_remote_tls_channel.dart';
-import '../lib/features/dev_tools/domain/harness_remote_connection.dart';
-import '../lib/features/dev_tools/domain/harness_remote_workspace_client.dart';
-import '../lib/features/dev_tools/domain/harness_work_status.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_connection.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_execution.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_host.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_identity.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_ledger.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_tls_channel.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_workspace_client.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_work_status.dart';
 
 void main() {
   Future<HarnessRemoteIdentity> identity() => HarnessRemoteIdentityStore(

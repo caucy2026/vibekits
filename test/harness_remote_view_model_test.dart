@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/features/dev_tools/domain/harness_remote_connection.dart';
-import '../lib/features/dev_tools/domain/harness_remote_workspace_client.dart';
-import '../lib/features/dev_tools/domain/harness_remote_view_model.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_connection.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_view_model.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_workspace_client.dart';
 
 class _Channel implements HarnessRemoteChannel {
   _Channel({this.live = true});

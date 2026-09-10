@@ -132,6 +132,7 @@ void main() {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
       currentVersionCode: 1,
+      installedLookup: (_) async => false,
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[
           AppCenterCategory(name: '探索', isExplore: true),
@@ -165,11 +166,121 @@ void main() {
     );
   });
 
+  testWidgets('macOS 已安装应用显示可用的打开按钮并调用稳定包名', (tester) async {
+    String? openedPackage;
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+      currentVersionCode: 1,
+      installedLookup: (String packageName) async =>
+          packageName == 'com.caucy.vibekits',
+      applicationOpener: (String packageName) async {
+        openedPackage = packageName;
+        return true;
+      },
+      loader: ({category, keyword = ''}) async => AppCenterCatalog(
+        categories: const <AppCenterCategory>[],
+        apps: <AppCenterItem>[AppCenterItem.fromJson(_itemJson(os: 'macos'))],
+        total: 1,
+      ),
+    );
+    addTearDown(service.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppCenterTab(service: service)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('app-center-item-53')));
+    await tester.pumpAndSettle();
+
+    final Finder openButton = find.byKey(const Key('app-center-open'));
+    expect(openButton, findsOneWidget);
+    expect(tester.widget<TextButton>(openButton).onPressed, isNotNull);
+    await tester.tap(openButton);
+    await tester.pumpAndSettle();
+
+    expect(openedPackage, 'com.caucy.vibekits');
+    expect(find.text('已打开应用'), findsOneWidget);
+  });
+
+  testWidgets('Windows 未安装应用的打开按钮禁用', (tester) async {
+    final AppCenterService windowsService = AppCenterService(
+      platformOverride: 'windows',
+      installedLookup: (_) async => false,
+      loader: ({category, keyword = ''}) async => AppCenterCatalog(
+        categories: const <AppCenterCategory>[],
+        apps: <AppCenterItem>[AppCenterItem.fromJson(_itemJson(os: 'windows'))],
+        total: 1,
+      ),
+    );
+    addTearDown(windowsService.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppCenterTab(service: windowsService)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('app-center-item-53')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const Key('app-center-open')))
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('Android 不显示桌面打开操作', (tester) async {
+    final AppCenterService androidService = AppCenterService(
+      platformOverride: 'android',
+      loader: ({category, keyword = ''}) async => AppCenterCatalog(
+        categories: const <AppCenterCategory>[],
+        apps: <AppCenterItem>[AppCenterItem.fromJson(_itemJson(os: 'android'))],
+        total: 1,
+      ),
+    );
+    addTearDown(androidService.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppCenterTab(service: androidService)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('app-center-item-53')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('app-center-open')), findsNothing);
+  });
+
+  test('非法包名不会传给桌面原生打开通道', () async {
+    bool called = false;
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'windows',
+      installedLookup: (_) async {
+        called = true;
+        return true;
+      },
+      applicationOpener: (_) async {
+        called = true;
+        return true;
+      },
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'windows'),
+      'package_name': r'..\\bad package',
+    });
+
+    expect(await service.isApplicationInstalled(item), isFalse);
+    expect(await service.openApplication(item), isFalse);
+    expect(called, isFalse);
+  });
+
   for (final String os in <String>['macos', 'windows', 'android']) {
     testWidgets('$os 当前版本显示最新版且下载按钮不可点击', (tester) async {
       final AppCenterService service = AppCenterService(
         platformOverride: os,
         currentVersionCode: 2159,
+        installedLookup: (_) async => false,
         loader: ({category, keyword = ''}) async => AppCenterCatalog(
           categories: const <AppCenterCategory>[],
           apps: <AppCenterItem>[

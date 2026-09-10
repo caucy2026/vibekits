@@ -17,7 +17,7 @@
 2. 用户可以查看详情、下载、校验并启动该平台的安装流程；
 3. 本 APP 能用固定包名和当前整数版本码检查自身更新；
 4. 下载文件必须通过 HTTPS、平台格式、精确字节数和 SHA-256 校验；
-5. 安装包通过平台签名门禁，macOS 还必须完成 Apple 公证和票据装订；
+5. 安装包通过对应平台的完整性门禁；macOS 必须完成 Developer ID 签名、Apple 公证和票据装订，Windows 按产品发布策略决定是否使用 Authenticode；
 6. 发布端按 `(package_name, os_type)` 更新既有记录，禁止重复创建；
 7. 旧版本能发现新版本，当前版本不循环提示；
 8. 从公开商城接口重新读取并从 CDN 下载后的结果与本地产物完全一致；
@@ -282,11 +282,13 @@ HTTP 重定向的最终 URL 仍必须为 HTTPS。下载进程不要通过拼接 
 
 ### 6.2 Windows
 
+> 2026-09-10 线上合同校正：KEMI Windows 自更新接口当前强制的是平台、HTTPS、精确大小和 SHA-256，并未把 Authenticode 声明为协议必填。VibeKits 当前 Windows 发行不以 Authenticode 状态阻断商城“打开”、下载安装或自更新。若产品后续启用 Windows 签名，应把它作为额外供应链门禁，不能擅自改变商城接口兼容性。
+
 构建与发布门禁：
 
 - 交付 x64 或明确声明的架构；依赖和运行时必须自包含；
-- `.exe`/`.msi` 必须使用组织正式 Authenticode 证书；
-- PowerShell 执行 `Get-AuthenticodeSignature`，`Status` 必须为 `Valid`；
+- 对未签名 Windows 包不做客户端签名拦截；发布端仍必须固定源码提交、构建环境、精确大小和 SHA-256；
+- 如果该产品声明使用 Authenticode，才执行 `Get-AuthenticodeSignature` 并要求 `Status=Valid`；不得把可选签名写成所有 KEMI Windows 应用的协议必填；
 - 安装器中的产品名、Publisher、包名和版本与商城记录一致；
 - 在干净 Windows 真机验证安装、卸载、升级和重启后启动。
 
@@ -296,7 +298,7 @@ HTTP 重定向的最终 URL 仍必须为 HTTPS。下载进程不要通过拼接 
 - `.exe` 直接以参数数组启动；
 - `.zip` 只能打开文件位置或进入经过设计的独立更新器，不能由主进程盲目覆盖自身；
 - 需要管理员权限时交给系统 UAC，客户端不得伪造或静默绕过；
-- 自替换使用独立、签名的 updater：等待主进程退出，备份旧版，替换后健康检查，失败自动回滚。
+- 自替换使用独立 updater：等待主进程退出，备份旧版，替换后健康检查，失败自动回滚；产品启用 Authenticode 时 updater 也必须纳入同一签名策略。
 
 真机验收：标准用户、管理员用户、UAC 取消、文件占用、杀毒拦截、断网续传、哈希错误、签名错误、旧版到新版和安装失败回滚。
 
@@ -478,7 +480,7 @@ Android 按线上文档使用 APK 专用上传凭证。接口字段可能演进�
 | 旧版升级新版 | 必须 | 必须 | 必须 |
 | 用户取消 | 必须 | 必须 | 必须 |
 | 错误大小/SHA 拒绝 | 必须 | 必须 | 必须 |
-| 平台签名验证 | APK signer | Authenticode | Developer ID + notarization |
+| 平台身份/完整性验证 | APK signer | 精确大小 + SHA-256；声明签名时再验 Authenticode | Developer ID + notarization |
 | 权限拒绝 | 未知来源 | UAC | Applications/系统策略 |
 | 架构门禁 | 支持 ABI | 声明架构 | arm64/x86_64 + 最低系统 |
 | 失败保留旧版 | 必须 | 必须 | 必须 |
@@ -495,7 +497,7 @@ Android 按线上文档使用 APK 专用上传凭证。接口字段可能演进�
 6. 应用中心详情页安装按钮可用且不混入其他平台；
 7. 真机安装、启动、升级、取消和失败回滚通过；
 8. macOS 最终包是 staple 后重新封装的包，Gatekeeper 为 `Notarized Developer ID`；
-9. Windows 签名有效且运行时自包含；
+9. Windows 运行时自包含且大小/SHA 与发布记录一致；若该产品声明签名，则 Authenticode 还必须有效；
 10. Android 包名、版本码和签名证书一致；
 11. 发布临时目录、登录响应和短期 token 已清理；
 12. 形成不含秘密的验收报告并关联 Git 提交和构建任务。
@@ -536,7 +538,10 @@ security:
   requireHttps: true
   requireExactSize: true
   requireSha256: true
-  requirePlatformSignature: true
+  requirePlatformSignature:
+    android: true
+    windows: product-policy
+    macos: true
 ```
 
 同时提交每个平台的最终包绝对路径或 CI artifact、精确字节数、SHA-256、签名输出、真机截图、旧版升级结果和回滚结果。不能只交一张“上传成功”截图。

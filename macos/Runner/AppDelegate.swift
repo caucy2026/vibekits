@@ -6,6 +6,7 @@ import WebKit
 class AppDelegate: FlutterAppDelegate {
   private var fileChannel: FlutterMethodChannel?
   private var harnessInputChannel: FlutterMethodChannel?
+  private var storeHostChannel: FlutterMethodChannel?
   private var pendingFiles: [String] = []
   private var dartReady = false
   private var webViewMouseMonitor: Any?
@@ -43,8 +44,50 @@ class AppDelegate: FlutterAppDelegate {
         }
         result(nil)
       }
+      storeHostChannel = FlutterMethodChannel(
+        name: "org.rustdesk.rustdesk/host",
+        binaryMessenger: controller.engine.binaryMessenger
+      )
+      storeHostChannel?.setMethodCallHandler { [weak self] call, result in
+        guard let self,
+              let arguments = call.arguments as? [String: Any],
+              let packageName = arguments["packageName"] as? String,
+              self.isSafeStorePackageName(packageName) else {
+          result(false)
+          return
+        }
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(
+          withBundleIdentifier: packageName
+        ) else {
+          result(false)
+          return
+        }
+        switch call.method {
+        case "isStoreApplicationInstalled":
+          result(true)
+        case "openStoreApplication":
+          let configuration = NSWorkspace.OpenConfiguration()
+          configuration.activates = true
+          NSWorkspace.shared.openApplication(
+            at: applicationURL,
+            configuration: configuration
+          ) { _, error in
+            result(error == nil)
+          }
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
     }
     installWebViewMouseRouting()
+  }
+
+  private func isSafeStorePackageName(_ value: String) -> Bool {
+    guard !value.isEmpty else { return false }
+    return value.range(
+      of: "^[A-Za-z0-9._-]+$",
+      options: .regularExpression
+    ) != nil
   }
 
   override func applicationWillTerminate(_ notification: Notification) {
