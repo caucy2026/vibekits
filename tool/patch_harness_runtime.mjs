@@ -3,6 +3,27 @@ import { join, resolve } from 'node:path';
 
 const runtime = resolve(process.argv[2] ?? 'native/harness/windows/runtime');
 
+// WKWebView can reject the official multi-resource combo script before the
+// request reaches Harness. Keep each application script in its own supported
+// batch; the official client already supports an arbitrary batch list.
+await replaceOneOf(
+  'node_modules/@deepseek-ai/dsh-client-modules/lib/index.js',
+  [
+    'const MAX_COMBO_URL_BYTES = 3 * 1024;',
+    'const MAX_COMBO_URL_BYTES = 1800;',
+  ],
+  `const MAX_COMBO_URL_BYTES = 1800;
+const MAX_COMBO_ENTRIES = 1;`,
+  ['const MAX_COMBO_ENTRIES = 1;'],
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-modules/lib/index.js',
+  'if (projectedComboUrlBytes(candidate) <= MAX_COMBO_URL_BYTES) {',
+  'if (candidate.length <= MAX_COMBO_ENTRIES && projectedComboUrlBytes(candidate) <= MAX_COMBO_URL_BYTES) {',
+  'candidate.length <= MAX_COMBO_ENTRIES',
+);
+
 async function replaceOnce(relativePath, before, after, marker = after) {
   const filename = join(runtime, relativePath);
   const source = await readFile(filename, 'utf8');

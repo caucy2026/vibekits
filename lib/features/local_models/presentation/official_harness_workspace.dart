@@ -21,6 +21,7 @@ import '../../dev_tools/domain/harness_remote_execution.dart';
 import '../../dev_tools/domain/harness_remote_host_runtime.dart';
 import '../../dev_tools/domain/harness_remote_identity.dart';
 import '../../dev_tools/domain/harness_remote_peer_store.dart';
+import '../../dev_tools/domain/harness_remote_pairing.dart';
 import '../../dev_tools/domain/harness_remote_pairing_service.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
@@ -135,12 +136,15 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Timer? _stabilityTimer;
   bool _disposing = false;
   final HarnessRemoteHostRuntime _remoteHostRuntime =
-      HarnessRemoteHostRuntime();
+      HarnessRemoteHostRuntime.shared;
   late Future<RustDeskHostInfo> _remoteHostSummary;
   final HarnessStartupRecovery _startupRecovery = HarnessStartupRecovery();
   Timer? _restartTimer;
   Timer? _stabilityTimer;
+  Timer? _remoteAuthorizationTimer;
+  bool _remoteAuthorizationInFlight = false;
   bool _disposing = false;
+  String _activeRemoteWorkspaceId = '';
 
   @override
   void initState() {
@@ -183,6 +187,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
 
   Future<void> _initialize() async {
     try {
+      if (Platform.environment['FLUTTER_TEST'] != 'true') {
+        await HarnessRemoteAccessSettings().loadEnabled();
+      }
       _restoreMcpExposureOnStart = await _mcpExposurePreferences.loadEnabled();
       if (Platform.environment['FLUTTER_TEST'] != 'true') {
         await LanPeerDiscoveryService.instance.start(
@@ -219,6 +226,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
             Directory(preferredWorkspace).existsSync()
         ? preferredWorkspace
         : Directory.current.absolute.path;
+    _activeRemoteWorkspaceId = workspace;
     _workStatusContext ??= HarnessWorkStatusHub.activateWorkspace(
       workspaceRef: workspace,
       workspaceLabel: _workspaceLabel(workspace),
@@ -417,6 +425,17 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         message: 'Harness 已就绪',
         target: workspace,
       );
+      if (HarnessRemoteAccessSettings.enabled) {
+        final bool hasRememberedPeer = (await HarnessRemotePeerStore().load())
+            .any((peer) => peer.remembered && peer.connectionReady);
+        if (hasRememberedPeer) {
+          try {
+            await _startRemoteHost(session.url);
+          } on Object {
+            // _startRemoteHost has already exposed a bounded visible error.
+          }
+        }
+      }
     } on Object catch (error) {
       final HarnessSessionHandle? session = _session;
       _session = null;
@@ -494,16 +513,93 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Future<void> _startRemoteHost(Uri endpoint) async {
     if (!HarnessRemoteAccessSettings.enabled) return;
     try {
+      final RustDeskHostInfo carrier =
+          await RustDeskHarnessShareService.inspect(
+            configuredExecutable: widget.rustDeskExecutable,
+          );
+      if (!carrier.available || carrier.executable.isEmpty) {
+        throw StateError('REMOTE_CARRIER_UNAVAILABLE');
+      }
+      if (!carrier.callable) {
+        await RustDeskHarnessShareService.launchHost(carrier.executable);
+      }
+      _remoteHostSummary = RustDeskHarnessShareService.inspect(
+        configuredExecutable: widget.rustDeskExecutable,
+      );
       await HarnessRemotePairingHost.instance.start();
       await _remoteHostRuntime.stop();
-      await _remoteHostRuntime.start(endpoint);
+      final bool started = await _remoteHostRuntime.start(endpoint);
+      if (!started) {
+        throw StateError('REMOTE_PAIRING_SCOPE_NOT_PERSISTED');
+      }
+      _startRemoteAuthorizationMonitor();
     } on Object catch (error) {
       // Remote assistance is optional and must not make the local Harness
       // unusable. Preserve a bounded diagnostic for the user instead.
       if (mounted) {
         setState(() => _status = 'Harness 已就绪；远程协助监听未启动：$error');
       }
+      rethrow;
     }
+  }
+
+  void _startRemoteAuthorizationMonitor() {
+    if (_remoteAuthorizationTimer != null || _disposing) return;
+    unawaited(_authorizeRememberedRemoteConnections());
+    _remoteAuthorizationTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => unawaited(_authorizeRememberedRemoteConnections()),
+    );
+  }
+
+  Future<void> _authorizeRememberedRemoteConnections() async {
+    if (_remoteAuthorizationInFlight ||
+        _disposing ||
+        !HarnessRemoteAccessSettings.enabled) {
+      return;
+    }
+    _remoteAuthorizationInFlight = true;
+    try {
+      // Registration can finish after application startup. A cached offline
+      // inspection would otherwise prevent remembered peers from ever being
+      // authorized until the settings dialog was opened manually.
+      final host = await RustDeskHarnessShareService.inspect(
+        configuredExecutable: widget.rustDeskExecutable,
+      );
+      _remoteHostSummary = Future<RustDeskHostInfo>.value(host);
+      if (!host.available || !host.callable || host.executable.isEmpty) return;
+      final rememberedIds = (await HarnessRemotePeerStore().load())
+          .where((peer) => peer.remembered && peer.connectionReady)
+          .map((peer) => peer.routingId)
+          .toSet();
+      if (rememberedIds.isEmpty) return;
+      final connections = await RustDeskHarnessShareService.connections(
+        host.executable,
+      );
+      for (final connection in connections) {
+        if (!connection.authorized &&
+            !connection.disconnected &&
+            rememberedIds.contains(connection.peerId)) {
+          await RustDeskHarnessShareService.decideConnection(
+            host.executable,
+            connectionId: connection.connectionId,
+            allow: true,
+          );
+        }
+      }
+    } on Object {
+      // The next bounded poll retries. Local Harness remains fully usable.
+    } finally {
+      _remoteAuthorizationInFlight = false;
+    }
+  }
+
+  Future<void> _startRemoteHostForCurrentSession() async {
+    final HarnessSessionHandle? session = _session;
+    if (session == null || !session.running) {
+      throw StateError('REMOTE_HARNESS_SESSION_NOT_READY');
+    }
+    await _startRemoteHost(session.url);
   }
 
   static String _workspaceLabel(String workspace) {
@@ -1196,6 +1292,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _disposing = true;
     _restartTimer?.cancel();
     _stabilityTimer?.cancel();
+    _remoteAuthorizationTimer?.cancel();
     if (_pointerDiagnostics) {
       GestureBinding.instance.pointerRouter.removeGlobalRoute(
         _recordFlutterPointer,
@@ -1207,7 +1304,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _loadingStateSubscription?.cancel();
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
-    unawaited(_remoteHostRuntime.stop());
+    // The app-wide remote endpoint is owned by the explicit assistance switch,
+    // not by this rebuildable workspace state.
     // The first-pair listener belongs to the application-level remote access
     // switch, not to this responsive workspace widget. A window resize, tab
     // change, or workspace rebuild must never make an enabled Mac disappear
@@ -1628,6 +1726,45 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
                   );
                 },
               ),
+            ),
+            StreamBuilder<RustDeskHarnessLinkSnapshot>(
+              stream: RustDeskHarnessLinkStatusHub.changes,
+              initialData: RustDeskHarnessLinkStatusHub.latest,
+              builder: (BuildContext context, snapshot) {
+                final link =
+                    snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                final (Color color, String label) = switch (link.phase) {
+                  RustDeskHarnessLinkPhase.connected => (Colors.green, '已连接'),
+                  RustDeskHarnessLinkPhase.clientFound ||
+                  RustDeskHarnessLinkPhase.handshaking => (
+                    Colors.orange,
+                    '连接中',
+                  ),
+                  RustDeskHarnessLinkPhase.incompatible ||
+                  RustDeskHarnessLinkPhase.stale => (Colors.red, '连接异常'),
+                  RustDeskHarnessLinkPhase.disconnected => (
+                    Colors.blue,
+                    '等待连接',
+                  ),
+                };
+                return Row(
+                  key: const Key('official-harness-remote-link-status'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(label, style: const TextStyle(fontSize: 12)),
+                    const SizedBox(width: 10),
+                  ],
+                );
+              },
             ),
             OutlinedButton.icon(
               key: const Key('official-harness-remote-assistance'),
@@ -2094,11 +2231,11 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         builder: (BuildContext context) => HarnessRemoteShareDialog(
           configuredExecutable: widget.rustDeskExecutable,
           webClientUrl: widget.rustDeskWebClientUrl,
-          onPaired: () async {
-            final session = _session;
-            if (session != null) await _startRemoteHost(session.url);
-          },
+          onPaired: _startRemoteHostForCurrentSession,
           onHostStopped: _remoteHostRuntime.stop,
+          localWorkspaceIds: () => <String>{
+            if (_activeRemoteWorkspaceId.isNotEmpty) _activeRemoteWorkspaceId,
+          },
         ),
       ),
     );
@@ -2486,6 +2623,7 @@ class HarnessRemoteShareDialog extends StatefulWidget {
     required this.onHostStopped,
     this.embedded = false,
     this.onConnectionChanged,
+    this.localWorkspaceIds,
   });
 
   final String configuredExecutable;
@@ -2494,6 +2632,7 @@ class HarnessRemoteShareDialog extends StatefulWidget {
   final Future<void> Function() onHostStopped;
   final bool embedded;
   final void Function(bool connected, String peerId)? onConnectionChanged;
+  final Set<String> Function()? localWorkspaceIds;
 
   @override
   State<HarnessRemoteShareDialog> createState() =>
@@ -2527,6 +2666,8 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   bool _forceRelay = false;
   bool _connecting = false;
   int _connectGeneration = 0;
+  DateTime? _remoteSessionConnectedAt;
+  DateTime? _lastAutomaticReconnectAt;
   String _message = '';
   HarnessRemoteControllerSession? _remoteSession;
 
@@ -2534,10 +2675,10 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   void initState() {
     super.initState();
     unawaited(_loadRemoteSettings());
-    _incomingTimer = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) => unawaited(_refreshIncoming()),
-    );
+    _incomingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshIncoming());
+      unawaited(_reconnectStaleRemoteSession());
+    });
   }
 
   @override
@@ -2629,13 +2770,45 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     }
   }
 
+  Future<void> _reconnectStaleRemoteSession() async {
+    final session = _remoteSession;
+    if (!mounted ||
+        !_remoteEnabled ||
+        _connecting ||
+        session == null ||
+        !session.model.stale) {
+      return;
+    }
+    final now = DateTime.now();
+    // A new model starts stale until its first authenticated snapshot lands.
+    // Do not tear down that healthy initial handshake.  Once a previously
+    // synchronized carrier goes stale, retry silently with a bounded cadence.
+    if (_remoteSessionConnectedAt case final connectedAt?
+        when now.difference(connectedAt) < const Duration(seconds: 4)) {
+      return;
+    }
+    if (_lastAutomaticReconnectAt case final attemptedAt?
+        when now.difference(attemptedAt) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastAutomaticReconnectAt = now;
+    final host = await _inspectHost();
+    if (!mounted || _remoteSession != session || !session.model.stale) return;
+    await _connectRemote(host, automatic: true);
+  }
+
   Future<void> _loadRemoteSettings() async {
     if (Platform.environment['FLUTTER_TEST'] == 'true') return;
-    final password = await _accessSettings.loadPassword();
+    final values = await Future.wait<Object>([
+      _accessSettings.loadPassword(),
+      _accessSettings.loadEnabled(),
+    ]);
+    final password = values[0] as String;
+    final enabled = values[1] as bool;
     if (!mounted) return;
     setState(() {
       _localPassword.text = password;
-      _remoteEnabled = HarnessRemoteAccessSettings.enabled;
+      _remoteEnabled = enabled;
     });
     if (widget.embedded && !_remoteEnabled) {
       final host = await _host;
@@ -2684,14 +2857,21 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   Future<void> _launchHost(RustDeskHostInfo host) async {
     try {
       await _accessSettings.savePassword(_localPassword.text);
-      HarnessRemoteAccessSettings.setEnabled(true);
+      await _accessSettings.saveEnabled(true);
       await HarnessRemotePairingHost.instance.start();
       await RustDeskHarnessShareService.launchHost(host.executable);
-      // Opening assistance is the explicit user authorization boundary. Start
-      // the application protocol host even when this installation has never
-      // paired before; otherwise a first-time controller can resolve the
-      // routing ID but has no mTLS/hello endpoint to connect to.
-      await widget.onPaired();
+      // Always ask the execution runtime to start.  It owns the authoritative
+      // credential check and returns REMOTE_PAIRING_SCOPE_NOT_PERSISTED when
+      // this is a genuine first-use wait.  Duplicating that check here caused
+      // an enabled-looking UI with no 32146 listener after a remembered peer
+      // had already been approved.
+      try {
+        await widget.onPaired();
+      } on StateError catch (error) {
+        if (!error.toString().contains('REMOTE_PAIRING_SCOPE_NOT_PERSISTED')) {
+          rethrow;
+        }
+      }
       RustDeskHarnessLinkStatusHub.clientFound();
       if (mounted) {
         setState(() {
@@ -2708,7 +2888,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
 
   Future<void> _stopHost() async {
     try {
-      HarnessRemoteAccessSettings.setEnabled(false);
+      await _accessSettings.saveEnabled(false);
       await _disconnectRemote();
       await HarnessRemotePairingHost.instance.stop();
       await widget.onHostStopped();
@@ -2733,7 +2913,10 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     }
   }
 
-  Future<void> _connectRemote(RustDeskHostInfo host) async {
+  Future<void> _connectRemote(
+    RustDeskHostInfo host, {
+    bool automatic = false,
+  }) async {
     if (_connecting) return;
     if (!_remoteEnabled) {
       setState(() => _message = '请先打开远程协助模式');
@@ -2742,7 +2925,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     final int generation = ++_connectGeneration;
     setState(() {
       _connecting = true;
-      _message = '正在建立 Harness ${_forceRelay ? '强制中继' : '直连/中继'}数据通道…';
+      _message = automatic
+          ? '远程通道短暂中断，正在后台自动重连…'
+          : '正在建立 Harness ${_forceRelay ? '强制中继' : '直连/中继'}数据通道…';
     });
     try {
       await _remoteSession?.close();
@@ -2754,9 +2939,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       var reconnectingRememberedPeer = false;
       if (matching.isEmpty || !matching.first.connectionReady) {
         final workspaceId = _remoteWorkspaceId.text.trim();
-        if (workspaceId.isEmpty) {
-          throw StateError('REMOTE_PAIRING_REQUIRED：首次连接请输入执行端显示的工作区 ID');
-        }
         if (!host.callable || host.id.isEmpty) {
           throw StateError('本机 Harness ID 尚未完成中继注册，不能发起配对');
         }
@@ -2764,7 +2946,11 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
           executable: host.executable,
           localRoutingId: host.id,
           remoteRoutingId: routingId,
-          requestedWorkspaceIds: <String>{workspaceId},
+          requestedWorkspaceIds: <String>{
+            workspaceId.isEmpty
+                ? HarnessRemotePairingRequest.currentWorkspaceCatalogScope
+                : workspaceId,
+          },
           requestedOperations: HarnessRemoteExecution.sessionOperations,
           forceRelay: _forceRelay,
           password: _remotePassword.text,
@@ -2823,6 +3009,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       }
       setState(() {
         _remoteSession = session;
+        _remoteSessionConnectedAt = DateTime.now();
         _message = '端到端证书与 Harness hello 已通过，正在同步远端项目状态';
       });
       widget.onConnectionChanged?.call(true, peer.routingId);
@@ -2834,7 +3021,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       }
     } on Object catch (error) {
       if (mounted && generation == _connectGeneration) {
-        setState(() => _message = '连接失败：$error');
+        setState(() {
+          _message = automatic ? '后台重连未成功，将自动继续尝试' : '连接失败：$error';
+        });
       }
     } finally {
       if (mounted && generation == _connectGeneration) {
@@ -2865,6 +3054,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     if (session == null) return;
     setState(() {
       _remoteSession = null;
+      _remoteSessionConnectedAt = null;
       _message = '正在断开 Harness 数据通道…';
     });
     await session.close();
@@ -2890,10 +3080,19 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       if (!nativeAuthorized) {
         throw StateError('PAIRING_NATIVE_CALLER_NOT_AUTHORIZED');
       }
+      var grantedWorkspaceIds = pending.request.requestedWorkspaceIds;
+      if (grantedWorkspaceIds.contains(
+        HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
+      )) {
+        grantedWorkspaceIds = widget.localWorkspaceIds?.call() ?? const {};
+        if (grantedWorkspaceIds.isEmpty) {
+          throw StateError('PAIRING_LOCAL_WORKSPACE_UNAVAILABLE');
+        }
+      }
       final approval = await HarnessRemotePairingHost.instance.approve(
         nonce: pending.request.nonce,
         hostRoutingId: host.id,
-        grantedWorkspaceIds: pending.request.requestedWorkspaceIds,
+        grantedWorkspaceIds: grantedWorkspaceIds,
         grantedOperations: pending.request.requestedOperations.intersection(
           HarnessRemoteExecution.sessionOperations,
         ),
@@ -3040,7 +3239,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                       _remoteEnabled && !_connecting && _remoteSession == null,
                   decoration: const InputDecoration(
                     labelText: '首次授权工作区 ID',
-                    helperText: '执行端会再次确认最小授权范围',
+                    helperText: '可选；留空时由执行端确认其当前项目列表',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -3066,11 +3265,26 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                         subtitle: Text(
                           '${peer.lastTransport == 'relay' ? '中继' : '直连'} · ${peer.workspaceIds.length} 个工作区',
                         ),
-                        trailing: FilledButton.tonal(
-                          onPressed: _remoteEnabled && !_connecting
-                              ? () => _connectRemembered(host, peer)
-                              : null,
-                          child: const Text('连接'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            FilledButton.tonal(
+                              onPressed: _remoteEnabled && !_connecting
+                                  ? () => _connectRemembered(host, peer)
+                                  : null,
+                              child: const Text('连接'),
+                            ),
+                            IconButton(
+                              key: Key(
+                                'harness-coordination-forget-${peer.routingId}',
+                              ),
+                              tooltip: '移除失效配对记录',
+                              onPressed: _remoteEnabled && !_connecting
+                                  ? () => _forgetPeer(peer.routingId)
+                                  : null,
+                              icon: const Icon(Icons.delete_outline_rounded),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -3084,6 +3298,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
               child: HarnessRemoteReadOnlyPanel(
                 peerRoutingId: _remoteSession!.peer.routingId,
                 model: _remoteSession!.model,
+                onReconnect: () => unawaited(_connectRemote(host)),
                 onDisconnect: () => unawaited(_disconnectRemote()),
               ),
             ),
@@ -3132,50 +3347,51 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
           ],
         );
 
-  Widget _buildPendingPairings(RustDeskHostInfo host) =>
-      StreamBuilder<List<HarnessRemotePendingPairing>>(
-        stream: HarnessRemotePairingHost.instance.changes,
-        initialData: HarnessRemotePairingHost.instance.pending,
-        builder: (context, snapshot) {
-          final rows = snapshot.data ?? const [];
-          if (rows.isEmpty) return const SizedBox.shrink();
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const SizedBox(height: 10),
-              Text('首次证书配对', style: Theme.of(context).textTheme.titleSmall),
-              for (final pending in rows)
-                ListTile(
-                  key: Key('harness-pairing-${pending.request.nonce}'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('调用方 ${pending.request.routingId}'),
-                  subtitle: Text(
-                    '工作区：${pending.request.requestedWorkspaceIds.join(', ')}\n'
-                    '证书：${pending.request.certificateSha256.substring(0, 16)}…',
-                  ),
-                  trailing: Wrap(
-                    spacing: 6,
-                    children: <Widget>[
-                      TextButton(
-                        onPressed: () => unawaited(
-                          HarnessRemotePairingHost.instance.reject(
-                            pending.request.nonce,
-                          ),
-                        ),
-                        child: const Text('拒绝'),
+  Widget _buildPendingPairings(
+    RustDeskHostInfo host,
+  ) => StreamBuilder<List<HarnessRemotePendingPairing>>(
+    stream: HarnessRemotePairingHost.instance.changes,
+    initialData: HarnessRemotePairingHost.instance.pending,
+    builder: (context, snapshot) {
+      final rows = snapshot.data ?? const [];
+      if (rows.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const SizedBox(height: 10),
+          Text('首次证书配对', style: Theme.of(context).textTheme.titleSmall),
+          for (final pending in rows)
+            ListTile(
+              key: Key('harness-pairing-${pending.request.nonce}'),
+              contentPadding: EdgeInsets.zero,
+              title: Text('调用方 ${pending.request.routingId}'),
+              subtitle: Text(
+                '工作区：${pending.request.requestedWorkspaceIds.contains(HarnessRemotePairingRequest.currentWorkspaceCatalogScope) ? '本机当前项目列表' : pending.request.requestedWorkspaceIds.join(', ')}\n'
+                '证书：${pending.request.certificateSha256.substring(0, 16)}…',
+              ),
+              trailing: Wrap(
+                spacing: 6,
+                children: <Widget>[
+                  TextButton(
+                    onPressed: () => unawaited(
+                      HarnessRemotePairingHost.instance.reject(
+                        pending.request.nonce,
                       ),
-                      FilledButton(
-                        onPressed: () => _approvePairing(host, pending),
-                        child: const Text('确认并记住'),
-                      ),
-                    ],
+                    ),
+                    child: const Text('拒绝'),
                   ),
-                ),
-              const Divider(),
-            ],
-          );
-        },
+                  FilledButton(
+                    onPressed: () => _approvePairing(host, pending),
+                    child: const Text('确认并记住'),
+                  ),
+                ],
+              ),
+            ),
+          const Divider(),
+        ],
       );
+    },
+  );
 
   Widget _buildNativeConnections(
     RustDeskHostInfo host,
@@ -3671,6 +3887,8 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                               child: HarnessRemoteReadOnlyPanel(
                                 peerRoutingId: _remoteSession!.peer.routingId,
                                 model: _remoteSession!.model,
+                                onReconnect: () =>
+                                    unawaited(_connectRemote(host)),
                                 onDisconnect: () =>
                                     unawaited(_disconnectRemote()),
                               ),

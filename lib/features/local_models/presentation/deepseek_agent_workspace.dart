@@ -185,7 +185,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _coordinationConnected = false;
   String _coordinationPeerId = '';
   final HarnessRemoteHostRuntime _remoteHostRuntime =
-      HarnessRemoteHostRuntime();
+      HarnessRemoteHostRuntime.shared;
   late Future<RustDeskHostInfo> _remoteHostSummary;
 
   String _sessionRunKey(String workspace, String sessionId) =>
@@ -421,7 +421,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     if (workStatusContext != null) {
       HarnessWorkStatusHub.clearWorkspace(workStatusContext);
     }
-    unawaited(_remoteHostRuntime.stop());
+    // The app-wide remote endpoint is stopped only by the explicit assistance
+    // switch. Responsive/project rebuilds must not drop an active PAD session.
     // Pairing is application-scoped. Responsive rebuilds and workspace/tab
     // disposal must not tear down an enabled execution endpoint; only the
     // explicit remote-assistance switch may stop the singleton listener.
@@ -2429,6 +2430,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       webClientUrl: widget.rustDeskWebClientUrl,
                       onPaired: _startDeepSeekRemoteHost,
                       onHostStopped: _stopDeepSeekRemoteHost,
+                      localWorkspaceIds: () => _workspaceCatalog
+                          .where((workspace) => workspace.trim().isNotEmpty)
+                          .toSet(),
                       embedded: true,
                       onConnectionChanged: (bool connected, String peerId) {
                         if (!mounted) return;
@@ -2721,6 +2725,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         webClientUrl: widget.rustDeskWebClientUrl,
         onPaired: _startDeepSeekRemoteHost,
         onHostStopped: _stopDeepSeekRemoteHost,
+        localWorkspaceIds: () => _workspaceCatalog
+            .where((workspace) => workspace.trim().isNotEmpty)
+            .toSet(),
       ),
     );
     if (mounted) {
@@ -2733,7 +2740,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _startDeepSeekRemoteHost() async {
-    if (_remoteHostRuntime.running) return;
+    if (_remoteHostRuntime.running) await _remoteHostRuntime.stop();
     final HarnessCallbackRemoteAdapter adapter = HarnessCallbackRemoteAdapter(
       _handleRemoteApiRequest,
     );

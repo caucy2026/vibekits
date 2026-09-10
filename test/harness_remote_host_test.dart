@@ -58,34 +58,49 @@ void main() {
       var cancelCalls = 0;
       server.listen((request) async {
         if (WebSocketTransformer.isUpgradeRequest(request)) {
-          websockets.add(await WebSocketTransformer.upgrade(request));
+          final socket = await WebSocketTransformer.upgrade(request);
+          websockets.add(socket);
+          socket.listen((raw) {
+            final open = jsonDecode(raw as String) as Map;
+            final endpoint = open['endpoint'];
+            if (endpoint == 'workspace/follow') {
+              socket.add(
+                jsonEncode({
+                  'type': 'item',
+                  'streamId': open['streamId'],
+                  'value': {
+                    'type': 'baseline',
+                    'value': {
+                      'items': [
+                        {
+                          'workspaceId': 'w',
+                          'path': '/visible',
+                          'title': 'Visible',
+                          'sessionIds': ['s'],
+                        },
+                        {
+                          'workspaceId': 'secret',
+                          'path': '/hidden',
+                          'title': 'Hidden',
+                          'sessionIds': ['other'],
+                        },
+                      ],
+                      'archivedSessionIds': [],
+                    },
+                  },
+                }),
+              );
+            }
+          });
           return;
         }
         final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
         Map<String, Object?> result = {'ok': true, 'value': {}};
-        if (body['method'] == 'workspace.list') {
-          result = {
-            'ok': true,
-            'value': {
-              'items': [
-                {
-                  'workspaceId': 'w',
-                  'title': 'Visible',
-                  'sessionIds': ['s'],
-                },
-                {
-                  'workspaceId': 'secret',
-                  'title': 'Hidden',
-                  'sessionIds': ['other'],
-                },
-              ],
-            },
-          };
-        } else if (body['method'] == 'session.prompt') {
+        if (body['method'] == 'session/prompt') {
           promptCalls++;
           promptEntered.complete();
           await finishPrompt.future;
-        } else if (body['method'] == 'session.cancel') {
+        } else if (body['method'] == 'session/cancel') {
           cancelCalls++;
         }
         request.response.headers.contentType = ContentType.json;

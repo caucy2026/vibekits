@@ -20,6 +20,10 @@ final class HarnessRemoteHostRuntime {
   }) : _identityStore = identityStore ?? HarnessRemoteIdentityStore.instance,
        _peerStore = peerStore ?? HarnessRemotePeerStore();
 
+  /// App-wide owner for the single loopback execution endpoint. Workspace
+  /// widgets may be rebuilt without ending an authorized remote session.
+  static final HarnessRemoteHostRuntime shared = HarnessRemoteHostRuntime();
+
   static const port = 32146;
   final HarnessRemoteIdentityStore _identityStore;
   final HarnessRemotePeerStore _peerStore;
@@ -57,11 +61,15 @@ final class HarnessRemoteHostRuntime {
     final host = HarnessRemoteHost(adapter: adapter, ledger: ledger);
     try {
       for (final peer in peers) {
+        final workspaceIds = await host.inventory.resolveWorkspaceScopes(
+          peer.workspaceIds,
+        );
+        if (workspaceIds.isEmpty) continue;
         host.approveCertificate(
           peer.certificateSha256,
           HarnessRemoteGrant(
             peerId: peer.deviceId,
-            workspaceIds: peer.workspaceIds,
+            workspaceIds: workspaceIds,
             operations: peer.operations,
           ),
         );

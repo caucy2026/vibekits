@@ -6,6 +6,9 @@ import '../lib/features/dev_tools/domain/harness_remote_workspace_client.dart';
 import '../lib/features/dev_tools/domain/harness_remote_view_model.dart';
 
 class _Channel implements HarnessRemoteChannel {
+  _Channel({this.live = true});
+
+  final bool live;
   final incoming = StreamController<String>();
   @override
   String get authenticatedPeerId => 'peer';
@@ -31,7 +34,7 @@ class _Channel implements HarnessRemoteChannel {
       },
       _ => {
         'ok': true,
-        'live': true,
+        'live': live,
         'epoch': 'epoch',
         'sequence': 0,
         'workspaces': [
@@ -119,6 +122,34 @@ void main() {
         expect(model.workspaces, isEmpty);
       } finally {
         model.dispose();
+      }
+    },
+  );
+
+  test(
+    'successful polling is connected when official event stream is offline',
+    () async {
+      final connection = HarnessRemoteConnection(_Channel(live: false));
+      final synchronized = Completer<void>();
+      final model = HarnessRemoteViewModel(
+        HarnessRemoteWorkspaceClient(connection),
+        applyOfficialEvents: (_) async {},
+        restoreOfficialSnapshot: (_) async {},
+      );
+      model.addListener(() {
+        if (!model.stale && !synchronized.isCompleted) {
+          synchronized.complete();
+        }
+      });
+      try {
+        model.start();
+        await synchronized.future.timeout(const Duration(seconds: 2));
+        expect(model.stale, isFalse);
+        expect(model.eventStreamLive, isFalse);
+        expect(model.workspaces.single['workspaceId'], 'w');
+      } finally {
+        model.dispose();
+        await connection.close();
       }
     },
   );

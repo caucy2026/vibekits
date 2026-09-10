@@ -83,6 +83,11 @@ void main() {
     );
     expect(moduleHost, contains('process.env.VIBEKITS_DSH_WEB_DIST_INDEX'));
     expect(moduleHost, contains('.replace(/\\.js\$/, ".macos12.js")'));
+    expect(
+      moduleHost,
+      contains('const MAX_COMBO_ENTRIES = 1;'),
+      reason: 'WKWebView must receive singleton plugin script batches',
+    );
   });
 
   test('macOS 12 frontend installs legacy WebKit polyfills before boot', () {

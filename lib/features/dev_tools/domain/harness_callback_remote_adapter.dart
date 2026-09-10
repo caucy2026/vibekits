@@ -51,6 +51,20 @@ final class HarnessCallbackRemoteAdapter implements HarnessRemoteApiAdapter {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> workspaceSnapshot() async {
+    final result = await _handler('workspace.list', <String, dynamic>{});
+    final value = result['value'];
+    final items = value is Map ? value['items'] : null;
+    if (result['ok'] != true || items is! List) {
+      throw StateError('REMOTE_INVENTORY_UNAVAILABLE');
+    }
+    return [
+      for (final item in items)
+        if (item is Map) Map<String, dynamic>.from(item),
+    ];
+  }
+
+  @override
   Stream<Map<String, dynamic>> events({
     bool host = false,
     void Function()? onConnected,

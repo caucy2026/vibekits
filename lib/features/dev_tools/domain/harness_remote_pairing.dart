@@ -9,6 +9,12 @@ import 'harness_remote_peer_store.dart';
 /// byte tunnel. The six-digit comparison code binds both routing identities,
 /// both certificates and a fresh nonce so a substituted endpoint is visible.
 final class HarnessRemotePairingRequest {
+  /// The controller does not know the execution device's private workspace
+  /// paths before pairing. This reserved request asks the approving device to
+  /// resolve its currently visible workspace catalog at approval time.
+  static const String currentWorkspaceCatalogScope =
+      '@vibekits/current-workspace-catalog';
+
   HarnessRemotePairingRequest({
     required this.routingId,
     required this.deviceId,
@@ -186,7 +192,10 @@ final class HarnessRemotePairingApproval {
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(hostRoutingId) ||
         !RegExp(r'^VH-[A-F0-9]{16,64}$').hasMatch(hostDeviceId) ||
         hostDeviceId != expectedHostDeviceId ||
-        !request.requestedWorkspaceIds.containsAll(grantedWorkspaceIds) ||
+        !(request.requestedWorkspaceIds.contains(
+              HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
+            ) ||
+            request.requestedWorkspaceIds.containsAll(grantedWorkspaceIds)) ||
         !request.requestedOperations.containsAll(grantedOperations) ||
         grantedWorkspaceIds.isEmpty ||
         grantedOperations.isEmpty) {

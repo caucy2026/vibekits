@@ -11,10 +11,23 @@ void main() {
       write: (key, value) async => values[key] = value,
     );
     expect(HarnessRemoteAccessSettings.enabled, isFalse);
+    expect(await settings.loadEnabled(), isFalse);
     expect(
       await settings.loadPassword(),
       HarnessRemoteAccessSettings.defaultPassword,
     );
+  });
+
+  test('用户打开远程协助后重启仍自动恢复', () async {
+    final values = <String, String>{};
+    HarnessRemoteAccessSettings settings() => HarnessRemoteAccessSettings(
+      read: (key) async => values[key],
+      write: (key, value) async => values[key] = value,
+    );
+    await settings().saveEnabled(true);
+    HarnessRemoteAccessSettings.setEnabled(false);
+    expect(await settings().loadEnabled(), isTrue);
+    expect(HarnessRemoteAccessSettings.enabled, isTrue);
   });
 
   test('用户可修改密码但短密码不落盘', () async {

@@ -77,4 +77,25 @@ void main() {
       isTrue,
     );
   });
+
+  test('正式远程数据通道连接保持绿灯且不被状态订阅降级', () {
+    RustDeskHarnessLinkStatusHub.remoteDataConnected('VH-controller');
+    expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
+    expect(
+      RustDeskHarnessLinkStatusHub.acceptHandshake(<String, Object?>{
+        'protocol': RustDeskHarnessLinkStatusHub.protocol,
+        'versions': <int>[1],
+        'peerId': 'status-observer',
+      }),
+      isTrue,
+    );
+    expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
+    RustDeskHarnessLinkStatusHub.disconnected(reason: 'KEMI远程办公状态订阅已断开');
+    expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
+    RustDeskHarnessLinkStatusHub.remoteDataDisconnected('VH-controller');
+    expect(
+      RustDeskHarnessLinkStatusHub.latest.phase,
+      RustDeskHarnessLinkPhase.disconnected,
+    );
+  });
 }

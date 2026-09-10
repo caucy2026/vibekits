@@ -13,6 +13,8 @@ class HarnessRemoteServerConnection {
     required this.channel,
     required this.execution,
     this.readState,
+    this.onNegotiated,
+    this.onHeartbeat,
   }) {
     if (channel.authenticatedPeerId.isEmpty) {
       throw ArgumentError('Remote channel is not authenticated');
@@ -34,6 +36,8 @@ class HarnessRemoteServerConnection {
     Map<String, dynamic> request,
   )?
   readState;
+  final void Function(String peerId)? onNegotiated;
+  final void Function(String peerId)? onHeartbeat;
   late final StreamSubscription<String> _subscription;
   final Set<String> _pending = {};
   Future<void> _outbound = Future<void>.value();
@@ -81,6 +85,7 @@ class HarnessRemoteServerConnection {
           payload['protocol'] == 'vibekits.harness.remote' &&
           payload['minVersion'] == 1 &&
           payload['maxVersion'] == 1) {
+        onNegotiated?.call(channel.authenticatedPeerId);
         response = {
           'ok': true,
           'protocol': 'vibekits.harness.remote',
@@ -96,6 +101,7 @@ class HarnessRemoteServerConnection {
         };
       } else if (payload['kind'] == 'heartbeat' &&
           payload['connectionId'] == _connectionId) {
+        onHeartbeat?.call(channel.authenticatedPeerId);
         response = {
           'ok': true,
           'connectionId': _connectionId,

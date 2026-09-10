@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'harness_official_remote_adapter.dart';
 
 /// Reads the authoritative official workspace registry. No local project names
@@ -7,32 +5,12 @@ import 'harness_official_remote_adapter.dart';
 class HarnessRemoteInventory {
   HarnessRemoteInventory(this.adapter);
   final HarnessRemoteApiAdapter adapter;
-  final Random _random = Random.secure();
-
   Future<List<Map<String, dynamic>>> _workspaces() async {
-    final id = List.generate(
-      24,
-      (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-    final response = await adapter.request({
-      'type': 'client-request',
-      'rpcId': id,
-      'method': 'workspace.list',
-      'payload': <String, Object?>{},
-    });
-    final result = response['result'];
-    if (result is! Map || result['ok'] != true) {
-      throw StateError('REMOTE_INVENTORY_UNAVAILABLE');
-    }
-    final value = result['value'];
-    if (value is! Map || value['items'] is! List) {
-      throw const FormatException('Unsupported official workspace inventory');
-    }
+    final items = await adapter.workspaceSnapshot();
     final rows = <Map<String, dynamic>>[];
     final ids = <String>{};
-    for (final row in value['items'] as List) {
-      if (row is! Map<String, dynamic> ||
-          row['workspaceId'] is! String ||
+    for (final row in items) {
+      if (row['workspaceId'] is! String ||
           row['title'] is! String ||
           row['sessionIds'] is! List ||
           !(row['sessionIds'] as List).every((id) => id is String) ||
@@ -52,6 +30,14 @@ class HarnessRemoteInventory {
     if (matches.length != 1) return null;
     return matches.single['workspaceId'] as String;
   }
+
+  /// Resolve persisted user-visible path scopes into this DSH generation's
+  /// opaque Workspace IDs. IDs are also accepted for forward compatibility.
+  Future<Set<String>> resolveWorkspaceScopes(Set<String> scopes) async => {
+    for (final row in await _workspaces())
+      if (scopes.contains(row['workspaceId']) || scopes.contains(row['path']))
+        row['workspaceId'] as String,
+  };
 
   Future<List<Map<String, dynamic>>> visibleWorkspaces(
     Set<String> authorizedWorkspaceIds,

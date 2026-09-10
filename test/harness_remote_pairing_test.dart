@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/features/dev_tools/domain/harness_remote_identity.dart';
@@ -92,5 +94,45 @@ void main() {
       }),
       throwsFormatException,
     );
+  });
+
+  test('控制端只输入设备 ID 时由执行端解析当前项目范围', () async {
+    Future<HarnessRemoteIdentity> identity(String prefix) {
+      final credentials = <String, String>{};
+      return HarnessRemoteIdentityStore(
+        read: (key) async => credentials['$prefix:$key'],
+        write: (key, value) async => credentials['$prefix:$key'] = value,
+      ).loadOrCreate();
+    }
+
+    final controller = await identity('controller-catalog');
+    final host = await identity('host-catalog');
+    final request = HarnessRemotePairingRequest.create(
+      routingId: '9464730211',
+      deviceId: controller.deviceId,
+      certificatePem: controller.certificatePem,
+      requestedWorkspaceIds: const {
+        HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
+      },
+      requestedOperations: const {'session.history', 'session.prompt'},
+      password: '12345678',
+      random: Random(7),
+    );
+    final approval = HarnessRemotePairingApproval(
+      request: request,
+      hostRoutingId: '1554650784',
+      hostDeviceId: host.deviceId,
+      hostCertificatePem: host.certificatePem,
+      grantedWorkspaceIds: const {'/Volumes/ORICO/newlink-new/vibekits'},
+      grantedOperations: const {'session.history', 'session.prompt'},
+      approvedAt: DateTime.utc(2026, 9, 10, 3),
+    );
+
+    expect(approval.hostRecord(remembered: true).workspaceIds, const {
+      '/Volumes/ORICO/newlink-new/vibekits',
+    });
+    expect(approval.controllerRecord(remembered: true).workspaceIds, const {
+      '/Volumes/ORICO/newlink-new/vibekits',
+    });
   });
 }

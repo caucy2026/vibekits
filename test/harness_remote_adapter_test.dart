@@ -12,20 +12,30 @@ void main() {
   test('official WebSocket downlink retains task payload', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final adapter = HarnessOfficialRemoteAdapter(
-      Uri.parse('http://127.0.0.1:${server.port}'),
+      Uri.parse('http://127.0.0.1:${server.port}/?token=local-ui-secret'),
     );
     server.listen((request) async {
-      expect(request.uri.path, '/api/events.mux');
+      if (request.uri.path == '/') {
+        expect(request.uri.queryParameters['token'], 'local-ui-secret');
+        request.response.cookies.add(Cookie('dsh_session', 'signed'));
+        request.response.statusCode = HttpStatus.found;
+        await request.response.close();
+        return;
+      }
+      expect(request.uri.path, '/api/remote.mux');
+      expect(request.uri.hasQuery, isFalse);
+      expect(request.cookies.single.value, 'signed');
       final socket = await WebSocketTransformer.upgrade(request);
+      final open = jsonDecode(await socket.first as String) as Map;
+      expect(open['endpoint'], r'$events');
       socket.add(
         jsonEncode({
-          'type': 'server-request',
-          'rpcId': 'event1',
-          'method': 'session/event',
-          'payload': {
-            'type': 'session/event',
-            'sessionId': 's',
-            'event': {'text': 'progress'},
+          'type': 'item',
+          'streamId': open['streamId'],
+          'value': {
+            'type': 'emit',
+            'event': 'api-session/status',
+            'args': ['s', true],
           },
         }),
       );
@@ -35,7 +45,7 @@ void main() {
       final event = await adapter.events().first.timeout(
         const Duration(seconds: 5),
       );
-      expect(event['rpcId'], 'event1');
+      expect(event['method'], 'api-session/status');
       expect((event['payload'] as Map)['sessionId'], 's');
     } finally {
       await adapter.close();
@@ -71,14 +81,14 @@ void main() {
         id: 'cmd',
         workspaceId: 'w',
         sessionId: 's',
-        operation: 'session.history',
+        operation: 'session.cancel',
         arguments: {'sessionId': 's'},
       );
       execution.grant(
         HarnessRemoteGrant(
           peerId: 'peer',
           workspaceIds: {'w'},
-          operations: {'session.history'},
+          operations: {'session.cancel'},
         ),
       );
       try {
@@ -106,11 +116,20 @@ void main() {
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final adapter = HarnessOfficialRemoteAdapter(
-        Uri.parse('http://127.0.0.1:${server.port}'),
+        Uri.parse('http://127.0.0.1:${server.port}/?token=local-ui-secret'),
       );
       var mismatch = false;
       server.listen((request) async {
-        expect(request.uri.path, '/api/session.history');
+        if (request.uri.path == '/') {
+          expect(request.uri.queryParameters['token'], 'local-ui-secret');
+          request.response.cookies.add(Cookie('dsh_session', 'signed'));
+          request.response.statusCode = HttpStatus.found;
+          await request.response.close();
+          return;
+        }
+        expect(request.uri.path, '/api/session/cancel');
+        expect(request.uri.hasQuery, isFalse);
+        expect(request.cookies.single.value, 'signed');
         final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
         request.response.headers.contentType = ContentType.json;
         request.response.write(
@@ -128,7 +147,7 @@ void main() {
       final message = <String, dynamic>{
         'type': 'client-request',
         'rpcId': 'one',
-        'method': 'session.history',
+        'method': 'session.cancel',
         'payload': {'sessionId': 'session'},
       };
       try {
@@ -149,13 +168,33 @@ void main() {
       'http://192.168.3.63:1234',
       'http://user:secret@127.0.0.1:1234',
       'http://127.0.0.1:1234/api',
+      'http://127.0.0.1:1234/#fragment',
     ]) {
       expect(
         () => HarnessOfficialRemoteAdapter(Uri.parse(url)),
         throwsArgumentError,
       );
     }
+    for (final url in [
+      'http://127.0.0.1:1234/?other=value',
+      'http://127.0.0.1:1234/?token=',
+    ]) {
+      expect(
+        () => HarnessOfficialRemoteAdapter(Uri.parse(url)),
+        throwsFormatException,
+      );
+    }
   });
+
+  test(
+    'normalizes the official Harness localhost endpoint to IPv4 loopback',
+    () {
+      final adapter = HarnessOfficialRemoteAdapter(
+        Uri.parse('http://localhost:55001/?token=local-ui-secret'),
+      );
+      expect(adapter.endpoint, Uri.parse('http://127.0.0.1:55001'));
+    },
+  );
 
   test('scoped batches advance over hidden events without leaking them', () {
     final log = HarnessRemoteEventLog(epoch: 'e');

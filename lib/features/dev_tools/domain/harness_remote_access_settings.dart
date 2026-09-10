@@ -6,9 +6,9 @@ typedef HarnessRemoteSecretReader = Future<String?> Function(String key);
 typedef HarnessRemoteSecretWriter =
     Future<void> Function(String key, String value);
 
-/// Process-lifetime remote-assistance gate plus the locally protected pairing
-/// password. The gate deliberately starts disabled after every application
-/// launch; showing the registered routing ID does not grant protocol access.
+/// Persistent remote-assistance gate plus the locally protected pairing
+/// password. A user's explicit choice survives an application restart; actual
+/// access still requires the remembered certificate and scoped peer grant.
 final class HarnessRemoteAccessSettings {
   HarnessRemoteAccessSettings({
     HarnessRemoteSecretReader? read,
@@ -18,6 +18,7 @@ final class HarnessRemoteAccessSettings {
 
   static const String defaultPassword = '12345678';
   static const String _passwordKey = 'harness-remote-v1-password';
+  static const String _enabledKey = 'harness-remote-v1-enabled';
   static final StreamController<bool> _changes =
       StreamController<bool>.broadcast();
   static bool _enabled = false;
@@ -32,6 +33,18 @@ final class HarnessRemoteAccessSettings {
     if (_enabled == value) return;
     _enabled = value;
     _changes.add(value);
+  }
+
+  Future<bool> loadEnabled() async {
+    final value = (await _read(_enabledKey))?.trim().toLowerCase();
+    final enabled = value == 'true';
+    setEnabled(enabled);
+    return enabled;
+  }
+
+  Future<void> saveEnabled(bool value) async {
+    await _write(_enabledKey, value ? 'true' : 'false');
+    setEnabled(value);
   }
 
   Future<String> loadPassword() async {

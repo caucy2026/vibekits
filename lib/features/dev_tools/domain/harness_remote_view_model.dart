@@ -18,7 +18,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
       if (state != HarnessRemoteConnectionState.connected) {
         _generation++;
         _cursor.disconnected();
-        _live = false;
+        _eventStreamLive = false;
         if (!_disposed) notifyListeners();
       }
     });
@@ -40,11 +40,15 @@ class HarnessRemoteViewModel extends ChangeNotifier {
   DateTime? _lastHeartbeat;
   DateTime? _lastSnapshot;
   int _generation = 0;
-  bool _live = false;
+  // `live` describes the optional official DSH event stream, not the
+  // authenticated Harness transport. Snapshot polling is still current when
+  // that upstream stream is unavailable.
+  bool _eventStreamLive = false;
   Duration? _roundTrip;
   String? _error;
   List<Map<String, dynamic>> _workspaces = const [];
-  bool get stale => _cursor.stale || !_live;
+  bool get stale => _cursor.stale;
+  bool get eventStreamLive => _eventStreamLive;
   Duration? get roundTrip => _roundTrip;
   String? get error => _error;
   List<Map<String, dynamic>> get workspaces => _workspaces;
@@ -97,7 +101,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
       if (result['ok'] != true) throw StateError('REMOTE_STATE_UNAVAILABLE');
       if (result['snapshotRequired'] == true) {
         _cursor.connected();
-        _live = false;
+        _eventStreamLive = false;
         return;
       }
       final epoch = result['epoch'];
@@ -151,7 +155,7 @@ class HarnessRemoteViewModel extends ChangeNotifier {
         );
         if (decision == HarnessRemoteEventDecision.snapshotRequired) {
           _cursor.connected();
-          _live = false;
+          _eventStreamLive = false;
           return;
         }
         if (decision == HarnessRemoteEventDecision.apply) {
@@ -165,14 +169,14 @@ class HarnessRemoteViewModel extends ChangeNotifier {
           );
         }
       }
-      _live = result['live'] == true;
+      _eventStreamLive = result['live'] == true;
       _roundTrip = watch.elapsed;
       _error = null;
     } catch (_) {
       if (!_disposed) {
         _negotiated = false;
         _lastHeartbeat = null;
-        _live = false;
+        _eventStreamLive = false;
         _error = '远程状态同步中断，保留最后记录';
         _cursor.connected();
       }

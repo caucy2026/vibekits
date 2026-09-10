@@ -82,6 +82,7 @@ void main() {
     (WidgetTester tester) async {
       final channel = _Channel();
       final connection = HarnessRemoteConnection(channel);
+      var reconnects = 0;
       final model = HarnessRemoteViewModel(
         HarnessRemoteWorkspaceClient(connection),
         applyOfficialEvents: (_) async {},
@@ -94,6 +95,7 @@ void main() {
               peerRoutingId: '1554650784',
               model: model,
               onDisconnect: () {},
+              onReconnect: () => reconnects += 1,
             ),
           ),
         ),
@@ -108,6 +110,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
       expect(find.text('远端工程 A'), findsOneWidget);
       expect(find.textContaining('最后一次同步记录'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('harness-remote-reconnect')));
+      expect(reconnects, 1);
       model.dispose();
       unawaited(connection.close());
       await tester.pumpWidget(const SizedBox.shrink());

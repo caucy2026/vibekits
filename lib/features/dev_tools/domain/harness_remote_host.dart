@@ -10,6 +10,8 @@ import 'harness_remote_server_connection.dart';
 import 'harness_remote_tls_channel.dart';
 import 'harness_remote_ledger.dart';
 import 'harness_work_status.dart';
+import 'harness_runtime_log_store.dart';
+import 'rustdesk_harness_link_status.dart';
 
 /// Explicitly enabled remote host, independent from desktop-sharing identity.
 /// Constructing a host does not listen or grant access. UI pairing must supply
@@ -114,11 +116,18 @@ class HarnessRemoteHost {
               channel: channel,
               execution: execution,
               readState: _readState,
+              onNegotiated: RustDeskHarnessLinkStatusHub.remoteDataConnected,
+              onHeartbeat: RustDeskHarnessLinkStatusHub.remoteDataHeartbeat,
             );
             _connections[connection] = channel.authenticatedPeerId;
             unawaited(
               connection.done.whenComplete(() {
                 _connections.remove(connection);
+                if (_connections.isEmpty && !_closed) {
+                  RustDeskHarnessLinkStatusHub.remoteDataDisconnected(
+                    channel.authenticatedPeerId,
+                  );
+                }
               }),
             );
           } catch (_) {
@@ -194,7 +203,20 @@ class HarnessRemoteHost {
     // but must not skip changes that arrived while inventory was loading.
     final sequence = _journal.sequence;
     final epoch = _journal.epoch;
-    final rows = await inventory.visibleWorkspaces(scope);
+    late final List<Map<String, dynamic>> rows;
+    try {
+      rows = await inventory.visibleWorkspaces(scope);
+    } on Object catch (error) {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'kind': 'harness-remote-inventory-failure',
+          'errorType': error.runtimeType.toString(),
+          'errorCode': _safeInventoryErrorCode(error),
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+      throw StateError(_safeInventoryErrorCode(error));
+    }
     final work = _workSnapshot();
     final currentScope = execution.visibleWorkspaceIds(peerId);
     if (currentScope.isEmpty) throw StateError('REMOTE_PERMISSION_DENIED');
@@ -212,6 +234,17 @@ class HarnessRemoteHost {
             _withWorkState(row, work),
       ],
     };
+  }
+
+  static String _safeInventoryErrorCode(Object error) {
+    if (error is HttpException) return 'REMOTE_DSH_HTTP';
+    if (error is WebSocketException) return 'REMOTE_DSH_WEBSOCKET';
+    if (error is FormatException) return 'REMOTE_DSH_FORMAT';
+    if (error is StateError) {
+      final message = error.message.toString();
+      if (message.startsWith('REMOTE_')) return message;
+    }
+    return 'REMOTE_DSH_UNKNOWN';
   }
 
   Map<String, dynamic> _withWorkState(

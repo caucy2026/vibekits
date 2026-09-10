@@ -55,17 +55,41 @@ abstract final class RustDeskHarnessLinkStatusHub {
       RustDeskHarnessLinkSnapshot.disconnected();
   static Timer? _staleTimer;
   static String _activePeerId = '';
+  static String _remoteDataPeerId = '';
 
   static RustDeskHarnessLinkSnapshot get latest => _latest;
   static Stream<RustDeskHarnessLinkSnapshot> get changes => _changes.stream;
 
-  static void clientFound() =>
-      _publish(RustDeskHarnessLinkPhase.clientFound, 'VibeKits 内置 P2P/中继引擎已就绪');
+  static void clientFound() {
+    if (_remoteDataPeerId.isNotEmpty) return;
+    _publish(RustDeskHarnessLinkPhase.clientFound, 'VibeKits 内置 P2P/中继引擎已就绪');
+  }
 
   static void handshaking() =>
       _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验 Harness 消息协议');
 
+  /// The authenticated VibeKits remote-data protocol is live inside the
+  /// RustDesk byte tunnel. This is distinct from remote desktop state.
+  static void remoteDataConnected(String peerId) {
+    _remoteDataPeerId = _bounded(peerId, 80);
+    _activePeerId = _remoteDataPeerId;
+    _markConnected(const Duration(seconds: 5));
+  }
+
+  static void remoteDataHeartbeat(String peerId) {
+    if (_remoteDataPeerId != peerId || peerId.isEmpty) return;
+    _activePeerId = peerId;
+    _markConnected(const Duration(seconds: 5));
+  }
+
+  static void remoteDataDisconnected(String peerId) {
+    if (_remoteDataPeerId != peerId) return;
+    _remoteDataPeerId = '';
+    disconnected(reason: '远程 Harness 数据通道已断开');
+  }
+
   static bool acceptHandshake(Map<String, Object?> hello) {
+    if (_remoteDataPeerId.isNotEmpty) return true;
     handshaking();
     final String peer = _bounded(hello['peerId']?.toString() ?? '', 80);
     final String remoteProtocol = hello['protocol']?.toString() ?? '';
@@ -123,7 +147,9 @@ abstract final class RustDeskHarnessLinkStatusHub {
   }
 
   static void disconnected({String reason = ''}) {
+    if (_remoteDataPeerId.isNotEmpty && reason.contains('状态订阅')) return;
     _staleTimer?.cancel();
+    _remoteDataPeerId = '';
     _activePeerId = '';
     _publish(
       RustDeskHarnessLinkPhase.disconnected,
