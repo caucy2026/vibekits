@@ -4,7 +4,7 @@
 
 PAD 75 到本机 Mac Harness 的真实上下行闭环通过：PAD 进入协同主界面、使用历史配对静默连接、收到权威项目/会话快照、发送真实 Harness 命令、收到合并后的最终回复与完成状态，执行端重启后可自动恢复连接。直连、强制 HBBR 中继和长任务停止均已完成真机验证。
 
-本报告不把尚未验证的 Mac↔Mac 异机连接宣称为已通过，也不作为 KEMI 商场发布许可。
+dev.169 的产品范围明确为“本机 Mac 作为 Harness 执行主机，PAD 作为远程协助端”；Mac↔Mac 不属于本版本验收范围。本报告完成远程协助功能门禁，但不替代 KEMI 商场的独立发布门禁。
 
 ## 候选包
 
@@ -59,7 +59,8 @@ PAD 75 到本机 Mac Harness 的真实上下行闭环通过：PAD 进入协同�
 - 强制 HBBR 断开后历史：`/private/tmp/dev169-hbbr-history-final.png`
 - 最终签名包接收命令后输入安全清空：`/private/tmp/dev169-final-command-cleared.png`
 
-## 剩余门禁
+## 发布边界
 
-1. 第二台 Mac 真机执行 Mac↔Mac 异机 ID 连接、授权和会话验收；不得拿 57 或其他未指定设备代替。
-2. 商场发布前单独完成 macOS Universal 12+、Developer ID/公证及 Windows 真机发布门禁。
+远程协助功能范围内无剩余门禁。若后续新增 Mac↔Mac 协助，必须作为新需求单独设计和验收，不得反向阻塞本次 PAD→Mac 交付。
+
+商场发布仍须单独完成 macOS Universal 12+、Developer ID/公证及 Windows 真机发布门禁。
