@@ -24,12 +24,55 @@ class _Channel implements HarnessRemoteChannel {
     final Map<String, Object?> response;
     if (payload['operation'] is String) {
       operations.add(payload['operation'] as String);
+      final operation = payload['operation'] as String;
       response = {
         'ok': true,
         'commandId': payload['commandId'],
-        'officialResponse': {
-          'result': {'ok': true},
-        },
+        'officialResponse': operation == 'session.history'
+            ? {
+                'result': {
+                  'ok': true,
+                  'value': {
+                    'records': [
+                      {
+                        'type': 'user/message',
+                        'data': {'text': '<system-reminder>internal only'},
+                      },
+                      {
+                        'type': 'user/message',
+                        'data': {'text': '请继续验收'},
+                      },
+                      {
+                        'type': 'chunks',
+                        'event': {
+                          'type': 'chunkrow/text-chunks',
+                          'data': {
+                            'texts': ['远端反馈'],
+                          },
+                        },
+                      },
+                      {
+                        'type': 'chunks',
+                        'event': {
+                          'type': 'chunkrow/text-chunks',
+                          'data': {
+                            'texts': ['已同步'],
+                          },
+                        },
+                      },
+                      {'type': 'turn/end', 'data': <String, Object?>{}},
+                    ],
+                  },
+                },
+              }
+            : {
+                'result': {
+                  'ok': true,
+                  'value': operation == 'session.prompt'
+                      ? {'accepted': true}
+                      : <String, Object?>{},
+                },
+              },
       };
     } else {
       response = switch (payload['kind']) {
@@ -137,13 +180,21 @@ void main() {
             child: HarnessRemoteCommandPanel(
               model: model,
               client: client,
-              allowedOperations: const {'session.prompt', 'session.cancel'},
+              allowedOperations: const {
+                'session.history',
+                'session.prompt',
+                'session.cancel',
+              },
             ),
           ),
         ),
       ),
     );
     await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('<system-reminder>internal only'), findsNothing);
+    expect(find.text('请继续验收'), findsOneWidget);
+    expect(find.text('远端反馈已同步'), findsOneWidget);
+    expect(find.text('本轮完成'), findsOneWidget);
     await tester.enterText(
       find.byKey(const Key('harness-remote-command-input')),
       '继续检查构建日志',
@@ -151,7 +202,9 @@ void main() {
     await tester.tap(find.byKey(const Key('harness-remote-command-send')));
     await tester.pump(const Duration(milliseconds: 30));
     expect(channel.operations, contains('session.prompt'));
-    expect(find.textContaining('执行端已返回'), findsOneWidget);
+    expect(find.textContaining('执行端已接收命令'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 30));
+    expect(find.text('远端反馈已同步'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('harness-remote-command-stop')));
     await tester.pump(const Duration(milliseconds: 30));

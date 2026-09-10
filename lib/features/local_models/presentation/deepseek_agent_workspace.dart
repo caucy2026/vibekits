@@ -2434,6 +2434,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                           .where((workspace) => workspace.trim().isNotEmpty)
                           .toSet(),
                       embedded: true,
+                      controllerOnly: Platform.isAndroid,
                       onConnectionChanged: (bool connected, String peerId) {
                         if (!mounted) return;
                         setState(() {

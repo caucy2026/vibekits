@@ -9,6 +9,63 @@ import 'package:vibekits/features/dev_tools/domain/harness_remote_commands.dart'
 import 'package:vibekits/features/dev_tools/domain/harness_remote_execution.dart';
 
 void main() {
+  test(
+    'official Session follow opening frame becomes scoped history',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final adapter = HarnessOfficialRemoteAdapter(
+        Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      server.listen((request) async {
+        expect(request.uri.path, '/api/remote.mux');
+        final socket = await WebSocketTransformer.upgrade(request);
+        final open = jsonDecode(await socket.first as String) as Map;
+        expect(open['endpoint'], 'session/follow');
+        expect(
+          (((open['payload'] as Map)['args'] as Map)['request']
+              as Map)['address'],
+          {'kind': 'session', 'sessionId': 'session-1'},
+        );
+        socket.add(
+          jsonEncode({
+            'type': 'item',
+            'streamId': open['streamId'],
+            'value': {
+              'type': 'snapshot',
+              'header': {'version': 0, 'id': 'session-1', 'createdAt': 1},
+              'cursor': 7,
+              'records': [
+                {
+                  'type': 'user/message',
+                  'seq': 7,
+                  'time': 1,
+                  'data': {'text': 'hello'},
+                },
+              ],
+              'hasMore': false,
+              'projections': {'asOfSeq': 7, 'values': []},
+            },
+          }),
+        );
+        await socket.close();
+      });
+      try {
+        final result = await adapter.request({
+          'type': 'client-request',
+          'rpcId': 'history-1',
+          'method': 'session.history',
+          'payload': {'sessionId': 'session-1'},
+        });
+        final value = ((result['result'] as Map)['value'] as Map);
+        expect(value['cursor'], 7);
+        expect((value['records'] as List), hasLength(1));
+      } finally {
+        await adapter.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
   test('official WebSocket downlink retains task payload', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final adapter = HarnessOfficialRemoteAdapter(

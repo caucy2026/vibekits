@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../domain/harness_remote_view_model.dart';
@@ -154,9 +157,25 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
   String? _sessionId;
   String? _activeCommandId;
   String _feedback = '';
+  Timer? _historyTimer;
+  bool _historyLoading = false;
+  List<Map<String, dynamic>> _history = const <Map<String, dynamic>>[];
+  String? _historyError;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshHistory());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshHistory());
+    });
+  }
 
   @override
   void dispose() {
+    _historyTimer?.cancel();
     _draft.dispose();
     super.dispose();
   }
@@ -203,7 +222,54 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
           offset: (_sessionDrafts[nextKey] ?? '').length,
         ),
       );
+      _history = const <Map<String, dynamic>>[];
+      _historyError = null;
     });
+    unawaited(_refreshHistory());
+  }
+
+  Future<void> _refreshHistory() async {
+    final target = _selected();
+    if (!mounted ||
+        _historyLoading ||
+        widget.model.stale ||
+        target == null ||
+        !widget.allowedOperations.contains('session.history')) {
+      return;
+    }
+    _historyLoading = true;
+    try {
+      final response = await widget.client.call(
+        commandId: widget.client.newCommandId(),
+        workspaceId: target.$1,
+        sessionId: target.$2,
+        method: 'session.history',
+        payload: const <String, Object?>{},
+      );
+      final result = response['result'];
+      final value = result is Map ? result['value'] : null;
+      final source = value is Map
+          ? (value['records'] is List ? value['records'] : value['messages'])
+          : null;
+      if (result is! Map || result['ok'] != true || source is! List) {
+        throw const FormatException('REMOTE_HISTORY_INVALID');
+      }
+      final rows = <Map<String, dynamic>>[
+        for (final row in source)
+          if (row is Map) Map<String, dynamic>.from(row),
+      ];
+      if (!mounted || _selected()?.$2 != target.$2) return;
+      setState(() {
+        _history = rows;
+        _historyError = null;
+      });
+    } on Object catch (error) {
+      if (mounted && _selected()?.$2 == target.$2) {
+        setState(() => _historyError = '会话反馈同步失败：$error');
+      }
+    } finally {
+      _historyLoading = false;
+    }
   }
 
   Future<void> _send() async {
@@ -225,12 +291,184 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
         method: 'session.prompt',
         payload: <String, Object?>{'text': text},
       );
-      if (mounted) setState(() => _feedback = '执行端已返回：$result');
+      if (mounted) {
+        setState(() {
+          _feedback = _isAccepted(result)
+              ? '执行端已接收命令；运行状态与会话反馈将持续同步，请勿把接收回执当作完成。'
+              : '执行端返回：${_compactResult(result)}';
+        });
+        unawaited(_refreshHistory());
+      }
     } on Object catch (error) {
       if (mounted) setState(() => _feedback = '远程命令失败或结果未知：$error');
     } finally {
       if (mounted) setState(() => _activeCommandId = null);
     }
+  }
+
+  bool _isAccepted(Map<String, dynamic> response) {
+    final result = response['result'];
+    final value = result is Map ? result['value'] : null;
+    return result is Map &&
+        result['ok'] == true &&
+        value is Map &&
+        value['accepted'] == true;
+  }
+
+  String _compactResult(Map<String, dynamic> response) {
+    final text = jsonEncode(response);
+    return text.length <= 320 ? text : '${text.substring(0, 320)}…';
+  }
+
+  String _historyTitle(Map<String, dynamic> row) {
+    final user = row['user'];
+    if (user is bool) return user ? '用户' : 'Harness';
+    final type = row['type']?.toString() ?? '记录';
+    if (row['event'] is Map) {
+      return (row['event'] as Map)['type']?.toString() ?? '流式反馈';
+    }
+    return type;
+  }
+
+  String _historySummary(Map<String, dynamic> row) {
+    final direct = row['text'];
+    if (direct is String && direct.trim().isNotEmpty) return direct.trim();
+    final event = row['event'];
+    final data = event is Map ? event['data'] : row['data'];
+    return _readableValue(data) ?? '结构化事件；展开可查看完整详情';
+  }
+
+  String? _readableValue(Object? value, [int depth = 0]) {
+    if (depth > 4 || value == null) return null;
+    if (value is String) {
+      final text = value.trim();
+      if (text.isEmpty) return null;
+      return text.length <= 600 ? text : '${text.substring(0, 600)}…';
+    }
+    if (value is List) {
+      final parts = value
+          .map((item) => _readableValue(item, depth + 1))
+          .whereType<String>()
+          .where((text) => text.isNotEmpty)
+          .take(4)
+          .toList();
+      return parts.isEmpty ? null : parts.join('\n');
+    }
+    if (value is Map) {
+      for (final key in const <String>[
+        'texts',
+        'text',
+        'content',
+        'message',
+        'reason',
+        'detail',
+        'name',
+        'toolName',
+        'status',
+        'result',
+        'arguments',
+      ]) {
+        final readable = _readableValue(value[key], depth + 1);
+        if (readable != null) return readable;
+      }
+    }
+    return null;
+  }
+
+  List<_RemoteHistoryEntry> _historyEntries() {
+    final entries = <_RemoteHistoryEntry>[];
+    final assistantText = StringBuffer();
+    final assistantDetails = <Map<String, dynamic>>[];
+
+    void flushAssistant() {
+      final text = assistantText.toString().trim();
+      if (text.isNotEmpty) {
+        entries.add(
+          _RemoteHistoryEntry(
+            title: 'Harness',
+            summary: text,
+            records: List<Map<String, dynamic>>.from(assistantDetails),
+          ),
+        );
+      }
+      assistantText.clear();
+      assistantDetails.clear();
+    }
+
+    for (final row in _history) {
+      final type = _historyTitle(row).toLowerCase();
+      if (type == 'user/message') {
+        flushAssistant();
+        final summary = _historySummary(row);
+        if (_isInternalUserMessage(summary)) continue;
+        entries.add(
+          _RemoteHistoryEntry(
+            title: '用户',
+            summary: summary,
+            records: <Map<String, dynamic>>[row],
+          ),
+        );
+        continue;
+      }
+      if (type == 'chunkrow/text-chunks') {
+        final chunk = _textChunks(row);
+        if (chunk.isNotEmpty) {
+          assistantText.write(chunk);
+          assistantDetails.add(row);
+        }
+        continue;
+      }
+      if (type.contains('tool') || type.contains('command')) {
+        flushAssistant();
+        entries.add(
+          _RemoteHistoryEntry(
+            title: '工具调用',
+            summary: _historySummary(row),
+            records: <Map<String, dynamic>>[row],
+          ),
+        );
+        continue;
+      }
+      if (type == 'turn/end' || type == 'turn/complete') {
+        flushAssistant();
+        entries.add(
+          _RemoteHistoryEntry(
+            title: '本轮完成',
+            summary: '远端 Harness 已结束本轮执行',
+            records: <Map<String, dynamic>>[row],
+          ),
+        );
+      }
+    }
+    flushAssistant();
+    return entries;
+  }
+
+  bool _isInternalUserMessage(String text) {
+    final normalized = text.trimLeft().toLowerCase();
+    return normalized.startsWith('<system-reminder>') ||
+        normalized.startsWith('current runtime context.') ||
+        normalized.startsWith('<available_skills>') ||
+        normalized.startsWith('instructions from:');
+  }
+
+  String _textChunks(Map<String, dynamic> row) {
+    final event = row['event'];
+    final data = event is Map ? event['data'] : row['data'];
+    if (data is Map && data['texts'] is List) {
+      return (data['texts'] as List)
+          .whereType<String>()
+          .map((text) => text)
+          .join();
+    }
+    return _readableValue(data) ?? '';
+  }
+
+  String _entryDetails(_RemoteHistoryEntry entry) {
+    final encoded = const JsonEncoder.withIndent('  ').convert(entry.records);
+    return encoded.length <= 6000
+        ? encoded
+        : '${encoded.substring(0, 6000)}\n…';
   }
 
   Future<void> _stop() async {
@@ -253,6 +491,7 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
   Widget build(BuildContext context) {
     final targets = _targets;
     final selected = _selected();
+    final historyEntries = _historyEntries();
     final canPrompt = widget.allowedOperations.contains('session.prompt');
     final canCancel = widget.allowedOperations.contains('session.cancel');
     return AnimatedBuilder(
@@ -315,6 +554,50 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          ExpansionTile(
+            key: const Key('harness-remote-history'),
+            tilePadding: EdgeInsets.zero,
+            initiallyExpanded: true,
+            leading: _historyLoading
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.forum_outlined),
+            title: Text('远端会话反馈（${historyEntries.length} 条）'),
+            subtitle: Text(
+              _historyError ??
+                  (historyEntries.isEmpty ? '正在读取正式会话记录…' : '每 2 秒同步，执行端为唯一权威'),
+            ),
+            children: <Widget>[
+              for (final entry
+                  in historyEntries.reversed.take(12).toList().reversed)
+                ExpansionTile(
+                  dense: true,
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  title: Text(entry.title),
+                  subtitle: Text(
+                    entry.summary,
+                    maxLines: 8,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  children: <Widget>[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(
+                        _entryDetails(entry),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
           if (_feedback.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             SelectableText(
@@ -326,4 +609,16 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
       ),
     );
   }
+}
+
+class _RemoteHistoryEntry {
+  const _RemoteHistoryEntry({
+    required this.title,
+    required this.summary,
+    required this.records,
+  });
+
+  final String title;
+  final String summary;
+  final List<Map<String, dynamic>> records;
 }

@@ -91,7 +91,18 @@ class HarnessRemoteExecution {
   Future<Map<String, dynamic>> dispatch(
     String authenticatedPeerId,
     HarnessRemoteCommand command,
-  ) => _gate.dispatch(authenticatedPeerId, command);
+  ) async {
+    // History is an idempotent, read-only snapshot. Do not consume the durable
+    // mutation ledger for the controller's periodic two-second refreshes; the
+    // same authorization and workspace/session ownership checks still apply.
+    if (command.operation == 'session.history') {
+      if (!await _authorize(authenticatedPeerId, command)) {
+        throw StateError('REMOTE_PERMISSION_DENIED');
+      }
+      return Map<String, dynamic>.from(await _execute(command));
+    }
+    return _gate.dispatch(authenticatedPeerId, command);
+  }
 
   Future<Map<String, Object?>> _execute(HarnessRemoteCommand command) async {
     final reply = await adapter.request({

@@ -3,6 +3,43 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/local_models/presentation/official_harness_workspace.dart';
 
 void main() {
+  testWidgets('PAD controller-only mode never exposes or starts inbound host', (
+    tester,
+  ) async {
+    var hostStarts = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HarnessRemoteShareDialog(
+            configuredExecutable: '/definitely/missing/relay',
+            webClientUrl: '',
+            embedded: true,
+            controllerOnly: true,
+            onPaired: () async => hostStarts++,
+            onHostStopped: () async {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('连接远程设备'), findsOneWidget);
+    expect(
+      find.byKey(const Key('harness-coordination-peer-id')),
+      findsOneWidget,
+    );
+    expect(find.text('允许别人协助本机'), findsNothing);
+    expect(find.text('本机 Harness ID'), findsNothing);
+    expect(
+      find.byKey(const Key('harness-coordination-main-workspace')),
+      findsOneWidget,
+    );
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(hostStarts, 0);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('remote assistance content stays bounded on a compact display', (
     tester,
   ) async {

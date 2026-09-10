@@ -147,6 +147,19 @@ class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
         envelope['payload'] is! Map) {
       throw const FormatException('Invalid official client-request');
     }
+    if (method == 'session.history') {
+      final request = Map<String, dynamic>.from(envelope['payload'] as Map);
+      final sessionId = request['sessionId'];
+      if (sessionId is! String || sessionId.isEmpty) {
+        throw const FormatException('Invalid official Harness session');
+      }
+      final value = await _sessionSnapshot(sessionId).timeout(timeout);
+      return <String, dynamic>{
+        'type': 'server-response',
+        'rpcId': rpcId,
+        'result': <String, dynamic>{'ok': true, 'value': value},
+      };
+    }
     final target = _officialInvocation(method, envelope['payload'] as Map);
     final officialEnvelope = <String, dynamic>{
       'type': 'client-request',
@@ -170,9 +183,7 @@ class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
           'args': <String, Object?>{},
         });
       case 'session.history':
-        // History is stream-backed in current DSH and is handled separately
-        // by the remote UI before command forwarding is enabled.
-        throw UnsupportedError('REMOTE_HISTORY_REQUIRES_SESSION_STREAM');
+        throw StateError('REMOTE_HISTORY_DISPATCH_BYPASSED');
       case 'session.selectModel':
         return _OfficialInvocation('session/selectModel', {
           'args': {'request': request},
@@ -328,6 +339,38 @@ class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
       ];
     }
     throw StateError('REMOTE_INVENTORY_UNAVAILABLE');
+  }
+
+  Future<Map<String, dynamic>> _sessionSnapshot(String sessionId) async {
+    await for (final frame in _openStream('session/follow', <String, Object?>{
+      'args': <String, Object?>{
+        'request': <String, Object?>{
+          'address': <String, Object?>{
+            'kind': 'session',
+            'sessionId': sessionId,
+          },
+          'maxMessages': 80,
+        },
+      },
+    })) {
+      if (frame['type'] != 'snapshot' ||
+          frame['header'] is! Map ||
+          frame['cursor'] is! int ||
+          frame['records'] is! List ||
+          frame['hasMore'] is! bool) {
+        throw const FormatException('Invalid official Session snapshot');
+      }
+      return Map<String, dynamic>.unmodifiable(<String, dynamic>{
+        'sessionId': sessionId,
+        'header': Map<String, dynamic>.from(frame['header'] as Map),
+        'cursor': frame['cursor'],
+        'records': List<dynamic>.unmodifiable(frame['records'] as List),
+        'hasMore': frame['hasMore'],
+        if (frame['projections'] is Map)
+          'projections': Map<String, dynamic>.from(frame['projections'] as Map),
+      });
+    }
+    throw StateError('REMOTE_SESSION_UNAVAILABLE');
   }
 
   Stream<Map<String, dynamic>> _openStream(
