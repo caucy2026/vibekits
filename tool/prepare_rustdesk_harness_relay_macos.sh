@@ -21,6 +21,12 @@ case "$(file -b "$SOURCE")" in
     exit 2
     ;;
 esac
+for ARCH in arm64 x86_64; do
+  if ! lipo "$SOURCE" -verify_arch "$ARCH"; then
+    echo "Harness relay is not Universal; missing architecture: $ARCH" >&2
+    exit 2
+  fi
+done
 for MARKER in transport_connected transport_connect_timeout; do
   if ! strings "$SOURCE" | grep -F "$MARKER" >/dev/null; then
     echo "Harness relay is stale; missing marker: $MARKER" >&2

@@ -6,6 +6,7 @@ import WebKit
 class AppDelegate: FlutterAppDelegate {
   private var fileChannel: FlutterMethodChannel?
   private var harnessInputChannel: FlutterMethodChannel?
+  private var simulatorHostChannel: FlutterMethodChannel?
   private var storeHostChannel: FlutterMethodChannel?
   private var pendingFiles: [String] = []
   private var dartReady = false
@@ -43,6 +44,18 @@ class AppDelegate: FlutterAppDelegate {
           self?.capturedWebViewResponder = nil
         }
         result(nil)
+      }
+      simulatorHostChannel = FlutterMethodChannel(
+        name: "vibekits/simulator_host",
+        binaryMessenger: controller.engine.binaryMessenger
+      )
+      simulatorHostChannel?.setMethodCallHandler { [weak self] call, result in
+        guard call.method == "setRemoteLoginEnabled",
+              let enabled = call.arguments as? Bool else {
+          result(FlutterMethodNotImplemented)
+          return
+        }
+        self?.setRemoteLoginEnabled(enabled, result: result)
       }
       storeHostChannel = FlutterMethodChannel(
         name: "org.rustdesk.rustdesk/host",
@@ -88,6 +101,57 @@ class AppDelegate: FlutterAppDelegate {
       of: "^[A-Za-z0-9._-]+$",
       options: .regularExpression
     ) != nil
+  }
+
+  /// Ask macOS to update its built-in SSH launchd service using the system
+  /// authorization panel.
+  /// The bridge accepts no command text or credentials: Dart can only request
+  /// the fixed on/off operation, and the administrator password remains owned
+  /// by macOS SecurityAgent.
+  private func setRemoteLoginEnabled(
+    _ enabled: Bool,
+    result: @escaping FlutterResult
+  ) {
+    let command = enabled
+      ? "/bin/launchctl enable system/com.openssh.sshd; /bin/launchctl bootstrap system /System/Library/LaunchDaemons/ssh.plist 2>/dev/null || /bin/launchctl kickstart -k system/com.openssh.sshd"
+      : "/bin/launchctl bootout system/com.openssh.sshd 2>/dev/null; /bin/launchctl disable system/com.openssh.sshd"
+    DispatchQueue.global(qos: .userInitiated).async {
+      let process = Process()
+      let output = Pipe()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+      process.arguments = [
+        "-e",
+        "do shell script \"\(command)\" with administrator privileges"
+      ]
+      process.standardOutput = output
+      process.standardError = output
+      do {
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let message = String(data: data, encoding: .utf8)?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        DispatchQueue.main.async {
+          if process.terminationStatus == 0 {
+            result(["ok": true, "enabled": enabled, "message": message])
+          } else {
+            result(FlutterError(
+              code: "REMOTE_LOGIN_AUTHORIZATION_FAILED",
+              message: message.isEmpty ? "macOS administrator authorization was cancelled" : message,
+              details: nil
+            ))
+          }
+        }
+      } catch {
+        DispatchQueue.main.async {
+          result(FlutterError(
+            code: "REMOTE_LOGIN_LAUNCH_FAILED",
+            message: error.localizedDescription,
+            details: nil
+          ))
+        }
+      }
+    }
   }
 
   override func applicationWillTerminate(_ notification: Notification) {

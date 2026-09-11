@@ -116,6 +116,11 @@
 109. [KEMI 应用商城跨平台接入、安装、自更新与发布标准](59_KEMI_APP_MARKET_CROSS_PLATFORM_INTEGRATION_STANDARD.md)——供所有 APP 团队执行的 Android/Windows/macOS 商城浏览、自更新、安全安装、签名发布和真机闭环唯一操作手册
 110. [dev.155 Windows/macOS 正式市场发布验收](acceptance/V1_9_0_DEV155_MARKET_RELEASE_2026-09-03.md)——版本一致性修复、Windows 自包含产物、macOS Developer ID/Apple 公证、市场 app_id 53/54 更新及公开自更新正反向闭环
 111. [dev.164 Android Harness 远程协助阶段验收](acceptance/V1_9_0_DEV164_ANDROID_HARNESS_REMOTE_2026-09-09.md)——独立中继 ID、同签名 Binder、Android 权威会话后端、63 真机生命周期证据与尚未通过的正式发布门禁
+112. [统一 ID 仿真机访问需求与验收规范](65_UNIFIED_ID_SIMULATOR_TARGET_REQUIREMENTS.md)——同一 ID、单开关、固定回环 MCP、P2P/HBBR、跨平台角色和双机完成定义
+113. [dev.177 ID-only 整机仿真阶段记录](acceptance/V1_9_0_DEV177_ID_ONLY_MACHINE_SIMULATOR_2026-09-11.md)——首次双机阻断证据、空探测方案撤销和后续修复要求
+114. [dev.183 统一 ID 仿真传输修复验收](acceptance/V1_9_0_DEV183_SIMULATOR_TRANSPORT_FIX_2026-09-11.md)——桌面 IPC/登录响应顺序修复、双架构签名候选、直连/强制中继本机闭环及未完成双机门禁
+115. [dev.186 整机仿真诊断与安全升级阶段验收](acceptance/V1_9_0_DEV186_SIMULATOR_DEBUG_AND_SAFE_UPDATE_2026-09-11.md)——目标 ID 直连/强制中继真业务、任意 App 诊断、专用回环签名升级、Mac 候选门禁和明确剩余项
+116. [dev.187 PAD 协同会话与 KEMI 商场发布验收](acceptance/V1_9_0_DEV187_PAD_REMOTE_SESSION_MARKET_RELEASE_2026-09-11.md)——进程级会话生命周期、PAD 75 到 Mac 命令反馈、Apple 公证、商场公网回读及 Windows 阻断门禁
 
 ## 完成定义
 

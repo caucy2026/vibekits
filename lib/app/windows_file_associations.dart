@@ -68,6 +68,7 @@ abstract final class WindowsFileAssociations {
   static const String imageProgId = 'Vibekits.Image';
   static const String databaseProgId = 'Vibekits.Database';
   static const String modelProgId = 'Vibekits.Model';
+  static const String audioProgId = 'Vibekits.Audio';
 
   static bool shouldRegisterExecutable(String executable) {
     if (!Platform.isWindows) return false;
@@ -171,6 +172,7 @@ abstract final class WindowsFileAssociations {
     progId(imageProgId, 'Vibekits 图片');
     progId(databaseProgId, 'Vibekits SQLite 数据库');
     progId(modelProgId, 'Vibekits 本地模型');
+    progId(audioProgId, 'Vibekits 音频');
     const String appBase = 'Software\\Classes\\Applications\\vibekits.exe';
     write(appBase, 'FriendlyAppName', 'Vibekits');
     write('$appBase\\shell\\open\\command', null, command);
@@ -191,6 +193,8 @@ abstract final class WindowsFileAssociations {
           ? imageProgId
           : SupportedFileTypes.modelExtensions.contains(extension)
           ? modelProgId
+          : SupportedFileTypes.audioExtensions.contains(extension)
+          ? audioProgId
           : documentProgId;
       write('$appBase\\SupportedTypes', dotted, '');
       write('Software\\Classes\\$dotted\\OpenWithProgids', progId, '');
@@ -205,6 +209,7 @@ abstract final class WindowsFileAssociations {
       final bool database = SupportedFileTypes.databaseExtensions.contains(
         extension,
       );
+      final bool audio = SupportedFileTypes.audioExtensions.contains(extension);
       write(
         contextMenu,
         'MUIVerb',
@@ -216,6 +221,8 @@ abstract final class WindowsFileAssociations {
             ? '用 Vibekits 查看或识别文字'
             : model
             ? '导入到 Vibekits 本地模型'
+            : audio
+            ? '用 Vibekits 分析音频'
             : '用 Vibekits 查看或解码',
       );
       write(contextMenu, 'Icon', '$executable,0');

@@ -1,0 +1,358 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
+
+import 'harness_remote_access_settings.dart';
+import 'harness_simulator_access_settings.dart';
+import 'lan_mcp_tool_server.dart';
+import 'rustdesk_harness_share_service.dart';
+
+enum HarnessSimulatorTargetPhase { disabled, starting, ready, connected, error }
+
+final class HarnessSimulatorTargetSnapshot {
+  const HarnessSimulatorTargetSnapshot({
+    required this.phase,
+    this.routingId = '',
+    this.endpoint = '',
+    this.message = '',
+    this.sshEndpoint = '',
+    this.sshUsername = '',
+  });
+
+  final HarnessSimulatorTargetPhase phase;
+  final String routingId;
+  final String endpoint;
+  final String message;
+  final String sshEndpoint;
+  final String sshUsername;
+
+  /// Whether the user has explicitly enabled simulator access.
+  ///
+  /// Runtime diagnostics may remain in [phase]/[message] after a failed start,
+  /// but they must not make the main workspace look as if access is enabled.
+  bool get enabled => HarnessSimulatorAccessSettings.enabled;
+  bool get ready =>
+      phase == HarnessSimulatorTargetPhase.ready ||
+      phase == HarnessSimulatorTargetPhase.connected;
+}
+
+final class HarnessSimulatorEndpointLease {
+  const HarnessSimulatorEndpointLease({
+    required this.port,
+    required this.close,
+  });
+
+  final int port;
+  final Future<void> Function() close;
+}
+
+typedef HarnessSimulatorHostInspector = Future<RustDeskHostInfo> Function();
+typedef HarnessSimulatorHostStarter = Future<RustDeskHostInfo> Function();
+typedef HarnessSimulatorEndpointStarter =
+    Future<HarnessSimulatorEndpointLease> Function();
+typedef HarnessSimulatorHostStopper = Future<void> Function();
+typedef HarnessSimulatorNativeGateSetter =
+    Future<void> Function(String executable, bool enabled);
+typedef HarnessSimulatorConnectionLister =
+    Future<List<RustDeskHarnessIncomingConnection>> Function(String executable);
+typedef HarnessSimulatorRelayFingerprintLoader =
+    Future<String> Function(String executable);
+
+/// Owns the explicit "use this device as a simulator" authorization gate.
+///
+/// The MCP endpoint is loopback-only. A caller reaches it through the existing
+/// VibeKits RustDesk ID and managed P2P/HBBR port-forward carrier, never by
+/// exposing an SSH or HTTP listener to the LAN.
+final class HarnessSimulatorTargetRuntime {
+  HarnessSimulatorTargetRuntime({
+    HarnessSimulatorAccessSettings? settings,
+    HarnessSimulatorHostInspector? inspectHost,
+    HarnessSimulatorHostStarter? startHost,
+    HarnessSimulatorEndpointStarter? startEndpoint,
+    HarnessSimulatorHostStopper? stopHost,
+    HarnessSimulatorNativeGateSetter? setNativeGate,
+    HarnessSimulatorConnectionLister? listConnections,
+    HarnessSimulatorRelayFingerprintLoader? relayFingerprint,
+    Duration connectionPollInterval = const Duration(seconds: 1),
+    Duration hostRestartTimeout = const Duration(seconds: 5),
+  }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
+       _inspectHost =
+           inspectHost ?? (() => RustDeskHarnessShareService.inspect()),
+       _startHost =
+           startHost ??
+           (() => RustDeskHarnessShareService.ensureHostAvailable()),
+       _startEndpoint = startEndpoint ?? _startDefaultEndpoint,
+       _stopHost = stopHost ?? RustDeskHarnessShareService.stopHost,
+       _setNativeGate =
+           setNativeGate ??
+           ((executable, enabled) =>
+               RustDeskHarnessShareService.setSimulatorAccess(
+                 executable,
+                 enabled: enabled,
+               )),
+       _listConnections =
+           listConnections ??
+           ((executable) =>
+               RustDeskHarnessShareService.connections(executable)),
+       _relayFingerprint = relayFingerprint ?? _loadRelayFingerprint,
+       _connectionPollInterval = connectionPollInterval,
+       _hostRestartTimeout = hostRestartTimeout;
+
+  static const int remotePort = 32147;
+  static final HarnessSimulatorTargetRuntime shared =
+      HarnessSimulatorTargetRuntime();
+
+  final HarnessSimulatorAccessSettings _settings;
+  final HarnessSimulatorHostInspector _inspectHost;
+  final HarnessSimulatorHostStarter _startHost;
+  final HarnessSimulatorEndpointStarter _startEndpoint;
+  final HarnessSimulatorHostStopper _stopHost;
+  final HarnessSimulatorNativeGateSetter _setNativeGate;
+  final HarnessSimulatorConnectionLister _listConnections;
+  final HarnessSimulatorRelayFingerprintLoader _relayFingerprint;
+  final Duration _connectionPollInterval;
+  final Duration _hostRestartTimeout;
+  final StreamController<HarnessSimulatorTargetSnapshot> _changes =
+      StreamController<HarnessSimulatorTargetSnapshot>.broadcast();
+
+  HarnessSimulatorEndpointLease? _endpoint;
+  Timer? _connectionPoller;
+  String _hostExecutable = '';
+  bool _pollingConnections = false;
+  int _generation = 0;
+  bool _changing = false;
+  HarnessSimulatorTargetSnapshot _latest = const HarnessSimulatorTargetSnapshot(
+    phase: HarnessSimulatorTargetPhase.disabled,
+    message: '仿真机访问已关闭',
+  );
+
+  HarnessSimulatorTargetSnapshot get latest => _latest;
+  Stream<HarnessSimulatorTargetSnapshot> get changes => _changes.stream;
+
+  static Future<HarnessSimulatorEndpointLease> _startDefaultEndpoint() async {
+    final server = await LanMcpToolServer.start(
+      bindAddress: InternetAddress.loopbackIPv4,
+      port: remotePort,
+      allowSimulatorUpdateUpload: true,
+    );
+    return HarnessSimulatorEndpointLease(
+      port: server.port,
+      close: server.close,
+    );
+  }
+
+  static Future<String> _loadRelayFingerprint(String executable) async {
+    final digest = await sha256.bind(File(executable).openRead()).first;
+    return 'sha256:$digest';
+  }
+
+  Future<void> restore() async {
+    if (!await _settings.loadEnabled()) return;
+    await _enable(persist: false, reconcileRelayVersion: true);
+  }
+
+  Future<void> enable({bool persist = true}) =>
+      _enable(persist: persist, reconcileRelayVersion: false);
+
+  Future<void> _enable({
+    required bool persist,
+    required bool reconcileRelayVersion,
+  }) async {
+    if (_changing || _latest.ready) return;
+    _changing = true;
+    final generation = ++_generation;
+    _publish(
+      const HarnessSimulatorTargetSnapshot(
+        phase: HarnessSimulatorTargetPhase.starting,
+        message: '正在准备仿真机安全通道…',
+      ),
+    );
+    RustDeskHostInfo? host;
+    try {
+      if (persist) await _settings.saveEnabled(true);
+      host = await _inspectHost();
+      if (!host.available) throw StateError(host.message);
+      final relayExecutable = File(host.executable).absolute.path;
+      final relayFingerprint = await _relayFingerprint(host.executable);
+      final savedRelayFingerprint = await _settings.loadRelayFingerprint();
+      final savedRelayExecutable = await _settings.loadRelayExecutable();
+      if (reconcileRelayVersion &&
+          host.callable &&
+          (savedRelayFingerprint != relayFingerprint ||
+              savedRelayExecutable != relayExecutable)) {
+        await _stopHost();
+        final deadline = DateTime.now().add(_hostRestartTimeout);
+        do {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          host = await _inspectHost();
+          if (!host.callable) break;
+        } while (DateTime.now().isBefore(deadline));
+        if (host.callable) {
+          throw TimeoutException('旧版仿真中继未能退出', _hostRestartTimeout);
+        }
+      }
+      if (!host.callable) host = await _startHost();
+      await _setNativeGate(host.executable, true);
+      final endpoint = await _startEndpoint();
+      if (generation != _generation) {
+        await endpoint.close();
+        return;
+      }
+      _endpoint = endpoint;
+      await _settings.saveRelayFingerprint(relayFingerprint);
+      await _settings.saveRelayExecutable(relayExecutable);
+      _publish(
+        HarnessSimulatorTargetSnapshot(
+          phase: HarnessSimulatorTargetPhase.ready,
+          routingId: host.id,
+          endpoint: '127.0.0.1:${endpoint.port}',
+          message: '仿真机可连接 · 告知对方本机 ID 即可调试',
+        ),
+      );
+      _startConnectionPolling(generation, host.executable);
+    } on Object catch (error) {
+      _stopConnectionPolling();
+      final endpoint = _endpoint;
+      _endpoint = null;
+      await endpoint?.close();
+      if (host != null && host.executable.isNotEmpty) {
+        try {
+          await _setNativeGate(host.executable, false);
+        } on Object {
+          // Preserve the original startup error. The native gate is volatile
+          // and resets to closed if the carrier exits.
+        }
+      }
+      await _settings.saveEnabled(false);
+      _publish(
+        HarnessSimulatorTargetSnapshot(
+          phase: HarnessSimulatorTargetPhase.error,
+          message: '仿真机启动失败：$error',
+        ),
+      );
+    } finally {
+      _changing = false;
+    }
+  }
+
+  Future<void> disable({bool persist = true}) async {
+    if (_changing) return;
+    _changing = true;
+    ++_generation;
+    try {
+      if (persist) await _settings.saveEnabled(false);
+      final endpoint = _endpoint;
+      _endpoint = null;
+      await endpoint?.close();
+      _stopConnectionPolling();
+      final host = await _inspectHost();
+      if (host.available && host.executable.isNotEmpty) {
+        await _setNativeGate(host.executable, false);
+      }
+      if (!HarnessRemoteAccessSettings.enabled) await _stopHost();
+      _publish(
+        const HarnessSimulatorTargetSnapshot(
+          phase: HarnessSimulatorTargetPhase.disabled,
+          message: '仿真机访问已关闭',
+        ),
+      );
+    } on Object catch (error) {
+      _publish(
+        HarnessSimulatorTargetSnapshot(
+          phase: HarnessSimulatorTargetPhase.error,
+          message: '仿真机关闭失败：$error',
+        ),
+      );
+    } finally {
+      _changing = false;
+    }
+  }
+
+  void markConnected(String peerId) {
+    if (!_latest.ready) return;
+    final message = peerId.trim().isEmpty ? '仿真机已连接' : '仿真机已连接 · $peerId';
+    if (_latest.phase == HarnessSimulatorTargetPhase.connected &&
+        _latest.message == message) {
+      return;
+    }
+    _publish(
+      HarnessSimulatorTargetSnapshot(
+        phase: HarnessSimulatorTargetPhase.connected,
+        routingId: _latest.routingId,
+        endpoint: _latest.endpoint,
+        sshEndpoint: _latest.sshEndpoint,
+        sshUsername: _latest.sshUsername,
+        message: message,
+      ),
+    );
+  }
+
+  void markDisconnected() {
+    if (_latest.phase != HarnessSimulatorTargetPhase.connected) return;
+    _publish(
+      HarnessSimulatorTargetSnapshot(
+        phase: HarnessSimulatorTargetPhase.ready,
+        routingId: _latest.routingId,
+        endpoint: _latest.endpoint,
+        sshEndpoint: _latest.sshEndpoint,
+        sshUsername: _latest.sshUsername,
+        message: '仿真机可连接 · 告知对方本机 ID 即可调试',
+      ),
+    );
+  }
+
+  void _publish(HarnessSimulatorTargetSnapshot value) {
+    _latest = value;
+    _changes.add(value);
+  }
+
+  void _startConnectionPolling(int generation, String executable) {
+    _stopConnectionPolling();
+    _hostExecutable = executable;
+    unawaited(_pollConnections(generation));
+    _connectionPoller = Timer.periodic(
+      _connectionPollInterval,
+      (_) => unawaited(_pollConnections(generation)),
+    );
+  }
+
+  void _stopConnectionPolling() {
+    _connectionPoller?.cancel();
+    _connectionPoller = null;
+    _hostExecutable = '';
+  }
+
+  Future<void> _pollConnections(int generation) async {
+    if (_pollingConnections ||
+        generation != _generation ||
+        _hostExecutable.isEmpty ||
+        !_latest.ready) {
+      return;
+    }
+    _pollingConnections = true;
+    try {
+      final connections = await _listConnections(_hostExecutable);
+      if (generation != _generation) return;
+      final target = connections.where(
+        (connection) =>
+            connection.authorized &&
+            !connection.disconnected &&
+            (connection.portForward == '127.0.0.1:$remotePort' ||
+                connection.portForward == 'localhost:$remotePort' ||
+                connection.portForward == '127.0.0.1:22' ||
+                connection.portForward == 'localhost:22'),
+      );
+      if (target.isEmpty) {
+        markDisconnected();
+      } else {
+        markConnected(target.first.peerId);
+      }
+    } on Object {
+      // A transient control-query failure must not revoke a healthy endpoint.
+      // The next bounded poll reconciles the real connection state.
+    } finally {
+      _pollingConnections = false;
+    }
+  }
+}

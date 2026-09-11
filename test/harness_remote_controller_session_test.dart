@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:vibekits/features/dev_tools/domain/harness_remote_connection.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_remote_controller_session.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_controller_runtime.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_remote_identity.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_remote_peer_store.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -142,8 +143,11 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(restored.single['title'], '远端项目');
     expect(session.model.stale, isFalse);
-    await session.close();
-    await session.close();
+    await HarnessRemoteControllerRuntime.instance.adopt(session);
+    expect(HarnessRemoteControllerRuntime.instance.session, same(session));
+    await HarnessRemoteControllerRuntime.instance.close();
+    await HarnessRemoteControllerRuntime.instance.close();
+    expect(HarnessRemoteControllerRuntime.instance.session, isNull);
     expect(channel.closed, isTrue);
     expect(await process.exitCode, 0);
   });

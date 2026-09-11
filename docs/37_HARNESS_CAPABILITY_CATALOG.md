@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：198。
-- Harness 当前可执行接口：175。
+- Harness 定义接口：218。
+- Harness 当前可执行接口：195。
 - 当前不可公开接口：23。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 46 |
+| 系统诊断 | 66 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,11 +108,12 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 46）
+## 系统诊断（定义 66）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
+| `vibekits.advanced.capabilities` | `advanced__capabilities` | 查看高级设备能力 | 是 | 只读返回远程协助、局域网仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。 | `readOnly` | `{}` |
 | `vibekits.agent_cli` | `agent_cli` | 智能体 CLI 编排 | 否（环境/接线门禁） | 统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。 适合：用户明确需要“智能体 CLI 编排”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
@@ -120,7 +121,16 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.cleaner.analyze_drive_cancel` | `cleaner__analyze_drive_cancel` | 取消磁盘占用分析 | 是 | 取消指定只读分析任务；不会删除或修改任何文件。 | `readOnly` | `taskId`* (string) |
 | `vibekits.cleaner.analyze_drive_start` | `cleaner__analyze_drive_start` | 启动磁盘占用分析 | 是 | 启动长耗时只读磁盘分析并立即返回 taskId。同一根目录只保留一个运行任务；Harness 应轮询 status，禁止因等待或超时重复启动。 | `readOnly` | `root`* (string), `maxResults` (integer；默认=50；最小=10；最大=200) |
 | `vibekits.cleaner.analyze_drive_status` | `cleaner__analyze_drive_status` | 查询磁盘分析状态 | 是 | 按 taskId 长轮询进度；任务运行时最多等待 waitSeconds，完成时立即返回有界结果。若仍为 running，继续查询同一 taskId，不得重新启动。 | `readOnly` | `taskId`* (string), `waitSeconds` (integer；默认=20；最小=0；最大=45) |
+| `vibekits.cluster.set_enabled` | `cluster__set_enabled` | 开关集群任务接收 | 是 | 打开或关闭集群任务接收。未配置服务器时保持等待，不发起网络请求，也不会猜测服务器或执行任意网页内容。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.cluster.status` | `cluster__status` | 查看集群任务中心状态 | 是 | 只读返回集群任务接收开关和配置完整性。尚未配置可信 HTTPS 服务、可信域和签名公钥时明确返回 unconfigured。 | `readOnly` | `{}` |
 | `vibekits.database_manager` | `database_manager` | 数据库管理（SQL） | 否（环境/接线门禁） | 拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。 适合：用户明确需要“数据库管理（SQL）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.device.app_control` | `device__app_control` | 启动或停止本机应用 | 是 | 在被调试设备上启动或停止指定 App。macOS target 使用应用名；Windows launch 使用绝对 exe 路径，stop 使用进程名。 | `controlsDevice` | `action`* (string；枚举=launch/stop), `target`* (string) |
+| `vibekits.device.crash_reports` | `device__crash_reports` | 读取本机应用崩溃报告 | 是 | 按 App 名读取本机真实崩溃报告或 dump 元数据，结果来自被调试设备。 | `readOnly` | `appName`* (string), `limit` (integer；最小=1；最大=20) |
+| `vibekits.device.logs` | `device__logs` | 读取本机应用日志 | 是 | 按进程名读取本机真实系统日志；macOS 使用 Unified Log，Windows 使用 Application Event Log。 | `readOnly` | `processName`* (string), `seconds` (integer；最小=1；最大=3600), `maxLines` (integer；最小=1；最大=2000) |
+| `vibekits.device.processes` | `device__processes` | 检查本机应用进程 | 是 | 读取本机操作系统的真实进程，可按其他 App 或进程名筛选，不限于 VibeKits 自身。 | `readOnly` | `query` (string), `limit` (integer；最小=1；最大=200) |
+| `vibekits.device.update_apply` | `device__update_apply` | 应用 VibeKits 签名候选 | 是 | 严格验证包名、递增版本、Developer ID 团队与 Universal 架构后，保留回滚副本并后台替换、重启。 | `controlsDevice` | `token`* (string) |
+| `vibekits.device.update_begin` | `device__update_begin` | 准备接收 VibeKits 候选 | 是 | 生成五分钟有效、单次使用且绑定文件名/字节数/SHA-256 的上传令牌；只在仿真开关打开的回环端点可用。 | `writesData` | `fileName`* (string), `fileSize`* (integer；最小=1；最大=1610612736), `sha256`* (string) |
+| `vibekits.device.update_status` | `device__update_status` | 查看 VibeKits 候选状态 | 是 | 只读返回目标机当前是否正在接收、校验或应用签名候选。 | `readOnly` | `{}` |
 | `vibekits.duplicate_files` | `duplicate_files` | 重复文件（Duplicate） | 否（环境/接线门禁） | 按大小预筛并用完整 SHA-256 确认重复内容，复核后移入回收站。 适合：用户明确需要“重复文件（Duplicate）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `writesData` | `input`* (string), `params` (string) |
 | `vibekits.feishu.auth_status` | `feishu__auth_status` | 检查飞书授权状态 | 是 | 调用官方lark-cli auth status，返回结构化授权状态或not_configured提示；不回显App Secret和Token。 | `readOnly` | `{}` |
 | `vibekits.feishu.execute` | `feishu__execute` | 执行官方飞书CLI命令 | 是 | 以参数数组调用内置官方lark-cli并返回有界JSON结果。禁止传入Secret或Token；写操作必须先读取Schema并优先使用--dry-run。 | `controlsDevice` | `arguments`* (array), `timeoutSeconds` (integer；默认=300；最小=5；最大=1800) |
@@ -144,9 +154,19 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.programmer_calculator` | `programmer_calculator` | 程序员计算器（HEX/DEC） | 否（环境/接线门禁） | 整数表达式、进制转换、位运算和有符号/无符号解释。 适合：用户明确需要“程序员计算器（HEX/DEC）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.project.build` | `project__build` | 验证并编译 Vibekits APP | 是 | 在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。 | `writesData` | `workspace`* (string), `target`* (string；枚举=windows/android/macos), `flutterExecutable` (string), `runTests` (boolean) |
 | `vibekits.project.iteration_inspect` | `project__iteration_inspect` | 检查 APP 自迭代工作区 | 是 | 检查 Vibekits 源码、ToolSpec 单一注册表和 Harness 桥接位置，并返回新增工具必须遵循的自动发现流程。 | `readOnly` | `workspace`* (string) |
+| `vibekits.remote_assistance.set_enabled` | `remote_assistance__set_enabled` | 开关远程协助 | 是 | 打开或关闭本机被协助授权。Android PAD 只作为协助端，不能打开本机被协助服务。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.remote_assistance.status` | `remote_assistance__status` | 查看远程协助状态 | 是 | 只读返回本机远程协助授权和结构化消息通道状态；不返回密码。 | `readOnly` | `{}` |
 | `vibekits.remote_workspace` | `remote_workspace` | 远程连接（SSH/SFTP） | 否（环境/接线门禁） | 统一管理安全终端、双栏文件和本地/远程/SOCKS5 端口转发。 适合：用户明确需要“远程连接（SSH/SFTP）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
 | `vibekits.serial.auto_detect` | `serial__auto_detect` | 自动探测串口配置 | 是 | 自动选择物理 USB 串口，并以只监听、不发送数据的方式分阶段尝试常见波特率、数据位、停止位、奇偶校验和全部 8 种流控组合；返回逐项证据及推荐配置，不要求用户手工填写。 | `controlsDevice` | `port` (string), `baudRates` (array), `listenMs` (integer；默认=300；最小=100；最大=3000) |
 | `vibekits.serial_port` | `serial_port` | 串口调试（Serial） | 否（环境/接线门禁） | 打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。 适合：用户明确需要“串口调试（Serial）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
+| `vibekits.simulator.call` | `simulator__call` | 调用远程仿真工具 | 是 | 在已连接设备上调用其真实调试工具，用于读取日志、进程、资源、截图以及受控安装/启动/停止。工具必须存在于远端目录。 | `controlsDevice` | `routingId`* (string), `toolId`* (string), `arguments` (object) |
+| `vibekits.simulator.catalog` | `simulator__catalog` | 查看远程仿真工具 | 是 | 读取已连接设备真实公开的调试工具目录。 | `readOnly` | `routingId`* (string) |
+| `vibekits.simulator.connect` | `simulator__connect` | 按 ID 连接远程仿真机 | 是 | 只需提供对方 VibeKits ID；自动建立加密 P2P 通道并在直连失败时使用中继，不需要 IP、端口、SSH 账号、密码或密钥。 | `controlsDevice` | `routingId`* (string) |
+| `vibekits.simulator.connection_status` | `simulator__connection_status` | 查看远程仿真连接 | 是 | 只读返回当前按 ID 建立的仿真连接；不会暴露内部端口。 | `readOnly` | `routingId` (string) |
+| `vibekits.simulator.disconnect` | `simulator__disconnect` | 断开远程仿真机 | 是 | 关闭指定 ID 的隧道并回收本地监听，不在后台遗留连接。 | `controlsDevice` | `routingId`* (string) |
+| `vibekits.simulator.install_candidate` | `simulator__install_candidate` | 安装远程仿真机 VibeKits 候选 | 是 | 通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。 | `controlsDevice` | `routingId`* (string), `packagePath`* (string), `apply` (boolean) |
+| `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关局域网仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为局域网仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
 | `vibekits.system.capability_check` | `system__capability_check` | 检查智能体工具链 | 是 | 只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。 | `readOnly` | `{}` |
 | `vibekits.system.describe_tool` | `system__describe_tool` | 精确说明工具参数 | 是 | 按工具 ID 返回当前运行版本的完整 inputSchema、必填项、枚举、默认值、风险和自动配置原则。回答参数配置问题前必须调用。 | `readOnly` | `toolId`* (string) |
 | `vibekits.system.resources` | `system__resources` | 检查系统资源 | 是 | 只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。 | `readOnly` | `adbSerial` (string), `samples` (integer；最小=1；最大=10), `intervalMs` (integer；最小=250；最大=5000) |

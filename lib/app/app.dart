@@ -8,6 +8,7 @@ import '../features/dev_tools/domain/harness_tool_bridge.dart';
 import '../features/dev_tools/domain/harness_agent_preferences.dart';
 import '../features/dev_tools/domain/harness_status_ipc_protocol.dart';
 import '../features/dev_tools/domain/harness_status_ipc_publisher.dart';
+import '../features/dev_tools/domain/harness_simulator_target_runtime.dart';
 import '../features/dev_tools/domain/harness_tool_server.dart';
 import '../features/dev_tools/domain/harness_work_status.dart';
 import '../features/dev_tools/domain/lan_peer_discovery_service.dart';
@@ -73,6 +74,11 @@ class _VibekitsAppState extends State<VibekitsApp> {
     if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
       unawaited(_startMcpFabricAndExternalToolServer());
       unawaited(_startHarnessStatusPublisher());
+      // Simulator hosting is an app-level desktop capability. Restore it from
+      // the saved switch without waiting for the Harness workspace to mount;
+      // the asynchronous runtime keeps the first frame independent from P2P,
+      // relay and local MCP endpoint readiness.
+      unawaited(HarnessSimulatorTargetRuntime.shared.restore());
     }
     if (!_isFlutterTest) MarketingCacheService.instance.start();
   }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +18,7 @@ import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart
 import 'package:vibekits/features/local_models/domain/model_store.dart';
 import 'package:vibekits/features/local_models/domain/pp_ocr_v6.dart';
 import 'package:vibekits/features/local_models/presentation/local_models_tab.dart';
+import 'package:vibekits/features/local_models/presentation/harness_webview_input_gate.dart';
 
 Future<void> pumpBounded(WidgetTester tester, {int frames = 20}) async {
   for (int index = 0; index < frames; index++) {
@@ -25,6 +27,12 @@ Future<void> pumpBounded(WidgetTester tester, {int frames = 20}) async {
 }
 
 void main() {
+  setUp(() {
+    HarnessWebViewInputGate.resetForTesting();
+    HarnessWebViewInputGate.testSetter = (_) async {};
+  });
+  tearDown(HarnessWebViewInputGate.resetForTesting);
+
   testWidgets('启动后显示七个 Tab 与第一个页面', (WidgetTester tester) async {
     await tester.pumpWidget(const VibekitsApp());
 
@@ -52,7 +60,12 @@ void main() {
   });
 
   testWidgets('点击 Tab 切换页面', (WidgetTester tester) async {
+    final List<bool> nativeInputStates = <bool>[];
+    HarnessWebViewInputGate.testSetter = (bool enabled) async {
+      nativeInputStates.add(enabled);
+    };
     await tester.pumpWidget(const VibekitsApp());
+    await tester.pump();
 
     await tester.tap(find.text('系统清理'));
     await tester.pump();
@@ -60,6 +73,13 @@ void main() {
 
     expect(find.text('扫描可清理项'), findsOneWidget);
     expect(find.text('打开压缩包'), findsNothing);
+    expect(nativeInputStates, contains(false));
+    expect(HarnessWebViewInputGate.workspaceActive, isFalse);
+
+    await tester.tap(find.text('智能体（Harness）').last);
+    await tester.pump();
+    expect(nativeInputStates.last, isTrue);
+    expect(HarnessWebViewInputGate.workspaceActive, isTrue);
   });
 
   testWidgets('启动恢复上次一级工作区', (WidgetTester tester) async {
@@ -145,10 +165,147 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.comma);
     await tester.sendKeyUpEvent(modifier);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('主题'), findsOneWidget);
     expect(find.text('保存'), findsOneWidget);
+    Navigator.of(tester.element(find.text('设置'))).pop();
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('设置弹窗打开时暂停底层 Harness 输入且取消后恢复', (WidgetTester tester) async {
+    final List<bool> nativeInputStates = <bool>[];
+    HarnessWebViewInputGate.testSetter = (bool enabled) async {
+      nativeInputStates.add(enabled);
+    };
+    await tester.pumpWidget(const VibekitsApp());
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('app-settings-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('设置'), findsOneWidget);
+    expect(nativeInputStates, <bool>[false]);
+    expect(HarnessWebViewInputGate.depth, 1);
+
+    await tester.tap(find.widgetWithText(TextButton, '取消'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('设置'), findsNothing);
+    expect(nativeInputStates, <bool>[false, true]);
+    expect(HarnessWebViewInputGate.depth, 0);
+  });
+
+  testWidgets('远程协同与仿真机配置只出现在设置高级页面', (WidgetTester tester) async {
+    await tester.pumpWidget(const VibekitsApp());
+
+    final LogicalKeyboardKey modifier = Platform.isMacOS
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(modifier);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(
+      find.byKey(const Key('advanced-remote-simulator-page')),
+      findsNothing,
+    );
+    await tester.tap(find.text('高级'));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('advanced-remote-simulator-page')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('advanced-simulator-access-enabled')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('advanced-local-device-id-card')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getTopLeft(find.byKey(const Key('advanced-local-device-id-card')))
+          .dy,
+      lessThan(
+        tester
+            .getTopLeft(
+              find.byKey(const Key('advanced-simulator-access-enabled')),
+            )
+            .dy,
+      ),
+    );
+    expect(find.text('局域网仿真'), findsOneWidget);
+    expect(
+      find.byKey(const Key('advanced-cluster-task-center')),
+      findsOneWidget,
+    );
+    expect(find.text('等待配置服务器'), findsOneWidget);
+    expect(
+      tester
+          .widget<Switch>(
+            find.byKey(const Key('advanced-cluster-task-enabled')),
+          )
+          .value,
+      isTrue,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const Key('advanced-local-device-id-card'))),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('远程协助和局域网仿真共用此 ID'), findsOneWidget);
+    await mouse.moveTo(Offset.zero);
+    await tester.pump();
+    expect(find.textContaining('远程协助和局域网仿真共用此 ID'), findsNothing);
+    expect(find.text('协同访问本机'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('低高度窗口的高级能力页面可滚动到集群配置且不遮挡', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1024, 600);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpWidget(const VibekitsApp());
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('app-settings-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('高级'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    final Finder cluster = find.byKey(
+      const Key('advanced-cluster-task-center'),
+    );
+    final Finder advancedScroll = find
+        .descendant(
+          of: find.byKey(const Key('harness-coordination-main-workspace')),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(cluster, 160, scrollable: advancedScroll);
+    expect(cluster, findsOneWidget);
+    await tester.tap(cluster);
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('advanced-cluster-save')),
+      160,
+      scrollable: advancedScroll,
+    );
+    expect(find.byKey(const Key('advanced-cluster-save')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('宽窗口使用侧边工作台导航', (WidgetTester tester) async {

@@ -16,6 +16,7 @@ import 'adb_service.dart';
 import 'agent_cli_service.dart';
 import 'audio_harness_service.dart';
 import 'api_request_service.dart';
+import 'cluster_task_settings.dart';
 import 'duplicate_file_background_runner.dart';
 import 'duplicate_file_scanner.dart';
 import 'file_hash_background_runner.dart';
@@ -29,10 +30,16 @@ import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_runtime_log_store.dart';
 import 'harness_connection_sessions.dart';
+import 'harness_remote_access_settings.dart';
+import 'harness_remote_management_bridge.dart';
+import 'harness_simulator_access_settings.dart';
+import 'harness_simulator_controller.dart';
+import 'harness_simulator_target_runtime.dart';
 import 'harness_work_status.dart';
 import 'lark_cli_service.dart';
 import 'lan_peer_discovery_service.dart';
 import 'network_virtualization_service.dart';
+import 'native_app_debug_service.dart';
 import 'network_download_service.dart';
 import 'packet_capture_service.dart';
 import 'system_proxy_service.dart';
@@ -44,8 +51,10 @@ import 'remote_connection_record.dart';
 import 'remote_connection_status.dart';
 import 'remote_database_service.dart';
 import 'remote_session.dart';
+import 'rustdesk_harness_link_status.dart';
 import 'serial_port_service.dart';
 import 'semantic_workflow_service.dart';
+import 'simulator_update_service.dart';
 import 'sftp_service.dart';
 import 'sqlite_database_service.dart';
 import 'tool_registry.dart';
@@ -419,6 +428,30 @@ class VibekitsHarnessToolBridge {
   static const String audioGenerateToneId = 'vibekits.audio.generate_tone';
   static const String systemResourcesId = 'vibekits.system.resources';
   static const String capabilityCheckId = 'vibekits.system.capability_check';
+  static const String advancedCapabilitiesId = 'vibekits.advanced.capabilities';
+  static const String remoteAssistanceStatusId =
+      'vibekits.remote_assistance.status';
+  static const String remoteAssistanceSetEnabledId =
+      'vibekits.remote_assistance.set_enabled';
+  static const String simulatorStatusId = 'vibekits.simulator.status';
+  static const String simulatorSetEnabledId = 'vibekits.simulator.set_enabled';
+  static const String simulatorConnectId = 'vibekits.simulator.connect';
+  static const String simulatorConnectionStatusId =
+      'vibekits.simulator.connection_status';
+  static const String simulatorCatalogId = 'vibekits.simulator.catalog';
+  static const String simulatorCallId = 'vibekits.simulator.call';
+  static const String simulatorDisconnectId = 'vibekits.simulator.disconnect';
+  static const String simulatorInstallCandidateId =
+      'vibekits.simulator.install_candidate';
+  static const String deviceProcessesId = 'vibekits.device.processes';
+  static const String deviceLogsId = 'vibekits.device.logs';
+  static const String deviceCrashReportsId = 'vibekits.device.crash_reports';
+  static const String deviceAppControlId = 'vibekits.device.app_control';
+  static const String deviceUpdateBeginId = 'vibekits.device.update_begin';
+  static const String deviceUpdateStatusId = 'vibekits.device.update_status';
+  static const String deviceUpdateApplyId = 'vibekits.device.update_apply';
+  static const String clusterStatusId = 'vibekits.cluster.status';
+  static const String clusterSetEnabledId = 'vibekits.cluster.set_enabled';
   static const String describeToolId = 'vibekits.system.describe_tool';
   static const String harnessDiagnosticsId = 'vibekits.harness.diagnostics';
   static const String projectIterationInspectId =
@@ -534,6 +567,227 @@ class VibekitsHarnessToolBridge {
       description:
           '只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。',
       properties: const <String, Object?>{},
+    ),
+    advancedCapabilitiesId: _definition(
+      id: advancedCapabilitiesId,
+      name: '查看高级设备能力',
+      description:
+          '只读返回远程协助、局域网仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。',
+      properties: const <String, Object?>{},
+    ),
+    remoteAssistanceStatusId: _definition(
+      id: remoteAssistanceStatusId,
+      name: '查看远程协助状态',
+      description: '只读返回本机远程协助授权和结构化消息通道状态；不返回密码。',
+      properties: const <String, Object?>{},
+    ),
+    remoteAssistanceSetEnabledId: _definition(
+      id: remoteAssistanceSetEnabledId,
+      name: '开关远程协助',
+      description: '打开或关闭本机被协助授权。Android PAD 只作为协助端，不能打开本机被协助服务。写操作仍需批准。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'enabled': const <String, Object?>{
+          'type': 'boolean',
+          'description': 'true 打开，false 关闭',
+        },
+      },
+      required: const <String>['enabled'],
+    ),
+    simulatorStatusId: _definition(
+      id: simulatorStatusId,
+      name: '查看仿真机状态',
+      description: '只读返回本机作为局域网仿真机的权限和真实运行阶段。',
+      properties: const <String, Object?>{},
+    ),
+    simulatorSetEnabledId: _definition(
+      id: simulatorSetEnabledId,
+      name: '开关局域网仿真机',
+      description: '打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'enabled': const <String, Object?>{
+          'type': 'boolean',
+          'description': 'true 打开，false 关闭',
+        },
+      },
+      required: const <String>['enabled'],
+    ),
+    simulatorConnectId: _definition(
+      id: simulatorConnectId,
+      name: '按 ID 连接远程仿真机',
+      description:
+          '只需提供对方 VibeKits ID；自动建立加密 P2P 通道并在直连失败时使用中继，不需要 IP、端口、SSH 账号、密码或密钥。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'routingId': _string('对方界面显示的 6～16 位 VibeKits ID'),
+      },
+      required: const <String>['routingId'],
+    ),
+    simulatorConnectionStatusId: _definition(
+      id: simulatorConnectionStatusId,
+      name: '查看远程仿真连接',
+      description: '只读返回当前按 ID 建立的仿真连接；不会暴露内部端口。',
+      properties: <String, Object?>{'routingId': _string('可选；指定 VibeKits ID')},
+    ),
+    simulatorCatalogId: _definition(
+      id: simulatorCatalogId,
+      name: '查看远程仿真工具',
+      description: '读取已连接设备真实公开的调试工具目录。',
+      properties: <String, Object?>{'routingId': _string('已连接的 VibeKits ID')},
+      required: const <String>['routingId'],
+    ),
+    simulatorCallId: _definition(
+      id: simulatorCallId,
+      name: '调用远程仿真工具',
+      description: '在已连接设备上调用其真实调试工具，用于读取日志、进程、资源、截图以及受控安装/启动/停止。工具必须存在于远端目录。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'routingId': _string('已连接的 VibeKits ID'),
+        'toolId': _string('远端工具目录中的完整工具 ID'),
+        'arguments': const <String, Object?>{
+          'type': 'object',
+          'description': '远端工具参数',
+          'additionalProperties': true,
+        },
+      },
+      required: const <String>['routingId', 'toolId'],
+    ),
+    simulatorDisconnectId: _definition(
+      id: simulatorDisconnectId,
+      name: '断开远程仿真机',
+      description: '关闭指定 ID 的隧道并回收本地监听，不在后台遗留连接。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'routingId': _string('已连接的 VibeKits ID')},
+      required: const <String>['routingId'],
+    ),
+    simulatorInstallCandidateId: _definition(
+      id: simulatorInstallCandidateId,
+      name: '安装远程仿真机 VibeKits 候选',
+      description:
+          '通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'routingId': _string('已连接的 VibeKits ID'),
+        'packagePath': _string('本机 VibeKits Universal Developer ID ZIP 绝对路径'),
+        'apply': <String, Object?>{
+          'type': 'boolean',
+          'description': '校验上传后是否立即替换并重启；默认 true',
+        },
+      },
+      required: const <String>['routingId', 'packagePath'],
+    ),
+    deviceProcessesId: _definition(
+      id: deviceProcessesId,
+      name: '检查本机应用进程',
+      description: '读取本机操作系统的真实进程，可按其他 App 或进程名筛选，不限于 VibeKits 自身。',
+      properties: <String, Object?>{
+        'query': _string('可选；App 或进程名的一部分'),
+        'limit': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 200,
+        },
+      },
+    ),
+    deviceLogsId: _definition(
+      id: deviceLogsId,
+      name: '读取本机应用日志',
+      description:
+          '按进程名读取本机真实系统日志；macOS 使用 Unified Log，Windows 使用 Application Event Log。',
+      properties: <String, Object?>{
+        'processName': _string('目标进程名，例如 MyApp'),
+        'seconds': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 3600,
+        },
+        'maxLines': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 2000,
+        },
+      },
+      required: const <String>['processName'],
+    ),
+    deviceCrashReportsId: _definition(
+      id: deviceCrashReportsId,
+      name: '读取本机应用崩溃报告',
+      description: '按 App 名读取本机真实崩溃报告或 dump 元数据，结果来自被调试设备。',
+      properties: <String, Object?>{
+        'appName': _string('目标 App 或进程名'),
+        'limit': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 20,
+        },
+      },
+      required: const <String>['appName'],
+    ),
+    deviceAppControlId: _definition(
+      id: deviceAppControlId,
+      name: '启动或停止本机应用',
+      description:
+          '在被调试设备上启动或停止指定 App。macOS target 使用应用名；Windows launch 使用绝对 exe 路径，stop 使用进程名。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'action': <String, Object?>{
+          'type': 'string',
+          'enum': const <String>['launch', 'stop'],
+        },
+        'target': _string('应用名、进程名或受支持的绝对路径'),
+      },
+      required: const <String>['action', 'target'],
+    ),
+    deviceUpdateBeginId: _definition(
+      id: deviceUpdateBeginId,
+      name: '准备接收 VibeKits 候选',
+      description: '生成五分钟有效、单次使用且绑定文件名/字节数/SHA-256 的上传令牌；只在仿真开关打开的回环端点可用。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'fileName': _string('安全命名的 .zip 文件名'),
+        'fileSize': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': SimulatorUpdateService.maxPackageBytes,
+        },
+        'sha256': _string('候选 ZIP 的 64 位十六进制 SHA-256'),
+      },
+      required: const <String>['fileName', 'fileSize', 'sha256'],
+    ),
+    deviceUpdateStatusId: _definition(
+      id: deviceUpdateStatusId,
+      name: '查看 VibeKits 候选状态',
+      description: '只读返回目标机当前是否正在接收、校验或应用签名候选。',
+      properties: const <String, Object?>{},
+    ),
+    deviceUpdateApplyId: _definition(
+      id: deviceUpdateApplyId,
+      name: '应用 VibeKits 签名候选',
+      description: '严格验证包名、递增版本、Developer ID 团队与 Universal 架构后，保留回滚副本并后台替换、重启。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'token': _string('已完整上传的候选令牌')},
+      required: const <String>['token'],
+    ),
+    clusterStatusId: _definition(
+      id: clusterStatusId,
+      name: '查看集群任务中心状态',
+      description:
+          '只读返回集群任务接收开关和配置完整性。尚未配置可信 HTTPS 服务、可信域和签名公钥时明确返回 unconfigured。',
+      properties: const <String, Object?>{},
+    ),
+    clusterSetEnabledId: _definition(
+      id: clusterSetEnabledId,
+      name: '开关集群任务接收',
+      description: '打开或关闭集群任务接收。未配置服务器时保持等待，不发起网络请求，也不会猜测服务器或执行任意网页内容。写操作仍需批准。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'enabled': const <String, Object?>{
+          'type': 'boolean',
+          'description': 'true 打开，false 关闭',
+        },
+      },
+      required: const <String>['enabled'],
     ),
     describeToolId: _definition(
       id: describeToolId,
@@ -2473,6 +2727,34 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == systemResourcesId) return _inspectSystemResources;
     if (toolId == capabilityCheckId) return _checkHarnessCapabilities;
+    if (toolId == advancedCapabilitiesId) return _advancedCapabilities;
+    if (toolId == remoteAssistanceStatusId) {
+      return _remoteAssistanceStatus;
+    }
+    if (toolId == remoteAssistanceSetEnabledId) {
+      return _setRemoteAssistanceEnabled;
+    }
+    if (toolId == simulatorStatusId) return _simulatorStatus;
+    if (toolId == simulatorSetEnabledId) return _setSimulatorEnabled;
+    if (toolId == simulatorConnectId) return _connectSimulator;
+    if (toolId == simulatorConnectionStatusId) {
+      return _simulatorConnectionStatus;
+    }
+    if (toolId == simulatorCatalogId) return _simulatorCatalog;
+    if (toolId == simulatorCallId) return _callSimulator;
+    if (toolId == simulatorDisconnectId) return _disconnectSimulator;
+    if (toolId == simulatorInstallCandidateId) {
+      return _installSimulatorCandidate;
+    }
+    if (toolId == deviceProcessesId) return _inspectDeviceProcesses;
+    if (toolId == deviceLogsId) return _readDeviceLogs;
+    if (toolId == deviceCrashReportsId) return _readDeviceCrashReports;
+    if (toolId == deviceAppControlId) return _controlDeviceApplication;
+    if (toolId == deviceUpdateBeginId) return _beginDeviceUpdate;
+    if (toolId == deviceUpdateStatusId) return _deviceUpdateStatus;
+    if (toolId == deviceUpdateApplyId) return _applyDeviceUpdate;
+    if (toolId == clusterStatusId) return _clusterStatus;
+    if (toolId == clusterSetEnabledId) return _setClusterEnabled;
     if (toolId == projectIterationInspectId) return _inspectProjectIteration;
     if (toolId == projectBuildId) return _buildProjectIteration;
     if (toolId == captureStatusId) return _captureStatus;
@@ -2733,16 +3015,19 @@ class VibekitsHarnessToolBridge {
       }
     }
     return <String, Object?>{
+      'advancedCapabilities': await _advancedCapabilities(arguments),
       'ready': missingHandlers.isEmpty && missingRuntimes.isEmpty,
       'protocol': protocolVersion,
       'productHierarchy': <String, Object?>{
-        'topLevelPageCount': 5,
+        'topLevelPageCount': 7,
         'topLevelPages': const <String>[
           '智能体（Harness）',
           '解压缩',
           '系统清理',
           '文档阅读',
           '开发工具',
+          '应用中心',
+          '关于我们',
         ],
         'developerCapabilityEntries': allDevToolRegistry.length,
         'independentDeveloperWorkspaces': devToolRegistry.length,
@@ -2811,6 +3096,211 @@ class VibekitsHarnessToolBridge {
       'checkedAt': DateTime.now().toIso8601String(),
       'scope': '注册、公开状态与执行器接线；真实设备、网络、凭据和硬件另按环境门禁验收',
     };
+  }
+
+  Future<Map<String, Object?>> _advancedCapabilities(
+    Map<String, Object?> arguments,
+  ) async {
+    final cluster = ClusterTaskSettings.latest;
+    return <String, Object?>{
+      'priority': const <String>[
+        'remoteAssistance',
+        'simulatorTarget',
+        'clusterTaskCenter',
+      ],
+      'remoteAssistance': await _remoteAssistanceStatus(arguments),
+      'simulatorTarget': await _simulatorStatus(arguments),
+      'clusterTaskCenter': cluster.toSafeJson(),
+      'sharedIdentity': true,
+      'permissionRule': '三项能力共用设备 ID，但授权、运行时和撤销完全独立',
+      'managementEntry': '设置 → 高级',
+      'harnessRule': 'Harness 只显示状态；高级能力异常不得阻塞、重启或导航 Harness',
+    };
+  }
+
+  Future<Map<String, Object?>> _remoteAssistanceStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final link = RustDeskHarnessLinkStatusHub.latest;
+    return <String, Object?>{
+      'supportedAsHost': !Platform.isAndroid && !Platform.isIOS,
+      'controllerOnly': Platform.isAndroid || Platform.isIOS,
+      'enabled':
+          !Platform.isAndroid &&
+          !Platform.isIOS &&
+          HarnessRemoteAccessSettings.enabled,
+      'phase': link.phase.name,
+      'connected': link.connected,
+      'peerId': link.peerId,
+      'message': link.message,
+      'managementEntry': '设置 → 高级 → 远程协助',
+    };
+  }
+
+  Future<Map<String, Object?>> _setRemoteAssistanceEnabled(
+    Map<String, Object?> arguments,
+  ) async {
+    final enabled = arguments['enabled'];
+    if (enabled is! bool) throw const FormatException('enabled 必须是布尔值');
+    if ((Platform.isAndroid || Platform.isIOS) && enabled) {
+      throw UnsupportedError('PAD/移动端只作为协助端，不开放本机被协助服务');
+    }
+    final settings = HarnessRemoteAccessSettings();
+    if (enabled) {
+      await settings.saveEnabled(true);
+      try {
+        await HarnessRemoteManagementBridge.startHost();
+      } on Object {
+        await settings.saveEnabled(false);
+        rethrow;
+      }
+    } else {
+      await settings.saveEnabled(false);
+      await HarnessRemoteManagementBridge.stopHost();
+    }
+    return _remoteAssistanceStatus(arguments);
+  }
+
+  Future<Map<String, Object?>> _simulatorStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final snapshot = HarnessSimulatorTargetRuntime.shared.latest;
+    return <String, Object?>{
+      'supportedAsTarget': !Platform.isAndroid && !Platform.isIOS,
+      'enabled': HarnessSimulatorAccessSettings.enabled,
+      'ready': snapshot.ready,
+      'phase': snapshot.phase.name,
+      'routingId': snapshot.routingId,
+      'sshEndpoint': snapshot.sshEndpoint,
+      'sshUsername': snapshot.sshUsername,
+      'message': snapshot.message,
+      'managementEntry': '设置 → 高级 → 局域网仿真机',
+    };
+  }
+
+  Future<Map<String, Object?>> _setSimulatorEnabled(
+    Map<String, Object?> arguments,
+  ) async {
+    final enabled = arguments['enabled'];
+    if (enabled is! bool) throw const FormatException('enabled 必须是布尔值');
+    if ((Platform.isAndroid || Platform.isIOS) && enabled) {
+      throw UnsupportedError('PAD/移动端只作为控制端，不开放本机仿真机');
+    }
+    if (enabled) {
+      await HarnessSimulatorTargetRuntime.shared.enable();
+    } else {
+      await HarnessSimulatorTargetRuntime.shared.disable();
+    }
+    final result = await _simulatorStatus(arguments);
+    if (enabled && result['ready'] != true) {
+      throw StateError(result['message']?.toString() ?? '仿真机未就绪');
+    }
+    return result;
+  }
+
+  Future<Map<String, Object?>> _connectSimulator(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.connect(
+    '${arguments['routingId'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _simulatorConnectionStatus(
+    Map<String, Object?> arguments,
+  ) async => HarnessSimulatorController.shared.status(
+    arguments['routingId']?.toString(),
+  );
+
+  Future<Map<String, Object?>> _simulatorCatalog(
+    Map<String, Object?> arguments,
+  ) async => <String, Object?>{
+    'routingId': '${arguments['routingId'] ?? ''}',
+    'tools': HarnessSimulatorController.shared.catalog(
+      '${arguments['routingId'] ?? ''}',
+    ),
+  };
+
+  Future<Map<String, Object?>> _callSimulator(
+    Map<String, Object?> arguments,
+  ) async {
+    final raw = arguments['arguments'];
+    return HarnessSimulatorController.shared.call(
+      '${arguments['routingId'] ?? ''}',
+      '${arguments['toolId'] ?? ''}',
+      raw is Map ? Map<String, Object?>.from(raw) : const <String, Object?>{},
+    );
+  }
+
+  Future<Map<String, Object?>> _disconnectSimulator(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.disconnect(
+    '${arguments['routingId'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _installSimulatorCandidate(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.installCandidate(
+    '${arguments['routingId'] ?? ''}',
+    '${arguments['packagePath'] ?? ''}',
+    apply: arguments['apply'] != false,
+  );
+
+  Future<Map<String, Object?>> _inspectDeviceProcesses(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.inspectProcesses(
+    query: '${arguments['query'] ?? ''}',
+    limit: _integer(arguments['limit'], 50),
+  );
+
+  Future<Map<String, Object?>> _readDeviceLogs(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.readLogs(
+    processName: '${arguments['processName'] ?? ''}',
+    seconds: _integer(arguments['seconds'], 300),
+    maxLines: _integer(arguments['maxLines'], 500),
+  );
+
+  Future<Map<String, Object?>> _readDeviceCrashReports(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.readCrashReports(
+    appName: '${arguments['appName'] ?? ''}',
+    limit: _integer(arguments['limit'], 5),
+  );
+
+  Future<Map<String, Object?>> _controlDeviceApplication(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.controlApplication(
+    action: '${arguments['action'] ?? ''}',
+    target: '${arguments['target'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _beginDeviceUpdate(
+    Map<String, Object?> arguments,
+  ) => SimulatorUpdateService.instance.begin(
+    expectedBytes: _integer(arguments['fileSize'], -1),
+    expectedSha256: '${arguments['sha256'] ?? ''}',
+    fileName: '${arguments['fileName'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _deviceUpdateStatus(
+    Map<String, Object?> arguments,
+  ) => SimulatorUpdateService.instance.status();
+
+  Future<Map<String, Object?>> _applyDeviceUpdate(
+    Map<String, Object?> arguments,
+  ) => SimulatorUpdateService.instance.apply(
+    token: '${arguments['token'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _clusterStatus(
+    Map<String, Object?> arguments,
+  ) async => ClusterTaskSettings.latest.toSafeJson();
+
+  Future<Map<String, Object?>> _setClusterEnabled(
+    Map<String, Object?> arguments,
+  ) async {
+    final enabled = arguments['enabled'];
+    if (enabled is! bool) throw const FormatException('enabled 必须是布尔值');
+    return (await ClusterTaskSettings().saveEnabled(enabled)).toSafeJson();
   }
 
   Future<Map<String, Object?>> _inspectProjectIteration(

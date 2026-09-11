@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'harness_tool_bridge.dart';
+import 'simulator_update_service.dart';
 
 /// MCP JSON-RPC endpoint exposed only while the user enables LAN MCP.
 ///
@@ -10,13 +11,18 @@ import 'harness_tool_bridge.dart';
 /// accidentally public interface cannot turn VibeKits into an Internet-facing
 /// tool endpoint.
 class LanMcpToolServer {
-  LanMcpToolServer._(this._server, this._bridge);
+  LanMcpToolServer._(
+    this._server,
+    this._bridge, {
+    required this.allowSimulatorUpdateUpload,
+  });
 
   static const int maxRequestBytes = 1024 * 1024;
   static const String mcpProtocolVersion = '2025-06-18';
 
   final HttpServer _server;
   final VibekitsHarnessToolBridge _bridge;
+  final bool allowSimulatorUpdateUpload;
 
   int get port => _server.port;
   Uri get loopbackEndpoint => Uri.parse('http://127.0.0.1:$port/mcp');
@@ -24,15 +30,18 @@ class LanMcpToolServer {
   static Future<LanMcpToolServer> start({
     VibekitsHarnessToolBridge? bridge,
     InternetAddress? bindAddress,
+    int port = 0,
+    bool allowSimulatorUpdateUpload = false,
   }) async {
     final HttpServer server = await HttpServer.bind(
       bindAddress ?? InternetAddress.anyIPv4,
-      0,
+      port,
       shared: false,
     );
     final LanMcpToolServer result = LanMcpToolServer._(
       server,
       bridge ?? VibekitsHarnessToolBridge(),
+      allowSimulatorUpdateUpload: allowSimulatorUpdateUpload,
     );
     server.listen(result._handle, onError: (_) {});
     return result;
@@ -54,6 +63,19 @@ class LanMcpToolServer {
         HttpStatus.forbidden,
         'forbidden',
       );
+      return;
+    }
+    if (request.method == 'PUT' &&
+        request.uri.path == SimulatorUpdateService.uploadPath) {
+      if (!allowSimulatorUpdateUpload || remoteAddress != '127.0.0.1') {
+        await _writeHttpError(
+          request.response,
+          HttpStatus.forbidden,
+          'simulator_update_upload_disabled',
+        );
+        return;
+      }
+      await _handleSimulatorUpdateUpload(request);
       return;
     }
     if (request.method != 'POST' || request.uri.path != '/mcp') {
@@ -134,6 +156,29 @@ class LanMcpToolServer {
       await _rpcError(request.response, null, -32700, '$error');
     } on Object catch (error) {
       await _rpcError(request.response, null, -32603, '$error');
+    }
+  }
+
+  Future<void> _handleSimulatorUpdateUpload(HttpRequest request) async {
+    try {
+      final String uploadToken =
+          request.headers.value('x-vibekits-upload-token') ?? '';
+      final result = await SimulatorUpdateService.instance.receive(
+        stream: request,
+        uploadToken: uploadToken,
+        contentLength: request.contentLength,
+      );
+      await _json(request.response, HttpStatus.ok, result);
+    } on FormatException catch (error) {
+      await _json(request.response, HttpStatus.badRequest, <String, Object?>{
+        'error': '$error',
+      });
+    } on Object catch (error) {
+      await _json(
+        request.response,
+        HttpStatus.internalServerError,
+        <String, Object?>{'error': '$error'},
+      );
     }
   }
 

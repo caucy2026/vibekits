@@ -38,11 +38,21 @@ case "$RELAY_KIND" in
     exit 8
     ;;
 esac
+for RELAY_ARCH in arm64 x86_64; do
+  if ! lipo "$RELAY_SOURCE" -verify_arch "$RELAY_ARCH"; then
+    echo "Harness RustDesk transport is not Universal; missing architecture: $RELAY_ARCH" >&2
+    exit 8
+  fi
+done
 mkdir -p "$(dirname "$RELAY_DESTINATION")" "$(dirname "$RELAY_LICENSE_DESTINATION")"
-ditto "$RELAY_SOURCE" "$RELAY_DESTINATION"
+RELAY_SIGNING_STAGE="$(mktemp /private/tmp/vibekits-harness-relay.XXXXXX)"
+ditto "$RELAY_SOURCE" "$RELAY_SIGNING_STAGE"
+chmod 755 "$RELAY_SIGNING_STAGE"
+codesign --force --sign - "$RELAY_SIGNING_STAGE"
+ditto "$RELAY_SIGNING_STAGE" "$RELAY_DESTINATION"
+rm -f "$RELAY_SIGNING_STAGE"
 ditto "$RELAY_LICENSE_SOURCE" "$RELAY_LICENSE_DESTINATION"
 chmod 755 "$RELAY_DESTINATION"
-codesign --force --sign - "$RELAY_DESTINATION"
 echo "Packaged Harness RustDesk transport: $RELAY_DESTINATION"
 
 if [ ! -f "$SOURCE/harness-runtime.json" ] || \

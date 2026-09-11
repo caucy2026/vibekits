@@ -12,8 +12,11 @@ import '../features/cleaner/presentation/cleaner_tab.dart';
 import '../features/documents/presentation/documents_tab.dart';
 import '../features/documents/domain/format_router.dart';
 import '../features/dev_tools/presentation/dev_tools_tab.dart';
+import '../features/dev_tools/domain/harness_remote_management_bridge.dart';
 import '../features/dev_tools/domain/remote_session.dart';
 import '../features/local_models/presentation/local_models_tab.dart';
+import '../features/local_models/presentation/official_harness_workspace.dart';
+import '../features/local_models/presentation/harness_webview_input_gate.dart';
 import 'app_shortcuts.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
@@ -157,6 +160,9 @@ class _MainShellState extends State<MainShell> {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (_selectedIndex != 0) {
+        unawaited(HarnessWebViewInputGate.setWorkspaceActive(false));
+      }
       setState(() => _loadedTabs.add(_selectedIndex));
     });
     widget.settingsController.addListener(_applySettings);
@@ -216,6 +222,9 @@ class _MainShellState extends State<MainShell> {
           _loadedTabs.add(restoredIndex);
         }
       });
+      unawaited(
+        HarnessWebViewInputGate.setWorkspaceActive(restoredIndex == 0),
+      );
     }
   }
 
@@ -259,6 +268,7 @@ class _MainShellState extends State<MainShell> {
           ..add(index);
       }
     });
+    unawaited(HarnessWebViewInputGate.setWorkspaceActive(index == 0));
     if (needsLoad) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // Paint the selected navigation state and lightweight placeholder
@@ -296,11 +306,15 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _openSettings() {
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext context) => _DeferredSettingsDialog(
-        initial: widget.settingsController.value,
-        onSave: widget.settingsController.update,
+    unawaited(
+      HarnessWebViewInputGate.runWithOverlay<void>(
+        () => showDialog<void>(
+          context: context,
+          builder: (BuildContext context) => _DeferredSettingsDialog(
+            initial: widget.settingsController.value,
+            onSave: widget.settingsController.update,
+          ),
+        ),
       ),
     );
   }
@@ -1301,6 +1315,7 @@ class _SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<_SettingsDialog> {
   late AppSettings _value = widget.initial;
+  bool _showAdvanced = false;
   late final TextEditingController _modelDirectory = TextEditingController(
     text: _value.modelDirectory,
   );
@@ -1371,185 +1386,263 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final Size viewport = MediaQuery.sizeOf(context);
+    final double contentWidth = (viewport.width - 80).clamp(280.0, 720.0);
+    final double contentHeight = (viewport.height - 150).clamp(220.0, 590.0);
     return AlertDialog(
       title: const Text('设置'),
       content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              DropdownButtonFormField<ThemeMode>(
-                key: const Key('theme-mode'),
-                initialValue: _value.themeMode,
-                decoration: const InputDecoration(labelText: '主题'),
-                items: const <DropdownMenuItem<ThemeMode>>[
-                  DropdownMenuItem(
-                    value: ThemeMode.system,
-                    child: Text('跟随系统'),
-                  ),
-                  DropdownMenuItem(value: ThemeMode.light, child: Text('浅色')),
-                  DropdownMenuItem(value: ThemeMode.dark, child: Text('深色')),
-                ],
-                onChanged: (ThemeMode? mode) {
-                  if (mode != null) {
-                    setState(() => _value = _value.copyWith(themeMode: mode));
-                  }
-                },
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('恢复上次打开的标签页'),
-                value: _value.restoreLastTab,
-                onChanged: (bool enabled) => setState(
-                  () => _value = _value.copyWith(restoreLastTab: enabled),
+        width: contentWidth,
+        height: contentHeight,
+        child: Column(
+          children: <Widget>[
+            SegmentedButton<bool>(
+              key: const Key('settings-section-selector'),
+              segments: const <ButtonSegment<bool>>[
+                ButtonSegment<bool>(
+                  value: false,
+                  icon: Icon(Icons.tune_rounded),
+                  label: Text('常规'),
                 ),
-              ),
-              DropdownButtonFormField<AppLogLevel>(
-                initialValue: _value.logLevel,
-                decoration: const InputDecoration(labelText: '日志级别'),
-                items: AppLogLevel.values
-                    .map(
-                      (AppLogLevel level) => DropdownMenuItem<AppLogLevel>(
-                        value: level,
-                        child: Text(level.name.toUpperCase()),
-                      ),
+                ButtonSegment<bool>(
+                  value: true,
+                  icon: Icon(Icons.admin_panel_settings_outlined),
+                  label: Text('高级'),
+                ),
+              ],
+              selected: <bool>{_showAdvanced},
+              onSelectionChanged: (Set<bool> selection) =>
+                  setState(() => _showAdvanced = selection.first),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _showAdvanced
+                  ? HarnessRemoteShareDialog(
+                      key: const Key('advanced-remote-simulator-page'),
+                      embedded: true,
+                      configuredExecutable: _rustDeskExecutable.text.trim(),
+                      webClientUrl: _rustDeskWebClientUrl.text.trim(),
+                      onPaired: HarnessRemoteManagementBridge.startHost,
+                      onHostStopped: HarnessRemoteManagementBridge.stopHost,
+                      localWorkspaceIds:
+                          HarnessRemoteManagementBridge.localWorkspaceIds,
                     )
-                    .toList(),
-                onChanged: (AppLogLevel? level) {
-                  if (level != null) {
-                    setState(() => _value = _value.copyWith(logLevel: level));
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                initialValue: _value.cacheLimitMb.toString(),
-                decoration: const InputDecoration(
-                  labelText: '缓存上限（MB，64–8192）',
-                ),
-                keyboardType: TextInputType.number,
-                onChanged: (String text) {
-                  final int? number = int.tryParse(text);
-                  if (number != null && number >= 64 && number <= 8192) {
-                    _value = _value.copyWith(cacheLimitMb: number);
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              Container(
-                key: const Key('platform-storage-locations'),
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: context.vibe.canvas,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: context.vibe.border),
-                ),
-                child: SelectableText(
-                  '${_storage.platform.toUpperCase()} 存储位置\n'
-                  '设置：${_storage.settingsFile}\n'
-                  '缓存：${_storage.cacheDirectory}\n'
-                  '凭据：${_storage.credentialStoreLabel}\n'
-                  '${_storageAccessText()}',
-                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _modelDirectory,
-                decoration: const InputDecoration(labelText: '模型目录（留空使用默认目录）'),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('harness-debug-directory'),
-                controller: _harnessDebugDirectory,
-                decoration: InputDecoration(
-                  labelText: '智能体调试临时目录（Harness）',
-                  helperText: '默认：$_defaultDebugDirectory',
-                  suffixIcon: IconButton(
-                    tooltip: '选择目录',
-                    onPressed: () => _pickDirectory(_harnessDebugDirectory),
-                    icon: const Icon(Icons.folder_open_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('tool-download-directory'),
-                controller: _toolDownloadDirectory,
-                decoration: InputDecoration(
-                  labelText: '工具与模型下载目录',
-                  helperText: '默认：$_defaultToolDownloadDirectory',
-                  suffixIcon: IconButton(
-                    tooltip: '选择目录',
-                    onPressed: () => _pickDirectory(_toolDownloadDirectory),
-                    icon: const Icon(Icons.folder_open_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('rustdesk-executable'),
-                controller: _rustDeskExecutable,
-                decoration: InputDecoration(
-                  labelText: 'Harness 传输引擎路径（开发调试）',
-                  helperText: '正式版自动使用 VibeKits 包内引擎，无需安装其他 App',
-                  suffixIcon: IconButton(
-                    tooltip: '选择 VibeKits Harness 传输引擎',
-                    onPressed: _pickRustDeskExecutable,
-                    icon: const Icon(Icons.folder_open_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('rustdesk-web-client-url'),
-                controller: _rustDeskWebClientUrl,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: 'KEMI远程办公网页端地址',
-                  helperText: '留空自动从兼容配置推导 /web；不保存远程控制密码',
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: _value.archiveMaxEntries.toString(),
-                      decoration: const InputDecoration(labelText: '解压最大条目数'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (String text) {
-                        final int? number = int.tryParse(text);
-                        if (number != null &&
-                            number >= 1000 &&
-                            number <= 1000000) {
-                          _value = _value.copyWith(archiveMaxEntries: number);
-                        }
-                      },
+                  : SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          DropdownButtonFormField<ThemeMode>(
+                            key: const Key('theme-mode'),
+                            initialValue: _value.themeMode,
+                            decoration: const InputDecoration(labelText: '主题'),
+                            items: const <DropdownMenuItem<ThemeMode>>[
+                              DropdownMenuItem(
+                                value: ThemeMode.system,
+                                child: Text('跟随系统'),
+                              ),
+                              DropdownMenuItem(
+                                value: ThemeMode.light,
+                                child: Text('浅色'),
+                              ),
+                              DropdownMenuItem(
+                                value: ThemeMode.dark,
+                                child: Text('深色'),
+                              ),
+                            ],
+                            onChanged: (ThemeMode? mode) {
+                              if (mode != null) {
+                                setState(
+                                  () =>
+                                      _value = _value.copyWith(themeMode: mode),
+                                );
+                              }
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('恢复上次打开的标签页'),
+                            value: _value.restoreLastTab,
+                            onChanged: (bool enabled) => setState(
+                              () => _value = _value.copyWith(
+                                restoreLastTab: enabled,
+                              ),
+                            ),
+                          ),
+                          DropdownButtonFormField<AppLogLevel>(
+                            initialValue: _value.logLevel,
+                            decoration: const InputDecoration(
+                              labelText: '日志级别',
+                            ),
+                            items: AppLogLevel.values
+                                .map(
+                                  (AppLogLevel level) =>
+                                      DropdownMenuItem<AppLogLevel>(
+                                        value: level,
+                                        child: Text(level.name.toUpperCase()),
+                                      ),
+                                )
+                                .toList(),
+                            onChanged: (AppLogLevel? level) {
+                              if (level != null) {
+                                setState(
+                                  () =>
+                                      _value = _value.copyWith(logLevel: level),
+                                );
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            initialValue: _value.cacheLimitMb.toString(),
+                            decoration: const InputDecoration(
+                              labelText: '缓存上限（MB，64–8192）',
+                            ),
+                            keyboardType: TextInputType.number,
+                            onChanged: (String text) {
+                              final int? number = int.tryParse(text);
+                              if (number != null &&
+                                  number >= 64 &&
+                                  number <= 8192) {
+                                _value = _value.copyWith(cacheLimitMb: number);
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            key: const Key('platform-storage-locations'),
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: context.vibe.canvas,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: context.vibe.border),
+                            ),
+                            child: SelectableText(
+                              '${_storage.platform.toUpperCase()} 存储位置\n'
+                              '设置：${_storage.settingsFile}\n'
+                              '缓存：${_storage.cacheDirectory}\n'
+                              '凭据：${_storage.credentialStoreLabel}\n'
+                              '${_storageAccessText()}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.vibe.muted,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _modelDirectory,
+                            decoration: const InputDecoration(
+                              labelText: '模型目录（留空使用默认目录）',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            key: const Key('harness-debug-directory'),
+                            controller: _harnessDebugDirectory,
+                            decoration: InputDecoration(
+                              labelText: '智能体调试临时目录（Harness）',
+                              helperText: '默认：$_defaultDebugDirectory',
+                              suffixIcon: IconButton(
+                                tooltip: '选择目录',
+                                onPressed: () =>
+                                    _pickDirectory(_harnessDebugDirectory),
+                                icon: const Icon(Icons.folder_open_outlined),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            key: const Key('tool-download-directory'),
+                            controller: _toolDownloadDirectory,
+                            decoration: InputDecoration(
+                              labelText: '工具与模型下载目录',
+                              helperText: '默认：$_defaultToolDownloadDirectory',
+                              suffixIcon: IconButton(
+                                tooltip: '选择目录',
+                                onPressed: () =>
+                                    _pickDirectory(_toolDownloadDirectory),
+                                icon: const Icon(Icons.folder_open_outlined),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            key: const Key('rustdesk-executable'),
+                            controller: _rustDeskExecutable,
+                            decoration: InputDecoration(
+                              labelText: 'Harness 传输引擎路径（开发调试）',
+                              helperText: '正式版自动使用 VibeKits 包内引擎，无需安装其他 App',
+                              suffixIcon: IconButton(
+                                tooltip: '选择 VibeKits Harness 传输引擎',
+                                onPressed: _pickRustDeskExecutable,
+                                icon: const Icon(Icons.folder_open_outlined),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            key: const Key('rustdesk-web-client-url'),
+                            controller: _rustDeskWebClientUrl,
+                            keyboardType: TextInputType.url,
+                            decoration: const InputDecoration(
+                              labelText: 'KEMI远程办公网页端地址',
+                              helperText: '留空自动从兼容配置推导 /web；不保存远程控制密码',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: TextFormField(
+                                  initialValue: _value.archiveMaxEntries
+                                      .toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: '解压最大条目数',
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  onChanged: (String text) {
+                                    final int? number = int.tryParse(text);
+                                    if (number != null &&
+                                        number >= 1000 &&
+                                        number <= 1000000) {
+                                      _value = _value.copyWith(
+                                        archiveMaxEntries: number,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextFormField(
+                                  initialValue: _value.archiveMaxFileMb
+                                      .toString(),
+                                  decoration: const InputDecoration(
+                                    labelText: '单文件上限（MB）',
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  onChanged: (String text) {
+                                    final int? number = int.tryParse(text);
+                                    if (number != null &&
+                                        number >= 64 &&
+                                        number <= 102400) {
+                                      _value = _value.copyWith(
+                                        archiveMaxFileMb: number,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: _value.archiveMaxFileMb.toString(),
-                      decoration: const InputDecoration(labelText: '单文件上限（MB）'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (String text) {
-                        final int? number = int.tryParse(text);
-                        if (number != null &&
-                            number >= 64 &&
-                            number <= 102400) {
-                          _value = _value.copyWith(archiveMaxFileMb: number);
-                        }
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       actions: <Widget>[

@@ -13,10 +13,14 @@ import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_callback_remote_adapter.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
+import '../../dev_tools/domain/harness_remote_controller_runtime.dart';
+import '../../dev_tools/domain/harness_remote_controller_session.dart';
 import '../../dev_tools/domain/harness_remote_host_runtime.dart';
+import '../../dev_tools/domain/harness_remote_management_bridge.dart';
 import '../../dev_tools/domain/harness_remote_access_settings.dart';
 import '../../dev_tools/domain/harness_remote_pairing_service.dart';
 import '../../dev_tools/domain/harness_remote_peer_store.dart';
+import '../../dev_tools/domain/harness_simulator_target_runtime.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
@@ -32,7 +36,7 @@ import 'mcp_reputation_badge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
-import 'official_harness_workspace.dart';
+import '../../dev_tools/presentation/harness_remote_read_only_panel.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
 typedef AgentCredentialReader = Future<String?> Function(String key);
@@ -181,12 +185,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _workspaceSearchOpen = false;
   bool _workspaceCatalogLoading = true;
   bool _showScrollToLatest = false;
-  bool _coordinationMode = false;
-  bool _coordinationConnected = false;
-  String _coordinationPeerId = '';
   final HarnessRemoteHostRuntime _remoteHostRuntime =
       HarnessRemoteHostRuntime.shared;
-  late Future<RustDeskHostInfo> _remoteHostSummary;
+  StreamSubscription<HarnessRemoteControllerSession?>?
+  _remoteControllerSubscription;
 
   String _sessionRunKey(String workspace, String sessionId) =>
       '$workspace\u0000$sessionId';
@@ -210,20 +212,21 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   @override
   void initState() {
     super.initState();
+    HarnessRemoteManagementBridge.bind(
+      owner: this,
+      startHost: _startDeepSeekRemoteHost,
+      stopHost: _stopDeepSeekRemoteHost,
+      localWorkspaceIds: () => _workspaceCatalog
+          .where((String workspace) => workspace.trim().isNotEmpty)
+          .toSet(),
+    );
+    _remoteControllerSubscription = HarnessRemoteControllerRuntime
+        .instance
+        .changes
+        .listen((_) {
+          if (mounted) setState(() {});
+        });
     _composer.addListener(_captureComposerDraft);
-    _remoteHostSummary = Platform.environment['FLUTTER_TEST'] == 'true'
-        ? Future<RustDeskHostInfo>.value(
-            const RustDeskHostInfo(
-              executable: '',
-              id: 'TEST-ID',
-              available: true,
-              callable: true,
-              message: '测试远程协助身份',
-            ),
-          )
-        : RustDeskHarnessShareService.inspect(
-            configuredExecutable: widget.rustDeskExecutable,
-          );
     _scroll.addListener(_updateScrollToLatest);
     _adoptExternalPrompt();
     unawaited(_loadSettings());
@@ -397,6 +400,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   @override
   void dispose() {
+    HarnessRemoteManagementBridge.unbind(this);
+    _remoteControllerSubscription?.cancel();
     _captureComposerDraft();
     unawaited(_persistConversation());
     _conversationEpoch++;
@@ -2412,6 +2417,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   @override
   Widget build(BuildContext context) {
     final HarnessEnvironmentReport? environment = _environment;
+    final HarnessRemoteControllerSession? remoteSession =
+        HarnessRemoteControllerRuntime.instance.session;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         // The Harness tab is usually about 776 px wide inside the application
@@ -2423,26 +2430,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           children: <Widget>[
             _buildCoordinationModeBar(),
             Expanded(
-              child: _coordinationMode
-                  ? HarnessRemoteShareDialog(
-                      key: const Key('agent-coordination-workspace'),
-                      configuredExecutable: widget.rustDeskExecutable,
-                      webClientUrl: widget.rustDeskWebClientUrl,
-                      onPaired: _startDeepSeekRemoteHost,
-                      onHostStopped: _stopDeepSeekRemoteHost,
-                      localWorkspaceIds: () => _workspaceCatalog
-                          .where((workspace) => workspace.trim().isNotEmpty)
-                          .toSet(),
-                      embedded: true,
-                      controllerOnly: Platform.isAndroid,
-                      onConnectionChanged: (bool connected, String peerId) {
-                        if (!mounted) return;
-                        setState(() {
-                          _coordinationConnected = connected;
-                          _coordinationPeerId = peerId;
-                        });
-                      },
-                    )
+              child: remoteSession != null
+                  ? _buildRemoteWorkspace(remoteSession)
                   : Row(
                       children: <Widget>[
                         if (showSessionSidebar) ...<Widget>[
@@ -2472,112 +2461,131 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     );
   }
 
+  Widget _buildRemoteWorkspace(HarnessRemoteControllerSession session) {
+    return Padding(
+      key: const Key('agent-harness-remote-workspace'),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Expanded(
+            child: HarnessRemoteReadOnlyPanel(
+              peerRoutingId: session.peer.routingId,
+              model: session.model,
+              onDisconnect: () =>
+                  unawaited(HarnessRemoteControllerRuntime.instance.close()),
+            ),
+          ),
+          const SizedBox(height: 10),
+          HarnessRemoteCommandPanel(
+            model: session.model,
+            client: session.client,
+            allowedOperations: session.peer.operations,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCoordinationModeBar() {
     final colors = Theme.of(context).colorScheme;
-    if (!Platform.isAndroid) {
-      return Material(
-        color: colors.surfaceContainerLow,
-        child: SizedBox(
-          height: 52,
-          child: Row(
-            children: <Widget>[
-              const SizedBox(width: 14),
-              const Icon(Icons.support_agent_rounded, size: 20),
-              const SizedBox(width: 9),
-              Expanded(
-                child: FutureBuilder<RustDeskHostInfo>(
-                  future: _remoteHostSummary,
-                  builder: (context, snapshot) {
-                    final String id = snapshot.data?.id ?? '';
-                    return Text(
-                      id.isEmpty ? '本机远程协助 ID · 正在注册…' : '本机远程协助 ID：$id',
-                      key: const Key('agent-local-assistance-id'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    );
-                  },
-                ),
-              ),
-              OutlinedButton.icon(
-                key: const Key('agent-remote-assistance-button'),
-                onPressed: _showRemoteShare,
-                icon: const Icon(Icons.screen_share_outlined, size: 18),
-                label: const Text('远程协助'),
-              ),
-              const SizedBox(width: 12),
-            ],
-          ),
-        ),
-      );
-    }
     return Material(
-      color: _coordinationMode
-          ? colors.tertiaryContainer
-          : colors.surfaceContainerLow,
+      color: colors.surfaceContainerLow,
       child: SizedBox(
-        height: 48,
+        height: 44,
         child: Row(
           children: <Widget>[
             const SizedBox(width: 14),
-            Icon(
-              _coordinationMode
-                  ? Icons.screen_share_rounded
-                  : Icons.computer_rounded,
-              size: 19,
-            ),
+            const Icon(Icons.monitor_heart_outlined, size: 19),
             const SizedBox(width: 8),
-            Expanded(
+            const Expanded(
               child: Text(
-                !_coordinationMode
-                    ? '本地模式 · 点击远程协助去连接对方'
-                    : _coordinationConnected
-                    ? '远程协助 · 已连接 $_coordinationPeerId'
-                    : '远程协助 · 请连接对应设备 ID；连接前所有操作均已禁止',
-                key: const Key('agent-coordination-status'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                '远程状态',
+                key: Key('agent-coordination-status'),
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
-            FilledButton.icon(
-              key: const Key('agent-coordination-switch'),
-              onPressed: _coordinationMode
-                  ? _exitCoordinationMode
-                  : _enterCoordinationMode,
-              icon: Icon(
-                _coordinationMode
-                    ? Icons.stop_screen_share_outlined
-                    : Icons.screen_share_outlined,
-                size: 19,
-              ),
-              label: Text(_coordinationMode ? '退出远程协助' : '远程协助'),
+            StreamBuilder<HarnessSimulatorTargetSnapshot>(
+              stream: HarnessSimulatorTargetRuntime.shared.changes,
+              initialData: HarnessSimulatorTargetRuntime.shared.latest,
+              builder: (BuildContext context, snapshot) {
+                final simulator =
+                    snapshot.data ??
+                    HarnessSimulatorTargetRuntime.shared.latest;
+                if (!simulator.enabled) return const SizedBox.shrink();
+                final (Color, String) status = switch (simulator.phase) {
+                  HarnessSimulatorTargetPhase.disabled => (colors.outline, ''),
+                  HarnessSimulatorTargetPhase.starting => (
+                    Colors.orange,
+                    '局域网仿真准备中',
+                  ),
+                  HarnessSimulatorTargetPhase.ready => (
+                    Colors.blue,
+                    '局域网仿真可连接',
+                  ),
+                  HarnessSimulatorTargetPhase.connected => (
+                    Colors.green,
+                    '局域网仿真中',
+                  ),
+                  HarnessSimulatorTargetPhase.error => (Colors.red, '局域网仿真异常'),
+                };
+                return _remoteStatusChip(status.$1, status.$2);
+              },
             ),
-            const SizedBox(width: 8),
+            StreamBuilder<RustDeskHarnessLinkSnapshot>(
+              stream: RustDeskHarnessLinkStatusHub.changes,
+              initialData: RustDeskHarnessLinkStatusHub.latest,
+              builder: (BuildContext context, snapshot) {
+                final controllerSession =
+                    HarnessRemoteControllerRuntime.instance.session;
+                if (controllerSession != null) {
+                  return _remoteStatusChip(
+                    controllerSession.model.stale
+                        ? Colors.orange
+                        : Colors.green,
+                    controllerSession.model.stale ? '协同恢复中' : '协同已连接',
+                  );
+                }
+                final link =
+                    snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
+                final (Color, String) status = switch (link.phase) {
+                  RustDeskHarnessLinkPhase.connected => (Colors.green, '协同已连接'),
+                  RustDeskHarnessLinkPhase.clientFound ||
+                  RustDeskHarnessLinkPhase.handshaking => (
+                    Colors.orange,
+                    '协同连接中',
+                  ),
+                  RustDeskHarnessLinkPhase.incompatible ||
+                  RustDeskHarnessLinkPhase.stale => (Colors.red, '协同异常'),
+                  RustDeskHarnessLinkPhase.disconnected => (
+                    Colors.blue,
+                    '协同断开',
+                  ),
+                };
+                return _remoteStatusChip(status.$1, status.$2);
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
-  void _enterCoordinationMode() {
-    if (_sessionRuns.isNotEmpty) {
-      _show('本机仍有任务运行，请先停止任务再进入协同模式');
-      return;
-    }
-    _captureComposerDraft();
-    setState(() {
-      _coordinationMode = true;
-      _coordinationConnected = false;
-      _coordinationPeerId = '';
-    });
-  }
-
-  void _exitCoordinationMode() {
-    setState(() {
-      _coordinationMode = false;
-      _coordinationConnected = false;
-      _coordinationPeerId = '';
-    });
-  }
+  Widget _remoteStatusChip(Color color, String label) => Padding(
+    padding: const EdgeInsets.only(right: 10),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12)),
+      ],
+    ),
+  );
 
   Widget _buildCrossPlatformToolRail() => Container(
     width: 60,
@@ -2661,23 +2669,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           tooltip: 'Harness 工具调用记录',
           onPressed: _showRecentToolActivity,
         ),
-        StreamBuilder<RustDeskHarnessLinkSnapshot>(
-          stream: RustDeskHarnessLinkStatusHub.changes,
-          initialData: RustDeskHarnessLinkStatusHub.latest,
-          builder: (_, AsyncSnapshot<RustDeskHarnessLinkSnapshot> snapshot) {
-            final RustDeskHarnessLinkSnapshot link =
-                snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
-            return _macRailAction(
-              icon: Icons.screen_share_outlined,
-              tooltip: '远程状态：${link.message}',
-              active: link.phase == RustDeskHarnessLinkPhase.connected,
-              onPressed: _showRemoteShare,
-            );
-          },
-        ),
         _macRailAction(
           icon: Icons.settings_outlined,
-          tooltip: 'MCP 与协同设置',
+          tooltip: 'MCP 设置',
           onPressed: _showMacMcpSettings,
         ),
         PopupMenuButton<String>(
@@ -2685,26 +2679,16 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           tooltip: '更多 Harness 操作',
           onSelected: (String value) {
             switch (value) {
-              case 'remote':
-                _showRemoteShare();
               case 'settings':
                 _showMacMcpSettings();
             }
           },
           itemBuilder: (_) => const <PopupMenuEntry<String>>[
             PopupMenuItem<String>(
-              value: 'remote',
-              child: ListTile(
-                leading: Icon(Icons.screen_share_outlined),
-                title: Text('远程协助'),
-                subtitle: Text('查看本机 ID 或连接另一台 Harness'),
-              ),
-            ),
-            PopupMenuItem<String>(
               value: 'settings',
               child: ListTile(
                 leading: Icon(Icons.settings_outlined),
-                title: Text('MCP 与协同设置'),
+                title: Text('MCP 设置'),
               ),
             ),
           ],
@@ -2713,32 +2697,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ],
     ),
   );
-
-  Future<void> _showRemoteShare() async {
-    if (Platform.isAndroid) {
-      _enterCoordinationMode();
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (context) => HarnessRemoteShareDialog(
-        configuredExecutable: widget.rustDeskExecutable,
-        webClientUrl: widget.rustDeskWebClientUrl,
-        onPaired: _startDeepSeekRemoteHost,
-        onHostStopped: _stopDeepSeekRemoteHost,
-        localWorkspaceIds: () => _workspaceCatalog
-            .where((workspace) => workspace.trim().isNotEmpty)
-            .toSet(),
-      ),
-    );
-    if (mounted) {
-      setState(() {
-        _remoteHostSummary = RustDeskHarnessShareService.inspect(
-          configuredExecutable: widget.rustDeskExecutable,
-        );
-      });
-    }
-  }
 
   Future<void> _startDeepSeekRemoteHost() async {
     if (_remoteHostRuntime.running) await _remoteHostRuntime.stop();
@@ -3205,7 +3163,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         final McpCapabilitySnapshot snapshot =
             McpCapabilityDirectory.instance.snapshot;
         return AlertDialog(
-          title: const Text('MCP 与协同设置'),
+          title: const Text('MCP 设置'),
           content: SizedBox(
             width: 560,
             child: Column(
@@ -3885,12 +3843,6 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             tooltip: '重新检查',
             onPressed: _checkEnvironment,
             icon: const Icon(Icons.refresh, size: 18),
-          ),
-          IconButton(
-            key: const Key('agent-remote-assistance'),
-            tooltip: 'Harness 远程协助：本机 ID、首次授权和连接历史',
-            onPressed: _showRemoteShare,
-            icon: const Icon(Icons.screen_share_outlined, size: 19),
           ),
           if (Platform.isAndroid && _apiKey.text.isEmpty)
             OutlinedButton.icon(

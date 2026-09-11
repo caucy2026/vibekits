@@ -18,15 +18,134 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Vibekits 可处理文件</string>
+			<string>Vibekits 压缩文件</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
-			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
+			<string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
 			<array>
-				<string>public.data</string>
+				<string>zip</string>
+				<string>tar</string>
+				<string>gz</string>
+				<string>tgz</string>
+				<string>bz2</string>
+				<string>tbz2</string>
+				<string>xz</string>
+				<string>txz</string>
+				<string>7z</string>
+				<string>rar</string>
+				<string>r00</string>
+				<string>iso</string>
+				<string>img</string>
+				<string>zst</string>
+				<string>tzst</string>
+				<string>cab</string>
+				<string>arj</string>
+				<string>lzh</string>
+				<string>chm</string>
+				<string>msi</string>
+				<string>nsis</string>
+				<string>udf</string>
+				<string>wim</string>
+				<string>swm</string>
+				<string>esd</string>
+				<string>dmg</string>
+				<string>hfs</string>
+				<string>apfs</string>
+				<string>vhd</string>
+				<string>vhdx</string>
+				<string>ova</string>
+				<string>cpio</string>
+				<string>rpm</string>
+				<string>deb</string>
+				<string>squashfs</string>
+				<string>zipx</string>
+				<string>jar</string>
+				<string>xpi</string>
+				<string>apk</string>
+				<string>appx</string>
+				<string>ipa</string>
+				<string>odt</string>
+				<string>ods</string>
+				<string>docx</string>
+				<string>xlsx</string>
 			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Vibekits 文档与源代码</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>txt</string><string>log</string><string>md</string><string>markdown</string>
+				<string>ini</string><string>cfg</string><string>conf</string><string>properties</string>
+				<string>yaml</string><string>yml</string><string>toml</string><string>env</string>
+				<string>editorconfig</string><string>gitignore</string><string>diff</string><string>patch</string>
+				<string>tex</string><string>latex</string><string>csv</string><string>tsv</string>
+				<string>json</string><string>xml</string><string>html</string><string>htm</string>
+				<string>epub</string><string>svg</string><string>svgz</string><string>bin</string>
+				<string>dart</string><string>js</string><string>mjs</string><string>cjs</string>
+				<string>ts</string><string>tsx</string><string>jsx</string><string>css</string>
+				<string>scss</string><string>less</string><string>vue</string><string>svelte</string>
+				<string>py</string><string>pyw</string><string>java</string><string>kt</string><string>kts</string>
+				<string>c</string><string>h</string><string>cc</string><string>cpp</string><string>cxx</string><string>hpp</string>
+				<string>cs</string><string>go</string><string>rs</string><string>swift</string>
+				<string>sh</string><string>bash</string><string>zsh</string><string>bat</string><string>cmd</string><string>ps1</string>
+				<string>sql</string><string>gradle</string><string>cmake</string><string>dockerfile</string>
+				<string>rb</string><string>php</string><string>phtml</string><string>lua</string><string>r</string>
+				<string>scala</string><string>sc</string><string>groovy</string>
+				<string>clj</string><string>cljs</string><string>cljc</string><string>edn</string>
+				<string>ex</string><string>exs</string><string>erl</string><string>hrl</string>
+				<string>fs</string><string>fsx</string><string>fsi</string><string>vb</string><string>vbs</string>
+				<string>asm</string><string>s</string><string>v</string><string>zig</string>
+				<string>nim</string><string>nims</string><string>sol</string><string>proto</string>
+				<string>graphql</string><string>gql</string><string>tf</string><string>tfvars</string><string>hcl</string>
+				<string>nix</string><string>fish</string><string>nu</string><string>awk</string><string>sed</string>
+				<string>pl</string><string>pm</string><string>tcl</string><string>coffee</string>
+				<string>wat</string><string>wasm</string><string>lock</string><string>ipynb</string>
+				<string>astro</string><string>elm</string><string>hs</string><string>lhs</string><string>jl</string>
+				<string>ml</string><string>mli</string><string>pas</string><string>pp</string><string>inc</string>
+				<string>rego</string><string>yara</string><string>yar</string>
+				<string>glsl</string><string>vert</string><string>frag</string><string>comp</string><string>hlsl</string><string>metal</string>
+				<string>rst</string><string>adoc</string><string>bazel</string><string>bzl</string><string>build</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits 图片</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>png</string><string>jpg</string><string>jpeg</string><string>jpe</string><string>jfif</string>
+				<string>webp</string><string>bmp</string><string>dib</string><string>gif</string>
+				<string>tif</string><string>tiff</string><string>ico</string><string>cur</string><string>tga</string>
+				<string>psd</string><string>exr</string><string>pnm</string><string>pbm</string><string>pgm</string><string>ppm</string><string>pvr</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits SQLite 数据库</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>db</string><string>db3</string><string>sqlite</string><string>sqlite3</string></array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits 本地模型</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>onnx</string><string>ort</string><string>tflite</string><string>gguf</string><string>model</string></array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits 音频</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array><string>pcm</string><string>raw</string><string>wav</string><string>wave</string></array>
 		</dict>
 	</array>
 	<key>CFBundlePackageType</key>

@@ -203,6 +203,39 @@ void main() {
     expect(launched, executable.path);
   });
 
+  test('仿真机权限只通过显式原生控制命令切换', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_simulator_gate_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final calls = <List<String>>[];
+
+    for (final enabled in <bool>[true, false]) {
+      await RustDeskHarnessShareService.setSimulatorAccess(
+        executable.path,
+        enabled: enabled,
+        runner: (_, arguments) async {
+          calls.add(arguments);
+          return ProcessResult(
+            1,
+            0,
+            '{"ok":true,"state":"idle","connections":[]}',
+            '',
+          );
+        },
+      );
+    }
+
+    expect(calls, <List<String>>[
+      <String>['--vibekits-harness-simulator-access', '1'],
+      <String>['--vibekits-harness-simulator-access', '0'],
+    ]);
+  });
+
   test('恢复远程协助会启动中继并等待到真实可呼叫状态', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_resume_',
@@ -391,6 +424,7 @@ void main() {
     );
     expect(connections.single.peerName, 'Harness B');
     expect(connections.single.authorized, isFalse);
+    expect(connections.single.portForward, isEmpty);
     await RustDeskHarnessShareService.decideConnection(
       '/Harness',
       connectionId: 17,

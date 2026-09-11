@@ -33,12 +33,14 @@ class RustDeskHarnessIncomingConnection {
     required this.peerName,
     required this.authorized,
     required this.disconnected,
+    this.portForward = '',
   });
   final int connectionId;
   final String peerId;
   final String peerName;
   final bool authorized;
   final bool disconnected;
+  final String portForward;
 }
 
 typedef RustDeskProcessRunner =
@@ -198,6 +200,8 @@ final class RustDeskHarnessTunnelLease {
 /// transport. VibeKits' own authenticated protocol defines every payload; no
 /// separately installed RustDesk/KEMI app or plugin is a runtime dependency.
 abstract final class RustDeskHarnessShareService {
+  static const int simulatorRemotePort = 32147;
+  static const int simulatorSshRemotePort = 22;
   static const MethodChannel _androidRelay = MethodChannel(
     'vibekits/harness-relay',
   );
@@ -571,7 +575,8 @@ abstract final class RustDeskHarnessShareService {
     if (localPort < 1024 || localPort > 65535) {
       throw const FormatException('Harness 本地转发端口无效');
     }
-    if (remotePort < 1024 || remotePort > 65535) {
+    if ((remotePort < 1024 && remotePort != simulatorSshRemotePort) ||
+        remotePort > 65535) {
       throw const FormatException('Harness 远端服务端口无效');
     }
   }
@@ -634,6 +639,7 @@ abstract final class RustDeskHarnessShareService {
         peerName: value['peerName'] as String,
         authorized: value['authorized'] as bool,
         disconnected: value['disconnected'] as bool,
+        portForward: value['portForward']?.toString() ?? '',
       );
     }),
   );
@@ -666,6 +672,59 @@ abstract final class RustDeskHarnessShareService {
       throw StateError(payload['code']?.toString() ?? 'Harness 授权操作失败');
     }
   }
+
+  /// Enables or revokes the native gate for the one fixed simulator MCP
+  /// endpoint. This never changes desktop, terminal, file-transfer or generic
+  /// tunnel permissions.
+  static Future<void> setSimulatorAccess(
+    String executable, {
+    required bool enabled,
+    RustDeskProcessRunner? runner,
+  }) async {
+    if (Platform.isAndroid) {
+      throw UnsupportedError('PAD 只作为协助端，不开放本机仿真机访问');
+    }
+    final ProcessResult result = await _runControlCommand(
+      executable,
+      <String>['--vibekits-harness-simulator-access', enabled ? '1' : '0'],
+      timeout: const Duration(seconds: 5),
+      runner: runner,
+    );
+    final Map<String, Object?> payload = _decodeControl(result);
+    if (payload['ok'] != true) {
+      throw StateError(payload['code']?.toString() ?? '仿真机权限更新失败');
+    }
+  }
+
+  static Future<RustDeskHarnessTunnelLease> openSimulatorTunnel(
+    String executable, {
+    required String routingId,
+    required int localPort,
+    bool forceRelay = false,
+    RustDeskManagedProcessLauncher? launcher,
+  }) => openTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    remotePort: simulatorRemotePort,
+    forceRelay: forceRelay,
+    launcher: launcher,
+  );
+
+  static Future<RustDeskHarnessTunnelLease> openSimulatorSshTunnel(
+    String executable, {
+    required String routingId,
+    required int localPort,
+    bool forceRelay = false,
+    RustDeskManagedProcessLauncher? launcher,
+  }) => openTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    remotePort: simulatorSshRemotePort,
+    forceRelay: forceRelay,
+    launcher: launcher,
+  );
 
   static Map<String, Object?> _decodeControl(ProcessResult result) {
     if (result.exitCode != 0) {

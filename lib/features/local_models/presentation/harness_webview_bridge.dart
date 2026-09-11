@@ -15,6 +15,8 @@ class HarnessWebViewBridge {
       StreamController<dynamic>.broadcast();
   final StreamController<void> _pageFinished =
       StreamController<void>.broadcast();
+  final StreamController<String> _navigationDiagnostics =
+      StreamController<String>.broadcast();
 
   win.WebviewController? _windows;
   mac.WebViewController? _macos;
@@ -22,6 +24,7 @@ class HarnessWebViewBridge {
 
   Stream<dynamic> get messages => _messages.stream;
   Stream<void> get pageFinished => _pageFinished.stream;
+  Stream<String> get navigationDiagnostics => _navigationDiagnostics.stream;
   bool get initialized => _initialized;
 
   Future<void> initialize() async {
@@ -55,7 +58,27 @@ class HarnessWebViewBridge {
         },
       );
       await controller.setNavigationDelegate(
-        mac.NavigationDelegate(onPageFinished: (_) => _pageFinished.add(null)),
+        mac.NavigationDelegate(
+          onPageStarted: (String url) =>
+              _navigationDiagnostics.add('started ${_safeUrl(url)}'),
+          onPageFinished: (String url) {
+            _navigationDiagnostics.add('finished ${_safeUrl(url)}');
+            _pageFinished.add(null);
+          },
+          onHttpError: (mac.HttpResponseError error) {
+            _navigationDiagnostics.add(
+              'http ${error.response?.statusCode ?? 0} '
+              '${_safeUrl(error.request?.uri.toString() ?? '')}',
+            );
+          },
+          onWebResourceError: (mac.WebResourceError error) {
+            if (error.isForMainFrame == false) return;
+            _navigationDiagnostics.add(
+              'resource ${error.errorCode} ${_safeUrl(error.url ?? '')} '
+              '${error.description}',
+            );
+          },
+        ),
       );
       _macos = controller;
       _initialized = true;
@@ -76,6 +99,45 @@ class HarnessWebViewBridge {
       return;
     }
     throw StateError('Harness WebView 尚未初始化');
+  }
+
+  /// Removes only accumulated DSH browser-auth cookies when they are large
+  /// enough to make the loopback server reject every request with HTTP 431.
+  /// Project, conversation, plugin, cache and local-storage data are untouched.
+  Future<bool> pruneOversizedHarnessAuthentication() async {
+    final win.WebviewController? windows = _windows;
+    if (windows != null) {
+      // This WebView2 controller is dedicated to Harness. Stable-port reuse
+      // prevents future growth, while one cleanup repairs older installations.
+      await windows.clearCookies();
+      return true;
+    }
+    if (_macos != null) {
+      final mac.WebViewCookieManager manager = mac.WebViewCookieManager();
+      final List<mac.WebViewCookie> cookies = await manager.getCookies(
+        domain: Uri.parse('http://127.0.0.1/'),
+      );
+      final List<mac.WebViewCookie> harnessCookies = cookies
+          .where(
+            (mac.WebViewCookie cookie) => cookie.name.startsWith('dsh-auth-'),
+          )
+          .toList(growable: false);
+      final int headerBytes = harnessCookies.fold<int>(
+        0,
+        (int total, mac.WebViewCookie cookie) =>
+            total + cookie.name.length + cookie.value.length + 3,
+      );
+      if (harnessCookies.length < 24 && headerBytes < 6 * 1024) return false;
+      await manager.clearCookies();
+      return true;
+    }
+    throw StateError('Harness WebView 尚未初始化');
+  }
+
+  static String _safeUrl(String value) {
+    final Uri? url = Uri.tryParse(value);
+    if (url == null || !url.hasScheme) return value;
+    return url.replace(query: '', fragment: '').toString();
   }
 
   Future<dynamic> executeScript(String script) async {
@@ -118,5 +180,6 @@ class HarnessWebViewBridge {
     _windows?.dispose();
     _messages.close();
     _pageFinished.close();
+    _navigationDiagnostics.close();
   }
 }

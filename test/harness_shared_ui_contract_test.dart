@@ -28,6 +28,47 @@ void main() {
     expect(source, contains('VibekitsHarnessToolBridge('));
   });
 
+  test('official and fallback Harness action rails stay scrollable', () {
+    final String official = File(
+      'lib/features/local_models/presentation/official_harness_workspace.dart',
+    ).readAsStringSync();
+    final String fallback = File(
+      'lib/features/local_models/presentation/deepseek_agent_workspace.dart',
+    ).readAsStringSync();
+
+    expect(official, contains("Key('harness-quick-actions-rail-scroll')"));
+    expect(official, contains('child: ListView('));
+    expect(fallback, contains('Widget _buildCrossPlatformToolRail()'));
+    expect(fallback, contains('child: ListView('));
+  });
+
+  test('remote management never replaces either Harness workspace', () {
+    final String official = File(
+      'lib/features/local_models/presentation/official_harness_workspace.dart',
+    ).readAsStringSync();
+    final String fallback = File(
+      'lib/features/local_models/presentation/deepseek_agent_workspace.dart',
+    ).readAsStringSync();
+
+    expect(official, contains('HarnessRemoteManagementBridge.bind'));
+    expect(fallback, contains('HarnessRemoteManagementBridge.bind'));
+    expect(official, contains("'远程状态'"));
+    expect(fallback, contains("'远程状态'"));
+    expect(official, contains("'局域网仿真中'"));
+    expect(fallback, contains("'局域网仿真中'"));
+    expect(
+      official,
+      contains('if (!simulator.enabled) return const SizedBox.shrink();'),
+    );
+    expect(
+      fallback,
+      contains('if (!simulator.enabled) return const SizedBox.shrink();'),
+    );
+    expect(fallback, isNot(contains('agent-coordination-workspace')));
+    expect(fallback, isNot(contains('agent-remote-assistance-button')));
+    expect(fallback, isNot(contains('agent-coordination-switch')));
+  });
+
   test('official plugin settings and inventory remain composed', () {
     final List<File> candidates = <File>[
       File(
@@ -73,6 +114,13 @@ void main() {
     expect(source, contains('win.WebviewController'));
     expect(source, isNot(contains('EagerGestureRecognizer')));
     expect(source, contains('return mac.WebViewWidget(controller: macos)'));
+    expect(source, isNot(contains('clearRecoverableUiState')));
+    expect(workspace, isNot(contains('_waitForHarnessContent')));
+    expect(workspace, isNot(contains('HarnessPageNotRenderedException')));
+    expect(workspace, contains('unawaited(_activateIndependentServices'));
+    expect(source, contains('pruneOversizedHarnessAuthentication'));
+    expect(source, contains("cookie.name.startsWith('dsh-auth-')"));
+    expect(workspace, contains('pruneOversizedHarnessAuthentication()'));
     expect(workspace, isNot(contains('_scrollHarnessConversation')));
     expect(
       workspace,
@@ -86,7 +134,10 @@ void main() {
     expect(injectedUx, contains('window.VibekitsHost'));
     expect(injectedUx, contains("value === 'AUTH'"));
     expect(injectedUx, contains('vibekits.inferenceError'));
-    expect(workspace, contains("payload?['type'] == 'vibekits.inferenceError'"));
+    expect(
+      workspace,
+      contains("payload?['type'] == 'vibekits.inferenceError'"),
+    );
     expect(workspace, contains('API 密钥无效，请检查 DeepSeek API Key 后重试。'));
     expect(injectedUx, contains('vibekits-selected-session-actions'));
     expect(injectedUx, contains('[role="treeitem"][aria-selected="true"]'));
@@ -104,9 +155,16 @@ void main() {
     expect(appDelegate, contains('self.webViewInputEnabled'));
     expect(appDelegate, contains('webViewResponder'));
     expect(workspace, contains('_withFlutterOverlay'));
-    expect(workspace, contains('setWebViewInputEnabled'));
+    expect(workspace, contains('HarnessWebViewInputGate.runWithOverlay'));
+    final String shell = File('lib/app/main_shell.dart').readAsStringSync();
+    expect(shell, contains('HarnessWebViewInputGate.runWithOverlay<void>'));
     expect(workspace, contains('_blockNativeWebViewInput'));
     expect(workspace, contains('_unblockNativeWebViewInput'));
+    final String gate = File(
+      'lib/features/local_models/presentation/harness_webview_input_gate.dart',
+    ).readAsStringSync();
+    expect(gate, contains('setWebViewInputEnabled'));
+    expect(gate, contains('static int _depth = 0'));
   });
 
   test('bundled Harness workers are tied to the desktop App lifetime', () {

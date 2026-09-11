@@ -537,6 +537,26 @@ void main() {
     }
   });
 
+  test('高级设备能力全部进入 MCP 目录且开关保持控制权限', () {
+    final Map<String, HarnessToolDefinition> tools =
+        <String, HarnessToolDefinition>{
+          for (final tool in VibekitsHarnessToolBridge().executableCatalog)
+            tool.id: tool,
+        };
+    expect(tools, contains(VibekitsHarnessToolBridge.advancedCapabilitiesId));
+    expect(
+      tools[VibekitsHarnessToolBridge.advancedCapabilitiesId]?.risk,
+      HarnessToolRisk.readOnly,
+    );
+    for (final id in <String>[
+      VibekitsHarnessToolBridge.remoteAssistanceSetEnabledId,
+      VibekitsHarnessToolBridge.simulatorSetEnabledId,
+      VibekitsHarnessToolBridge.clusterSetEnabledId,
+    ]) {
+      expect(tools[id]?.risk, HarnessToolRisk.controlsDevice, reason: id);
+    }
+  });
+
   test('智能体能力自检保证所有公开工具都有本地执行器', () async {
     final Directory runtime = Directory.systemTemp.createTempSync(
       'vibekits_capability_runtime_',
@@ -562,10 +582,20 @@ void main() {
     expect(result.data?['missingRuntimes'], isEmpty);
     expect(result.data?['executableTools'], greaterThan(50));
     expect(result.data?['unavailableTools'], isNotEmpty);
+    final Map<String, Object?> advanced =
+        (result.data?['advancedCapabilities'] as Map).cast<String, Object?>();
+    expect(advanced['priority'], <String>[
+      'remoteAssistance',
+      'simulatorTarget',
+      'clusterTaskCenter',
+    ]);
+    expect(advanced['remoteAssistance'], isA<Map>());
+    expect(advanced['simulatorTarget'], isA<Map>());
+    expect(advanced['clusterTaskCenter'], isA<Map>());
     final Map<String, Object?> productHierarchy =
         (result.data?['productHierarchy'] as Map).cast<String, Object?>();
-    expect(productHierarchy['topLevelPageCount'], 5);
-    expect(productHierarchy['topLevelPages'], hasLength(5));
+    expect(productHierarchy['topLevelPageCount'], 7);
+    expect(productHierarchy['topLevelPages'], hasLength(7));
     expect(
       productHierarchy['developerCapabilityEntries'],
       allDevToolRegistry.length,

@@ -101,6 +101,23 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
+# The Harness collaboration/simulator transport is part of VibeKits itself.
+# Keep it beside vibekits.exe because the Dart runtime deliberately resolves
+# only an app-local sibling and never falls back to a separately installed
+# RustDesk application or a developer PATH.
+set(HARNESS_RELAY_RUNTIME
+  "${CMAKE_SOURCE_DIR}/../native/rustdesk/windows/runtime/vibekits-harness-relay.exe")
+if(EXISTS "${HARNESS_RELAY_RUNTIME}")
+  install(FILES "${HARNESS_RELAY_RUNTIME}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
+else()
+  install(CODE "
+    if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+      message(FATAL_ERROR \"Bundled Windows Harness relay is missing. Prepare native/rustdesk/windows/runtime/vibekits-harness-relay.exe before Release packaging.\")
+    endif()
+  " COMPONENT Runtime)
+endif()
+
 install(TARGETS vibekits_packet_capture RUNTIME
   DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/packet_capture" COMPONENT Runtime)
 install(FILES

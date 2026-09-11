@@ -214,7 +214,7 @@ abstract final class DeepSeekHarnessService {
       r'''<!-- VIBEKITS_CAPABILITIES_BEGIN -->
 # VibeKits Harness 工具使用准则
 
-你运行在 VibeKits 内部。询问 APP 功能时，先调用只读工具 `vibekits.system.capability_check`，并分别报告 5 个产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。
+你运行在 VibeKits 内部。询问 APP 功能、特殊能力或高级功能时，先调用只读工具 `vibekits.advanced.capabilities`，按远程协助、局域网仿真机、集群任务中心的顺序优先报告真实开关、状态和平台角色；局域网仿真机还要报告统一 ID 与系统 SSH 端点/用户名，不得把未授权状态说成可用；再调用 `vibekits.system.capability_check`，分别报告产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。打开或关闭高级能力必须使用对应 `set_enabled` 工具，不得用 shell、修改配置文件或猜测服务地址绕过权限。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
 
@@ -226,7 +226,7 @@ abstract final class DeepSeekHarnessService {
 
 用户要求“记住/学习/录制这套操作”时使用语义 Record & Replay：先调用 `vibekits.workflow.record_start` 写清业务目标、可变输入和客观成功标准，再完成一次真实示范，最后调用 `workflow.record_stop`。以后先 `workflow.list → workflow.prepare_replay` 绑定本次输入；把返回内容当作 Skill，根据当前三层 MCP 目录重新规划和逐步验证，禁止回放鼠标坐标、盲目照搬旧参数或继承录制时的一次性批准。
 
-产品一级页面：智能体（Harness）、解压缩、系统清理、文档阅读、开发工具。业务模块：计算调试、系统诊断、数据库、远程连接、网络开发、版本控制、文件工具、音频调试、编码转换、加密生成、时间文本、格式处理和虚拟化。
+产品一级页面：智能体（Harness）、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们。业务模块：计算调试、系统诊断、数据库、远程连接、网络开发、版本控制、文件工具、音频调试、编码转换、加密生成、时间文本、格式处理和虚拟化。
 
 常用链路：串口先 `serial.list_ports → serial.auto_detect`，直接采用返回的 `selected`（baudRate/dataBits/stopBits/parity/flowControl），短任务再 `serial.transact`，持续调试再 `serial.session_open → session_read/write → session_close`。自动探测只监听，协议未知时禁止发送探测字节；没有数据时扩大 listenMs 重试；即使存在多个串口也按 VID/PID、描述和传输类型自动排序选择，再以被动接收结果报告置信度，不询问用户猜端口或配置。ADB `adb.list_devices/connect → adb.*`，长连接用 `adb.session_open → session_status → session_close`；SSH/SFTP `remote.list_profiles/open_interactive → ssh_exec/sftp_*`，优先复用保存会话；Git `git.inspect → backup_preview → backup_commit → backup_push → verify_remote_ref`；代理 `runtime.inspect → proxy.start → runtime.status → proxy.system_apply`，结束时恢复系统代理；虚拟机 `runtime.inspect → vm.create_disk → vm.start → runtime.status → vm.stop`。修改 VibeKits 自身前先 `project.iteration_inspect`，完成后调用 `project.build` 执行分析、接口测试和 Release 构建门禁；构建产物不得自动覆盖正在运行的 APP，安装升级必须由用户确认。
 
@@ -652,10 +652,12 @@ abstract final class DeepSeekHarnessService {
   }
 
   static Future<int> findFreeLoopbackPort() async {
-    final ServerSocket socket = await ServerSocket.bind(
-      InternetAddress.loopbackIPv4,
-      0,
-    );
+    ServerSocket socket;
+    try {
+      socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 3080);
+    } on SocketException {
+      socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    }
     final int port = socket.port;
     await socket.close();
     return port;
@@ -1076,9 +1078,8 @@ String? harnessLegacyWebKitDistIndex({
   final int? minor = match?.group(2) == null
       ? null
       : int.tryParse(match!.group(2)!);
-  final bool needsCompatibility = major == 12 ||
-      major == 13 ||
-      (major == 14 && minor != null && minor < 4);
+  final bool needsCompatibility =
+      major == 12 || major == 13 || (major == 14 && minor != null && minor < 4);
   return needsCompatibility ? compatibilityIndexPath : null;
 }
 
@@ -1187,11 +1188,11 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       parentWatchdogPath: parentWatchdog.path,
       sessionRebindPath: sessionRebind.path,
       builtInSkillsDirectory: builtInSkills,
-        macos12WebDistIndexPath:
-            '${root.path}${Platform.pathSeparator}node_modules'
-            '${Platform.pathSeparator}@deepseek-ai${Platform.pathSeparator}'
-            'dsh-web-frontend${Platform.pathSeparator}dist-macos12'
-            '${Platform.pathSeparator}index.html',
+      macos12WebDistIndexPath:
+          '${root.path}${Platform.pathSeparator}node_modules'
+          '${Platform.pathSeparator}@deepseek-ai${Platform.pathSeparator}'
+          'dsh-web-frontend${Platform.pathSeparator}dist-macos12'
+          '${Platform.pathSeparator}index.html',
     );
   }
   throw const FileSystemException('内置 Harness 运行时缺失');
@@ -1620,13 +1621,15 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
     if (announced != null) {
       url = announced;
     }
-    final String safe = DeepSeekHarnessService.redactSensitiveOutput(
-      chunk,
-      <String>[
-        _apiKey,
-        if (url.queryParameters['token'] != null) url.queryParameters['token']!,
-      ],
-    ).replaceAll(RegExp(r'([?&]token=)[^\s&]+'), r'$1<hidden>');
+    final String safe =
+        DeepSeekHarnessService.redactSensitiveOutput(chunk, <String>[
+          _apiKey,
+          if (url.queryParameters['token'] != null)
+            url.queryParameters['token']!,
+        ]).replaceAllMapped(
+          RegExp(r'([?&]token=)[^\s&]+'),
+          (Match match) => '${match.group(1)}<hidden>',
+        );
     _log.write('[${DateTime.now().toUtc().toIso8601String()}][$channel] $safe');
     // IOSink is already buffered. A forced disk flush for every Node output
     // chunk can add seconds to DSH startup on Windows and is unnecessary for a

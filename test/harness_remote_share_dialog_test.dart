@@ -85,6 +85,11 @@ void main() {
     expect(find.text('Harness 远程协助'), findsOneWidget);
     expect(find.text('远程协助已关闭'), findsOneWidget);
     expect(find.text('本机 Harness ID'), findsOneWidget);
+    expect(
+      find.byKey(const Key('harness-simulator-access-enabled')),
+      findsOneWidget,
+    );
+    expect(find.text('允许作为仿真机'), findsOneWidget);
     expect(find.byKey(const Key('harness-remote-peer-id')), findsOneWidget);
     expect(
       find.byKey(const Key('harness-remote-peer-password')),

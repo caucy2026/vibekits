@@ -368,7 +368,7 @@ void main() {
     );
   });
 
-  testWidgets('右侧更多菜单可进入远程协助而不是无响应占位符', (WidgetTester tester) async {
+  testWidgets('Harness 只显示远程状态且右侧菜单仅管理 MCP', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -396,7 +396,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('agent-local-assistance-id')), findsOneWidget);
+    expect(find.byKey(const Key('agent-coordination-status')), findsOneWidget);
+    expect(find.text('局域网仿真关闭'), findsNothing);
+    expect(find.text('协同断开'), findsOneWidget);
+    expect(find.byKey(const Key('agent-local-assistance-id')), findsNothing);
     await tester.ensureVisible(
       find.byKey(const Key('agent-mcp-local-devices')),
     );
@@ -409,14 +412,13 @@ void main() {
     await tester.tap(find.byKey(const Key('agent-tool-rail-more')));
     await tester.pumpAndSettle();
 
-    expect(find.text('远程协助'), findsWidgets);
-    expect(find.text('查看本机 ID 或连接另一台 Harness'), findsOneWidget);
-    expect(find.text('MCP 与协同设置'), findsOneWidget);
-    await tester.tap(find.text('远程协助').last);
+    expect(find.text('远程协助'), findsNothing);
+    expect(find.text('查看本机 ID 或连接另一台 Harness'), findsNothing);
+    expect(find.text('MCP 设置'), findsOneWidget);
+    await tester.tap(find.text('MCP 设置'));
     await tester.pumpAndSettle();
-    expect(find.text('Harness 远程协助'), findsOneWidget);
-    expect(find.text('本机 Harness ID'), findsOneWidget);
-    expect(find.byKey(const Key('harness-remote-peer-id')), findsOneWidget);
+    expect(find.text('MCP 设置'), findsOneWidget);
+    expect(find.textContaining('实例 ID：'), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
