@@ -4,6 +4,7 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 
+#include <cwctype>
 #include <optional>
 #include <unordered_set>
 #include <variant>

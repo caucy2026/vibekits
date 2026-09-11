@@ -49,6 +49,12 @@
 ## 6. Windows 门禁状态
 
 - Windows 58 节点已准备 dev.187 源码目录和旧正式版自包含运行时。
+- 节点：Windows 10 22H2 build 19045；全部源码、缓存、临时目录、构建和产物位于 `D:\KEMI-Test`。
+- 首次分析因 Mac `.dart_tool/package_config.json` 的绝对路径污染产生伪错误；使用 D 盘离线 Pub 缓存重建配置后，`flutter analyze --no-pub` 通过（442.6 秒）。
+- 重点测试执行 54 项：53 项通过；唯一失败是测试错误地要求 Windows 展示 macOS 专属“协助另一台设备”输入框。源码已改成平台感知断言，macOS 对应用例 3/3 通过；该修复仍需同步到 58 后复跑 Windows。
+- 首次 Release 暴露两个真实构建输入问题：`flutter_window.cpp` 缺少 `<cwctype>`，以及 Mihomo 许可证文件未进入同步源。源码已补 `<cwctype>`；58 使用等价 `/FIcwctype` 增量验证，并从既有正式运行时恢复相同许可证文件。
+- 最终增量 `flutter build windows --release --no-pub` 成功，开始 `00:51:19`、结束 `00:53:22`、耗时 108.8 秒、退出码 0；生成 `vibekits.exe`，版本 `1.9.0-dev.187+2187`。
+- `vibekits.exe` 字节数 `160768`，SHA-256 `986e0cb2bf472827d3657f50978cc60025cb4cf2152b5709f34a65d38108a1da`；两次启动 8 秒后进程均存活。内置 Git `2.55.0.windows.3`、ADB `1.0.41`、7-Zip `26.02 x64` 可执行。
 - 最终 Windows 源码明确要求将 `vibekits-harness-relay.exe` 与 `vibekits.exe` 同目录打包；缺少该二进制时 Release 主动失败。
 - Windows 端只有在精确最终源码、内置 relay、Release 构建、隔离启动和真实协同/仿真命令全部通过后才能发布。不得用旧版普通启动或 SSH 会话冒充本功能验收。
 
