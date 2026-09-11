@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/local_models/presentation/official_harness_workspace.dart';
@@ -90,10 +92,16 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('允许作为仿真机'), findsOneWidget);
-    expect(find.byKey(const Key('harness-remote-peer-id')), findsOneWidget);
+    // Desktop target mode is shared, while initiating assistance is currently
+    // a macOS/PAD role. A Windows target must not fail its UI contract merely
+    // because it intentionally omits the macOS-only controller fields.
+    expect(
+      find.byKey(const Key('harness-remote-peer-id')),
+      Platform.isMacOS ? findsOneWidget : findsNothing,
+    );
     expect(
       find.byKey(const Key('harness-remote-peer-password')),
-      findsOneWidget,
+      Platform.isMacOS ? findsOneWidget : findsNothing,
     );
     final scrollable = find.descendant(
       of: find.byType(AlertDialog),
