@@ -321,6 +321,64 @@ void main() {
     ]);
   });
 
+  test('旧中继以退出码 2 报 unsupported 时仍精确接管并恢复授权', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_remote_assistance_legacy_exit_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final calls = <List<String>>[];
+    int gateAttempts = 0;
+    bool launched = false;
+
+    await RustDeskHarnessShareService.setRemoteAssistanceAccess(
+      executable.path,
+      enabled: true,
+      runner: (_, arguments) async {
+        calls.add(arguments);
+        if (arguments.first == '--vibekits-harness-stop') {
+          return ProcessResult(
+            2,
+            0,
+            '{"ok":true,"state":"stopped","connections":[]}',
+            '',
+          );
+        }
+        gateAttempts += 1;
+        if (gateAttempts == 1) {
+          return ProcessResult(
+            1,
+            2,
+            'unsupported VibeKits Harness relay command',
+            '',
+          );
+        }
+        return ProcessResult(
+          1,
+          0,
+          '{"ok":true,"state":"idle","connections":[]}',
+          '',
+        );
+      },
+      launcher: (path, arguments) async {
+        launched = true;
+        expect(path, executable.path);
+        expect(arguments, const <String>['--vibekits-harness-service']);
+      },
+    );
+
+    expect(launched, isTrue);
+    expect(gateAttempts, 2);
+    expect(calls, <List<String>>[
+      <String>['--vibekits-harness-remote-assistance-access', '1'],
+      <String>['--vibekits-harness-stop'],
+      <String>['--vibekits-harness-remote-assistance-access', '1'],
+    ]);
+  });
+
   test('关闭远程协助遇到旧中继时保持失败关闭且不重启服务', () async {
     bool launched = false;
     await RustDeskHarnessShareService.setRemoteAssistanceAccess(

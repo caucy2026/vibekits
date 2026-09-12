@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-13 · dev.198 远程协助旧 Relay 覆盖升级修复
+
+- dev.197 正式包真实运行时发现：已打开仿真后再打开远程协助，仍在运行的 dev.196 Relay 对新 gate 命令以退出码 2 和固定 `unsupported` 文本拒绝；控制层过早抛错，既有旧服务接管路径未执行。dev.197 因此不作为最终交付候选。
+- dev.198 只对上述精确 legacy 响应进入安全接管：停止旧 Relay、启动当前包内 Relay、等待远程协助 gate 成功并恢复已打开的仿真权限；其他非零退出继续失败关闭。
+- 定向回归 `97` 项通过、`1` 项环境门禁跳过、`0` 项失败，生产文件静态分析 0 issue。PAD 75 用隔离 ADB server 重新连接成功，当前为 dev.188；63 仍超时/No route to host。
+- 详细证据与剩余门禁见 `docs/acceptance/V1_9_0_DEV198_REMOTE_ASSISTANCE_RELAY_UPGRADE_2026-09-13.md`；精确 dev.198 签名、公证和跨端闭环完成前不得发布。
+
 ## 2026-09-10 · 1.9.0-dev.170+2170 · Android 应用中心与商城发布闭环
 
 - 修复 Android 商城把线上 `platforms=[all]` / `platforms=[pad2]` 条目全部误过滤、页面显示空列表的问题；保留平台二次校验，桌面端不会混入 PAD 条目。

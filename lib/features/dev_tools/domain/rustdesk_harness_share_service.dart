@@ -710,8 +710,8 @@ abstract final class RustDeskHarnessShareService {
     if (Platform.isAndroid) {
       throw UnsupportedError('PAD 只作为协助端，不开放本机被协助服务');
     }
-    Future<Map<String, Object?>> updateGate() async => _decodeControl(
-      await _runControlCommand(
+    Future<Map<String, Object?>> updateGate() async {
+      final ProcessResult result = await _runControlCommand(
         executable,
         <String>[
           '--vibekits-harness-remote-assistance-access',
@@ -719,8 +719,19 @@ abstract final class RustDeskHarnessShareService {
         ],
         timeout: const Duration(seconds: 5),
         runner: runner,
-      ),
-    );
+      );
+      if (result.exitCode != 0) {
+        final String output = '${result.stdout}\n${result.stderr}'.trim();
+        if (output.contains('unsupported VibeKits Harness relay command')) {
+          return const <String, Object?>{
+            'ok': false,
+            'state': 'legacy',
+            'code': 'control_response_invalid',
+          };
+        }
+      }
+      return _decodeControl(result);
+    }
 
     Map<String, Object?> payload = await updateGate();
     if (payload['ok'] == true) return;
