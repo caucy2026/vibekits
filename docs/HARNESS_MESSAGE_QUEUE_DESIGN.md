@@ -1,5 +1,9 @@
 # Harness 运行中消息与待执行队列设计
 
+> 待开发状态审查（2026-09-12，基线 `cloud/main@9cecb37`）：本设计尚未进入功能实现。当前源码没有持久队列仓储、忙闲事件适配、`message.accepted` 确认、补充/排队/打断选择、待执行列表、编辑/排序/删除或 `VIBEKITS_DATA_HOME`。现有 `_injectPrompt` 仍只把外部文本写入官方 DSH 输入框。其他智能体应从本文“当前版本落地顺序”开始实现，不能把文档存在视为功能完成。
+
+> 基线检测结果：`flutter analyze` 返回 16 项（测试/工具脚本相对导入等 14 项提示、1 项未使用参数警告、1 项下划线提示）；Harness/会话/设置相关测试 30 项中 29 项通过，`右侧更多菜单可进入远程协助而不是无响应占位符` 因找不到 `harness-remote-peer-id` 失败；Windows Release 已生成主 EXE，但最终 CMake install 因 `build/windows/x64/runner/Release/tools/packet_capture/vibekits_packet_capture.exe` 被占用或权限锁定，无法设置权限而失败。以上属于开发前基线问题，必须修复并重新跑完整门禁。
+
 ## 目标
 
 Harness 推理、调用工具或执行长任务时，输入框仍然可用。新消息不能丢失，也不能在用户不知情时终止当前任务。每条消息必须明确处于当前任务补充、待执行或立即打断三种语义之一。
