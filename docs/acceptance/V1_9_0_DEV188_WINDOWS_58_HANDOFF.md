@@ -46,7 +46,7 @@ flutter build windows --release --no-pub
 - VibeKits 源码提交：`17c8c2e14fdc6dc00d17fa7b7227a0b35544c592`；RustDesk relay 源码提交：`6ce56ab0b37c94f0e4cbfb983cff5d69d244b707`。
 - 远程协助/仿真共用逻辑定向回归共 `89/89` 通过，覆盖默认密码、首次证书批准、错误密码拒绝、证书固定、P2P/强制中继选择、mTLS、项目/会话快照、命令回执、独立停止、断线恢复、撤权、PAD 仅控制端以及固定仿真端点生命周期。
 - 远程协助相关 Dart 源码静态分析：`No issues found`。
-- 本机 Rust relay 测试已进入依赖编译，阻断点是开发机没有 `cmake`，报错来自 `libsamplerate-sys` 构建脚本；未出现 relay 源码编译错误。58 必须使用本节既定 D 盘工具链重新执行 Rust 测试和 Release 构建，不能沿用本机旧 helper 代替。
+- 本机补入临时 CMake 3.30 并指向仓库自带 `vcpkg` 后，Rust relay 二进制完成编译/链接；库模块内四个 relay 单测 `4/4` 通过。RustDesk 上游仍产生既有 warning，但没有 relay 错误。该结果只证明 macOS arm64 开发构建，58 仍必须使用本节既定 D 盘工具链重新执行 Windows Rust 测试和 Release 构建，不能沿用本机 helper 代替。
 - 本机 ADB 预检只发现 `192.168.3.75:5555` 在线；`192.168.3.63:5555` 当前不可达。因此 63 真机远程闭环仍是未通过门禁，不得由上述 89 项自动测试替代。
 
 58 在完整构建前还应执行远程共用逻辑回归：
