@@ -2,6 +2,7 @@ param(
   [string]$RustDeskSource = $env:VIBEKITS_RUSTDESK_SOURCE,
   [string]$ToolsRoot = 'D:\KEMI-Test\tools',
   [string]$VisualStudioRoot = 'D:\VSBuildTools',
+  [string]$LlvmRoot = '',
   [string]$OutputFile = '',
   [string]$CargoTargetDirectory = 'D:\KEMI-Test\build\rustdesk-harness-relay'
 )
@@ -30,6 +31,18 @@ Assert-DDrivePath 'VisualStudioRoot' $VisualStudioRoot
 Assert-DDrivePath 'OutputFile' $OutputFile
 Assert-DDrivePath 'CargoTargetDirectory' $CargoTargetDirectory
 
+if ([string]::IsNullOrWhiteSpace($LlvmRoot)) {
+  $LlvmRoot = Get-ChildItem -LiteralPath $ToolsRoot -Directory |
+    Where-Object { $_.Name -like 'llvm*' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'bin\libclang.dll')) } |
+    Sort-Object Name -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+}
+if ([string]::IsNullOrWhiteSpace($LlvmRoot)) {
+  throw "No pinned LLVM directory containing bin\libclang.dll was found under $ToolsRoot"
+}
+Assert-DDrivePath 'LlvmRoot' $LlvmRoot
+$libclangPath = Join-Path $LlvmRoot 'bin'
+
 $cargoHome = Join-Path $ToolsRoot 'cargo-home-rustdesk'
 $rustupHome = Join-Path $ToolsRoot 'rustup-home-rustdesk'
 $cargo = Join-Path $cargoHome 'bin\cargo.exe'
@@ -45,6 +58,7 @@ foreach ($required in @(
   (Join-Path $RustDeskSource 'src\vibekits_harness_cli.rs'),
   (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'),
   $cargo,
+  (Join-Path $libclangPath 'libclang.dll'),
   (Join-Path $projectRoot 'third_party\rustdesk-transport\LICENCE')
 )) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
@@ -121,6 +135,7 @@ $env:VCPKG_ROOT = $vcpkgRoot
 $env:VCPKG_INSTALLED_ROOT = Join-Path $vcpkgRoot 'installed'
 $env:VCPKG_DEFAULT_TRIPLET = 'x64-windows-static'
 $env:VCPKG_DEFAULT_HOST_TRIPLET = 'x64-windows-static'
+$env:LIBCLANG_PATH = $libclangPath
 $env:PATH = "$(Join-Path $cargoHome 'bin');$env:PATH"
 
 Push-Location $RustDeskSource
