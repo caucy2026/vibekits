@@ -49,6 +49,7 @@ flutter build windows --release --no-pub
 - 本机补入临时 CMake 3.30 并指向仓库自带 `vcpkg` 后，Rust relay 二进制完成编译/链接；库模块内四个 relay 单测 `4/4` 通过。RustDesk 上游仍产生既有 warning，但没有 relay 错误。该结果只证明 macOS arm64 开发构建，58 仍必须使用本节既定 D 盘工具链重新执行 Windows Rust 测试和 Release 构建，不能沿用本机 helper 代替。
 - 当前源码 helper 完成真实本机服务生命周期：启动后独立 ID `1554650784` 返回 `callable=true`、`rendezvousOnline=true`、`registrationKeyConfirmed=true`、`state=registered`；无会话时连接控制返回 `idle`；显式停止返回 `stopped` 且服务进程退出。随后已恢复原 Release helper，并再次确认相同独立 ID 为 `registered/callable`。这证明本机 HBBS 注册、状态 IPC 与停止生命周期，不代表远端 P2P/HBBR 业务会话已通过。
 - 本机 ADB 预检只发现 `192.168.3.75:5555` 在线；`192.168.3.63:5555` 当前不可达。因此 63 真机远程闭环仍是未通过门禁，不得由上述 89 项自动测试替代。
+- 对此前授权目标 ID `4456560334` 分别执行自动 P2P/回退和强制 HBBR 到固定仿真端点 `127.0.0.1:32147`，两轮都先正确报告 `listener_ready`，随后在 45 秒返回 `transport_connect_timeout`；失败后本机 relay 仍为 `registered/callable`。这说明失败没有污染本机服务，但当前目标未形成可用数据面，不能复用 2026-09-11 的历史成功证据替代本轮双机验收。
 
 58 在完整构建前还应执行远程共用逻辑回归：
 
