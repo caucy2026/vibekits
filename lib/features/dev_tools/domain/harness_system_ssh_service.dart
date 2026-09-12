@@ -119,15 +119,48 @@ abstract final class HarnessSystemSshService {
       '-E',
       'sha256',
     ]);
-    if (result.exitCode != 0) throw StateError('无法读取 SSH 主机指纹');
-    final match = RegExp(
+    String? fingerprint = RegExp(
       r'\b(SHA256:[A-Za-z0-9+/=]+)\b',
-    ).firstMatch('${result.stdout}');
-    if (match == null) throw StateError('SSH 主机指纹格式无效');
+    ).firstMatch('${result.stdout}')?.group(1);
+    if (fingerprint == null && Platform.isWindows) {
+      // A standard Windows user can run sshd but may be denied direct read
+      // access to C:\ProgramData\ssh\ssh_host_ed25519_key.pub. Derive the
+      // same OpenSSH SHA-256 fingerprint from the loopback-only key scan
+      // instead of asking for elevation or weakening host verification.
+      final ProcessResult scan = await run(_sshKeyscanExecutable(), <String>[
+        '-T',
+        '3',
+        '-t',
+        'ed25519',
+        '127.0.0.1',
+      ]);
+      if (scan.exitCode == 0) {
+        for (final String line in const LineSplitter().convert(
+          '${scan.stdout}',
+        )) {
+          if (line.trimLeft().startsWith('#')) continue;
+          final List<String> fields = line.trim().split(RegExp(r'\s+'));
+          if (fields.length < 3 || fields[1] != 'ssh-ed25519') continue;
+          try {
+            final List<int> keyBytes = base64Decode(fields[2]);
+            final String digest = base64Encode(
+              sha256.convert(keyBytes).bytes,
+            ).replaceAll('=', '');
+            fingerprint = 'SHA256:$digest';
+            break;
+          } on FormatException {
+            // Ignore malformed scanner rows and fail closed below.
+          }
+        }
+      }
+    }
+    if (fingerprint == null) {
+      throw StateError(result.exitCode == 0 ? 'SSH 主机指纹格式无效' : '无法读取 SSH 主机指纹');
+    }
     return <String, Object?>{
       'enabled': true,
       'username': snapshot.username,
-      'hostKeyFingerprint': match.group(1),
+      'hostKeyFingerprint': fingerprint,
       'remotePort': 22,
     };
   }
@@ -348,6 +381,10 @@ abstract final class HarnessSystemSshService {
   static String _sshKeygenExecutable() => Platform.isWindows
       ? '${_windowsDirectory()}\\System32\\OpenSSH\\ssh-keygen.exe'
       : '/usr/bin/ssh-keygen';
+
+  static String _sshKeyscanExecutable() => Platform.isWindows
+      ? '${_windowsDirectory()}\\System32\\OpenSSH\\ssh-keyscan.exe'
+      : '/usr/bin/ssh-keyscan';
 
   static String _hostPublicKeyPath() => Platform.isWindows
       ? '${Platform.environment['ProgramData']?.trim().isNotEmpty == true ? Platform.environment['ProgramData']!.trim() : r'C:\ProgramData'}\\ssh\\ssh_host_ed25519_key.pub'
