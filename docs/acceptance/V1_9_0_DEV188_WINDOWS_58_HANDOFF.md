@@ -40,3 +40,39 @@ flutter build windows --release --no-pub
 5. 进入工具审批等待，确认队列不抢跑；分别验证完成、失败、取消、断网恢复。
 6. 检查 `vibekits-harness-relay.exe --vibekits-harness-status` 返回 JSON；再按真实 routing ID 完成一轮 P2P/HBBR 连接和 Harness 状态传输。
 7. 记录 Release 目录 SHA-256、运行截图、日志路径、Windows 版本和每项结论到新的验收文档。全绿后才能交付或发布。
+
+## 2026-09-12 本机交接前复核
+
+- VibeKits 源码提交：`17c8c2e14fdc6dc00d17fa7b7227a0b35544c592`；RustDesk relay 源码提交：`6ce56ab0b37c94f0e4cbfb983cff5d69d244b707`。
+- 远程协助/仿真共用逻辑定向回归共 `89/89` 通过，覆盖默认密码、首次证书批准、错误密码拒绝、证书固定、P2P/强制中继选择、mTLS、项目/会话快照、命令回执、独立停止、断线恢复、撤权、PAD 仅控制端以及固定仿真端点生命周期。
+- 远程协助相关 Dart 源码静态分析：`No issues found`。
+- 本机 Rust relay 测试已进入依赖编译，阻断点是开发机没有 `cmake`，报错来自 `libsamplerate-sys` 构建脚本；未出现 relay 源码编译错误。58 必须使用本节既定 D 盘工具链重新执行 Rust 测试和 Release 构建，不能沿用本机旧 helper 代替。
+- 本机 ADB 预检只发现 `192.168.3.75:5555` 在线；`192.168.3.63:5555` 当前不可达。因此 63 真机远程闭环仍是未通过门禁，不得由上述 89 项自动测试替代。
+
+58 在完整构建前还应执行远程共用逻辑回归：
+
+```powershell
+flutter test --no-pub --concurrency=1 `
+  test\harness_remote_access_settings_test.dart `
+  test\harness_remote_adapter_test.dart `
+  test\harness_remote_commands_test.dart `
+  test\harness_remote_controller_session_test.dart `
+  test\harness_remote_host_test.dart `
+  test\harness_remote_ledger_test.dart `
+  test\harness_remote_link_state_test.dart `
+  test\harness_remote_pairing_service_test.dart `
+  test\harness_remote_pairing_test.dart `
+  test\harness_remote_peer_store_test.dart `
+  test\harness_remote_read_only_panel_test.dart `
+  test\harness_remote_routing_identity_test.dart `
+  test\harness_remote_share_dialog_test.dart `
+  test\harness_remote_sync_test.dart `
+  test\harness_remote_view_model_test.dart `
+  test\harness_simulator_access_settings_test.dart `
+  test\harness_simulator_controller_test.dart `
+  test\harness_simulator_target_runtime_test.dart `
+  test\rustdesk_harness_link_status_test.dart `
+  test\rustdesk_harness_share_service_test.dart
+```
+
+该命令通过只证明跨平台 Flutter 协议与状态逻辑一致；Windows helper 打包、真实 ID 直连、强制 HBBR、项目/会话/命令/反馈/停止及断线重连仍必须在真机分别验收。
