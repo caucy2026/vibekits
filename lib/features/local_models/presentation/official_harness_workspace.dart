@@ -22,6 +22,7 @@ import '../../dev_tools/domain/harness_remote_controller_session.dart';
 import '../../dev_tools/domain/harness_remote_controller_runtime.dart';
 import '../../dev_tools/domain/harness_remote_access_settings.dart';
 import '../../dev_tools/domain/harness_simulator_access_settings.dart';
+import '../../dev_tools/domain/harness_simulator_controller.dart';
 import '../../dev_tools/domain/harness_simulator_target_runtime.dart';
 import '../../dev_tools/domain/harness_remote_execution.dart';
 import '../../dev_tools/domain/harness_remote_host_runtime.dart';
@@ -3149,6 +3150,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   bool _obscureRemotePassword = true;
   bool _forceRelay = false;
   bool _connecting = false;
+  bool _simulatorConnecting = false;
+  String? _simulatorRoutingId;
+  int _simulatorToolCount = 0;
   int _connectGeneration = 0;
   DateTime? _remoteSessionConnectedAt;
   DateTime? _lastAutomaticReconnectAt;
@@ -3609,6 +3613,80 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     await _connectRemote(host);
   }
 
+  Future<void> _connectSimulator(String routingId) async {
+    final id = routingId.trim();
+    if (_simulatorConnecting || id.isEmpty) {
+      if (id.isEmpty && mounted) setState(() => _message = '请输入对方 Harness ID');
+      return;
+    }
+    setState(() {
+      _simulatorConnecting = true;
+      _message = '正在按 ID 建立仿真调试通道并读取远端工具目录…';
+    });
+    try {
+      await HarnessSimulatorController.shared.connect(
+        id,
+        forceRelay: _forceRelay,
+      );
+      final tools = HarnessSimulatorController.shared.catalog(id);
+      // Listing the catalog proves only that the tunnel and MCP handshake are
+      // alive. Run one bounded, read-only target call as part of the explicit
+      // connect action so the UI never reports a usable simulator when remote
+      // execution itself is broken.
+      await HarnessSimulatorController.shared.call(
+        id,
+        VibekitsHarnessToolBridge.deviceProcessesId,
+        const <String, Object?>{'query': 'Vibekits', 'limit': 10},
+      );
+      final capabilityResult = await HarnessSimulatorController.shared.call(
+        id,
+        VibekitsHarnessToolBridge.capabilityCheckId,
+        const <String, Object?>{},
+      );
+      final structured = capabilityResult['structuredContent'];
+      final capabilityData = structured is Map && structured['data'] is Map
+          ? Map<String, Object?>.from(structured['data']! as Map)
+          : const <String, Object?>{};
+      final platform = capabilityData['platform'];
+      final storage = platform is Map && platform['storageLocations'] is Map
+          ? Map<String, Object?>.from(platform['storageLocations']! as Map)
+          : const <String, Object?>{};
+      final probeRoot = '${storage['downloads'] ?? ''}'.trim();
+      if (probeRoot.isEmpty) {
+        throw StateError('远端未返回可验证的受控文件目录');
+      }
+      await HarnessSimulatorController.shared
+          .call(id, VibekitsHarnessToolBridge.fileSearchId, <String, Object?>{
+            'root': probeRoot,
+            'query': '__vibekits_simulator_probe__',
+            'mode': 'name',
+            'maxResults': 1,
+          });
+      if (!mounted) return;
+      setState(() {
+        _simulatorRoutingId = id;
+        _simulatorToolCount = tools.length;
+        _message = '仿真调试已连接 $id · ${tools.length} 项工具 · 进程与文件自检通过';
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '仿真连接失败：$error');
+    } finally {
+      if (mounted) setState(() => _simulatorConnecting = false);
+    }
+  }
+
+  Future<void> _disconnectSimulator() async {
+    final id = _simulatorRoutingId;
+    if (id == null) return;
+    await HarnessSimulatorController.shared.disconnect(id);
+    if (!mounted) return;
+    setState(() {
+      _simulatorRoutingId = null;
+      _simulatorToolCount = 0;
+      _message = '仿真调试通道已断开';
+    });
+  }
+
   Future<void> _disconnectRemote() async {
     final session = _remoteSession;
     _detachRemoteModelListener();
@@ -3758,7 +3836,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
             const SizedBox(height: 4),
             Text(
               _remoteSession == null || _remoteSession!.model.stale
-                  ? '输入对方 ID 即可开始。连接完成前，本机项目、会话、命令和工具均不可操作。'
+                  ? '输入同一个设备 ID，可选择协同项目或仿真调试整机。'
                   : '协同连接已建立；下方内容全部来自 ${_remoteSession!.peer.routingId}。',
             ),
             const SizedBox(height: 12),
@@ -3805,12 +3883,68 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                     _connecting
                         ? '取消'
                         : _remoteSession == null
-                        ? '连接'
+                        ? '协同'
                         : '断开',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonalIcon(
+                  key: const Key('harness-simulator-connect'),
+                  onPressed: _simulatorConnecting || !host.available
+                      ? null
+                      : _simulatorRoutingId == null
+                      ? () => _connectSimulator(_remoteId.text)
+                      : _disconnectSimulator,
+                  icon: _simulatorConnecting
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _simulatorRoutingId == null
+                              ? Icons.developer_mode_rounded
+                              : Icons.link_off_rounded,
+                        ),
+                  label: Text(
+                    _simulatorConnecting
+                        ? '连接中'
+                        : _simulatorRoutingId == null
+                        ? '仿真'
+                        : '断开仿真',
                   ),
                 ),
               ],
             ),
+            if (_simulatorRoutingId != null) ...<Widget>[
+              const SizedBox(height: 10),
+              Material(
+                key: const Key('harness-simulator-live-bar'),
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      const Icon(
+                        Icons.circle,
+                        size: 10,
+                        color: Color(0xFF16845B),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '仿真调试 · $_simulatorRoutingId · $_simulatorToolCount 项工具',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (_connecting) ...<Widget>[
               const SizedBox(height: 10),
               const LinearProgressIndicator(),
@@ -3914,7 +4048,17 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                                 onPressed: _remoteEnabled && !_connecting
                                     ? () => _connectRemembered(host, peer)
                                     : null,
-                                child: const Text('连接'),
+                                child: const Text('协同'),
+                              ),
+                              const SizedBox(width: 6),
+                              FilledButton.tonal(
+                                key: Key(
+                                  'harness-simulator-connect-${peer.routingId}',
+                                ),
+                                onPressed: _simulatorConnecting
+                                    ? null
+                                    : () => _connectSimulator(peer.routingId),
+                                child: const Text('仿真'),
                               ),
                               IconButton(
                                 key: Key(

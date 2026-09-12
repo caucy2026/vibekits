@@ -31,6 +31,12 @@ void main() {
       find.byKey(const Key('harness-coordination-peer-id')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const Key('harness-simulator-connect')),
+      findsOneWidget,
+    );
+    expect(find.text('协同'), findsOneWidget);
+    expect(find.text('仿真'), findsOneWidget);
     await tester.tap(
       find.byKey(const Key('harness-coordination-first-connect-options')),
     );

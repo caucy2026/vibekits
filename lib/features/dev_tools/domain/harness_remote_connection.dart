@@ -69,7 +69,13 @@ class HarnessRemoteConnection {
     );
     unawaited(
       channel.send(frame).catchError((Object error, StackTrace stack) {
+        // A frame write failure is a transport failure, not an isolated RPC
+        // error. Some native carriers cannot close the inbound stream after
+        // the socket is lost, so waiting for onDone leaves the shared session
+        // and status indicator falsely connected.
+        _disconnect(error);
         if (!completion.isCompleted) completion.completeError(error, stack);
+        unawaited(channel.close());
       }),
     );
     try {

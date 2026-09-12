@@ -93,7 +93,53 @@ final class _Channel implements HarnessRemoteChannel {
   }
 }
 
+final class _FailingSendChannel implements HarnessRemoteChannel {
+  @override
+  String get authenticatedPeerId => 'VH-REMOTE';
+
+  final StreamController<String> controller = StreamController<String>();
+  bool closed = false;
+
+  @override
+  Stream<String> get frames => controller.stream;
+
+  @override
+  Future<void> send(String frame) async {
+    throw const SocketException('carrier write failed');
+  }
+
+  @override
+  Future<void> close() async {
+    if (closed) return;
+    closed = true;
+    await controller.close();
+  }
+}
+
 void main() {
+  test('发送失败立即把共享连接标记为断开并关闭载体', () async {
+    final channel = _FailingSendChannel();
+    final connection = HarnessRemoteConnection(channel);
+    final disconnected = connection.states.firstWhere(
+      (state) => state == HarnessRemoteConnectionState.disconnected,
+    );
+
+    await expectLater(
+      connection.request('request-1', const <String, Object?>{'kind': 'ping'}),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('REMOTE_OUTCOME_UNKNOWN'),
+        ),
+      ),
+    );
+    expect(await disconnected, HarnessRemoteConnectionState.disconnected);
+    expect(connection.state, HarnessRemoteConnectionState.disconnected);
+    expect(channel.closed, isTrue);
+    await connection.close();
+  });
+
   test('已配对设备完成隧道、证书、hello、状态同步并统一关闭', () async {
     final credentials = <String, String>{};
     final identity = await HarnessRemoteIdentityStore(
