@@ -22,7 +22,9 @@ fi
 VIBEKITS_DEVELOPER_ID_APPLICATION="$IDENTITY" \
   "$PROJECT_ROOT/tool/sign_macos_developer_id.sh" "$APP_BUNDLE"
 
-BRIDGE_FILE="$HOME/Library/Application Support/Vibekits/Mcp/tool-bridge.json"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "$APP_BUNDLE/Contents/Info.plist")"
+BRIDGE_FILE="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/mcp/tool-bridge.json"
 SMOKE_PID=""
 cleanup_smoke() {
   if [ -n "$SMOKE_PID" ] && kill -0 "$SMOKE_PID" 2>/dev/null; then

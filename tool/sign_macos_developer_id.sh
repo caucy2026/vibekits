@@ -51,9 +51,19 @@ codesign --force --timestamp --options runtime --sign "$IDENTITY" \
   --entitlements "$HARNESS_NODE_ENTITLEMENTS" \
   "$HARNESS_NODE"
 
-codesign --force --timestamp --options runtime --sign "$IDENTITY" \
-  --entitlements "$PROJECT_ROOT/macos/Runner/Release.entitlements" \
-  "$APP_BUNDLE"
+OUTER_ENTITLEMENTS="$PROJECT_ROOT/macos/Runner/Release.entitlements"
+OUTER_ENTITLEMENTS_JSON="$(plutil -convert json -o - "$OUTER_ENTITLEMENTS" | tr -d '[:space:]')"
+if [ "$OUTER_ENTITLEMENTS_JSON" = "{}" ]; then
+  # A non-sandboxed Developer ID app needs no outer entitlement. Passing an
+  # empty plist to codesign creates an entitlement blob that current macOS
+  # reports as invalid, even though the nested Node keeps its own JIT grants.
+  codesign --force --timestamp --options runtime --sign "$IDENTITY" \
+    "$APP_BUNDLE"
+else
+  codesign --force --timestamp --options runtime --sign "$IDENTITY" \
+    --entitlements "$OUTER_ENTITLEMENTS" \
+    "$APP_BUNDLE"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
 EXPECTED_TEAM_ID="$(codesign -dv --verbose=4 "$APP_BUNDLE" 2>&1 | \

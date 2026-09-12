@@ -150,17 +150,6 @@ class _VibekitsAppState extends State<VibekitsApp> {
     try {
       await _settingsLoad;
       final McpDeviceIdentity identity = McpDeviceIdentity.forVibekits();
-      await LanPeerDiscoveryService.instance.start(
-        instanceId: identity.instanceId,
-        name: identity.displayName,
-        capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
-        appId: identity.appId,
-        appVersion: VibekitsLmcpExposureServer.currentAppVersion,
-        hardwareCode: identity.hardwareCode,
-        // Receiving is process-wide. Publishing remains controlled by the
-        // explicit MCP consent flow in the Harness workspace.
-        exposureEnabled: false,
-      );
       final McpCapabilityDirectory directory = McpCapabilityDirectory.instance;
       bridge = VibekitsHarnessToolBridge(
         activityRecorder: HarnessToolActivityStore.record,
@@ -207,7 +196,10 @@ class _VibekitsAppState extends State<VibekitsApp> {
                 ),
       );
       final VibekitsHarnessToolBridge activeBridge = bridge;
-      await directory.start(appBridge: activeBridge);
+      // Publish the process-local bridge before starting optional discovery
+      // and provider scans.  A slow network interface, malformed third-party
+      // registration, or unavailable LAN must never make the original local
+      // Harness/MCP integration disappear or leave a stale connection file.
       final HarnessToolServer server = await HarnessToolServer.start(
         bridge: bridge,
         approve: _approveExternalTool,
@@ -219,6 +211,27 @@ class _VibekitsAppState extends State<VibekitsApp> {
       }
       _externalToolServer = server;
       bridge = null; // Ownership transferred to HarnessToolServer.
+
+      try {
+        await LanPeerDiscoveryService.instance.start(
+          instanceId: identity.instanceId,
+          name: identity.displayName,
+          capabilityDigest: VibekitsHarnessToolBridge.protocolVersion,
+          appId: identity.appId,
+          appVersion: VibekitsLmcpExposureServer.currentAppVersion,
+          hardwareCode: identity.hardwareCode,
+          // Receiving is process-wide. Publishing remains controlled by the
+          // explicit MCP consent flow in the Harness workspace.
+          exposureEnabled: false,
+        );
+      } on Object catch (error) {
+        debugPrint('LAN MCP discovery unavailable: $error');
+      }
+      try {
+        await directory.start(appBridge: activeBridge);
+      } on Object catch (error) {
+        debugPrint('MCP capability directory unavailable: $error');
+      }
     } on Object catch (error) {
       await bridge?.dispose();
       // MCP is an optional integration. A publishing failure must never block

@@ -560,7 +560,13 @@ VibeKits MCP connection file 仅供同一台电脑使用：
 
 ```text
 Windows: %LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json
-macOS:   ~/Library/Application Support/Vibekits/Mcp/tool-bridge.json
+macOS（当前正式 bundle）：~/Library/Application Support/com.caucy.vibekits/Vibekits/mcp/tool-bridge.json
+
+macOS 路径必须以 APP 启动时的 `PlatformStorageLayout.current().mcpConnectionFile`
+为事实源，不得在外部脚本中继续硬编码旧的
+`~/Library/Application Support/Vibekits/Mcp/tool-bridge.json`。内置 Harness 会通过
+`VIBEKITS_DATA_HOME` 接收同一数据根目录；旧路径只可能保留历史兼容文件，不能用其
+PID、端口或更新时间判断当前版本是否就绪。
 ```
 
 Mac 不连接 Windows 的 loopback MCP HTTP 地址。跨机仿真始终走 SSH/SFTP。

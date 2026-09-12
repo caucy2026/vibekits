@@ -586,30 +586,43 @@ class _HarnessRemoteCommandPanelState extends State<HarnessRemoteCommandPanel> {
                   (historyEntries.isEmpty ? '正在读取正式会话记录…' : '每 2 秒同步，执行端为唯一权威'),
             ),
             children: <Widget>[
-              for (final entry
-                  in historyEntries.reversed.take(12).toList().reversed)
-                ExpansionTile(
-                  dense: true,
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 8),
-                  title: Text(entry.title),
-                  subtitle: Text(
-                    entry.summary,
-                    maxLines: 8,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  children: <Widget>[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: SelectableText(
-                        _entryDetails(entry),
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
+              if (historyEntries.isNotEmpty)
+                SizedBox(
+                  height: (historyEntries.length * 112.0).clamp(112.0, 320.0),
+                  child: ListView(
+                    key: const Key('harness-remote-history-list'),
+                    primary: false,
+                    children: <Widget>[
+                      // Put fresh execution feedback first. The bounded list
+                      // remains scrollable on PAD and compact desktop windows
+                      // instead of pushing the newest result under the bottom
+                      // navigation/actions.
+                      for (final entry in historyEntries.reversed.take(12))
+                        ExpansionTile(
+                          dense: true,
+                          tilePadding: EdgeInsets.zero,
+                          childrenPadding: const EdgeInsets.only(bottom: 8),
+                          title: Text(entry.title),
+                          subtitle: Text(
+                            entry.summary,
+                            maxLines: 8,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          children: <Widget>[
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: SelectableText(
+                                _entryDetails(entry),
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
             ],
           ),

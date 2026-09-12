@@ -2132,24 +2132,40 @@ window.__vibekitsHarnessQueueBridge?.submit(
     return Padding(
       key: const Key('official-harness-remote-workspace'),
       padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Expanded(
-            child: HarnessRemoteReadOnlyPanel(
-              peerRoutingId: session.peer.routingId,
-              model: session.model,
-              onDisconnect: () =>
-                  unawaited(HarnessRemoteControllerRuntime.instance.close()),
-            ),
-          ),
-          const SizedBox(height: 10),
-          HarnessRemoteCommandPanel(
-            model: session.model,
-            client: session.client,
-            allowedOperations: session.peer.operations,
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final projectHeight = math.min(
+            220.0,
+            math.max(140.0, constraints.maxHeight * 0.24),
+          );
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              SizedBox(
+                height: projectHeight,
+                child: HarnessRemoteReadOnlyPanel(
+                  peerRoutingId: session.peer.routingId,
+                  model: session.model,
+                  onDisconnect: () => unawaited(
+                    HarnessRemoteControllerRuntime.instance.close(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: SingleChildScrollView(
+                  key: const Key('harness-remote-command-scroll'),
+                  primary: false,
+                  child: HarnessRemoteCommandPanel(
+                    model: session.model,
+                    client: session.client,
+                    allowedOperations: session.peer.operations,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2252,7 +2268,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
                     snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
                 final (Color color, String label) = switch (link.phase) {
                   RustDeskHarnessLinkPhase.connected => (Colors.green, '已连接'),
-                  RustDeskHarnessLinkPhase.clientFound ||
+                  RustDeskHarnessLinkPhase.clientFound => (Colors.blue, '协同就绪'),
                   RustDeskHarnessLinkPhase.handshaking => (
                     Colors.orange,
                     '协同连接中',

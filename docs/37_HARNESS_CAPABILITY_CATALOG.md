@@ -58,7 +58,7 @@ tool_timeout_sec = 600
 
 运行链路：启动脚本确保 VibeKits APP 在运行 → APP 在 `127.0.0.1` 随机端口发布带随机 Bearer Token 的桥接文件 → stdio MCP 读取目录并转发调用。监听不暴露到局域网，连接文件不包含模型 API Key。写入、设备控制和破坏性操作仍遵守 APP 当前权限策略，并写入对应工具日志。
 
-需要自行实现适配器时，可读取 `%LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json` 中的临时 `baseUrl` 和 `token`，使用 `Authorization: Bearer <token>` 调用 `GET /catalog`、`POST /invoke` 与 `POST /native-approval`。这是仅限本机的底层协议；普通客户端应优先使用 stdio MCP，以免自行处理令牌轮换和 APP 生命周期。
+需要自行实现适配器时，Windows 可读取 `%LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json`；macOS 当前正式 bundle 读取 `~/Library/Application Support/com.caucy.vibekits/Vibekits/mcp/tool-bridge.json`。路径必须由 `PlatformStorageLayout.current().mcpConnectionFile`/`VIBEKITS_DATA_HOME` 统一派生，不能把旧的 `~/Library/Application Support/Vibekits/Mcp/tool-bridge.json` 当当前事实源。清单内临时端点和 token 仅用于本机 `GET /catalog`、`POST /invoke` 与 `POST /native-approval`。普通客户端应优先使用 stdio MCP，以免自行处理令牌轮换和 APP 生命周期。
 
 MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例如 `vibekits.adb.shell` 对外为 `adb__shell`。客户端必须以运行时 `tools/list` 返回值为准。
 

@@ -197,6 +197,10 @@ void main() {
     expect(find.text('请继续验收'), findsOneWidget);
     expect(find.text('远端反馈已同步'), findsOneWidget);
     expect(find.text('本轮完成'), findsOneWidget);
+    expect(
+      find.byKey(const Key('harness-remote-history-list')),
+      findsOneWidget,
+    );
     await tester.enterText(
       find.byKey(const Key('harness-remote-command-input')),
       '继续检查构建日志',
