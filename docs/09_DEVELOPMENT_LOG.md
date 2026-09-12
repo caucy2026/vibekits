@@ -1628,3 +1628,12 @@
 - 本轮没有把本机自动测试冒充双机成功。目标 `4456560334` 尚未安装本文精确候选；首次公钥批准、真实主机指纹、P2P/HBBR SSH、SCP SHA、签名测试 App 安装/日志/回滚、63/PAD 协同和 Windows 58 真机仍是未完成门禁。完整证据与验收步骤见 `docs/acceptance/V1_9_0_DEV196_ID_ONLY_SSH_SIMULATOR_2026-09-13.md`。
 - Windows 58 随后完成 D 盘 Relay 源码构建、静态分析、共享远程协议 `90/90`、系统 SSH 真机身份/受限公钥/撤销 `1/1`、Release 40 项运行时验证及三次进程启动。修复 Windows 独占文件锁测试、配对广播竞态、`.exe` 工具名测试，以及标准用户无权读取 ProgramData 主机公钥时的回环 keyscan 指纹派生；最终测试目录的 EXE/Relay 均为 `NotSigned`，未发布。
 - 对目标统一 ID `4456560334` 的实时 P2P 探测显示远端 `32145`、`32147`、`22` 均未监听，目标尚未进入 dev.196 单开关仿真状态；63/75 同时为 `No route to host`。因此 Mac 双机 SSH/SCP、签名测试 App 安装/日志/回滚、PAD/63 和 Windows 跨机端到端门禁继续保持未完成，禁止用自动测试替代。
+# 2026-09-13 · dev.197 Windows→Mac 仅凭 ID 仿真双路径闭环
+
+- 版本推进到 `1.9.0-dev.197+2197`，LMCP `appVersion`、`catalogRevision=2197` 与 UI 版本统一。
+- 定位并修复首次 SSH 自动交换超时：控制端此前没有把本机 routing ID 传入 MCP，目标端只能等待人工批准。现仅在固定回环仿真端点、合法 caller ID 与 `peerId` 完全一致时预授权 SSH 公钥写入/撤销；安装卸载仍需人工批准。
+- 定位 Windows 旧 OpenSSH 与 Mac OpenSSH 10.2 的 KEX 兼容故障：`ssh-keyscan` 报 `unsupported KEX method sntrup761x25519-sha512@openssh.com`。改用 `curve25519-sha256` + `ssh-ed25519` 采集主机公钥，计算 SHA-256 并与 MCP 身份严格比对，后续 SSH/SCP 保持 `StrictHostKeyChecking=yes`。
+- 自动组合回归 `14/14` 通过。Windows 58（控制 ID `8296293831`）到 Mac（目标 ID `1554650784`）的默认 P2P/自动回退和强制 HBBR 两轮均真实通过：204 个工具、进程查询、SSH 命令、28 字节文件上传和 SHA-256 校验全部成功；双端目标测试同步通过。
+- 全量 Flutter 回归 `857` 项通过、`21` 项显式真机/联网门禁跳过、`0` 项失败，退出码 `0`；跳过项仍按未验收处理，不用自动测试替代 63、PAD 75、目标 Mac 或正式安装包真机证据。
+- 清理门禁通过：目标 `32147` 关闭、管理公钥撤销、临时 PASS 标记删除、Mac 连接表为空；Windows 会话 0 测试中继残留精确清零。完整证据见 `docs/acceptance/V1_9_0_DEV197_CROSS_PLATFORM_ID_ONLY_SSH_2026-09-13.md`。
+- 尚未把 dev.197 声称为正式发布：Universal macOS 签名/公证包、Windows 新 Release、目标 `4456560334`、首次证书配对、项目/会话同步、63/PAD75 仍需继续门禁。

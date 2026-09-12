@@ -211,13 +211,23 @@ void main() {
         await File('$keyPath.pub').writeAsString('ssh-ed25519 $key controller');
         return ProcessResult(1, 0, '', '');
       }
-      if (executablePath.endsWith('ssh-keyscan') ||
-          executablePath.endsWith('ssh-keyscan.exe')) {
+      if ((executablePath.endsWith('/ssh') ||
+              executablePath.endsWith('ssh.exe')) &&
+          arguments.contains('StrictHostKeyChecking=accept-new')) {
+        final knownHostsOption = arguments.firstWhere(
+          (argument) => argument.startsWith('UserKnownHostsFile='),
+        );
+        final knownHostsPath = knownHostsOption.substring(
+          'UserKnownHostsFile='.length,
+        );
+        await File(
+          knownHostsPath,
+        ).writeAsString('[127.0.0.1]:43214 ssh-ed25519 AAAATESTHOSTKEY\n');
         return ProcessResult(
           1,
-          0,
-          '[127.0.0.1]:43214 ssh-ed25519 AAAATESTHOSTKEY\n',
+          255,
           '',
+          'authentication intentionally skipped',
         );
       }
       if ((executablePath.endsWith('ssh-keygen') ||
@@ -288,6 +298,17 @@ void main() {
     expect(connected['hostname'], 'target-mac');
     expect(mcp.authorizedPeerId, '1554650784');
     expect(mcp.authorizedPublicKey, startsWith('ssh-ed25519 '));
+    expect(mcp.callerIds, isNotEmpty);
+    expect(mcp.callerIds, everyElement('1554650784'));
+    expect(
+      executed.any(
+        (line) =>
+            line.contains('StrictHostKeyChecking=accept-new') &&
+            line.contains('KexAlgorithms=curve25519-sha256') &&
+            line.contains('HostKeyAlgorithms=ssh-ed25519'),
+      ),
+      isTrue,
+    );
 
     final command = await controller.runSshCommand('4456560334', 'uname -a');
     expect(command['ok'], isTrue);
@@ -343,7 +364,10 @@ final class _OrderedMcpClient implements HarnessSimulatorMcpClient {
   final List<String> events;
 
   @override
-  Future<List<Map<String, Object?>>> initializeAndList(int localPort) async {
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  }) async {
     events.add('mcp:$localPort');
     return <Map<String, Object?>>[
       <String, Object?>{'name': 'vibekits.device.processes'},
@@ -354,15 +378,19 @@ final class _OrderedMcpClient implements HarnessSimulatorMcpClient {
   Future<Map<String, Object?>> call(
     int localPort,
     String toolId,
-    Map<String, Object?> arguments,
-  ) async => <String, Object?>{};
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  }) async => <String, Object?>{};
 }
 
 final class _FakeMcpClient implements HarnessSimulatorMcpClient {
   int? lastPort;
 
   @override
-  Future<List<Map<String, Object?>>> initializeAndList(int localPort) async {
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  }) async {
     lastPort = localPort;
     return <Map<String, Object?>>[
       <String, Object?>{'name': 'vibekits.system.resources'},
@@ -374,8 +402,9 @@ final class _FakeMcpClient implements HarnessSimulatorMcpClient {
   Future<Map<String, Object?>> call(
     int localPort,
     String toolId,
-    Map<String, Object?> arguments,
-  ) async {
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  }) async {
     lastPort = localPort;
     return <String, Object?>{'called': toolId, 'arguments': arguments};
   }
@@ -384,22 +413,30 @@ final class _FakeMcpClient implements HarnessSimulatorMcpClient {
 final class _SshBootstrapMcpClient implements HarnessSimulatorMcpClient {
   String? authorizedPeerId;
   String? authorizedPublicKey;
+  final List<String> callerIds = <String>[];
 
   @override
-  Future<List<Map<String, Object?>>> initializeAndList(int localPort) async =>
-      <Map<String, Object?>>[
-        <String, Object?>{'name': 'vibekits.device.ssh_identity'},
-        <String, Object?>{'name': 'vibekits.device.ssh_key_status'},
-        <String, Object?>{'name': 'vibekits.device.ssh_authorize'},
-        <String, Object?>{'name': 'vibekits.device.processes'},
-      ];
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  }) async {
+    callerIds.add(callerId);
+    return <Map<String, Object?>>[
+      <String, Object?>{'name': 'vibekits.device.ssh_identity'},
+      <String, Object?>{'name': 'vibekits.device.ssh_key_status'},
+      <String, Object?>{'name': 'vibekits.device.ssh_authorize'},
+      <String, Object?>{'name': 'vibekits.device.processes'},
+    ];
+  }
 
   @override
   Future<Map<String, Object?>> call(
     int localPort,
     String toolId,
-    Map<String, Object?> arguments,
-  ) async {
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  }) async {
+    callerIds.add(callerId);
     final data = switch (toolId) {
       'vibekits.device.ssh_identity' => <String, Object?>{
         'username': 'remote-user',

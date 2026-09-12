@@ -102,6 +102,15 @@ void main() {
         );
       }
       if (enableAssistance) expect(assistance['enabled'], isTrue);
+      final String targetStopFile =
+          Platform.environment['VIBEKITS_REAL_TARGET_STOP_FILE'] ?? '';
+      if (targetStopFile.isNotEmpty) {
+        final Map<String, Object?> stopped = await controller.runSshCommand(
+          routingId,
+          "printf PASS > '$targetStopFile'",
+        );
+        expect(stopped['ok'], isTrue);
+      }
       // Never print remote process rows, paths, credentials or application
       // data. Counts and transport mode are sufficient acceptance evidence.
       // ignore: avoid_print

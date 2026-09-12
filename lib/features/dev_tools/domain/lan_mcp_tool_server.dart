@@ -137,11 +137,20 @@ class LanMcpToolServer {
           final Map<String, Object?> arguments = rawArguments is Map
               ? Map<String, Object?>.from(rawArguments)
               : const <String, Object?>{};
+          final bool simulatorSshPreauthorized =
+              _isSimulatorSshBootstrapPreauthorized(
+                request,
+                remoteAddress: remoteAddress,
+                toolId: name,
+                arguments: arguments,
+              );
           final HarnessToolDefinition? definition = _bridge.executableCatalog
               .where((tool) => tool.id == name)
               .firstOrNull;
           LmcpInboundCallHandle? approvalCall;
-          if (_requiresTargetApproval(name) && definition != null) {
+          if (_requiresTargetApproval(name) &&
+              definition != null &&
+              !simulatorSshPreauthorized) {
             final traceId =
                 'simulator-${DateTime.now().microsecondsSinceEpoch}-${_traceSequence++}';
             approvalCall = LmcpInboundCallHub.instance.begin(
@@ -181,7 +190,7 @@ class LanMcpToolServer {
             result = await _bridge.invoke(
               toolId: name,
               arguments: arguments,
-              preauthorized: approvalCall != null,
+              preauthorized: approvalCall != null || simulatorSshPreauthorized,
               approve: (_) async => true,
             );
             if (result.ok) {
@@ -216,6 +225,25 @@ class LanMcpToolServer {
       toolId == VibekitsHarnessToolBridge.deviceAppUninstallId ||
       toolId == VibekitsHarnessToolBridge.deviceSshAuthorizeId ||
       toolId == VibekitsHarnessToolBridge.deviceSshRevokeId;
+
+  bool _isSimulatorSshBootstrapPreauthorized(
+    HttpRequest request, {
+    required String remoteAddress,
+    required String toolId,
+    required Map<String, Object?> arguments,
+  }) {
+    if (!allowSimulatorUpdateUpload || remoteAddress != '127.0.0.1') {
+      return false;
+    }
+    if (toolId != VibekitsHarnessToolBridge.deviceSshAuthorizeId &&
+        toolId != VibekitsHarnessToolBridge.deviceSshRevokeId) {
+      return false;
+    }
+    final String callerId =
+        request.headers.value('x-vibekits-caller-id')?.trim() ?? '';
+    return RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(callerId) &&
+        '${arguments['peerId'] ?? ''}'.trim() == callerId;
+  }
 
   Future<void> _handleSimulatorUpdateUpload(HttpRequest request) async {
     try {

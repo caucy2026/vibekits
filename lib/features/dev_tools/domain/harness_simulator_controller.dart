@@ -20,13 +20,17 @@ final class HarnessSimulatorControllerException implements Exception {
 }
 
 abstract interface class HarnessSimulatorMcpClient {
-  Future<List<Map<String, Object?>>> initializeAndList(int localPort);
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  });
 
   Future<Map<String, Object?>> call(
     int localPort,
     String toolId,
-    Map<String, Object?> arguments,
-  );
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  });
 }
 
 final class _LoopbackHarnessSimulatorMcpClient
@@ -37,7 +41,10 @@ final class _LoopbackHarnessSimulatorMcpClient
   static const int _maxResponseBytes = 1024 * 1024;
 
   @override
-  Future<List<Map<String, Object?>>> initializeAndList(int localPort) async {
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  }) async {
     final initialized = await _rpc(
       localPort,
       1,
@@ -50,6 +57,7 @@ final class _LoopbackHarnessSimulatorMcpClient
           'version': '1',
         },
       },
+      callerId: callerId,
     );
     if (initialized['protocolVersion'] != _protocolVersion) {
       throw const HarnessSimulatorControllerException(
@@ -57,12 +65,17 @@ final class _LoopbackHarnessSimulatorMcpClient
         '远端仿真机 MCP 协议不兼容',
       );
     }
-    await _notification(localPort, 'notifications/initialized');
+    await _notification(
+      localPort,
+      'notifications/initialized',
+      callerId: callerId,
+    );
     final result = await _rpc(
       localPort,
       2,
       'tools/list',
       const <String, Object?>{},
+      callerId: callerId,
     );
     final raw = result['tools'];
     if (raw is! List) {
@@ -97,24 +110,34 @@ final class _LoopbackHarnessSimulatorMcpClient
   Future<Map<String, Object?>> call(
     int localPort,
     String toolId,
-    Map<String, Object?> arguments,
-  ) => _rpc(localPort, 3, 'tools/call', <String, Object?>{
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  }) => _rpc(localPort, 3, 'tools/call', <String, Object?>{
     'name': toolId,
     'arguments': arguments,
-  });
+  }, callerId: callerId);
 
   Future<Map<String, Object?>> _rpc(
     int port,
     int id,
     String method,
-    Map<String, Object?> params,
-  ) async {
-    final response = await _post(port, <String, Object?>{
-      'jsonrpc': '2.0',
-      'id': id,
-      'method': method,
-      'params': params,
-    });
+    Map<String, Object?> params, {
+    String callerId = '',
+  }) async {
+    late final Map<String, Object?> response;
+    try {
+      response = await _post(port, <String, Object?>{
+        'jsonrpc': '2.0',
+        'id': id,
+        'method': method,
+        'params': params,
+      }, callerId: callerId);
+    } on HarnessSimulatorControllerException catch (error) {
+      throw HarnessSimulatorControllerException(
+        error.code,
+        '${error.message}（阶段：$method）',
+      );
+    }
     if (response['jsonrpc'] != '2.0' || response['id'] != id) {
       throw const HarnessSimulatorControllerException(
         'invalid_response',
@@ -136,18 +159,30 @@ final class _LoopbackHarnessSimulatorMcpClient
     return Map<String, Object?>.from(result);
   }
 
-  Future<void> _notification(int port, String method) async {
-    await _post(port, <String, Object?>{
-      'jsonrpc': '2.0',
-      'method': method,
-      'params': const <String, Object?>{},
-    });
+  Future<void> _notification(
+    int port,
+    String method, {
+    String callerId = '',
+  }) async {
+    try {
+      await _post(port, <String, Object?>{
+        'jsonrpc': '2.0',
+        'method': method,
+        'params': const <String, Object?>{},
+      }, callerId: callerId);
+    } on HarnessSimulatorControllerException catch (error) {
+      throw HarnessSimulatorControllerException(
+        error.code,
+        '${error.message}（阶段：$method）',
+      );
+    }
   }
 
   Future<Map<String, Object?>> _post(
     int port,
-    Map<String, Object?> payload,
-  ) async {
+    Map<String, Object?> payload, {
+    String callerId = '',
+  }) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client
@@ -156,6 +191,9 @@ final class _LoopbackHarnessSimulatorMcpClient
       request.persistentConnection = false;
       request.headers.contentType = ContentType.json;
       request.headers.set('MCP-Protocol-Version', _protocolVersion);
+      if (callerId.trim().isNotEmpty) {
+        request.headers.set('x-vibekits-caller-id', callerId.trim());
+      }
       final bytes = utf8.encode(jsonEncode(payload));
       request.contentLength = bytes.length;
       request.add(bytes);
@@ -318,7 +356,7 @@ final class HarnessSimulatorController {
       // second handshake and can race the listener; buffer this real request
       // until the single transport is authenticated instead.
       final toolsFuture = _mcpClient
-          .initializeAndList(localPort)
+          .initializeAndList(localPort, callerId: host.id)
           .timeout(timeout);
       // Attach an error observer immediately because the target may close the
       // demand TCP request while the native carrier is still reporting the
@@ -345,6 +383,7 @@ final class HarnessSimulatorController {
             );
       final session = _HarnessSimulatorSession(
         routingId: id,
+        controllerRoutingId: host.id,
         localPort: localPort,
         forceRelay: forceRelay,
         tunnel: tunnel,
@@ -401,7 +440,12 @@ final class HarnessSimulatorController {
         '远端仿真机没有公开这个工具',
       );
     }
-    return _mcpClient.call(session.localPort, name, arguments);
+    return _mcpClient.call(
+      session.localPort,
+      name,
+      arguments,
+      callerId: session.controllerRoutingId,
+    );
   }
 
   Future<Map<String, Object?>> runSshCommand(
@@ -516,6 +560,10 @@ final class HarnessSimulatorController {
     'UserKnownHostsFile=${ssh.knownHostsPath}',
     '-o',
     'GlobalKnownHostsFile=/dev/null',
+    '-o',
+    'KexAlgorithms=curve25519-sha256',
+    '-o',
+    'HostKeyAlgorithms=ssh-ed25519',
     '-i',
     ssh.privateKeyPath,
     '-p',
@@ -534,6 +582,10 @@ final class HarnessSimulatorController {
     'UserKnownHostsFile=${ssh.knownHostsPath}',
     '-o',
     'GlobalKnownHostsFile=/dev/null',
+    '-o',
+    'KexAlgorithms=curve25519-sha256',
+    '-o',
+    'HostKeyAlgorithms=ssh-ed25519',
     '-i',
     ssh.privateKeyPath,
     '-P',
@@ -569,6 +621,7 @@ final class HarnessSimulatorController {
         mcpPort,
         'vibekits.device.ssh_identity',
         const <String, Object?>{},
+        callerId: host.id,
       ),
     );
     final username = '${identity['username'] ?? ''}'.trim();
@@ -607,6 +660,7 @@ final class HarnessSimulatorController {
         mcpPort,
         'vibekits.device.ssh_key_status',
         <String, Object?>{'peerId': host.id, 'publicKey': publicKeyText},
+        callerId: host.id,
       ),
     );
     if (keyStatus['authorized'] != true) {
@@ -615,6 +669,7 @@ final class HarnessSimulatorController {
           mcpPort,
           'vibekits.device.ssh_authorize',
           <String, Object?>{'peerId': host.id, 'publicKey': publicKeyText},
+          callerId: host.id,
         ),
       );
     }
@@ -626,23 +681,39 @@ final class HarnessSimulatorController {
       forceRelay,
     );
     try {
-      final scanFuture = _processRunner(_sshKeyscanExecutable(), <String>[
-        '-T',
-        '8',
+      final knownHosts = File('${keyRoot.path}/known_hosts');
+      if (await knownHosts.exists()) await knownHosts.delete();
+      final captureFuture = _processRunner(_sshExecutable(), <String>[
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'IdentitiesOnly=yes',
+        '-o',
+        'StrictHostKeyChecking=accept-new',
+        '-o',
+        'UserKnownHostsFile=${knownHosts.path}',
+        '-o',
+        'GlobalKnownHostsFile=/dev/null',
+        '-o',
+        'PreferredAuthentications=none',
+        '-o',
+        'KexAlgorithms=curve25519-sha256',
+        '-o',
+        'HostKeyAlgorithms=ssh-ed25519',
+        '-o',
+        'ConnectTimeout=8',
         '-p',
         '$localPort',
-        '127.0.0.1',
+        '$username@127.0.0.1',
       ]).timeout(timeout);
       await tunnel.waitUntilConnected(timeout: timeout);
-      final scan = await scanFuture;
-      if (scan.exitCode != 0 || '${scan.stdout}'.trim().isEmpty) {
+      await captureFuture;
+      if (!await knownHosts.exists() || await knownHosts.length() == 0) {
         throw StateError('无法读取隧道后的 SSH 主机密钥');
       }
-      final scannedKey = File('${keyRoot.path}/host_key.scan');
-      await scannedKey.writeAsString('${scan.stdout}', flush: true);
       final scannedFingerprint = await _processRunner(
         _sshKeygenExecutable(),
-        <String>['-lf', scannedKey.path, '-E', 'sha256'],
+        <String>['-lf', knownHosts.path, '-E', 'sha256'],
       );
       final actualFingerprint = RegExp(
         r'\b(SHA256:[A-Za-z0-9+/=]+)\b',
@@ -654,8 +725,6 @@ final class HarnessSimulatorController {
           'SSH 主机指纹与已认证仿真通道返回值不一致',
         );
       }
-      final knownHosts = File('${keyRoot.path}/known_hosts');
-      await knownHosts.writeAsString('${scan.stdout}', flush: true);
       final probe = await _processRunner(_sshExecutable(), <String>[
         '-o',
         'BatchMode=yes',
@@ -715,9 +784,6 @@ final class HarnessSimulatorController {
       Platform.isWindows ? 'scp.exe' : '/usr/bin/scp';
   static String _sshKeygenExecutable() =>
       Platform.isWindows ? 'ssh-keygen.exe' : '/usr/bin/ssh-keygen';
-  static String _sshKeyscanExecutable() =>
-      Platform.isWindows ? 'ssh-keyscan.exe' : '/usr/bin/ssh-keyscan';
-
   Future<Map<String, Object?>> installCandidate(
     String routingId,
     String packagePath, {
@@ -879,6 +945,7 @@ final class HarnessSimulatorController {
 final class _HarnessSimulatorSession {
   const _HarnessSimulatorSession({
     required this.routingId,
+    required this.controllerRoutingId,
     required this.localPort,
     required this.forceRelay,
     required this.tunnel,
@@ -888,6 +955,7 @@ final class _HarnessSimulatorSession {
   });
 
   final String routingId;
+  final String controllerRoutingId;
   final int localPort;
   final bool forceRelay;
   final RustDeskHarnessTunnelLease tunnel;
