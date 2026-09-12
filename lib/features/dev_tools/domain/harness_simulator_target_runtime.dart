@@ -214,7 +214,7 @@ final class HarnessSimulatorTargetRuntime {
         }
       }
       if (!host.callable) host = await _startHost();
-      if (Platform.isMacOS) {
+      if (Platform.isMacOS || Platform.isWindows) {
         ssh = await _inspectSsh();
         if (!ssh.supported) throw UnsupportedError(ssh.message);
         if (!ssh.enabled) {

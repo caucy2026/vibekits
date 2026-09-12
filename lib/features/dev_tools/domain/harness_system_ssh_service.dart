@@ -30,11 +30,11 @@ typedef HarnessSystemSshInspector = Future<HarnessSystemSshSnapshot> Function();
 typedef HarnessSystemSshProcessRunner =
     Future<ProcessResult> Function(String executable, List<String> arguments);
 
-/// Explicit macOS Remote Login bridge used by the simulator-target switch.
+/// Explicit system SSH bridge used by the simulator-target switch.
 ///
-/// The native side accepts only one boolean and invokes macOS' own privileged
-/// authorization UI. VibeKits never receives, stores, or forwards the local
-/// administrator password.
+/// macOS uses the native authorization bridge. Windows invokes one fixed,
+/// encoded PowerShell maintenance script through UAC. VibeKits never receives,
+/// stores, or forwards the local administrator password.
 abstract final class HarnessSystemSshService {
   static const MethodChannel _channel = MethodChannel(
     'vibekits/simulator_host',
@@ -43,7 +43,7 @@ abstract final class HarnessSystemSshService {
   static HarnessSystemSshSetter? testSetter;
 
   static Future<HarnessSystemSshSnapshot> inspect() async {
-    if (!Platform.isMacOS) {
+    if (!Platform.isMacOS && !Platform.isWindows) {
       return const HarnessSystemSshSnapshot(
         supported: false,
         enabled: false,
@@ -51,14 +51,17 @@ abstract final class HarnessSystemSshService {
       );
     }
     final bool listening = await _isLoopbackSshListening();
-    final String username = Platform.environment['USER']?.trim() ?? '';
+    final String username = _currentUsername();
     final String address = await _preferredLanAddress();
+    final String platformName = Platform.isWindows ? 'Windows' : 'macOS';
     return HarnessSystemSshSnapshot(
       supported: true,
       enabled: listening,
       endpoint: listening && address.isNotEmpty ? '$address:22' : '',
       username: username,
-      message: listening ? 'macOS 系统远程登录已打开' : 'macOS 系统远程登录已关闭',
+      message: listening
+          ? '$platformName 系统 SSH 已打开'
+          : '$platformName 系统 SSH 已关闭',
     );
   }
 
@@ -69,14 +72,24 @@ abstract final class HarnessSystemSshService {
     if (!before.supported) throw UnsupportedError(before.message);
     if (before.enabled == enabled) return before;
 
-    final Map<Object?, Object?>? response = await _channel
-        .invokeMapMethod<Object?, Object?>('setRemoteLoginEnabled', enabled);
-    if (response?['ok'] != true) {
-      throw StateError(
-        response?['message']?.toString() ?? 'macOS 系统 SSH 状态更新失败',
-      );
+    if (Platform.isMacOS) {
+      final Map<Object?, Object?>? response = await _channel
+          .invokeMapMethod<Object?, Object?>('setRemoteLoginEnabled', enabled);
+      if (response?['ok'] != true) {
+        throw StateError(
+          response?['message']?.toString() ?? 'macOS 系统 SSH 状态更新失败',
+        );
+      }
+    } else if (Platform.isWindows) {
+      await _setWindowsSshEnabled(enabled);
+    } else {
+      throw UnsupportedError(before.message);
     }
-    for (int attempt = 0; attempt < 20; attempt++) {
+    final int attempts = Platform.isWindows ? 120 : 20;
+    final Duration interval = Platform.isWindows
+        ? const Duration(milliseconds: 500)
+        : const Duration(milliseconds: 150);
+    for (int attempt = 0; attempt < attempts; attempt++) {
       final current = await inspect();
       if (current.enabled == enabled) {
         return HarnessSystemSshSnapshot(
@@ -88,7 +101,7 @@ abstract final class HarnessSystemSshService {
           message: current.message,
         );
       }
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await Future<void>.delayed(interval);
     }
     throw StateError(enabled ? '系统已授权，但 SSH 端口 22 尚未就绪' : 'SSH 服务尚未停止');
   }
@@ -100,9 +113,9 @@ abstract final class HarnessSystemSshService {
     final snapshot = await (inspector ?? inspect)();
     if (!snapshot.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
     final run = runner ?? Process.run;
-    final result = await run('/usr/bin/ssh-keygen', const <String>[
+    final result = await run(_sshKeygenExecutable(), <String>[
       '-lf',
-      '/etc/ssh/ssh_host_ed25519_key.pub',
+      _hostPublicKeyPath(),
       '-E',
       'sha256',
     ]);
@@ -144,9 +157,7 @@ abstract final class HarnessSystemSshService {
     }
     final snapshot = await (inspector ?? inspect)();
     if (!snapshot.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
-    final home =
-        homeDirectory?.absolute.path ??
-        (Platform.environment['HOME']?.trim() ?? '');
+    final home = homeDirectory?.absolute.path ?? _userHome();
     if (home.isEmpty) throw StateError('无法定位当前用户目录');
     final sshDirectory = Directory('$home/.ssh');
     await sshDirectory.create(recursive: true);
@@ -170,12 +181,13 @@ abstract final class HarnessSystemSshService {
     final temporary = File('${authorizedKeys.path}.vibekits-$pid.tmp');
     await temporary.writeAsString('${retained.join('\n')}\n', flush: true);
     final run = runner ?? Process.run;
-    final directoryMode = await run('/bin/chmod', <String>[
-      '700',
-      sshDirectory.path,
-    ]);
-    final fileMode = await run('/bin/chmod', <String>['600', temporary.path]);
-    if (directoryMode.exitCode != 0 || fileMode.exitCode != 0) {
+    final bool permissionsReady = await _secureAuthorizedKeysFiles(
+      run: run,
+      directory: sshDirectory,
+      file: temporary,
+      username: snapshot.username,
+    );
+    if (!permissionsReady) {
       await temporary.delete();
       throw StateError('无法设置 SSH 授权文件权限');
     }
@@ -208,9 +220,7 @@ abstract final class HarnessSystemSshService {
     }
     final markerDigest = sha256.convert(keyBytes).toString().substring(0, 16);
     final marker = 'vibekits-simulator-${peerId.trim()}-$markerDigest';
-    final home =
-        homeDirectory?.absolute.path ??
-        (Platform.environment['HOME']?.trim() ?? '');
+    final home = homeDirectory?.absolute.path ?? _userHome();
     if (home.isEmpty) throw StateError('无法定位当前用户目录');
     final authorizedKeys = File('$home/.ssh/authorized_keys');
     final authorized =
@@ -230,9 +240,7 @@ abstract final class HarnessSystemSshService {
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(peerId.trim())) {
       throw const FormatException('控制端设备 ID 无效');
     }
-    final home =
-        homeDirectory?.absolute.path ??
-        (Platform.environment['HOME']?.trim() ?? '');
+    final home = homeDirectory?.absolute.path ?? _userHome();
     if (home.isEmpty) throw StateError('无法定位当前用户目录');
     final authorizedKeys = File('$home/.ssh/authorized_keys');
     if (!await authorizedKeys.exists()) {
@@ -257,9 +265,7 @@ abstract final class HarnessSystemSshService {
   static Future<Map<String, Object?>> revokeAllManagedPublicKeys({
     Directory? homeDirectory,
   }) async {
-    final home =
-        homeDirectory?.absolute.path ??
-        (Platform.environment['HOME']?.trim() ?? '');
+    final home = homeDirectory?.absolute.path ?? _userHome();
     if (home.isEmpty) throw StateError('无法定位当前用户目录');
     final authorizedKeys = File('$home/.ssh/authorized_keys');
     if (!await authorizedKeys.exists()) {
@@ -316,6 +322,104 @@ abstract final class HarnessSystemSshService {
     return a == 10 ||
         (a == 172 && b >= 16 && b <= 31) ||
         (a == 192 && b == 168);
+  }
+
+  static String _currentUsername() => Platform.isWindows
+      ? (Platform.environment['USERNAME']?.trim() ?? '')
+      : (Platform.environment['USER']?.trim() ?? '');
+
+  static String _userHome() => Platform.isWindows
+      ? (Platform.environment['USERPROFILE']?.trim() ?? '')
+      : (Platform.environment['HOME']?.trim() ?? '');
+
+  static String _windowsDirectory() =>
+      Platform.environment['WINDIR']?.trim().isNotEmpty == true
+      ? Platform.environment['WINDIR']!.trim()
+      : r'C:\Windows';
+
+  static String _sshKeygenExecutable() => Platform.isWindows
+      ? '${_windowsDirectory()}\\System32\\OpenSSH\\ssh-keygen.exe'
+      : '/usr/bin/ssh-keygen';
+
+  static String _hostPublicKeyPath() => Platform.isWindows
+      ? '${Platform.environment['ProgramData']?.trim().isNotEmpty == true ? Platform.environment['ProgramData']!.trim() : r'C:\ProgramData'}\\ssh\\ssh_host_ed25519_key.pub'
+      : '/etc/ssh/ssh_host_ed25519_key.pub';
+
+  static Future<void> _setWindowsSshEnabled(bool enabled) async {
+    final String powerShell =
+        '${_windowsDirectory()}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    final String script = enabled
+        ? r'''$ErrorActionPreference = 'Stop'
+$capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1'
+if ($capability.State -ne 'Installed') {
+  Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1' | Out-Null
+}
+$keygen = Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe'
+& $keygen -A
+if ($LASTEXITCODE -ne 0) { throw 'ssh-keygen failed' }
+Set-Service -Name sshd -StartupType Automatic
+Start-Service -Name sshd
+'''
+        : r'''$ErrorActionPreference = 'Stop'
+$service = Get-Service -Name sshd -ErrorAction SilentlyContinue
+if ($null -ne $service) {
+  if ($service.Status -ne 'Stopped') { Stop-Service -Name sshd -Force }
+  Set-Service -Name sshd -StartupType Manual
+}
+''';
+    final String encoded = base64Encode(_utf16Le(script));
+    final String wrapper =
+        "\$process = Start-Process -FilePath '$powerShell' -Verb RunAs -Wait "
+        "-PassThru -ArgumentList @('-NoProfile','-NonInteractive',"
+        "'-ExecutionPolicy','Bypass','-EncodedCommand','$encoded'); "
+        'exit \$process.ExitCode';
+    final ProcessResult result = await Process.run(powerShell, <String>[
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      wrapper,
+    ]).timeout(const Duration(minutes: 3));
+    if (result.exitCode != 0) {
+      throw StateError(
+        enabled ? 'Windows OpenSSH 启动未获授权或执行失败' : 'Windows OpenSSH 停止失败',
+      );
+    }
+  }
+
+  static List<int> _utf16Le(String value) => <int>[
+    for (final int unit in value.codeUnits) ...<int>[unit & 0xff, unit >> 8],
+  ];
+
+  static Future<bool> _secureAuthorizedKeysFiles({
+    required HarnessSystemSshProcessRunner run,
+    required Directory directory,
+    required File file,
+    required String username,
+  }) async {
+    if (!Platform.isWindows) {
+      final directoryMode = await run('/bin/chmod', <String>[
+        '700',
+        directory.path,
+      ]);
+      final fileMode = await run('/bin/chmod', <String>['600', file.path]);
+      return directoryMode.exitCode == 0 && fileMode.exitCode == 0;
+    }
+    if (username.trim().isEmpty) return false;
+    final directoryMode = await run('icacls.exe', <String>[
+      directory.path,
+      '/inheritance:r',
+      '/grant:r',
+      '$username:(OI)(CI)F',
+      '*S-1-5-18:(OI)(CI)F',
+    ]);
+    final fileMode = await run('icacls.exe', <String>[
+      file.path,
+      '/inheritance:r',
+      '/grant:r',
+      '$username:F',
+      '*S-1-5-18:F',
+    ]);
+    return directoryMode.exitCode == 0 && fileMode.exitCode == 0;
   }
 
   static void resetForTesting() => testSetter = null;
