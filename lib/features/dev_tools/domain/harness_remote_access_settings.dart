@@ -21,7 +21,10 @@ final class HarnessRemoteAccessSettings {
   static const String _enabledKey = 'harness-remote-v1-enabled';
   static final StreamController<bool> _changes =
       StreamController<bool>.broadcast();
-  static bool _enabled = false;
+  // Collaboration is available by default on desktop, while first access is
+  // still protected by the native connection decision, password proof and
+  // certificate approval. An explicitly saved `false` always wins.
+  static bool _enabled = true;
 
   final HarnessRemoteSecretReader _read;
   final HarnessRemoteSecretWriter _write;
@@ -37,7 +40,7 @@ final class HarnessRemoteAccessSettings {
 
   Future<bool> loadEnabled() async {
     final value = (await _read(_enabledKey))?.trim().toLowerCase();
-    final enabled = value == 'true';
+    final enabled = value == null || value.isEmpty || value == 'true';
     setEnabled(enabled);
     return enabled;
   }

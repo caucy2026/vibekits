@@ -37,7 +37,17 @@ class HarnessRemoteManagementBridge {
     if (callback == null) {
       throw StateError('HARNESS_BACKEND_NOT_READY');
     }
-    await callback();
+    try {
+      await callback();
+    } on StateError catch (error) {
+      // Opening remote assistance must always leave the fixed pairing carrier
+      // available. A fresh device cannot have a persisted certificate scope
+      // before its first approval, so this is the expected waiting state rather
+      // than a host-start failure. All other failures remain fail-closed.
+      if (!error.toString().contains('REMOTE_PAIRING_SCOPE_NOT_PERSISTED')) {
+        rethrow;
+      }
+    }
   }
 
   static Future<void> stopHost() async {

@@ -572,7 +572,7 @@ class VibekitsHarnessToolBridge {
       id: advancedCapabilitiesId,
       name: '查看高级设备能力',
       description:
-          '只读返回远程协助、局域网仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。',
+          '只读返回远程协助、远程仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。',
       properties: const <String, Object?>{},
     ),
     remoteAssistanceStatusId: _definition(
@@ -597,12 +597,12 @@ class VibekitsHarnessToolBridge {
     simulatorStatusId: _definition(
       id: simulatorStatusId,
       name: '查看仿真机状态',
-      description: '只读返回本机作为局域网仿真机的权限和真实运行阶段。',
+      description: '只读返回本机作为远程仿真机的权限和真实运行阶段。',
       properties: const <String, Object?>{},
     ),
     simulatorSetEnabledId: _definition(
       id: simulatorSetEnabledId,
-      name: '开关局域网仿真机',
+      name: '开关远程仿真机',
       description: '打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
@@ -621,6 +621,10 @@ class VibekitsHarnessToolBridge {
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'routingId': _string('对方界面显示的 6～16 位 VibeKits ID'),
+        'forceRelay': const <String, Object?>{
+          'type': 'boolean',
+          'description': '可选验收开关；true 强制经 HBBR 中继，默认优先 P2P 直连并自动回退中继',
+        },
       },
       required: const <String>['routingId'],
     ),
@@ -3174,7 +3178,7 @@ class VibekitsHarnessToolBridge {
       'sshEndpoint': snapshot.sshEndpoint,
       'sshUsername': snapshot.sshUsername,
       'message': snapshot.message,
-      'managementEntry': '设置 → 高级 → 局域网仿真机',
+      'managementEntry': '设置 → 高级 → 远程仿真机',
     };
   }
 
@@ -3202,6 +3206,7 @@ class VibekitsHarnessToolBridge {
     Map<String, Object?> arguments,
   ) => HarnessSimulatorController.shared.connect(
     '${arguments['routingId'] ?? ''}',
+    forceRelay: arguments['forceRelay'] == true,
   );
 
   Future<Map<String, Object?>> _simulatorConnectionStatus(

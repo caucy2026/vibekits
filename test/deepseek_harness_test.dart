@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/deepseek_harness_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_agent_preferences.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_conversation_store.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_remote_access_settings.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_work_status.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.dart';
@@ -129,7 +130,9 @@ void main() {
     final File credentials = File(
       '${home.path}${Platform.pathSeparator}.credentials.yaml',
     );
-    expect(await credentials.readAsString(), contains('"sk-legacy"'));
+    final String firstPersisted = await credentials.readAsString();
+    expect(firstPersisted, contains('refs:'));
+    expect(firstPersisted, contains('  DEEPSEEK_API_KEY: "sk-legacy"'));
 
     expect(
       await DeepSeekHarnessService.migrateLegacyCredentialToOfficialStore(
@@ -141,6 +144,37 @@ void main() {
     final String persisted = await credentials.readAsString();
     expect(persisted, contains('"sk-legacy"'));
     expect(persisted, isNot(contains('sk-must-not-overwrite')));
+  });
+
+  test('旧 Harness 官方凭据合并到 App 专属目录且保留当前会话', () async {
+    final Directory root = await Directory.systemTemp.createTemp(
+      'vibekits_harness_store_migration_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    final Directory current = Directory('${root.path}/current');
+    final Directory legacy = Directory('${root.path}/legacy');
+    await current.create(recursive: true);
+    await legacy.create(recursive: true);
+    await File('${current.path}/.credentials.yaml').writeAsString(
+      'version: 1\nrecords:\n  browser-session:\n    kind: secret\n',
+    );
+    await File('${legacy.path}/.credentials.yaml').writeAsString(
+      'version: 1\nrefs:\n  DEEPSEEK_API_KEY: "sk-from-old-home"\n',
+    );
+
+    expect(
+      await DeepSeekHarnessService.migrateLegacyOfficialCredentialFile(
+        harnessHome: current,
+        legacyHarnessHomes: <Directory>[legacy],
+      ),
+      HarnessCredentialMigration.migrated,
+    );
+    final String persisted = await File(
+      '${current.path}/.credentials.yaml',
+    ).readAsString();
+    expect(persisted, contains('DEEPSEEK_API_KEY: "sk-from-old-home"'));
+    expect(persisted, contains('browser-session:'));
+    expect(persisted.indexOf('refs:'), lessThan(persisted.indexOf('records:')));
   });
 
   test('Harness 固定官方内置版本且任务参数不包含安装命令', () async {
@@ -369,6 +403,8 @@ void main() {
   });
 
   testWidgets('Harness 只显示远程状态且右侧菜单仅管理 MCP', (WidgetTester tester) async {
+    HarnessRemoteAccessSettings.setEnabled(true);
+    addTearDown(() => HarnessRemoteAccessSettings.setEnabled(true));
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -397,8 +433,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('agent-coordination-status')), findsOneWidget);
-    expect(find.text('局域网仿真关闭'), findsNothing);
-    expect(find.text('协同断开'), findsOneWidget);
+    expect(find.text('协同等待连接'), findsOneWidget);
+    expect(find.text('远程仿真关闭'), findsNothing);
+    expect(find.text('协同连接中'), findsNothing);
+    expect(find.text('协同断开'), findsNothing);
     expect(find.byKey(const Key('agent-local-assistance-id')), findsNothing);
     await tester.ensureVisible(
       find.byKey(const Key('agent-mcp-local-devices')),

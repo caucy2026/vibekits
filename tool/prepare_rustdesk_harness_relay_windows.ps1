@@ -1,6 +1,7 @@
 param(
   [string]$RustDeskSource = $env:VIBEKITS_RUSTDESK_SOURCE,
   [string]$ToolsRoot = 'D:\KEMI-Test\tools',
+  [string]$VisualStudioRoot = 'D:\VSBuildTools',
   [string]$OutputFile = '',
   [string]$CargoTargetDirectory = 'D:\KEMI-Test\build\rustdesk-harness-relay'
 )
@@ -25,6 +26,7 @@ function Assert-DDrivePath([string]$Name, [string]$Path) {
 
 Assert-DDrivePath 'RustDeskSource' $RustDeskSource
 Assert-DDrivePath 'ToolsRoot' $ToolsRoot
+Assert-DDrivePath 'VisualStudioRoot' $VisualStudioRoot
 Assert-DDrivePath 'OutputFile' $OutputFile
 Assert-DDrivePath 'CargoTargetDirectory' $CargoTargetDirectory
 
@@ -43,7 +45,6 @@ foreach ($required in @(
   (Join-Path $RustDeskSource 'src\vibekits_harness_cli.rs'),
   (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'),
   $cargo,
-  $vswhere,
   (Join-Path $projectRoot 'third_party\rustdesk-transport\LICENCE')
 )) {
   if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
@@ -54,11 +55,49 @@ if ([string]::IsNullOrWhiteSpace($vcpkgRoot)) {
   throw "No pinned vcpkg directory was found under $ToolsRoot"
 }
 
-$visualStudio = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-if ([string]::IsNullOrWhiteSpace($visualStudio)) {
-  throw 'Visual Studio C++ Build Tools were not found'
+function Invoke-CapturedProcess(
+  [string]$FilePath,
+  [string[]]$ArgumentList
+) {
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = $FilePath
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.RedirectStandardOutput = $true
+  $startInfo.RedirectStandardError = $true
+  foreach ($argument in $ArgumentList) {
+    $startInfo.ArgumentList.Add($argument)
+  }
+  $process = [System.Diagnostics.Process]::new()
+  $process.StartInfo = $startInfo
+  if (-not $process.Start()) {
+    throw "Unable to start native process: $FilePath"
+  }
+  $stdout = $process.StandardOutput.ReadToEnd()
+  $stderr = $process.StandardError.ReadToEnd()
+  $process.WaitForExit()
+  if ($process.ExitCode -ne 0) {
+    throw "Native process failed ($($process.ExitCode)): $FilePath`n$stderr"
+  }
+  return $stdout
 }
-$vsDevCmd = Join-Path $visualStudio 'Common7\Tools\VsDevCmd.bat'
+
+$vsDevCmd = Join-Path $VisualStudioRoot 'Common7\Tools\VsDevCmd.bat'
+if (-not (Test-Path -LiteralPath $vsDevCmd -PathType Leaf)) {
+  if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+    throw "Visual Studio C++ Build Tools and vswhere are missing: $VisualStudioRoot"
+  }
+  $visualStudio = (Invoke-CapturedProcess $vswhere @(
+    '-latest',
+    '-products', '*',
+    '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+    '-property', 'installationPath'
+  )).Trim()
+  if ([string]::IsNullOrWhiteSpace($visualStudio)) {
+    throw 'Visual Studio C++ Build Tools were not found'
+  }
+  $vsDevCmd = Join-Path $visualStudio 'Common7\Tools\VsDevCmd.bat'
+}
 if (-not (Test-Path -LiteralPath $vsDevCmd -PathType Leaf)) {
   throw "VsDevCmd.bat is missing: $vsDevCmd"
 }
@@ -100,7 +139,7 @@ if (-not (Test-Path -LiteralPath $builtRelay -PathType Leaf)) {
   throw "Cargo did not produce the expected relay: $builtRelay"
 }
 $binaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($builtRelay))
-foreach ($marker in @('transport_connected', 'transport_connect_timeout')) {
+foreach ($marker in @('transport_connected', 'transport_connect_timeout', 'stdin_eof_v1')) {
   if (-not $binaryText.Contains($marker)) {
     throw "Harness relay is stale; missing marker: $marker"
   }

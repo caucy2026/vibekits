@@ -35,7 +35,6 @@ import 'mcp_exposure_consent_dialog.dart';
 import 'mcp_reputation_badge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
-import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
 import '../../dev_tools/presentation/harness_remote_read_only_panel.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
@@ -2488,6 +2487,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Widget _buildCoordinationModeBar() {
+    final controllerSession = HarnessRemoteControllerRuntime.instance.session;
+    if (!shouldShowHarnessRemoteStatus(
+      simulatorEnabled: HarnessSimulatorTargetRuntime.shared.latest.enabled,
+      assistanceEnabled: HarnessRemoteAccessSettings.enabled,
+      hasControllerSession: controllerSession != null,
+    )) {
+      return const SizedBox.shrink();
+    }
     final colors = Theme.of(context).colorScheme;
     return Material(
       color: colors.surfaceContainerLow,
@@ -2517,17 +2524,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                   HarnessSimulatorTargetPhase.disabled => (colors.outline, ''),
                   HarnessSimulatorTargetPhase.starting => (
                     Colors.orange,
-                    '局域网仿真准备中',
+                    '远程仿真准备中',
                   ),
-                  HarnessSimulatorTargetPhase.ready => (
-                    Colors.blue,
-                    '局域网仿真可连接',
-                  ),
+                  HarnessSimulatorTargetPhase.ready => (Colors.blue, '远程仿真可连接'),
                   HarnessSimulatorTargetPhase.connected => (
                     Colors.green,
-                    '局域网仿真中',
+                    '远程仿真中',
                   ),
-                  HarnessSimulatorTargetPhase.error => (Colors.red, '局域网仿真异常'),
+                  HarnessSimulatorTargetPhase.error => (Colors.red, '远程仿真异常'),
                 };
                 return _remoteStatusChip(status.$1, status.$2);
               },
@@ -2548,21 +2552,15 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 }
                 final link =
                     snapshot.data ?? RustDeskHarnessLinkStatusHub.latest;
-                final (Color, String) status = switch (link.phase) {
-                  RustDeskHarnessLinkPhase.connected => (Colors.green, '协同已连接'),
+                final Color statusColor = switch (link.phase) {
+                  RustDeskHarnessLinkPhase.connected => Colors.green,
                   RustDeskHarnessLinkPhase.clientFound ||
-                  RustDeskHarnessLinkPhase.handshaking => (
-                    Colors.orange,
-                    '协同连接中',
-                  ),
+                  RustDeskHarnessLinkPhase.disconnected => Colors.blue,
+                  RustDeskHarnessLinkPhase.handshaking => Colors.blue,
                   RustDeskHarnessLinkPhase.incompatible ||
-                  RustDeskHarnessLinkPhase.stale => (Colors.red, '协同异常'),
-                  RustDeskHarnessLinkPhase.disconnected => (
-                    Colors.blue,
-                    '协同断开',
-                  ),
+                  RustDeskHarnessLinkPhase.stale => Colors.red,
                 };
-                return _remoteStatusChip(status.$1, status.$2);
+                return _remoteStatusChip(statusColor, link.coordinationLabel);
               },
             ),
           ],
@@ -2700,6 +2698,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _startDeepSeekRemoteHost() async {
     if (_remoteHostRuntime.running) await _remoteHostRuntime.stop();
+    await HarnessRemotePairingHost.instance.ensureCarrierAvailable(
+      configuredExecutable: widget.rustDeskExecutable,
+    );
     final HarnessCallbackRemoteAdapter adapter = HarnessCallbackRemoteAdapter(
       _handleRemoteApiRequest,
     );
@@ -2711,14 +2712,14 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   }
 
   Future<void> _resumeRememberedRemoteHost() async {
-    if (!HarnessRemoteAccessSettings.enabled) return;
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
     try {
-      final peers = await HarnessRemotePeerStore().load();
-      if (!peers.any((peer) => peer.remembered && peer.connectionReady)) return;
-      await RustDeskHarnessShareService.ensureHostAvailable(
+      if (!await HarnessRemoteAccessSettings().loadEnabled()) return;
+      await HarnessRemotePairingHost.instance.ensureCarrierAvailable(
         configuredExecutable: widget.rustDeskExecutable,
       );
-      await HarnessRemotePairingHost.instance.start();
+      final peers = await HarnessRemotePeerStore().load();
+      if (!peers.any((peer) => peer.remembered && peer.connectionReady)) return;
       await _startDeepSeekRemoteHost();
     } on Object {
       // No remembered peer is the normal first-run state. Remote assistance

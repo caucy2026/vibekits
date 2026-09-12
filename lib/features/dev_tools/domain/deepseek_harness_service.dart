@@ -214,7 +214,7 @@ abstract final class DeepSeekHarnessService {
       r'''<!-- VIBEKITS_CAPABILITIES_BEGIN -->
 # VibeKits Harness 工具使用准则
 
-你运行在 VibeKits 内部。询问 APP 功能、特殊能力或高级功能时，先调用只读工具 `vibekits.advanced.capabilities`，按远程协助、局域网仿真机、集群任务中心的顺序优先报告真实开关、状态和平台角色；局域网仿真机还要报告统一 ID 与系统 SSH 端点/用户名，不得把未授权状态说成可用；再调用 `vibekits.system.capability_check`，分别报告产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。打开或关闭高级能力必须使用对应 `set_enabled` 工具，不得用 shell、修改配置文件或猜测服务地址绕过权限。
+你运行在 VibeKits 内部。询问 APP 功能、特殊能力或高级功能时，先调用只读工具 `vibekits.advanced.capabilities`，按远程协助、远程仿真机、集群任务中心的顺序优先报告真实开关、状态和平台角色；远程仿真机还要报告统一 ID 与系统 SSH 端点/用户名，不得把未授权状态说成可用；再调用 `vibekits.system.capability_check`，分别报告产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。打开或关闭高级能力必须使用对应 `set_enabled` 工具，不得用 shell、修改配置文件或猜测服务地址绕过权限。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
 
@@ -689,15 +689,12 @@ abstract final class DeepSeekHarnessService {
     String current = '';
     if (await credentials.exists()) {
       current = await credentials.readAsString();
-      if (RegExp(r'^DEEPSEEK_API_KEY\s*:', multiLine: true).hasMatch(current)) {
+      if (_containsOfficialDeepSeekCredential(current)) {
         return HarnessCredentialMigration.alreadyConfigured;
       }
     }
-    final String separator = current.isEmpty || current.endsWith('\n')
-        ? ''
-        : '\n';
     await credentials.writeAsString(
-      '$current$separator$_deepSeekCredentialRef: ${jsonEncode(key)}\n',
+      _mergeOfficialCredentialScalar(current, jsonEncode(key)),
       flush: true,
     );
     if (!Platform.isWindows) {
@@ -710,6 +707,65 @@ abstract final class DeepSeekHarnessService {
       }
     }
     return HarnessCredentialMigration.migrated;
+  }
+
+  /// Carries the official DSH credential forward when older VibeKits builds
+  /// used the unscoped `Application Support/Vibekits/Harness` directory.
+  /// Only the DeepSeek reference is merged; browser sessions and all other
+  /// records in the current app-scoped store remain authoritative.
+  static Future<HarnessCredentialMigration>
+  migrateLegacyOfficialCredentialFile({
+    Directory? harnessHome,
+    List<Directory>? legacyHarnessHomes,
+  }) async {
+    final Directory home = harnessHome ?? officialHarnessHomeDirectory();
+    await home.create(recursive: true);
+    final File credentials = File(
+      '${home.path}${Platform.pathSeparator}.credentials.yaml',
+    );
+    String current = '';
+    if (await credentials.exists()) {
+      current = await credentials.readAsString();
+      if (_containsOfficialDeepSeekCredential(current)) {
+        return HarnessCredentialMigration.alreadyConfigured;
+      }
+    }
+    final List<Directory> candidates =
+        legacyHarnessHomes ?? _legacyOfficialHarnessHomes();
+    for (final Directory candidate in candidates) {
+      if (candidate.absolute.path == home.absolute.path) continue;
+      final File legacy = File(
+        '${candidate.path}${Platform.pathSeparator}.credentials.yaml',
+      );
+      if (!await legacy.exists()) continue;
+      String legacyContents;
+      try {
+        legacyContents = await legacy.readAsString();
+      } on FileSystemException {
+        continue;
+      }
+      final RegExpMatch? match = RegExp(
+        r'^\s*DEEPSEEK_API_KEY\s*:\s*(\S.*)$',
+        multiLine: true,
+      ).firstMatch(legacyContents);
+      final String scalar = match?.group(1)?.trim() ?? '';
+      if (scalar.isEmpty) continue;
+      await credentials.writeAsString(
+        _mergeOfficialCredentialScalar(current, scalar),
+        flush: true,
+      );
+      if (!Platform.isWindows) {
+        final ProcessResult chmod = await Process.run('chmod', <String>[
+          '600',
+          credentials.path,
+        ], runInShell: false);
+        if (chmod.exitCode != 0) {
+          throw StateError('无法限制 Harness 凭据文件权限');
+        }
+      }
+      return HarnessCredentialMigration.migrated;
+    }
+    return HarnessCredentialMigration.noLegacyCredential;
   }
 
   /// Fast local check used before touching the platform credential vault.
@@ -726,10 +782,7 @@ abstract final class DeepSeekHarnessService {
     if (!await credentials.exists()) return false;
     try {
       final String value = await credentials.readAsString();
-      return RegExp(
-        r'^DEEPSEEK_API_KEY\s*:\s*\S+',
-        multiLine: true,
-      ).hasMatch(value);
+      return _containsOfficialDeepSeekCredential(value);
     } on FileSystemException {
       return false;
     }
@@ -737,6 +790,52 @@ abstract final class DeepSeekHarnessService {
 
   static Directory officialHarnessHomeDirectory() {
     return Directory(PlatformStorageLayout.current().harnessHomeDirectory);
+  }
+
+  static bool _containsOfficialDeepSeekCredential(String contents) => RegExp(
+    r'^\s*DEEPSEEK_API_KEY\s*:\s*\S+',
+    multiLine: true,
+  ).hasMatch(contents);
+
+  static String _mergeOfficialCredentialScalar(String current, String scalar) {
+    final String normalized = current.isEmpty
+        ? 'version: 1\n'
+        : current.endsWith('\n')
+        ? current
+        : '$current\n';
+    final RegExp refs = RegExp(r'^refs\s*:\s*$', multiLine: true);
+    final RegExpMatch? refsMatch = refs.firstMatch(normalized);
+    if (refsMatch != null) {
+      return normalized.replaceRange(
+        refsMatch.end,
+        refsMatch.end,
+        '\n  $_deepSeekCredentialRef: $scalar',
+      );
+    }
+    final RegExp records = RegExp(r'^records\s*:\s*$', multiLine: true);
+    final RegExpMatch? recordsMatch = records.firstMatch(normalized);
+    final String block = 'refs:\n  $_deepSeekCredentialRef: $scalar\n';
+    if (recordsMatch != null) {
+      return normalized.replaceRange(
+        recordsMatch.start,
+        recordsMatch.start,
+        block,
+      );
+    }
+    return '$normalized$block';
+  }
+
+  static List<Directory> _legacyOfficialHarnessHomes() {
+    if (!Platform.isMacOS) return const <Directory>[];
+    final String home = Platform.environment['HOME']?.trim() ?? '';
+    if (home.isEmpty) return const <Directory>[];
+    return <Directory>[
+      Directory(
+        '$home${Platform.pathSeparator}Library${Platform.pathSeparator}'
+        'Application Support${Platform.pathSeparator}Vibekits'
+        '${Platform.pathSeparator}Harness',
+      ),
+    ];
   }
 
   /// Shared user-agent root used by the official Harness skill filesystem.

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../features/dev_tools/domain/harness_tool_activity_store.dart';
 import '../features/dev_tools/domain/harness_tool_bridge.dart';
 import '../features/dev_tools/domain/harness_agent_preferences.dart';
-import '../features/dev_tools/domain/harness_status_ipc_protocol.dart';
 import '../features/dev_tools/domain/harness_status_ipc_publisher.dart';
 import '../features/dev_tools/domain/harness_simulator_target_runtime.dart';
 import '../features/dev_tools/domain/harness_tool_server.dart';
@@ -15,7 +14,6 @@ import '../features/dev_tools/domain/lan_peer_discovery_service.dart';
 import '../features/dev_tools/domain/lmcp_exposure_server.dart';
 import '../features/dev_tools/domain/mcp_capability_directory.dart';
 import '../features/dev_tools/domain/mcp_device_identity.dart';
-import '../features/dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../features/dev_tools/presentation/lmcp_inbound_call_overlay.dart';
 import '../features/about/domain/marketing_cache_service.dart';
 import 'app_theme.dart';
@@ -84,16 +82,12 @@ class _VibekitsAppState extends State<VibekitsApp> {
   }
 
   Future<void> _startHarnessStatusPublisher() async {
-    late final HarnessStatusIpcPublisher publisher;
-    publisher = HarnessStatusIpcPublisher(
+    final HarnessStatusIpcPublisher publisher = HarnessStatusIpcPublisher(
       snapshotProvider: () => HarnessWorkStatusHub.registryLatest.toJson(),
       snapshotStream: () => HarnessWorkStatusHub.registryChanges.map(
         (HarnessWorkRegistrySnapshot snapshot) => snapshot.toJson(),
       ),
       publisherVersion: AppVersion.semantic,
-      observer: (HarnessStatusIpcEvent event) {
-        _handleHarnessStatusIpcEvent(publisher, event);
-      },
     );
     _harnessStatusPublisher = publisher;
     final HarnessStatusIpcStartResult result = await publisher.start();
@@ -103,41 +97,6 @@ class _VibekitsAppState extends State<VibekitsApp> {
     }
     if (!result.available) {
       debugPrint('Harness status IPC unavailable: ${result.reason}');
-      RustDeskHarnessLinkStatusHub.disconnected(reason: result.reason);
-    }
-  }
-
-  void _handleHarnessStatusIpcEvent(
-    HarnessStatusIpcPublisher publisher,
-    HarnessStatusIpcEvent event,
-  ) {
-    final Duration interval = HarnessWorkStatusHub.registryLatest.busy
-        ? harnessStatusBusyHeartbeat
-        : harnessStatusIdleHeartbeat;
-    switch (event.type) {
-      case HarnessStatusIpcEventType.handshakeSucceeded:
-        RustDeskHarnessLinkStatusHub.acceptHandshake(<String, Object?>{
-          'protocol': RustDeskHarnessLinkStatusHub.protocol,
-          'versions': const <int>[1],
-          'peerId': event.peerId,
-        });
-      case HarnessStatusIpcEventType.subscriptionStarted:
-        RustDeskHarnessLinkStatusHub.acceptSubscription(
-          peerId: event.peerId,
-          version: 1,
-          heartbeatInterval: interval,
-        );
-      case HarnessStatusIpcEventType.heartbeatSent:
-        RustDeskHarnessLinkStatusHub.acceptHeartbeat(
-          peerId: event.peerId,
-          version: 1,
-          heartbeatInterval: interval,
-        );
-      case HarnessStatusIpcEventType.unsubscribed ||
-          HarnessStatusIpcEventType.disconnected:
-        if (publisher.activeSubscriptionCount == 0) {
-          RustDeskHarnessLinkStatusHub.disconnected(reason: 'KEMI远程办公状态订阅已断开');
-        }
     }
   }
 

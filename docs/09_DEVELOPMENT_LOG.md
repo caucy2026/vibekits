@@ -1575,3 +1575,45 @@
 - 新增 Windows D 盘 RustDesk Harness Relay 构建脚本及 Release 三重门禁：helper、来源/SHA 清单、AGPL 许可证缺一不可；包验证阶段会重算 SHA 并运行 status JSON 探针。
 - 版本统一提升到 `1.9.0-dev.188+2188`，同步 AppVersion、LMCP appVersion/catalogRevision 和 Windows workflow 产物名。
 - 本机静态分析 0 issue；消息队列、路径、DSH 交互契约已完成定向回归。Windows 58 的原生 Relay、Release 编译与真机运行由 Windows Codex 按新增脚本执行，结果需另写验收记录，不能用源码检查代替。
+
+# 2026-09-12 · dev.188 macOS 远程仿真与 Harness 凭据迁移
+
+- 修复平台数据目录应用隔离后遗漏官方 Harness 凭据的问题：启动时只把旧 DSH `.credentials.yaml` 的 `DEEPSEEK_API_KEY` 合并到当前 `refs`，保留当前会话记录并强制 `0600`；不输出、覆盖或删除旧密钥。
+- 精确 macOS 候选使用 ORICO 独立源码/临时/构建目录干净重建，Developer ID 深度严格验签通过；生成 Universal DMG 并完成镜像校验与只读挂载复核。该包未公证，只能用于双机测试。
+- ID `4456560334` 的普通 P2P/自动中继、强制 HBBR、195 项远程目录、目标进程读取、正常断开和控制端崩溃后的隧道退出均通过。
+- 钥匙串中已有证书完整且权限明确的首次配对记录；但旧设备 `9464730211` 本轮在 TLS 握手阶段终止，项目/会话/发送/反馈/停止未标记真实通过。新增显式真实远程会话门禁，普通测试不会连接或修改远端。
+- 63 ADB 身份核验、旧版 dev.165 启动和可视界面通过；dev.188 APK、Windows D 盘 Release 和 Apple 公证仍是独立未完成门禁。完整证据见 `docs/acceptance/V1_9_0_DEV188_MAC_REMOTE_SIMULATION_2026-09-12.md`。
+## 2026-09-12 · 1.9.0-dev.190+2190 · 远程协助独立端口授权与旧服务接管修复
+
+- 定位首次证书配对超时的真实原因：`32145/32146` 被错误套用普通 TCP 隧道权限，连接在到达执行端批准界面前已被拒绝；RustDesk 配套引擎新增独立远程协助授权开关，仅允许两条固定回环端口，不扩大远程桌面、文件、终端或任意隧道权限。
+- VibeKits 打开、恢复、停止远程协助时同步原生授权；与远程仿真 `32147/22` 保持独立生命周期。协同/仿真均关闭且无会话时，Harness 主界面不再显示连接中或异常信息。
+- 真机升级复现发现 dev.188 的脱离进程在 App 退出后仍常驻，dev.189 会误连旧 Relay，导致新授权命令不可用，因此 dev.189 候选已撤回。dev.190 增加版本接管：识别不兼容控制响应后停止旧服务、启动当前包内 Relay、重试远程协助授权并恢复已开启的仿真授权；关闭路径失败时保持 fail-closed，不重启旧服务。
+- 本机真实升级验证中旧 PID `75825` 被替换为当前包内新 PID `76087`，`32145/32146/32147` 均恢复监听且注册状态为 `registered`。Rust 定向测试 `6/6`、跨 macOS/Windows 共用 Dart 协议组合回归 `89/89`、旧服务接管定向组合 `26/26` 通过；Universal macOS 12+ 全功能门禁和 36 个 Mach-O Developer ID 深度签名通过。
+- 生成签名候选 `Vibekits-1.9.0.190+2190-macos-universal.dmg`，SHA-256 为 `20cc0aaa4d39909e228b62bbce0076a6f3624a57a5ddec30428ffbbf7c6b5ae8`。DMG 及内部 App 验签、镜像校验、只读挂载、版本和双架构复核通过。真实首次配对、项目/会话同步、发送/反馈/停止与 63 真机仍须用同版目标复验；Apple 公证未执行，不得标记正式发布。
+- 完整证据见 `docs/acceptance/V1_9_0_DEV190_REMOTE_ASSISTANCE_GATE_FIX_2026-09-12.md`。
+
+## 2026-09-12 · 1.9.0-dev.191+2191 · 远程仿真双路径实机通过与首次配对死锁定位
+
+- 对目标统一 ID `4456560334` 完成默认 P2P/自动回退与强制 HBBR 两轮真实远程仿真：均取得 195 项工具目录并成功调用只读进程接口；关闭后原生连接表为空，不遗留后台隧道。
+- 协同链路与仿真链路独立核算。真实配对仍未通过；通过远程仿真 MCP 进一步定位为首次开启要求已持久化配对范围，返回 `REMOTE_PAIRING_SCOPE_NOT_PERSISTED`，属于首次配对生命周期死锁，不是网络或中继不可达。
+- 远程核心与 Windows 共用协议回归 `49/49` 通过，覆盖身份、mTLS、项目/会话、历史、并发命令、反馈、停止/撤权和 Windows 自包含 Relay 合同；Windows 真机 Release 仍是单独门禁。
+- 63 曾完成同签名 dev.191 保留数据升级并前台启动；本轮 `192.168.3.63:5555` 超时离线，PAD 协同闭环仍未验收。
+- macOS dev.191 Universal/macOS 12+ Developer ID 签名 DMG 已生成，SHA-256 为 `603f188f6b002e72ee71495ff54aabe601bf5f2ace9d62e2174d959ebf157807`；未公证、未正式发布。完整证据见 `docs/acceptance/V1_9_0_DEV191_REMOTE_SIMULATION_AND_PAIRING_2026-09-12.md`。
+
+## 2026-09-12 · 1.9.0-dev.194+2194 · 远程协助强制载体与等待状态闭环
+
+- 用户明确授权远程协助开启时强制启动。统一管理桥接现在只把 `REMOTE_PAIRING_SCOPE_NOT_PERSISTED` 处理为首次配对等待，其他载体/后端错误仍失败关闭；官方与回退 Harness、macOS 与 Windows 共用同一逻辑。
+- 未完成项目订阅的协议握手在 6 秒后清理；反复 hello 也不再让主界面长期显示“协同连接中”。未完成证书/范围/订阅/心跳统一显示蓝灯“协同等待连接”，只有真正订阅和心跳才显示已连接。
+- 完整回归矩阵 `202/202` 通过，4 个受影响生产文件 analyze 0 issue。精确 DMG 只读启动、Harness 渲染、关闭冷启动无状态/无 Relay、开启冷启动强制包内 Relay 与等待蓝灯均通过。
+- 签名测试 DMG 为 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260912-remote-fix/package/Vibekits-1.9.0.194+2194-macos-universal.dmg`，385421955 bytes，SHA-256 `204b359866b9ef08b30383f1788192b14d730143b35388ac54a806318c1c666b`；Universal x86_64+arm64、macOS 12+、36 个 Mach-O Developer ID 深度验签、DMG 签名/镜像校验通过。
+- 对 `4456560334` 的 P2P 和强制 HBBR 首次配对均确认目标当前没有开放 `32145`，需先安装精确 dev.194 才能完成双机项目/会话/发送/停止闭环。未公证、未正式发布，不冒充已完成。证据见 `docs/acceptance/V1_9_0_DEV194_REMOTE_ASSISTANCE_FORCE_CARRIER_2026-09-12.md`。
+- dev.194 随后按正式发布门禁完成 App 与 DMG 双层 Apple 公证：App Submission ID `1a3e3c52-a5a5-48e3-a9a5-70b87715e57e`、DMG Submission ID `6cb470f9-0161-47e4-8a6a-8a5a715480c5` 均为 `Accepted`。最终 DMG 已签名、staple/validate、镜像校验，并从只读挂载验证内部 App 的 Developer ID、Gatekeeper `Notarized Developer ID`、`x86_64 + arm64` 和 macOS 12.0 最低版本。
+- dev.194 曾生成公证安装包 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260912-dev194-formal/package/Vibekits-1.9.0.194+2194-macos-universal-notarized.dmg`，387434428 bytes，SHA-256 `11094c385940c804aa32b780ab47bc462f80ea5f878fbce7679a3ebbd32d8083`；但最终真实启动发现空连接误报绿灯，已在 dev.195 撤回，禁止交付或上传。公证成功不能代替功能验收。
+
+## 2026-09-12 · 1.9.0-dev.195+2195 · 空连接状态解耦与正式 macOS 发布
+
+- dev.194 公证包最终启动时发现：本机 KEMI 状态订阅 IPC 会被错误投影成绿色“协同已连接”，而原生 Relay 连接表实际为 `idle / []`。dev.194 因此撤回，未作为最终包交付。
+- App 根层不再用本机状态 IPC handshake/subscription/heartbeat 驱动远程协同状态；状态 IPC 继续独立发布 Harness 工作快照，只有已认证的远程 Harness 数据通道和心跳可以点亮绿灯。此修复位于共享 Dart 层，macOS/Windows 不分叉。
+- 定向分析 0 issue；状态与 Harness/UI 定向回归 68/68，全量 Flutter 测试 851 项通过、19 项 live test 按环境条件跳过且无失败。Universal macOS 12+ 的 Harness、ADB、7-Zip、GitHub CLI、Git 完整门禁通过。
+- App 公证 Submission ID `5b5df8f2-747f-427b-b333-2bf95595ea5e`、DMG 公证 Submission ID `091d85e8-1d67-4a7f-a783-641e74e37037` 均为 Apple `Accepted`；两层票据已 staple/validate，Gatekeeper 为 `Notarized Developer ID`。
+- 唯一交付 DMG 为 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260912-dev195-formal/package/Vibekits-1.9.0.195+2195-macos-universal-notarized.dmg`，387538488 bytes，SHA-256 `de3d5e0e848deebd70402ecb60b0f1614f1ab165af6670fcb49df9b4c46c3ea9`。最终 DMG 真实启动时 Relay 注册正常、连接表为空，主界面准确显示蓝灯“协同等待连接”。完整证据见 `docs/acceptance/V1_9_0_DEV195_REMOTE_STATUS_RELEASE_2026-09-12.md`。

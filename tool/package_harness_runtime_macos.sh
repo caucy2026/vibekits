@@ -24,7 +24,7 @@ if [ ! -x "$RELAY_SOURCE" ] || [ ! -f "$RELAY_LICENSE_SOURCE" ]; then
   echo "Run tool/prepare_rustdesk_harness_relay_macos.sh before Release packaging." >&2
   exit 8
 fi
-for RELAY_MARKER in transport_connected transport_connect_timeout; do
+for RELAY_MARKER in transport_connected transport_connect_timeout stdin_eof_v1; do
   if ! strings "$RELAY_SOURCE" | grep -F "$RELAY_MARKER" >/dev/null; then
     echo "Harness RustDesk transport is stale; missing marker: $RELAY_MARKER" >&2
     exit 8

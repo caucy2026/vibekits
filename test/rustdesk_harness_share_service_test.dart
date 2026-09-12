@@ -236,6 +236,107 @@ void main() {
     ]);
   });
 
+  test('远程协助只开放配对和会话两个固定原生端点', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_remote_assistance_gate_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final calls = <List<String>>[];
+
+    for (final enabled in <bool>[true, false]) {
+      await RustDeskHarnessShareService.setRemoteAssistanceAccess(
+        executable.path,
+        enabled: enabled,
+        runner: (_, arguments) async {
+          calls.add(arguments);
+          return ProcessResult(
+            1,
+            0,
+            '{"ok":true,"state":"idle","connections":[]}',
+            '',
+          );
+        },
+      );
+    }
+
+    expect(calls, <List<String>>[
+      <String>['--vibekits-harness-remote-assistance-access', '1'],
+      <String>['--vibekits-harness-remote-assistance-access', '0'],
+    ]);
+  });
+
+  test('覆盖升级会停止不兼容旧中继并用当前包内组件恢复授权', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_remote_assistance_upgrade_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final calls = <List<String>>[];
+    int gateAttempts = 0;
+    bool launched = false;
+
+    await RustDeskHarnessShareService.setRemoteAssistanceAccess(
+      executable.path,
+      enabled: true,
+      runner: (_, arguments) async {
+        calls.add(arguments);
+        if (arguments.first == '--vibekits-harness-stop') {
+          return ProcessResult(
+            2,
+            0,
+            '{"ok":true,"state":"stopped","connections":[]}',
+            '',
+          );
+        }
+        gateAttempts += 1;
+        return ProcessResult(
+          1,
+          0,
+          gateAttempts == 1
+              ? '{"ok":false,"state":"unavailable","connections":[],"code":"control_response_invalid"}'
+              : '{"ok":true,"state":"idle","connections":[]}',
+          '',
+        );
+      },
+      launcher: (path, arguments) async {
+        launched = true;
+        expect(path, executable.path);
+        expect(arguments, const <String>['--vibekits-harness-service']);
+      },
+    );
+
+    expect(launched, isTrue);
+    expect(gateAttempts, 2);
+    expect(calls, <List<String>>[
+      <String>['--vibekits-harness-remote-assistance-access', '1'],
+      <String>['--vibekits-harness-stop'],
+      <String>['--vibekits-harness-remote-assistance-access', '1'],
+    ]);
+  });
+
+  test('关闭远程协助遇到旧中继时保持失败关闭且不重启服务', () async {
+    bool launched = false;
+    await RustDeskHarnessShareService.setRemoteAssistanceAccess(
+      '/Harness',
+      enabled: false,
+      runner: (_, _) async => ProcessResult(
+        1,
+        0,
+        '{"ok":false,"state":"unavailable","connections":[],"code":"control_response_invalid"}',
+        '',
+      ),
+      launcher: (_, _) async => launched = true,
+    );
+    expect(launched, isFalse);
+  });
+
   test('恢复远程协助会启动中继并等待到真实可呼叫状态', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_resume_',

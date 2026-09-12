@@ -27,7 +27,7 @@ for ARCH in arm64 x86_64; do
     exit 2
   fi
 done
-for MARKER in transport_connected transport_connect_timeout; do
+for MARKER in transport_connected transport_connect_timeout stdin_eof_v1; do
   if ! strings "$SOURCE" | grep -F "$MARKER" >/dev/null; then
     echo "Harness relay is stale; missing marker: $MARKER" >&2
     exit 2

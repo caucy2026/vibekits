@@ -9,6 +9,12 @@ enum RustDeskHarnessLinkPhase {
   incompatible,
 }
 
+bool shouldShowHarnessRemoteStatus({
+  required bool simulatorEnabled,
+  required bool assistanceEnabled,
+  required bool hasControllerSession,
+}) => simulatorEnabled || assistanceEnabled || hasControllerSession;
+
 class RustDeskHarnessLinkSnapshot {
   const RustDeskHarnessLinkSnapshot({
     required this.phase,
@@ -35,6 +41,18 @@ class RustDeskHarnessLinkSnapshot {
   bool get waiting =>
       phase == RustDeskHarnessLinkPhase.clientFound ||
       phase == RustDeskHarnessLinkPhase.handshaking;
+
+  /// Shared wording for both official and fallback Harness workspaces. A host
+  /// whose collaboration service is open but has no authenticated controller
+  /// is waiting, not connecting. Only a real protocol handshake is connecting.
+  String get coordinationLabel => switch (phase) {
+    RustDeskHarnessLinkPhase.connected => '协同已连接',
+    RustDeskHarnessLinkPhase.handshaking => '协同等待连接',
+    RustDeskHarnessLinkPhase.incompatible ||
+    RustDeskHarnessLinkPhase.stale => '协同异常',
+    RustDeskHarnessLinkPhase.clientFound ||
+    RustDeskHarnessLinkPhase.disconnected => '协同等待连接',
+  };
 }
 
 /// Process-wide, non-blocking projection of the VibeKits message channel.
@@ -62,11 +80,21 @@ abstract final class RustDeskHarnessLinkStatusHub {
 
   static void clientFound() {
     if (_remoteDataPeerId.isNotEmpty) return;
-    _publish(RustDeskHarnessLinkPhase.clientFound, 'VibeKits 内置 P2P/中继引擎已就绪');
+    _publish(RustDeskHarnessLinkPhase.clientFound, '协同等待连接');
   }
 
-  static void handshaking() =>
-      _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验 Harness 消息协议');
+  static void handshaking() {
+    _staleTimer?.cancel();
+    _publish(RustDeskHarnessLinkPhase.handshaking, '正在校验 Harness 消息协议');
+    _staleTimer = Timer(minimumHeartbeatTtl, () {
+      if (_latest.phase != RustDeskHarnessLinkPhase.handshaking ||
+          _remoteDataPeerId.isNotEmpty) {
+        return;
+      }
+      _activePeerId = '';
+      _publish(RustDeskHarnessLinkPhase.clientFound, '协同等待连接');
+    });
+  }
 
   /// The authenticated VibeKits remote-data protocol is live inside the
   /// RustDesk byte tunnel. This is distinct from remote desktop state.

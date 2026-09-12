@@ -58,7 +58,7 @@ tool_timeout_sec = 600
 
 运行链路：启动脚本确保 VibeKits APP 在运行 → APP 在 `127.0.0.1` 随机端口发布带随机 Bearer Token 的桥接文件 → stdio MCP 读取目录并转发调用。监听不暴露到局域网，连接文件不包含模型 API Key。写入、设备控制和破坏性操作仍遵守 APP 当前权限策略，并写入对应工具日志。
 
-需要自行实现适配器时，Windows 可读取 `%LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json`；macOS 当前正式 bundle 读取 `~/Library/Application Support/com.caucy.vibekits/Vibekits/mcp/tool-bridge.json`。路径必须由 `PlatformStorageLayout.current().mcpConnectionFile`/`VIBEKITS_DATA_HOME` 统一派生，不能把旧的 `~/Library/Application Support/Vibekits/Mcp/tool-bridge.json` 当当前事实源。清单内临时端点和 token 仅用于本机 `GET /catalog`、`POST /invoke` 与 `POST /native-approval`。普通客户端应优先使用 stdio MCP，以免自行处理令牌轮换和 APP 生命周期。
+需要自行实现适配器时，可读取 `%LOCALAPPDATA%\Vibekits\Mcp\tool-bridge.json` 中的临时 `baseUrl` 和 `token`，使用 `Authorization: Bearer <token>` 调用 `GET /catalog`、`POST /invoke` 与 `POST /native-approval`。这是仅限本机的底层协议；普通客户端应优先使用 stdio MCP，以免自行处理令牌轮换和 APP 生命周期。
 
 MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例如 `vibekits.adb.shell` 对外为 `adb__shell`。客户端必须以运行时 `tools/list` 返回值为准。
 
@@ -113,7 +113,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
-| `vibekits.advanced.capabilities` | `advanced__capabilities` | 查看高级设备能力 | 是 | 只读返回远程协助、局域网仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。 | `readOnly` | `{}` |
+| `vibekits.advanced.capabilities` | `advanced__capabilities` | 查看高级设备能力 | 是 | 只读返回远程协助、远程仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。 | `readOnly` | `{}` |
 | `vibekits.agent_cli` | `agent_cli` | 智能体 CLI 编排 | 否（环境/接线门禁） | 统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。 适合：用户明确需要“智能体 CLI 编排”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
@@ -161,12 +161,12 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.serial_port` | `serial_port` | 串口调试（Serial） | 否（环境/接线门禁） | 打开 Windows/macOS 串口，配置波特率和帧格式并进行文本或 HEX 收发。 适合：用户明确需要“串口调试（Serial）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
 | `vibekits.simulator.call` | `simulator__call` | 调用远程仿真工具 | 是 | 在已连接设备上调用其真实调试工具，用于读取日志、进程、资源、截图以及受控安装/启动/停止。工具必须存在于远端目录。 | `controlsDevice` | `routingId`* (string), `toolId`* (string), `arguments` (object) |
 | `vibekits.simulator.catalog` | `simulator__catalog` | 查看远程仿真工具 | 是 | 读取已连接设备真实公开的调试工具目录。 | `readOnly` | `routingId`* (string) |
-| `vibekits.simulator.connect` | `simulator__connect` | 按 ID 连接远程仿真机 | 是 | 只需提供对方 VibeKits ID；自动建立加密 P2P 通道并在直连失败时使用中继，不需要 IP、端口、SSH 账号、密码或密钥。 | `controlsDevice` | `routingId`* (string) |
+| `vibekits.simulator.connect` | `simulator__connect` | 按 ID 连接远程仿真机 | 是 | 只需提供对方 VibeKits ID；自动建立加密 P2P 通道并在直连失败时使用中继，不需要 IP、端口、SSH 账号、密码或密钥。 | `controlsDevice` | `routingId`* (string), `forceRelay` (boolean) |
 | `vibekits.simulator.connection_status` | `simulator__connection_status` | 查看远程仿真连接 | 是 | 只读返回当前按 ID 建立的仿真连接；不会暴露内部端口。 | `readOnly` | `routingId` (string) |
 | `vibekits.simulator.disconnect` | `simulator__disconnect` | 断开远程仿真机 | 是 | 关闭指定 ID 的隧道并回收本地监听，不在后台遗留连接。 | `controlsDevice` | `routingId`* (string) |
 | `vibekits.simulator.install_candidate` | `simulator__install_candidate` | 安装远程仿真机 VibeKits 候选 | 是 | 通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。 | `controlsDevice` | `routingId`* (string), `packagePath`* (string), `apply` (boolean) |
-| `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关局域网仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
-| `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为局域网仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
+| `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关远程仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为远程仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
 | `vibekits.system.capability_check` | `system__capability_check` | 检查智能体工具链 | 是 | 只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。 | `readOnly` | `{}` |
 | `vibekits.system.describe_tool` | `system__describe_tool` | 精确说明工具参数 | 是 | 按工具 ID 返回当前运行版本的完整 inputSchema、必填项、枚举、默认值、风险和自动配置原则。回答参数配置问题前必须调用。 | `readOnly` | `toolId`* (string) |
 | `vibekits.system.resources` | `system__resources` | 检查系统资源 | 是 | 只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。 | `readOnly` | `adbSerial` (string), `samples` (integer；最小=1；最大=10), `intervalMs` (integer；最小=250；最大=5000) |

@@ -243,7 +243,7 @@ void main() {
             .dy,
       ),
     );
-    expect(find.text('局域网仿真'), findsOneWidget);
+    expect(find.text('远程仿真'), findsOneWidget);
     expect(
       find.byKey(const Key('advanced-cluster-task-center')),
       findsOneWidget,
@@ -264,10 +264,10 @@ void main() {
       tester.getCenter(find.byKey(const Key('advanced-local-device-id-card'))),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.textContaining('远程协助和局域网仿真共用此 ID'), findsOneWidget);
+    expect(find.textContaining('远程协助和远程仿真共用此 ID'), findsOneWidget);
     await mouse.moveTo(Offset.zero);
     await tester.pump();
-    expect(find.textContaining('远程协助和局域网仿真共用此 ID'), findsNothing);
+    expect(find.textContaining('远程协助和远程仿真共用此 ID'), findsNothing);
     expect(find.text('协同访问本机'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

@@ -4,6 +4,32 @@ import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_link_status.
 void main() {
   tearDown(() => RustDeskHarnessLinkStatusHub.disconnected());
 
+  test('协同和仿真都关闭且没有控制会话时主页状态完全隐藏', () {
+    expect(
+      shouldShowHarnessRemoteStatus(
+        simulatorEnabled: false,
+        assistanceEnabled: false,
+        hasControllerSession: false,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldShowHarnessRemoteStatus(
+        simulatorEnabled: false,
+        assistanceEnabled: true,
+        hasControllerSession: false,
+      ),
+      isTrue,
+    );
+  });
+
+  test('协同打开但没有真实连接时显示等待连接', () {
+    RustDeskHarnessLinkStatusHub.clientFound();
+    expect(RustDeskHarnessLinkStatusHub.latest.coordinationLabel, '协同等待连接');
+    RustDeskHarnessLinkStatusHub.disconnected();
+    expect(RustDeskHarnessLinkStatusHub.latest.coordinationLabel, '协同等待连接');
+  });
+
   test('发现客户端不会误报已连接', () {
     RustDeskHarnessLinkStatusHub.clientFound();
     expect(RustDeskHarnessLinkStatusHub.latest.waiting, isTrue);
@@ -24,6 +50,7 @@ void main() {
       RustDeskHarnessLinkStatusHub.latest.phase,
       RustDeskHarnessLinkPhase.handshaking,
     );
+    expect(RustDeskHarnessLinkStatusHub.latest.coordinationLabel, '协同等待连接');
     expect(RustDeskHarnessLinkStatusHub.latest.protocolVersion, 1);
     expect(
       RustDeskHarnessLinkStatusHub.acceptSubscription(
@@ -34,6 +61,29 @@ void main() {
       isTrue,
     );
     expect(RustDeskHarnessLinkStatusHub.latest.connected, isTrue);
+  });
+
+  testWidgets('握手未完成订阅会自动回到等待连接', (WidgetTester tester) async {
+    expect(
+      RustDeskHarnessLinkStatusHub.acceptHandshake(<String, Object?>{
+        'protocol': RustDeskHarnessLinkStatusHub.protocol,
+        'versions': <int>[1],
+        'peerId': 'stale-handshake',
+      }),
+      isTrue,
+    );
+    expect(
+      RustDeskHarnessLinkStatusHub.latest.phase,
+      RustDeskHarnessLinkPhase.handshaking,
+    );
+
+    await tester.pump(RustDeskHarnessLinkStatusHub.minimumHeartbeatTtl);
+
+    expect(
+      RustDeskHarnessLinkStatusHub.latest.phase,
+      RustDeskHarnessLinkPhase.clientFound,
+    );
+    expect(RustDeskHarnessLinkStatusHub.latest.coordinationLabel, '协同等待连接');
   });
 
   test('协议不兼容时拒绝连接', () {

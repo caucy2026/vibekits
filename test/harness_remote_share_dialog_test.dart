@@ -5,6 +5,37 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/local_models/presentation/official_harness_workspace.dart';
 
 void main() {
+  test('remote connector reuses an already selected device ID', () {
+    expect(
+      selectHarnessRemoteRoutingId(
+        enteredId: ' ',
+        simulatorRoutingId: '1554650784',
+        activeRemoteRoutingId: '9464730211',
+      ),
+      '1554650784',
+    );
+    expect(
+      selectHarnessRemoteRoutingId(
+        enteredId: ' 24955106 ',
+        simulatorRoutingId: '1554650784',
+      ),
+      '24955106',
+    );
+  });
+
+  test('stale certificate transport failures enter secure re-pairing', () {
+    expect(
+      shouldRepairRememberedHarnessPeer(
+        StateError('REMOTE_OUTCOME_UNKNOWN: REMOTE_DISCONNECTED'),
+      ),
+      isTrue,
+    );
+    expect(
+      shouldRepairRememberedHarnessPeer(StateError('REMOTE_PERMISSION_DENIED')),
+      isFalse,
+    );
+  });
+
   testWidgets('PAD controller-only mode never exposes or starts inbound host', (
     tester,
   ) async {
@@ -31,10 +62,7 @@ void main() {
       find.byKey(const Key('harness-coordination-peer-id')),
       findsOneWidget,
     );
-    expect(
-      find.byKey(const Key('harness-simulator-connect')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('harness-simulator-connect')), findsOneWidget);
     expect(find.text('协同'), findsOneWidget);
     expect(find.text('仿真'), findsOneWidget);
     await tester.tap(

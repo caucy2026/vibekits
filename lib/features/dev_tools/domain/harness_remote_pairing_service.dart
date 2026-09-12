@@ -101,6 +101,28 @@ final class HarnessRemotePairingHost {
     _subscription = listener.listen(_accept);
   }
 
+  /// Restores the execution-side carrier without depending on Harness model
+  /// startup. This keeps first pairing available while the local workspace is
+  /// still loading or has failed, and gives official/fallback UI one shared
+  /// lifecycle implementation.
+  Future<RustDeskHostInfo> ensureCarrierAvailable({
+    String configuredExecutable = '',
+  }) async {
+    final RustDeskHostInfo ready =
+        await RustDeskHarnessShareService.ensureHostAvailable(
+          configuredExecutable: configuredExecutable,
+        );
+    if (!ready.callable || ready.executable.isEmpty) {
+      throw StateError('REMOTE_CARRIER_NOT_REGISTERED');
+    }
+    await RustDeskHarnessShareService.setRemoteAssistanceAccess(
+      ready.executable,
+      enabled: true,
+    );
+    await start();
+    return ready;
+  }
+
   void _accept(Socket socket) {
     socket.setOption(SocketOption.tcpNoDelay, true);
     unawaited(() async {

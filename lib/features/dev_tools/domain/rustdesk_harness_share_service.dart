@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import 'harness_simulator_access_settings.dart';
+
 class RustDeskHostInfo {
   const RustDeskHostInfo({
     required this.executable,
@@ -694,6 +696,84 @@ abstract final class RustDeskHarnessShareService {
     if (payload['ok'] != true) {
       throw StateError(payload['code']?.toString() ?? '仿真机权限更新失败');
     }
+  }
+
+  /// Enables or revokes the native byte-tunnel gate for the fixed pairing
+  /// and authenticated Harness session endpoints. This is deliberately
+  /// independent from simulator access and never enables arbitrary tunnels.
+  static Future<void> setRemoteAssistanceAccess(
+    String executable, {
+    required bool enabled,
+    RustDeskProcessRunner? runner,
+    RustDeskProcessLauncher? launcher,
+  }) async {
+    if (Platform.isAndroid) {
+      throw UnsupportedError('PAD 只作为协助端，不开放本机被协助服务');
+    }
+    Future<Map<String, Object?>> updateGate() async => _decodeControl(
+      await _runControlCommand(
+        executable,
+        <String>[
+          '--vibekits-harness-remote-assistance-access',
+          enabled ? '1' : '0',
+        ],
+        timeout: const Duration(seconds: 5),
+        runner: runner,
+      ),
+    );
+
+    Map<String, Object?> payload = await updateGate();
+    if (payload['ok'] == true) return;
+    final String code = payload['code']?.toString() ?? '';
+    const staleServiceCodes = <String>{
+      'control_response_invalid',
+      'control_send_failed',
+    };
+    if (!staleServiceCodes.contains(code)) {
+      throw StateError(code.isEmpty ? '远程协助权限更新失败' : code);
+    }
+
+    // An App update does not replace an already-running detached relay. Old
+    // services do not understand the new remote-assistance gate and would
+    // otherwise keep every pairing attempt behind the generic tunnel policy.
+    // Disabling is already fail-closed on those versions, so avoid restarting
+    // a relay that may still serve an explicitly enabled simulator endpoint.
+    if (!enabled) return;
+
+    final bool restoreSimulator = HarnessSimulatorAccessSettings.enabled;
+    final ProcessResult stopped = await _runControlCommand(
+      executable,
+      const <String>['--vibekits-harness-stop'],
+      timeout: const Duration(seconds: 5),
+      runner: runner,
+    );
+    final Map<String, Object?> stopPayload = _decodeControl(stopped);
+    if (stopPayload['ok'] != true) {
+      throw StateError(stopPayload['code']?.toString() ?? '旧版 Harness 中继停止失败');
+    }
+    await launchHost(executable, launcher: launcher);
+
+    final DateTime deadline = DateTime.now().add(const Duration(seconds: 10));
+    Object? lastError;
+    do {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      try {
+        payload = await updateGate();
+        if (payload['ok'] == true) {
+          if (restoreSimulator) {
+            await setSimulatorAccess(executable, enabled: true, runner: runner);
+          }
+          return;
+        }
+        lastError = payload['code'];
+      } on Object catch (error) {
+        lastError = error;
+      }
+    } while (DateTime.now().isBefore(deadline));
+    throw TimeoutException(
+      'HARNESS_RELAY_UPGRADE_TIMEOUT: ${lastError ?? code}',
+      const Duration(seconds: 10),
+    );
   }
 
   static Future<RustDeskHarnessTunnelLease> openSimulatorTunnel(
