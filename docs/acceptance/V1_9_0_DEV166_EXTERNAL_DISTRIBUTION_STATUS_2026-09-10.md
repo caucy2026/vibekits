@@ -79,4 +79,3 @@
 2. 将 dev.166 ZIP 和新截图上传 Uptodown，提交复审。
 3. 单独复核 KEMI传书 app ID `1000852583` 的实时文件、素材和审核状态。
 4. 获取 Apple Distribution 私钥后建立独立 Mac App Store target，完成 Sandbox 兼容改造、Archive/Validate，再创建 App Store Connect 记录并上传审核。
-

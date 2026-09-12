@@ -1,7 +1,7 @@
 # VibeKits dev.172 Harness 与远程层解耦验收记录
 
-日期：2026-09-11  
-候选版本：`v1.9.0-dev.172+2172`  
+日期：2026-09-11
+候选版本：`v1.9.0-dev.172+2172`
 需求基线：`docs/65_UNIFIED_ID_SIMULATOR_TARGET_REQUIREMENTS.md`
 
 ## 1. 修复范围

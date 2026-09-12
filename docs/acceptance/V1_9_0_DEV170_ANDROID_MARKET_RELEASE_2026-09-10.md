@@ -1,8 +1,8 @@
 # VibeKits 1.9.0-dev.170 Android 应用中心与 KEMI 商城发布验收
 
-日期：2026-09-10  
-商城记录：`app_id=71`  
-包名：`com.vibekits.vibekits`  
+日期：2026-09-10
+商城记录：`app_id=71`
+包名：`com.vibekits.vibekits`
 版本：`1.9.0-dev.170 (2170)`
 
 ## 1. 修复范围
