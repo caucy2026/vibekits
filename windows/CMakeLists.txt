@@ -107,13 +107,21 @@ install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
 # RustDesk application or a developer PATH.
 set(HARNESS_RELAY_RUNTIME
   "${CMAKE_SOURCE_DIR}/../native/rustdesk/windows/runtime/vibekits-harness-relay.exe")
-if(EXISTS "${HARNESS_RELAY_RUNTIME}")
-  install(FILES "${HARNESS_RELAY_RUNTIME}"
+set(HARNESS_RELAY_MANIFEST
+  "${CMAKE_SOURCE_DIR}/../native/rustdesk/windows/runtime/vibekits-harness-relay.json")
+set(HARNESS_RELAY_LICENSE
+  "${CMAKE_SOURCE_DIR}/../native/rustdesk/windows/runtime/RUSTDESK-AGPL-3.0.txt")
+if(EXISTS "${HARNESS_RELAY_RUNTIME}" AND EXISTS "${HARNESS_RELAY_MANIFEST}"
+   AND EXISTS "${HARNESS_RELAY_LICENSE}")
+  install(FILES
+    "${HARNESS_RELAY_RUNTIME}"
+    "${HARNESS_RELAY_MANIFEST}"
+    "${HARNESS_RELAY_LICENSE}"
     DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 else()
   install(CODE "
     if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
-      message(FATAL_ERROR \"Bundled Windows Harness relay is missing. Prepare native/rustdesk/windows/runtime/vibekits-harness-relay.exe before Release packaging.\")
+      message(FATAL_ERROR \"Bundled Windows Harness relay, provenance manifest, or AGPL license is missing. Run tool/prepare_rustdesk_harness_relay_windows.ps1 before Release packaging.\")
     endif()
   " COMPONENT Runtime)
 endif()

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { homedir, platform, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, normalize } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const argumentValue = (name) => {
@@ -9,6 +9,13 @@ const argumentValue = (name) => {
 };
 
 const defaultConnectionFile = () => {
+  const configured = process.env.VIBEKITS_DATA_HOME?.trim();
+  if (configured) {
+    if (!isAbsolute(configured)) {
+      throw new Error('VIBEKITS_DATA_HOME must be an absolute path');
+    }
+    return join(normalize(configured), 'Mcp', 'tool-bridge.json');
+  }
   if (platform() === 'win32') {
     return join(process.env.LOCALAPPDATA || tmpdir(), 'Vibekits', 'Mcp', 'tool-bridge.json');
   }

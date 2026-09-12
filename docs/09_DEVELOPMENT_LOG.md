@@ -1566,3 +1566,12 @@
 - 当前远程协助组合回归累计 40 项通过，8 个生产文件定向 analyze 为 0 issue；RustDesk 独立路由单测 2/2 通过。完整证据与剩余硬门禁见 `docs/acceptance/HARNESS_RELAY_ID_GATE_2026-09-08.md`。
 - 精确 macOS 候选为 `1.9.0.163+2163`、Universal `x86_64+arm64`、macOS 12+，内置 Harness/ADB/7-Zip/GitHub CLI/Git 兼容门禁通过；最终候选已用 Developer ID、Hardened Runtime 和安全时间戳从内到外签署 35 个 Mach-O 并严格验签。Apple 公证、staple、Gatekeeper 与真实下载尚未执行，禁止复制到正式 `bin` 或商场。
 - 63 上 KEMI远程办公与 VibeKits APK 的系统签名标识一致，可采用同签名保护的 bound service；但现有 Android Rust 核心没有独立 Harness Binder，且 PORT_FORWARD 主循环在移动端被编译排除。Android/63、Windows 58（D 盘低于 30 GiB）、两不同 routingId 直连/HBBR 和完整官方 DSH 时间线仍是发布硬门禁。
+
+# 2026-09-12 · dev.188 Harness 消息队列与 Windows Relay 构建收口
+
+- 按 `HARNESS_MESSAGE_QUEUE_DESIGN.md` 补齐 VibeKits 持久消息队列、固定 DSH 兼容适配器、紧凑待执行入口、编辑/排序/删除/立即执行、打断确认、steering 反馈、审批等待和终态顺序调度。
+- 队列正文只保存到 DSH 接受为止；每会话单执行项、幂等键、重启恢复、跨进程文件锁、Windows 文件占用退避和未落盘内存保底均已进入共享 Dart 实现，Windows/macOS 不分叉。
+- 路径统一收口到 `PlatformStorageLayout`，增加 `VIBEKITS_DATA_HOME`、Harness/queue、Mcp/tool-bridge.json 与显式 Node 子进程环境，修复 Windows Release 数据继续散落 C 盘的问题。
+- 新增 Windows D 盘 RustDesk Harness Relay 构建脚本及 Release 三重门禁：helper、来源/SHA 清单、AGPL 许可证缺一不可；包验证阶段会重算 SHA 并运行 status JSON 探针。
+- 版本统一提升到 `1.9.0-dev.188+2188`，同步 AppVersion、LMCP appVersion/catalogRevision 和 Windows workflow 产物名。
+- 本机静态分析 0 issue；消息队列、路径、DSH 交互契约已完成定向回归。Windows 58 的原生 Relay、Release 编译与真机运行由 Windows Codex 按新增脚本执行，结果需另写验收记录，不能用源码检查代替。

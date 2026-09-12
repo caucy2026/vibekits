@@ -9,7 +9,8 @@ Harness API.
 Current source checkout:
 
 - repository: `https://github.com/caucy2026/rust-desk.git`
-- commit: `e86d764ddf4acc9e9175e1b2e6a9f9903c202b6e`
+- parent repository commit: `6ce56ab0b` (`feat(harness): add self-contained relay transport`)
+- `libs/hbb_common` source patch: `kemi-docs/patches/hbb-common-worktree-20260909.patch`
 - VibeKits Android ABI currently imported: `arm64-v8a`
 - required JNI symbols are verified by `tool/import_rustdesk_harness_transport.sh`
 

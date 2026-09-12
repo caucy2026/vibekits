@@ -22,6 +22,9 @@ $bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
 }
 $app = Join-Path $bundle 'vibekits.exe'
 $required = @(
+  'vibekits-harness-relay.exe',
+  'vibekits-harness-relay.json',
+  'RUSTDESK-AGPL-3.0.txt',
   'tools\git\cmd\git.exe',
   'tools\git\mingw64\bin\git-remote-http.exe',
   'tools\git\mingw64\bin\git-remote-https.exe',
@@ -70,6 +73,23 @@ foreach ($relative in $required) {
     throw "Required bundled runtime is missing: $relative"
   }
 }
+
+$relay = Join-Path $bundle 'vibekits-harness-relay.exe'
+$relayManifestPath = Join-Path $bundle 'vibekits-harness-relay.json'
+$relayManifest = Get-Content -LiteralPath $relayManifestPath -Raw | ConvertFrom-Json
+$relayHash = (Get-FileHash -LiteralPath $relay -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($relayManifest.component -ne 'vibekits-harness-relay' -or
+    $relayManifest.target -ne 'x86_64-pc-windows-msvc' -or
+    $relayManifest.sha256 -ne $relayHash) {
+  throw 'Bundled Harness relay provenance or SHA256 is invalid'
+}
+$relayStatusText = (& $relay --vibekits-harness-status 2>$null | Out-String).Trim()
+try {
+  $relayStatus = $relayStatusText | ConvertFrom-Json
+} catch {
+  throw "Bundled Harness relay status did not return JSON: $relayStatusText"
+}
+if ($null -eq $relayStatus) { throw 'Bundled Harness relay status was empty' }
 
 $version = (Get-Item -LiteralPath $app).VersionInfo
 if ($version.FileVersion -ne $ExpectedVersion -or $version.ProductVersion -ne $ExpectedVersion) {

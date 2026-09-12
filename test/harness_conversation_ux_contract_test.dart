@@ -29,9 +29,30 @@ void main() {
       expect(script, contains("distance > 72 ? 'true' : 'false'"));
       expect(
         script,
-        contains("host.scrollTo({ top: host.scrollHeight, behavior: 'smooth' })"),
+        contains(
+          "host.scrollTo({ top: host.scrollHeight, behavior: 'smooth' })",
+        ),
       );
       expect(script, contains("document.addEventListener('scroll'"));
+    },
+  );
+
+  test(
+    'Harness queue bridge keeps official composer and exposes one protocol',
+    () async {
+      final String script = await File(
+        'assets/harness/harness_message_queue_bridge.js',
+      ).readAsString();
+
+      expect(script, contains('vibekits.harnessEvent'));
+      expect(script, contains("event: 'message.accepted'"));
+      expect(script, contains("'turn.completed'"));
+      expect(script, contains("'turn.failed'"));
+      expect(script, contains('cancellationRequested'));
+      expect(script, contains("event: 'approval.waiting'"));
+      expect(script, contains('__vibekitsHarnessQueueBridge'));
+      expect(script, contains('待执行'));
+      expect(script, isNot(contains('outerHTML =')));
     },
   );
 }

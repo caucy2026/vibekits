@@ -146,3 +146,15 @@ draft -> queued -> dispatching -> running -> completed
 ### 开发完成定义
 
 其他智能体实现时必须同时提交：路径解析单元测试、Windows 真机路径矩阵结果、消息队列状态机测试、官方 DSH 固定版本兼容测试、低磁盘测试及 Release 自包含验证报告。仅在开发目录可运行、仅检查文件存在或仅展示队列 UI，均不算完成。
+
+## dev.188 实现映射（2026-09-12）
+
+- `HarnessMessageQueueRepository` 已实现按工作区/会话隔离、原子 JSON 落盘、进程内串行化、操作系统文件锁、Defender 占用退避、内存保底、重启恢复和 `sessionId:itemId` 幂等键。官方 DSH 接受后立即清空 VibeKits 副本正文。
+- `HarnessMessageQueueScheduler` 已实现忙碌、审批等待、单项 dispatching/running 和终态后顺序调度；DSH 结构不匹配时保持原输入并关闭自动调度。
+- `harness_message_queue_bridge.js` 是 Windows WebView2 与 macOS WKWebView 共用的固定版本兼容适配器；不覆盖官方输入组件，只添加紧凑“待执行 N”入口，并统一输出 `turn.*`、`approval.waiting`、`message.accepted`。
+- 队列面板支持新增、编辑（回车保存）、上移、下移、删除、立即执行、悬停全文和“立即打断”二次确认；对话运行时默认官方发送仍作为 steering，并显示“已补充当前任务”。
+- 外部任务在适配器兼容时进入同一持久队列；适配器尚未就绪时保留旧的仅填入输入框降级，防止 DSH 升级导致输入失效。
+- `PlatformStorageLayout` 成为 Harness Home、队列、MCP runtime/connection file 与 debug 的统一路径事实源；支持绝对 `VIBEKITS_DATA_HOME`，并显式传给 Node 子进程。两个 MCP 启动脚本使用同一环境变量，不再各自推导另一条路径。
+- Windows 新增 `prepare_rustdesk_harness_relay_windows.ps1`：在 D 盘使用固定 Rust/Cargo/vcpkg/MSVC 构建并测试 `vibekits-harness-relay.exe`，生成来源 commit、SHA-256 和 AGPL 文件。CMake 与包验证器缺任一文件即拒绝 Release。
+
+本节只记录源码完成度。Windows 真机编译、安装、运行时和跨设备通信必须由 58 节点执行后另附证据；未产生该证据前不得写成“Windows 已发布”。

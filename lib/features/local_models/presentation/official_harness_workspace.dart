@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_windows/webview_windows.dart';
 
+import '../../../app/platform_storage_layout.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/cluster_task_settings.dart';
 import '../../dev_tools/domain/feishu_harness_tasks.dart';
@@ -16,6 +17,7 @@ import '../../dev_tools/domain/harness_startup_recovery.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
 import '../../dev_tools/domain/harness_legacy_modules.dart';
+import '../../dev_tools/domain/harness_message_queue.dart';
 import '../../dev_tools/domain/harness_remote_controller_session.dart';
 import '../../dev_tools/domain/harness_remote_controller_runtime.dart';
 import '../../dev_tools/domain/harness_remote_access_settings.dart';
@@ -106,6 +108,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   );
   static const String _credentialKey = 'deepseek-api-key';
   static Future<String>? _conversationUxScript;
+  static Future<String>? _messageQueueBridgeScript;
   final HarnessWebViewBridge _webview = HarnessWebViewBridge();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
@@ -146,6 +149,21 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   Future<void>? _independentServicesFuture;
   StreamSubscription<HarnessRemoteControllerSession?>?
   _remoteControllerSubscription;
+  late final HarnessMessageQueueRepository _messageQueue =
+      HarnessMessageQueueRepository(
+        root: Directory(PlatformStorageLayout.current().harnessQueueDirectory),
+      );
+  HarnessMessageQueueScheduler? _messageQueueScheduler;
+  String _queueWorkspaceId = '';
+  String _queueSessionId = '';
+  int _queuedMessageCount = 0;
+  bool _queuePersistencePending = false;
+  bool _harnessBusy = false;
+  bool _harnessApprovalWaiting = false;
+  bool _queueAdapterCompatible = false;
+  bool _queueDialogOpen = false;
+  String _pendingQueueIdempotencyKey = '';
+  Completer<bool>? _pendingQueueAcceptance;
 
   @override
   void initState() {
@@ -661,6 +679,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       final String script = await (_conversationUxScript ??= rootBundle
           .loadString('assets/harness/codex_conversation_ux.js'));
       await _webview.executeScriptVoid(script);
+      final String queueScript = await (_messageQueueBridgeScript ??= rootBundle
+          .loadString('assets/harness/harness_message_queue_bridge.js'));
+      await _webview.executeScriptVoid(queueScript);
+      await _publishQueueCountToWeb();
       if (_pointerDiagnostics) {
         await _webview.executeScriptVoid('''
           (() => {
@@ -959,7 +981,400 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   }
 
   Future<void> _injectExternalPrompt() async {
-    await _injectPrompt(widget.externalPrompt);
+    final String prompt = widget.externalPrompt.trim();
+    if (prompt.isEmpty) return;
+    if (_queueContextReady && _queueAdapterCompatible) {
+      await _messageQueue.enqueue(
+        workspaceId: _queueWorkspaceId,
+        sessionId: _queueSessionId,
+        text: prompt,
+        source: HarnessMessageSource.appMcp,
+      );
+      await _refreshQueueCount();
+      if (!_harnessBusy && !_harnessApprovalWaiting) {
+        await _messageQueueScheduler?.dispatchNext();
+        await _refreshQueueCount();
+      }
+      return;
+    }
+    await _injectPrompt(prompt);
+  }
+
+  bool get _queueContextReady =>
+      _queueWorkspaceId.isNotEmpty && _queueSessionId.isNotEmpty;
+
+  Future<void> _setQueueContext(String workspaceId, String sessionId) async {
+    final String workspace = workspaceId.trim();
+    final String session = sessionId.trim();
+    if (workspace.isEmpty || session.isEmpty) return;
+    if (_queueWorkspaceId == workspace && _queueSessionId == session) return;
+    _pendingQueueAcceptance?.complete(false);
+    _pendingQueueAcceptance = null;
+    _pendingQueueIdempotencyKey = '';
+    _queueWorkspaceId = workspace;
+    _queueSessionId = session;
+    _messageQueueScheduler = HarnessMessageQueueScheduler(
+      repository: _messageQueue,
+      workspaceId: workspace,
+      sessionId: session,
+      submit: _submitQueuedMessage,
+    );
+    await _messageQueue.load(
+      workspaceId: workspace,
+      sessionId: session,
+      recover: true,
+    );
+    _messageQueueScheduler?.updateHarnessState(
+      busy: _harnessBusy || !_queueAdapterCompatible,
+      approvalWaiting: _harnessApprovalWaiting,
+    );
+    await _refreshQueueCount();
+  }
+
+  Future<bool> _submitQueuedMessage(String text, String idempotencyKey) async {
+    if (!_webviewReady || !_queueAdapterCompatible) return false;
+    final Completer<bool> acceptance = Completer<bool>();
+    _pendingQueueAcceptance?.complete(false);
+    _pendingQueueAcceptance = acceptance;
+    _pendingQueueIdempotencyKey = idempotencyKey;
+    try {
+      final dynamic submitted = await _webview.executeScript('''
+window.__vibekitsHarnessQueueBridge?.submit(
+  ${jsonEncode(text)}, ${jsonEncode(idempotencyKey)}
+) === true
+''');
+      if (submitted != true && submitted.toString().toLowerCase() != 'true') {
+        return false;
+      }
+      return await acceptance.future.timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => false,
+      );
+    } finally {
+      if (identical(_pendingQueueAcceptance, acceptance)) {
+        _pendingQueueAcceptance = null;
+        _pendingQueueIdempotencyKey = '';
+      }
+    }
+  }
+
+  Future<void> _refreshQueueCount() async {
+    if (!_queueContextReady) return;
+    final List<HarnessQueueItem> items = await _messageQueue.load(
+      workspaceId: _queueWorkspaceId,
+      sessionId: _queueSessionId,
+      recover: false,
+    );
+    final int count = items
+        .where((HarnessQueueItem item) => item.editable)
+        .length;
+    final bool persistencePending = _messageQueue.persistencePending(
+      workspaceId: _queueWorkspaceId,
+      sessionId: _queueSessionId,
+    );
+    if (mounted &&
+        (count != _queuedMessageCount ||
+            persistencePending != _queuePersistencePending)) {
+      setState(() {
+        _queuedMessageCount = count;
+        _queuePersistencePending = persistencePending;
+      });
+    }
+    await _publishQueueCountToWeb();
+  }
+
+  Future<void> _publishQueueCountToWeb() async {
+    if (!_webviewReady) return;
+    try {
+      await _webview.executeScriptVoid(
+        'window.__vibekitsHarnessQueueBridge?.setQueueCount('
+        '$_queuedMessageCount);',
+      );
+    } on Object {
+      // Navigation can replace the DOM while this optional badge is updating.
+    }
+  }
+
+  Future<String> _composerText() async {
+    if (!_webviewReady) return '';
+    try {
+      final dynamic value = await _webview.executeScript(
+        'window.__vibekitsHarnessQueueBridge?.composerText?.() || ""',
+      );
+      return value?.toString() ?? '';
+    } on Object {
+      return '';
+    }
+  }
+
+  Future<void> _clearComposer() async {
+    if (!_webviewReady) return;
+    await _webview.executeScriptVoid(
+      'window.__vibekitsHarnessQueueBridge?.clearComposer();',
+    );
+  }
+
+  Future<void> _enqueueMessage(
+    String text, {
+    HarnessMessageMode mode = HarnessMessageMode.queued,
+  }) async {
+    if (!_queueContextReady || text.trim().isEmpty) return;
+    await _messageQueue.enqueue(
+      workspaceId: _queueWorkspaceId,
+      sessionId: _queueSessionId,
+      text: text,
+      mode: mode,
+    );
+    await _clearComposer();
+    await _refreshQueueCount();
+    if (!_harnessBusy && !_harnessApprovalWaiting) {
+      await _messageQueueScheduler?.dispatchNext();
+      await _refreshQueueCount();
+    }
+  }
+
+  Future<void> _requestImmediateInterrupt(String text) async {
+    if (!_queueContextReady || text.trim().isEmpty || !mounted) return;
+    final bool confirmed =
+        await _withFlutterOverlay<bool>(
+          () => showDialog<bool>(
+            context: context,
+            builder: (BuildContext dialogContext) => AlertDialog(
+              title: const Text('立即打断当前任务？'),
+              content: const Text('当前执行会先收到停止请求；确认停止后，再发送这条消息。'),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  child: const Text('停止并发送'),
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+    if (!confirmed) return;
+    await _enqueueMessage(text, mode: HarnessMessageMode.interrupt);
+    if (!_harnessBusy) return;
+    await _webview.executeScriptVoid(
+      'window.__vibekitsHarnessQueueBridge?.cancel();',
+    );
+  }
+
+  Future<void> _showMessageQueue() async {
+    if (_queueDialogOpen || !_queueContextReady || !mounted) return;
+    _queueDialogOpen = true;
+    final TextEditingController newMessage = TextEditingController(
+      text: await _composerText(),
+    );
+    try {
+      await _withFlutterOverlay<void>(() async {
+        await showDialog<void>(
+          context: context,
+          builder: (BuildContext dialogContext) => StatefulBuilder(
+            builder: (BuildContext dialogContext, StateSetter setDialogState) {
+              Future<void> mutate(Future<void> Function() operation) async {
+                await operation();
+                await _refreshQueueCount();
+                if (dialogContext.mounted) setDialogState(() {});
+              }
+
+              return AlertDialog(
+                title: Text(
+                  '待执行消息 · $_queuedMessageCount'
+                  '${_queuePersistencePending ? ' · 尚未持久化' : ''}',
+                ),
+                content: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 620,
+                    maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.7,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      TextField(
+                        controller: newMessage,
+                        minLines: 2,
+                        maxLines: 5,
+                        decoration: const InputDecoration(
+                          hintText: '输入下一条任务；当前任务运行时输入仍可编辑',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: <Widget>[
+                          TextButton.icon(
+                            onPressed: () async {
+                              final String text = newMessage.text;
+                              Navigator.pop(dialogContext);
+                              await _requestImmediateInterrupt(text);
+                            },
+                            icon: const Icon(Icons.stop_circle_outlined),
+                            label: const Text('立即打断'),
+                          ),
+                          const SizedBox(width: 8),
+                          FilledButton.icon(
+                            onPressed: () => mutate(() async {
+                              await _enqueueMessage(newMessage.text);
+                              newMessage.clear();
+                            }),
+                            icon: const Icon(Icons.playlist_add_rounded),
+                            label: const Text('排队下一条'),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 24),
+                      Flexible(
+                        child: FutureBuilder<List<HarnessQueueItem>>(
+                          future: _messageQueue.load(
+                            workspaceId: _queueWorkspaceId,
+                            sessionId: _queueSessionId,
+                            recover: false,
+                          ),
+                          builder: (BuildContext context, snapshot) {
+                            final List<HarnessQueueItem> items =
+                                snapshot.data
+                                    ?.where(
+                                      (HarnessQueueItem item) => item.editable,
+                                    )
+                                    .toList() ??
+                                <HarnessQueueItem>[];
+                            if (items.isEmpty) {
+                              return const Padding(
+                                padding: EdgeInsets.all(20),
+                                child: Text('暂无待执行消息'),
+                              );
+                            }
+                            return ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: items.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                final HarnessQueueItem item = items[index];
+                                return Tooltip(
+                                  message: item.text,
+                                  child: ListTile(
+                                    dense: true,
+                                    leading: Text('${index + 1}'),
+                                    title: TextFormField(
+                                      key: ValueKey<String>(item.id),
+                                      initialValue: item.text,
+                                      maxLines: 2,
+                                      decoration: const InputDecoration(
+                                        isDense: true,
+                                        border: InputBorder.none,
+                                      ),
+                                      onFieldSubmitted: (String value) =>
+                                          mutate(
+                                            () => _messageQueue.edit(
+                                              workspaceId: _queueWorkspaceId,
+                                              sessionId: _queueSessionId,
+                                              itemId: item.id,
+                                              text: value,
+                                            ),
+                                          ),
+                                    ),
+                                    subtitle: Text(
+                                      '${item.source.name} · '
+                                      '${item.createdAt.toLocal()}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: Wrap(
+                                      spacing: 0,
+                                      children: <Widget>[
+                                        IconButton(
+                                          tooltip: '上移',
+                                          onPressed: index == 0
+                                              ? null
+                                              : () => mutate(
+                                                  () => _messageQueue.move(
+                                                    workspaceId:
+                                                        _queueWorkspaceId,
+                                                    sessionId: _queueSessionId,
+                                                    itemId: item.id,
+                                                    delta: -1,
+                                                  ),
+                                                ),
+                                          icon: const Icon(Icons.arrow_upward),
+                                        ),
+                                        IconButton(
+                                          tooltip: '下移',
+                                          onPressed: index == items.length - 1
+                                              ? null
+                                              : () => mutate(
+                                                  () => _messageQueue.move(
+                                                    workspaceId:
+                                                        _queueWorkspaceId,
+                                                    sessionId: _queueSessionId,
+                                                    itemId: item.id,
+                                                    delta: 1,
+                                                  ),
+                                                ),
+                                          icon: const Icon(
+                                            Icons.arrow_downward,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          tooltip: '立即执行',
+                                          onPressed: () => mutate(() async {
+                                            await _messageQueue.promote(
+                                              workspaceId: _queueWorkspaceId,
+                                              sessionId: _queueSessionId,
+                                              itemId: item.id,
+                                            );
+                                            if (!_harnessBusy &&
+                                                !_harnessApprovalWaiting) {
+                                              await _messageQueueScheduler
+                                                  ?.dispatchNext();
+                                            }
+                                          }),
+                                          icon: const Icon(Icons.play_arrow),
+                                        ),
+                                        IconButton(
+                                          tooltip: '删除',
+                                          onPressed: () => mutate(
+                                            () => _messageQueue.remove(
+                                              workspaceId: _queueWorkspaceId,
+                                              sessionId: _queueSessionId,
+                                              itemId: item.id,
+                                            ),
+                                          ),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('关闭'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      });
+    } finally {
+      newMessage.dispose();
+      _queueDialogOpen = false;
+    }
   }
 
   Future<bool> _injectPrompt(String rawPrompt) async {
@@ -1052,6 +1467,31 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         : message is String
         ? (jsonDecode(message) as Map?)?.cast<String, dynamic>()
         : null;
+    if (payload?['type'] == 'vibekits.harnessEvent') {
+      unawaited(_handleHarnessEvent(payload!));
+      return;
+    }
+    if (payload?['type'] == 'vibekits.queue.open') {
+      unawaited(() async {
+        await _setQueueContext(
+          payload?['workspaceId']?.toString() ?? '',
+          payload?['sessionId']?.toString() ?? '',
+        );
+        await _showMessageQueue();
+      }());
+      return;
+    }
+    if (payload?['type'] == 'vibekits.queue.steered') {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('已补充当前任务'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      return;
+    }
     if (_pointerDiagnostics && payload?['type'] == 'vibekits.pointerProbe') {
       _appendPointerDiagnostic(
         'dom ${payload?['event']} x=${payload?['x']} y=${payload?['y']} '
@@ -1121,6 +1561,35 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
     final String title = (payload?['title'] as String? ?? '').trim();
     unawaited(_confirmDeleteSession(sessionId, title));
+  }
+
+  Future<void> _handleHarnessEvent(Map<String, dynamic> payload) async {
+    await _setQueueContext(
+      payload['workspaceId']?.toString() ?? '',
+      payload['sessionId']?.toString() ?? '',
+    );
+    final String event = payload['event']?.toString() ?? '';
+    _queueAdapterCompatible = payload['compatible'] == true;
+    _harnessBusy = payload['busy'] == true;
+    _harnessApprovalWaiting = payload['approvalWaiting'] == true;
+    _messageQueueScheduler?.updateHarnessState(
+      busy: _harnessBusy || !_queueAdapterCompatible,
+      approvalWaiting: _harnessApprovalWaiting,
+    );
+    if (event == 'message.accepted') {
+      final String key = payload['idempotencyKey']?.toString() ?? '';
+      if (key.isNotEmpty && key == _pendingQueueIdempotencyKey) {
+        final Completer<bool>? acceptance = _pendingQueueAcceptance;
+        if (acceptance != null && !acceptance.isCompleted) {
+          acceptance.complete(true);
+        }
+      }
+    } else if (event == 'turn.completed' ||
+        event == 'turn.failed' ||
+        event == 'turn.cancelled') {
+      await _messageQueueScheduler?.onTurnFinished();
+    }
+    await _refreshQueueCount();
   }
 
   Future<void> _confirmMoveSession({

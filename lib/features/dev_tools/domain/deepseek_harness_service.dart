@@ -736,14 +736,7 @@ abstract final class DeepSeekHarnessService {
   }
 
   static Directory officialHarnessHomeDirectory() {
-    final String base = Platform.isWindows
-        ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
-        : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
-    return Directory(
-      Platform.isWindows
-          ? '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness'
-          : '$base${Platform.pathSeparator}Library${Platform.pathSeparator}Application Support${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
-    );
+    return Directory(PlatformStorageLayout.current().harnessHomeDirectory);
   }
 
   /// Shared user-agent root used by the official Harness skill filesystem.
@@ -1057,6 +1050,9 @@ Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
       'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
       'VIBEKITS_PARENT_PID': '$pid',
       'DSH_AGENTS_HOME': DeepSeekHarnessService.sharedAgentHomeDirectory().path,
+      'VIBEKITS_DATA_HOME': PlatformStorageLayout.current().dataHomeDirectory,
+      'VIBEKITS_TOOL_BRIDGE_FILE':
+          PlatformStorageLayout.current().mcpConnectionFile,
       'VIBEKITS_DSH_WEB_DIST_INDEX': ?harnessLegacyWebKitDistIndex(
         isMacOS: Platform.isMacOS,
         operatingSystemVersion: Platform.operatingSystemVersion,
@@ -1101,9 +1097,10 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
     Directory(
       '$executableDirectory${Platform.pathSeparator}tools${Platform.pathSeparator}harness',
     ),
-    Directory(
-      '${Directory.current.path}${Platform.pathSeparator}native${Platform.pathSeparator}harness${Platform.pathSeparator}${Platform.isWindows ? 'windows' : 'macos'}${Platform.pathSeparator}runtime',
-    ),
+    if (!const bool.fromEnvironment('dart.vm.product'))
+      Directory(
+        '${Directory.current.path}${Platform.pathSeparator}native${Platform.pathSeparator}harness${Platform.pathSeparator}${Platform.isWindows ? 'windows' : 'macos'}${Platform.pathSeparator}runtime',
+      ),
   ];
   for (final Directory root in candidates) {
     final File manifest = File(

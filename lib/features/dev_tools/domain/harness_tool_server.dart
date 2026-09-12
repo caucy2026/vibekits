@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import '../../../app/platform_storage_layout.dart';
 import 'harness_tool_bridge.dart';
 
 /// Loopback-only adapter used by the bundled MCP stdio process.
@@ -56,32 +57,8 @@ class HarnessToolServer {
     return result;
   }
 
-  static File defaultConnectionFile() {
-    final String base;
-    if (Platform.isWindows) {
-      base = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
-      return File(
-        '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Mcp'
-        '${Platform.pathSeparator}tool-bridge.json',
-      );
-    }
-    final String home =
-        Platform.environment['HOME'] ?? Directory.systemTemp.path;
-    if (Platform.isMacOS) {
-      return File(
-        '$home${Platform.pathSeparator}Library${Platform.pathSeparator}'
-        'Application Support${Platform.pathSeparator}Vibekits'
-        '${Platform.pathSeparator}Mcp${Platform.pathSeparator}tool-bridge.json',
-      );
-    }
-    base =
-        Platform.environment['XDG_RUNTIME_DIR'] ??
-        '$home${Platform.pathSeparator}.local${Platform.pathSeparator}share';
-    return File(
-      '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Mcp'
-      '${Platform.pathSeparator}tool-bridge.json',
-    );
-  }
+  static File defaultConnectionFile() =>
+      File(PlatformStorageLayout.current().mcpConnectionFile);
 
   Future<void> close() async {
     await _removePublishedConnection();

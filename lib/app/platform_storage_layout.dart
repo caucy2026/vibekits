@@ -69,6 +69,18 @@ class PlatformStorageLayout {
 
   String get settingsFile => _join(settingsDirectory, 'settings.json');
 
+  String get dataHomeDirectory => settingsDirectory;
+
+  String get harnessHomeDirectory => _join(settingsDirectory, 'Harness');
+
+  String get harnessQueueDirectory =>
+      _joinAll(<String>[harnessHomeDirectory, 'queue']);
+
+  String get mcpRuntimeDirectory => _join(settingsDirectory, 'Mcp');
+
+  String get mcpConnectionFile =>
+      _join(mcpRuntimeDirectory, 'tool-bridge.json');
+
   static PlatformStorageAccessReport? get lastAccessReport => _lastAccessReport;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -78,6 +90,10 @@ class PlatformStorageLayout {
     'downloads': downloadsDirectory,
     'cache': cacheDirectory,
     'harnessDebug': harnessDebugDirectory,
+    'harnessHome': harnessHomeDirectory,
+    'harnessQueue': harnessQueueDirectory,
+    'mcpRuntime': mcpRuntimeDirectory,
+    'mcpConnectionFile': mcpConnectionFile,
     'credentials': credentialStoreLabel,
     if (_lastAccessReport != null) 'access': _lastAccessReport!.toJson(),
   };
@@ -107,6 +123,8 @@ class PlatformStorageLayout {
     final DirectoryWriteProbe probe = writeProbe ?? _probeDirectory;
     final List<String> fallbacks = <String>[];
 
+    final Map<String, String> effectiveEnvironment =
+        environment ?? Platform.environment;
     final String preferredSupport = _appScoped(nativeRoots.applicationSupport);
     final String documentFallback = _appScoped(nativeRoots.documents);
     final String temporaryFallback = _joinAll(<String>[
@@ -114,13 +132,26 @@ class PlatformStorageLayout {
       'Vibekits',
       'persistent-recovery',
     ]);
+    final String configuredDataHome =
+        effectiveEnvironment['VIBEKITS_DATA_HOME']?.trim() ?? '';
+    final bool configuredDataHomeValid =
+        configuredDataHome.isEmpty ||
+        _isAbsoluteForPlatform(configuredDataHome, platform);
+    if (!configuredDataHomeValid) {
+      fallbacks.add('VIBEKITS_DATA_HOME 必须是绝对路径，已忽略：$configuredDataHome');
+    }
+    final String requestedSupport =
+        configuredDataHomeValid && configuredDataHome.isNotEmpty
+        ? _normalizeForPlatform(configuredDataHome, platform)
+        : preferredSupport;
     final _WritableChoice support = await _firstWritable(<String>[
-      preferredSupport,
+      requestedSupport,
+      if (!_samePath(requestedSupport, preferredSupport)) preferredSupport,
       documentFallback,
       temporaryFallback,
     ], probe);
     if (support.index > 0) {
-      fallbacks.add('持久目录不可写，已切换：$preferredSupport → ${support.path}');
+      fallbacks.add('数据根目录不可写，已切换：$requestedSupport → ${support.path}');
     }
 
     final String preferredCache = _appScoped(nativeRoots.applicationCache);
@@ -132,18 +163,7 @@ class PlatformStorageLayout {
       fallbacks.add('缓存目录不可写，已切换：$preferredCache → ${cache.path}');
     }
 
-    final Map<String, String> effectiveEnvironment =
-        environment ?? Platform.environment;
-    final String preferredModels = platform == 'windows'
-        ? _joinAll(<String>[
-            _firstNonEmpty(<String?>[
-              effectiveEnvironment['LOCALAPPDATA'],
-              cache.path,
-            ], fallback: cache.path),
-            'Vibekits',
-            'Models',
-          ])
-        : _join(support.path, 'Models');
+    final String preferredModels = _join(support.path, 'Models');
     final _WritableChoice models = await _firstWritable(<String>[
       preferredModels,
       _join(cache.path, 'Models'),
@@ -153,10 +173,7 @@ class PlatformStorageLayout {
     }
 
     final String preferredDebug = platform == 'windows'
-        ? _joinAll(<String>[
-            _parentPath(executablePath ?? Platform.resolvedExecutable),
-            'tmp',
-          ])
+        ? _join(support.path, 'debug')
         : platform == 'macos'
         ? _joinAll(<String>[
             _homeFrom(
@@ -192,6 +209,9 @@ class PlatformStorageLayout {
       'downloads': await probe(layout.downloadsDirectory),
       'cache': cache.writable,
       'harnessDebug': debug.writable,
+      'harnessHome': await probe(layout.harnessHomeDirectory),
+      'harnessQueue': await probe(layout.harnessQueueDirectory),
+      'mcpRuntime': await probe(layout.mcpRuntimeDirectory),
     };
     final PlatformStorageAccessReport report = PlatformStorageAccessReport(
       platform: platform,
@@ -296,17 +316,18 @@ class PlatformStorageLayout {
         environment['APPDATA'],
         environment['USERPROFILE'],
       ], fallback: systemTempPath);
-      final String data = _join(local, 'Vibekits');
-      final String executableDirectory = executablePath.trim().isEmpty
-          ? data
-          : _parentPath(executablePath);
+      final String configured = environment['VIBEKITS_DATA_HOME']?.trim() ?? '';
+      final String data =
+          configured.isNotEmpty && _isAbsoluteForPlatform(configured, platform)
+          ? _normalizeForPlatform(configured, platform)
+          : _join(local, 'Vibekits');
       return PlatformStorageLayout(
         platform: 'windows',
         settingsDirectory: data,
         modelsDirectory: _join(data, 'Models'),
         downloadsDirectory: _join(data, 'downloads'),
         cacheDirectory: _join(data, 'cache'),
-        harnessDebugDirectory: _join(executableDirectory, 'tmp'),
+        harnessDebugDirectory: _join(data, 'debug'),
         credentialStoreLabel: _credentialLabel(platform),
       );
     }
@@ -404,6 +425,29 @@ class PlatformStorageLayout {
   static bool _samePath(String left, String right) =>
       left.replaceAll('\\', '/').toLowerCase() ==
       right.replaceAll('\\', '/').toLowerCase();
+
+  static bool _isAbsoluteForPlatform(String value, String platform) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty) return false;
+    if (platform == 'windows') {
+      return RegExp(r'^[A-Za-z]:[\\/]').hasMatch(trimmed) ||
+          trimmed.startsWith(r'\\');
+    }
+    return trimmed.startsWith('/');
+  }
+
+  static String _normalizeForPlatform(String value, String platform) {
+    final String separator = platform == 'windows' ? '\\' : '/';
+    String normalized = value.trim().replaceAll(RegExp(r'[\\/]+'), separator);
+    while (normalized.length > 1 && normalized.endsWith(separator)) {
+      if (platform == 'windows' &&
+          RegExp(r'^[A-Za-z]:\\$').hasMatch(normalized)) {
+        break;
+      }
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    return normalized;
+  }
 
   static String _homeFrom(Map<String, String> environment, String fallback) =>
       _firstNonEmpty(<String?>[environment['HOME']], fallback: fallback);

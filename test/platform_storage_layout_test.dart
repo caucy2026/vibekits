@@ -18,7 +18,14 @@ void main() {
       endsWith('/Vibekits/settings.json'),
     );
     expect(normalized(layout.modelsDirectory), endsWith('/Vibekits/Models'));
-    expect(normalized(layout.harnessDebugDirectory), 'D:/Apps/Vibekits/tmp');
+    expect(
+      normalized(layout.harnessDebugDirectory),
+      'C:/Users/dev/AppData/Local/Vibekits/debug',
+    );
+    expect(
+      normalized(layout.harnessQueueDirectory),
+      'C:/Users/dev/AppData/Local/Vibekits/Harness/queue',
+    );
     expect(layout.credentialStoreLabel, 'Windows Credential Manager');
   });
 
@@ -65,7 +72,7 @@ void main() {
     expect(normalized(layout.settingsDirectory), isNot(contains('/cache/')));
   });
 
-  test('启动时逐目录验证并从不可写安装目录切换到用户缓存', () async {
+  test('启动时所有可写目录都由用户数据根派生', () async {
     final PlatformStorageAccessReport report =
         await PlatformStorageLayout.initialize(
           operatingSystem: 'windows',
@@ -83,12 +90,43 @@ void main() {
 
     final PlatformStorageLayout layout = PlatformStorageLayout.current();
     expect(report.allRequiredWritable, isTrue);
-    expect(report.fallbacks, hasLength(1));
+    expect(report.fallbacks, isEmpty);
     expect(
       normalized(layout.harnessDebugDirectory),
-      contains('/AppData/Local/cache/Vibekits/Harness'),
+      contains('/AppData/Roaming/Vibekits/debug'),
     );
     expect(report.persistentDataUsesTemporaryStorage, isFalse);
+  });
+
+  test('Windows 显式数据盘根目录统一 Harness queue MCP 和 debug', () async {
+    final PlatformStorageAccessReport report =
+        await PlatformStorageLayout.initialize(
+          operatingSystem: 'windows',
+          environment: const <String, String>{
+            'VIBEKITS_DATA_HOME': r'D:\VibekitsData',
+          },
+          roots: const PlatformStorageRoots(
+            applicationSupport: r'C:\Users\dev\AppData\Roaming',
+            applicationCache: r'C:\Users\dev\AppData\Local\cache',
+            temporary: r'C:\Users\dev\AppData\Local\Temp',
+            documents: r'C:\Users\dev\Documents',
+          ),
+          writeProbe: (_) async => true,
+        );
+
+    final PlatformStorageLayout layout = PlatformStorageLayout.current();
+    expect(report.fallbacks, isEmpty);
+    expect(normalized(layout.dataHomeDirectory), 'D:/VibekitsData');
+    expect(normalized(layout.harnessHomeDirectory), 'D:/VibekitsData/Harness');
+    expect(
+      normalized(layout.harnessQueueDirectory),
+      'D:/VibekitsData/Harness/queue',
+    );
+    expect(
+      normalized(layout.mcpConnectionFile),
+      'D:/VibekitsData/Mcp/tool-bridge.json',
+    );
+    expect(normalized(layout.harnessDebugDirectory), 'D:/VibekitsData/debug');
   });
 
   test('持久目录只有临时应急位置可写时必须明确告警', () async {
