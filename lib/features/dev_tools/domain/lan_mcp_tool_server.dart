@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'harness_tool_bridge.dart';
+import 'lmcp_inbound_call_hub.dart';
 import 'simulator_update_service.dart';
 
 /// MCP JSON-RPC endpoint exposed only while the user enables LAN MCP.
@@ -23,6 +24,7 @@ class LanMcpToolServer {
   final HttpServer _server;
   final VibekitsHarnessToolBridge _bridge;
   final bool allowSimulatorUpdateUpload;
+  int _traceSequence = 0;
 
   int get port => _server.port;
   Uri get loopbackEndpoint => Uri.parse('http://127.0.0.1:$port/mcp');
@@ -132,15 +134,65 @@ class LanMcpToolServer {
         case 'tools/call':
           final String name = '${params['name'] ?? ''}';
           final Object? rawArguments = params['arguments'];
-          final HarnessToolCallResult result = await _bridge.invoke(
-            toolId: name,
-            arguments: rawArguments is Map
-                ? Map<String, Object?>.from(rawArguments)
-                : const <String, Object?>{},
-            // Enabling LAN MCP is the user's provider-wide consent. Remote
-            // Harness task delegation remains a separate approval surface.
-            approve: (_) async => true,
-          );
+          final Map<String, Object?> arguments = rawArguments is Map
+              ? Map<String, Object?>.from(rawArguments)
+              : const <String, Object?>{};
+          final HarnessToolDefinition? definition = _bridge.executableCatalog
+              .where((tool) => tool.id == name)
+              .firstOrNull;
+          LmcpInboundCallHandle? approvalCall;
+          if (_requiresTargetApproval(name) && definition != null) {
+            final traceId =
+                'simulator-${DateTime.now().microsecondsSinceEpoch}-${_traceSequence++}';
+            approvalCall = LmcpInboundCallHub.instance.begin(
+              traceId: traceId,
+              callerAppId: 'VibeKits 远程仿真',
+              callerInstanceId:
+                  request.headers.value('x-vibekits-caller-id') ?? '',
+              callerAddress: remoteAddress,
+              toolId: name,
+              toolName: definition.name,
+              arguments: arguments,
+              scopeSummary: '本次操作需目标机明确批准',
+              approvalRequired: true,
+            );
+            final allowed = await approvalCall.waitForApproval().timeout(
+              const Duration(minutes: 2),
+              onTimeout: () => false,
+            );
+            if (!allowed) {
+              approvalCall.fail('目标机未批准操作');
+              final denied = const HarnessToolCallResult.cancelled();
+              await _rpcResult(request.response, id, <String, Object?>{
+                'content': <Map<String, Object?>>[
+                  <String, Object?>{
+                    'type': 'text',
+                    'text': jsonEncode(denied.toJson()),
+                  },
+                ],
+                'structuredContent': denied.toJson(),
+                'isError': true,
+              });
+              break;
+            }
+          }
+          late final HarnessToolCallResult result;
+          try {
+            result = await _bridge.invoke(
+              toolId: name,
+              arguments: arguments,
+              preauthorized: approvalCall != null,
+              approve: (_) async => true,
+            );
+            if (result.ok) {
+              approvalCall?.succeed();
+            } else {
+              approvalCall?.fail(result.error);
+            }
+          } on Object catch (error) {
+            approvalCall?.fail('$error');
+            rethrow;
+          }
           final Map<String, Object?> structured = result.toJson();
           await _rpcResult(request.response, id, <String, Object?>{
             'content': <Map<String, Object?>>[
@@ -158,6 +210,12 @@ class LanMcpToolServer {
       await _rpcError(request.response, null, -32603, '$error');
     }
   }
+
+  static bool _requiresTargetApproval(String toolId) =>
+      toolId == VibekitsHarnessToolBridge.deviceAppInstallId ||
+      toolId == VibekitsHarnessToolBridge.deviceAppUninstallId ||
+      toolId == VibekitsHarnessToolBridge.deviceSshAuthorizeId ||
+      toolId == VibekitsHarnessToolBridge.deviceSshRevokeId;
 
   Future<void> _handleSimulatorUpdateUpload(HttpRequest request) async {
     try {

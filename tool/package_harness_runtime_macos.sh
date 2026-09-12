@@ -71,6 +71,18 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
   exit 3
 fi
 
+# An interrupted release-source sync can leave npm's .bin symlinks in place
+# while omitting their package payloads. `ditto` preserves those dangling
+# links and the failure otherwise appears much later as an opaque codesign
+# "No such file or directory" error. Reject the incomplete runtime before it
+# is copied into the App bundle.
+BROKEN_HARNESS_LINK="$(find -L "$SOURCE" -type l -print -quit)"
+if [ -n "$BROKEN_HARNESS_LINK" ]; then
+  echo "Bundled macOS Harness runtime contains a dangling symlink: $BROKEN_HARNESS_LINK" >&2
+  echo "Rebuild or fully resync native/harness/macos/runtime before Release packaging." >&2
+  exit 3
+fi
+
 rm -rf "$DESTINATION" "$LEGACY_DESTINATION"
 mkdir -p "$(dirname "$DESTINATION")"
 ditto "$SOURCE" "$DESTINATION"

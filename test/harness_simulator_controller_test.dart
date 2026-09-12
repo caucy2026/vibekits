@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_simulator_controller.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -44,6 +46,7 @@ void main() {
             },
           ),
       mcpClient: mcp,
+      enableSshBootstrap: false,
     );
 
     final connected = await controller.connect('9464730211');
@@ -101,6 +104,7 @@ void main() {
             },
           ),
       mcpClient: _FakeMcpClient(),
+      enableSshBootstrap: false,
     );
 
     final result = await controller.connect('9464730211', forceRelay: true);
@@ -170,11 +174,132 @@ void main() {
         launcher: (_, _) async => process,
       ),
       mcpClient: _OrderedMcpClient(events),
+      enableSshBootstrap: false,
     );
 
     await controller.connect('4456560334');
     expect(events, containsAll(<String>['mcp:43212', 'ready']));
     await controller.closeAll();
+  });
+
+  test('仅凭 ID 完成首次公钥授权、主机指纹校验、命令和文件上传', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'vibekits_simulator_ssh_',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final executable = File('${temporary.path}/relay');
+    await executable.writeAsBytes(const <int>[0]);
+    final upload = File('${temporary.path}/Demo.zip');
+    await upload.writeAsString('signed-test-candidate');
+    final expectedSha = (await sha256.bind(upload.openRead()).first).toString();
+    final mcpTunnelProcess = _FakeManagedProcess();
+    final sshTunnelProcess = _FakeManagedProcess();
+    final mcp = _SshBootstrapMcpClient();
+    final ports = <int>[43213, 43214];
+    final executed = <String>[];
+    Future<ProcessResult> processRunner(
+      String executablePath,
+      List<String> arguments,
+    ) async {
+      executed.add('$executablePath ${arguments.join(' ')}');
+      if (executablePath.endsWith('ssh-keygen') && arguments.contains('-f')) {
+        final keyPath = arguments[arguments.indexOf('-f') + 1];
+        await File(keyPath).writeAsString('private-key');
+        final key = base64Encode(List<int>.generate(48, (index) => index + 1));
+        await File('$keyPath.pub').writeAsString('ssh-ed25519 $key controller');
+        return ProcessResult(1, 0, '', '');
+      }
+      if (executablePath.endsWith('ssh-keyscan')) {
+        return ProcessResult(
+          1,
+          0,
+          '[127.0.0.1]:43214 ssh-ed25519 AAAATESTHOSTKEY\n',
+          '',
+        );
+      }
+      if (executablePath.endsWith('ssh-keygen') && arguments.contains('-lf')) {
+        return ProcessResult(
+          1,
+          0,
+          '256 SHA256:verifiedHost target (ED25519)',
+          '',
+        );
+      }
+      if (executablePath.endsWith('scp')) {
+        return ProcessResult(1, 0, '', '');
+      }
+      final command = arguments.isEmpty ? '' : arguments.last;
+      if (command == 'hostname') {
+        return ProcessResult(1, 0, 'target-mac\n', '');
+      }
+      if (command.startsWith('shasum -a 256')) {
+        return ProcessResult(1, 0, '$expectedSha  Demo.zip\n', '');
+      }
+      if (command == 'uname -a') {
+        return ProcessResult(1, 0, 'Darwin target-mac arm64\n', '');
+      }
+      return ProcessResult(1, 0, '', '');
+    }
+
+    final controller = HarnessSimulatorController(
+      resolveHost: () async => RustDeskHostInfo(
+        executable: executable.path,
+        id: '1554650784',
+        available: true,
+        callable: true,
+        message: 'ready',
+      ),
+      allocatePort: () async => ports.removeAt(0),
+      openTunnel: (_, _, _, _) async => RustDeskHarnessShareService.openTunnel(
+        executable.path,
+        routingId: '4456560334',
+        localPort: 43213,
+        remotePort: RustDeskHarnessShareService.simulatorRemotePort,
+        launcher: (_, _) async => mcpTunnelProcess,
+      ),
+      openSshTunnel: (_, _, localPort, _) async {
+        expect(localPort, 43214);
+        return RustDeskHarnessShareService.openTunnel(
+          executable.path,
+          routingId: '4456560334',
+          localPort: localPort,
+          remotePort: 22,
+          launcher: (_, arguments) async {
+            expect(arguments, contains('22'));
+            return sshTunnelProcess;
+          },
+        );
+      },
+      mcpClient: mcp,
+      processRunner: processRunner,
+      sshKeyRoot: Directory('${temporary.path}/keys'),
+    );
+
+    final connected = await controller.connect('4456560334');
+    expect(connected['sshReady'], isTrue);
+    expect(connected['sshUsername'], 'remote-user');
+    expect(connected['sshHostKeyFingerprint'], 'SHA256:verifiedHost');
+    expect(connected['hostname'], 'target-mac');
+    expect(mcp.authorizedPeerId, '1554650784');
+    expect(mcp.authorizedPublicKey, startsWith('ssh-ed25519 '));
+
+    final command = await controller.runSshCommand('4456560334', 'uname -a');
+    expect(command['ok'], isTrue);
+    expect(command['stdout'], contains('target-mac arm64'));
+    final uploaded = await controller.uploadFile('4456560334', upload.path);
+    expect(uploaded['uploaded'], isTrue);
+    expect(uploaded['sha256'], expectedSha);
+    expect(
+      executed.any(
+        (line) =>
+            line.contains('StrictHostKeyChecking=yes') &&
+            line.contains('UserKnownHostsFile='),
+      ),
+      isTrue,
+    );
+    await controller.disconnect('4456560334');
+    expect(mcpTunnelProcess.terminated, isTrue);
+    expect(sshTunnelProcess.terminated, isTrue);
   });
 }
 
@@ -247,5 +372,46 @@ final class _FakeMcpClient implements HarnessSimulatorMcpClient {
   ) async {
     lastPort = localPort;
     return <String, Object?>{'called': toolId, 'arguments': arguments};
+  }
+}
+
+final class _SshBootstrapMcpClient implements HarnessSimulatorMcpClient {
+  String? authorizedPeerId;
+  String? authorizedPublicKey;
+
+  @override
+  Future<List<Map<String, Object?>>> initializeAndList(int localPort) async =>
+      <Map<String, Object?>>[
+        <String, Object?>{'name': 'vibekits.device.ssh_identity'},
+        <String, Object?>{'name': 'vibekits.device.ssh_key_status'},
+        <String, Object?>{'name': 'vibekits.device.ssh_authorize'},
+        <String, Object?>{'name': 'vibekits.device.processes'},
+      ];
+
+  @override
+  Future<Map<String, Object?>> call(
+    int localPort,
+    String toolId,
+    Map<String, Object?> arguments,
+  ) async {
+    final data = switch (toolId) {
+      'vibekits.device.ssh_identity' => <String, Object?>{
+        'username': 'remote-user',
+        'hostKeyFingerprint': 'SHA256:verifiedHost',
+        'remotePort': 22,
+      },
+      'vibekits.device.ssh_key_status' => <String, Object?>{
+        'authorized': false,
+      },
+      'vibekits.device.ssh_authorize' => <String, Object?>{'authorized': true},
+      _ => <String, Object?>{},
+    };
+    if (toolId == 'vibekits.device.ssh_authorize') {
+      authorizedPeerId = '${arguments['peerId'] ?? ''}';
+      authorizedPublicKey = '${arguments['publicKey'] ?? ''}';
+    }
+    return <String, Object?>{
+      'structuredContent': <String, Object?>{'ok': true, 'data': data},
+    };
   }
 }

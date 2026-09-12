@@ -59,4 +59,37 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('首次公钥授权在目标机显示允许和拒绝按钮', (tester) async {
+    final hub = LmcpInboundCallHub(minimumVisibleDuration: Duration.zero);
+    addTearDown(hub.dispose);
+    final call = hub.begin(
+      traceId: 'trace-approval-widget',
+      callerAppId: 'vibekits-controller',
+      callerInstanceId: '4456560334',
+      callerAddress: '127.0.0.1',
+      toolId: 'vibekits.device.ssh_authorize',
+      toolName: '授权远程仿真 SSH 公钥',
+      arguments: const <String, Object?>{'publicKey': 'must-be-redacted'},
+      scopeSummary: '本次操作需目标机明确批准',
+      approvalRequired: true,
+    );
+    final approval = call.waitForApproval();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LmcpInboundCallOverlay(
+          hub: hub,
+          child: const Scaffold(body: Text('Harness')),
+        ),
+      ),
+    );
+    expect(find.text('等待本机批准'), findsOneWidget);
+    expect(find.text('允许'), findsOneWidget);
+    expect(find.text('拒绝'), findsOneWidget);
+    expect(find.text('强制关闭'), findsNothing);
+    await tester.tap(find.text('允许'));
+    await tester.pump();
+    expect(await approval, isTrue);
+    expect(find.text('已批准，正在调用'), findsOneWidget);
+  });
 }

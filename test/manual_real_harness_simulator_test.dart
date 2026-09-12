@@ -50,6 +50,34 @@ void main() {
         const <String, Object?>{'query': 'Vibekits'},
       );
       expect(result, isNotEmpty);
+      final Map<String, Object?> sshProbe = await controller.runSshCommand(
+        routingId,
+        'printf VIBEKITS_SIMULATOR_SSH_READY',
+      );
+      expect(sshProbe['ok'], isTrue);
+      expect(sshProbe['stdout'], contains('VIBEKITS_SIMULATOR_SSH_READY'));
+
+      final Directory uploadRoot = await Directory.systemTemp.createTemp(
+        'vibekits-real-simulator-',
+      );
+      addTearDown(() => uploadRoot.delete(recursive: true));
+      final File uploadSource = File('${uploadRoot.path}/transport-proof.txt');
+      await uploadSource.writeAsString('vibekits-id-only-sftp-proof\n');
+      final Map<String, Object?> upload = await controller.uploadFile(
+        routingId,
+        uploadSource.path,
+      );
+      expect(upload['uploaded'], isTrue);
+      expect('${upload['sha256']}', hasLength(64));
+      final String remotePath = '${upload['remotePath']}';
+      expect(remotePath, startsWith('/tmp/vibekits-simulator-$routingId/'));
+      addTearDown(() async {
+        try {
+          await controller.runSshCommand(routingId, "rm -f '$remotePath'");
+        } on Object {
+          // closeAll remains the authoritative transport cleanup path.
+        }
+      });
       Map<String, Object?> assistance = _toolData(
         await controller.call(
           routingId,
@@ -80,6 +108,8 @@ void main() {
       print(
         'HARNESS_REAL_SIMULATOR tools=${tools.length} '
         'forceRelay=$forceRelay responseKeys=${result.keys.length} '
+        'sshReady=${sshProbe['ok'] == true} '
+        'uploadBytes=${upload['bytes']} uploadShaVerified=true '
         'assistanceEnabled=${assistance['enabled'] == true}',
       );
     },

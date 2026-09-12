@@ -67,6 +67,16 @@ class _LmcpInboundCallOverlayState extends State<LmcpInboundCallOverlay> {
                                     _expanded.remove(call.traceId);
                                   }
                                 }),
+                                onApprove:
+                                    call.phase ==
+                                        LmcpInboundCallPhase.waitingApproval
+                                    ? () => _hub.approve(call.traceId)
+                                    : null,
+                                onDeny:
+                                    call.phase ==
+                                        LmcpInboundCallPhase.waitingApproval
+                                    ? () => _hub.deny(call.traceId)
+                                    : null,
                                 onForceClose:
                                     call.terminal ||
                                         call.phase ==
@@ -94,6 +104,8 @@ class _CallCard extends StatelessWidget {
     required this.call,
     required this.expanded,
     required this.onToggleDetails,
+    required this.onApprove,
+    required this.onDeny,
     required this.onForceClose,
     super.key,
   });
@@ -101,6 +113,8 @@ class _CallCard extends StatelessWidget {
   final LmcpInboundCallSnapshot call;
   final bool expanded;
   final VoidCallback onToggleDetails;
+  final VoidCallback? onApprove;
+  final VoidCallback? onDeny;
   final VoidCallback? onForceClose;
 
   @override
@@ -192,12 +206,27 @@ class _CallCard extends StatelessWidget {
                     child: Text(expanded ? '收起信息' : '调用信息'),
                   ),
                   const SizedBox(width: 4),
-                  FilledButton.tonalIcon(
-                    key: ValueKey<String>('lmcp-stop-${call.traceId}'),
-                    onPressed: onForceClose,
-                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                    label: const Text('强制关闭'),
-                  ),
+                  if (call.phase ==
+                      LmcpInboundCallPhase.waitingApproval) ...<Widget>[
+                    TextButton(
+                      key: ValueKey<String>('lmcp-deny-${call.traceId}'),
+                      onPressed: onDeny,
+                      child: const Text('拒绝'),
+                    ),
+                    const SizedBox(width: 4),
+                    FilledButton.icon(
+                      key: ValueKey<String>('lmcp-approve-${call.traceId}'),
+                      onPressed: onApprove,
+                      icon: const Icon(Icons.check_rounded, size: 18),
+                      label: const Text('允许'),
+                    ),
+                  ] else
+                    FilledButton.tonalIcon(
+                      key: ValueKey<String>('lmcp-stop-${call.traceId}'),
+                      onPressed: onForceClose,
+                      icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                      label: const Text('强制关闭'),
+                    ),
                 ],
               ),
             ],
@@ -210,6 +239,7 @@ class _CallCard extends StatelessWidget {
   static String _status(LmcpInboundCallSnapshot call) =>
       call.statusMessage ??
       switch (call.phase) {
+        LmcpInboundCallPhase.waitingApproval => '等待本机批准',
         LmcpInboundCallPhase.running => '正在调用',
         LmcpInboundCallPhase.cancelling => '正在强制关闭',
         LmcpInboundCallPhase.succeeded => '调用完成',
@@ -218,6 +248,7 @@ class _CallCard extends StatelessWidget {
       };
 
   static IconData _icon(LmcpInboundCallPhase phase) => switch (phase) {
+    LmcpInboundCallPhase.waitingApproval => Icons.approval_outlined,
     LmcpInboundCallPhase.running => Icons.sync_rounded,
     LmcpInboundCallPhase.cancelling => Icons.stop_circle_outlined,
     LmcpInboundCallPhase.succeeded => Icons.check_circle_outline,
@@ -227,6 +258,7 @@ class _CallCard extends StatelessWidget {
 
   static Color _statusColor(ColorScheme colors, LmcpInboundCallPhase phase) =>
       switch (phase) {
+        LmcpInboundCallPhase.waitingApproval => colors.secondary,
         LmcpInboundCallPhase.running => colors.primary,
         LmcpInboundCallPhase.succeeded => colors.tertiary,
         _ => colors.error,

@@ -1617,3 +1617,12 @@
 - 定向分析 0 issue；状态与 Harness/UI 定向回归 68/68，全量 Flutter 测试 851 项通过、19 项 live test 按环境条件跳过且无失败。Universal macOS 12+ 的 Harness、ADB、7-Zip、GitHub CLI、Git 完整门禁通过。
 - App 公证 Submission ID `5b5df8f2-747f-427b-b333-2bf95595ea5e`、DMG 公证 Submission ID `091d85e8-1d67-4a7f-a783-641e74e37037` 均为 Apple `Accepted`；两层票据已 staple/validate，Gatekeeper 为 `Notarized Developer ID`。
 - 唯一交付 DMG 为 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260912-dev195-formal/package/Vibekits-1.9.0.195+2195-macos-universal-notarized.dmg`，387538488 bytes，SHA-256 `de3d5e0e848deebd70402ecb60b0f1614f1ab165af6670fcb49df9b4c46c3ea9`。最终 DMG 真实启动时 Relay 注册正常、连接表为空，主界面准确显示蓝灯“协同等待连接”。完整证据见 `docs/acceptance/V1_9_0_DEV195_REMOTE_STATUS_RELEASE_2026-09-12.md`。
+
+## 2026-09-13 · 1.9.0-dev.196+2196 · 仅凭 ID 的 SSH/SFTP 远程仿真候选
+
+- 被控 Mac 的远程仿真单开关现统一准备固定回环 MCP、RustDesk P2P/HBBR 载体和系统 SSH；控制端只输入统一设备 ID，经认证 MCP 取得 SSH 用户与 Ed25519 主机指纹，首次目标端批准后自动完成每目标独立公钥、严格 `known_hosts`、SSH 命令和 SCP 上传。关闭时先关 SSH 隧道再关 MCP 隧道，并撤销 VibeKits 管理的公钥，不删除用户密钥。
+- 新增远端应用清单、签名安装、安全卸载、SSH 身份/授权/撤销与控制端 SSH/SCP Harness 工具。危险调用进入目标端允许/拒绝审批；macOS 安装要求 SHA-256、Gatekeeper 和 Bundle ID 一致并支持备份回滚，Windows 共享协议层并要求 MSI Authenticode/发布者一致。
+- 全量 Flutter 测试 856 项通过、19 项真实外设/联网条件跳过、0 失败；SSH/目标运行时定向回归 16/16，生产代码静态分析 0 issue。真机手工门禁扩展为工具目录、进程读取、SSH 探针、SCP 与远端 SHA-256 验证。
+- 首次独立构建副本同步中断造成 `pi-ai` 运行文件缺失，旧门禁直到签名深校验才报错；重建后新增 Harness Runtime 任意断链即禁止打包的前置门禁，防止残缺副本再次进入签名。
+- macOS 候选已完成 Universal `x86_64 + arm64`、macOS 12+、Developer ID、App/DMG 双层 Apple 公证与最终 DMG 真实启动。DMG 为 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260913-dev196/package/Vibekits-1.9.0-dev.196+2196-macos-universal-notarized.dmg`，396205663 bytes，SHA-256 `7a4652f36e734eaa11b2f5691b5461cc34c8515bc7d795209c1bbb568aaed642`。
+- 本轮没有把本机自动测试冒充双机成功。目标 `4456560334` 尚未安装本文精确候选；首次公钥批准、真实主机指纹、P2P/HBBR SSH、SCP SHA、签名测试 App 安装/日志/回滚、63/PAD 协同和 Windows 58 真机仍是未完成门禁。完整证据与验收步骤见 `docs/acceptance/V1_9_0_DEV196_ID_ONLY_SSH_SIMULATOR_2026-09-13.md`。

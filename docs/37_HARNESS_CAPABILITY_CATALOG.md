@@ -7,8 +7,8 @@
 - 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：218。
-- Harness 当前可执行接口：195。
+- Harness 定义接口：227。
+- Harness 当前可执行接口：204。
 - 当前不可公开接口：23。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 66 |
+| 系统诊断 | 75 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,7 +108,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 66）
+## 系统诊断（定义 75）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -125,9 +125,16 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.cluster.status` | `cluster__status` | 查看集群任务中心状态 | 是 | 只读返回集群任务接收开关和配置完整性。尚未配置可信 HTTPS 服务、可信域和签名公钥时明确返回 unconfigured。 | `readOnly` | `{}` |
 | `vibekits.database_manager` | `database_manager` | 数据库管理（SQL） | 否（环境/接线门禁） | 拖入 SQLite 数据库，浏览表和视图并运行有界只读 SQL。 适合：用户明确需要“数据库管理（SQL）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.device.app_control` | `device__app_control` | 启动或停止本机应用 | 是 | 在被调试设备上启动或停止指定 App。macOS target 使用应用名；Windows launch 使用绝对 exe 路径，stop 使用进程名。 | `controlsDevice` | `action`* (string；枚举=launch/stop), `target`* (string) |
+| `vibekits.device.app_install` | `device__app_install` | 安装被仿真机软件 | 是 | 在已授权远程仿真的目标机安装软件。可先用 network.download 把 HTTPS 安装包下载到目标机；macOS 仅接受签名并通过 Gatekeeper、只含单一 App 的 ZIP，Windows 仅接受 Authenticode 有效的 MSI。安装前校验 SHA-256 和预期包名或发布者，覆盖时保留回滚副本。 | `controlsDevice` | `packagePath`* (string), `sha256`* (string), `expectedIdentity`* (string) |
+| `vibekits.device.app_uninstall` | `device__app_uninstall` | 卸载被仿真机软件 | 是 | 卸载 applications 工具唯一确认的软件。macOS 按 Bundle ID 移入当前用户废纸篓并返回恢复路径；Windows 按注册表唯一身份启动官方卸载器。禁止用本工具卸载 VibeKits 自身。 | `destructive` | `identity`* (string) |
+| `vibekits.device.applications` | `device__applications` | 列出被仿真机软件 | 是 | 读取被仿真设备已安装的软件身份、版本、位置及是否可卸载；安装或卸载前先用此结果锁定唯一目标。 | `readOnly` | `query` (string), `limit` (integer；最小=1；最大=200) |
 | `vibekits.device.crash_reports` | `device__crash_reports` | 读取本机应用崩溃报告 | 是 | 按 App 名读取本机真实崩溃报告或 dump 元数据，结果来自被调试设备。 | `readOnly` | `appName`* (string), `limit` (integer；最小=1；最大=20) |
 | `vibekits.device.logs` | `device__logs` | 读取本机应用日志 | 是 | 按进程名读取本机真实系统日志；macOS 使用 Unified Log，Windows 使用 Application Event Log。 | `readOnly` | `processName`* (string), `seconds` (integer；最小=1；最大=3600), `maxLines` (integer；最小=1；最大=2000) |
 | `vibekits.device.processes` | `device__processes` | 检查本机应用进程 | 是 | 读取本机操作系统的真实进程，可按其他 App 或进程名筛选，不限于 VibeKits 自身。 | `readOnly` | `query` (string), `limit` (integer；最小=1；最大=200) |
+| `vibekits.device.ssh_authorize` | `device__ssh_authorize` | 批准仿真设备 SSH 公钥 | 是 | 首次连接时由目标机用户明确批准，把控制端设备专用 Ed25519 公钥写入当前用户 authorized_keys；密钥仅允许来自回环隧道，不开放公网 SSH。 | `controlsDevice` | `peerId`* (string), `publicKey`* (string) |
+| `vibekits.device.ssh_identity` | `device__ssh_identity` | 读取被仿真机 SSH 身份 | 是 | 只读返回目标机 SSH 用户、固定端口和 Ed25519 主机指纹；控制端必须在登录前核对该指纹。 | `readOnly` | `{}` |
+| `vibekits.device.ssh_key_status` | `device__ssh_key_status` | 检查仿真设备 SSH 公钥 | 是 | 只读检查当前控制端设备专用公钥是否已在目标机授权，不返回任何私钥或其他密钥内容。 | `readOnly` | `peerId`* (string), `publicKey`* (string) |
+| `vibekits.device.ssh_revoke` | `device__ssh_revoke` | 撤销仿真设备 SSH 公钥 | 是 | 按控制端设备 ID 只移除 VibeKits 管理的 authorized_keys 条目，不改变用户自己的 SSH 密钥。 | `destructive` | `peerId`* (string) |
 | `vibekits.device.update_apply` | `device__update_apply` | 应用 VibeKits 签名候选 | 是 | 严格验证包名、递增版本、Developer ID 团队与 Universal 架构后，保留回滚副本并后台替换、重启。 | `controlsDevice` | `token`* (string) |
 | `vibekits.device.update_begin` | `device__update_begin` | 准备接收 VibeKits 候选 | 是 | 生成五分钟有效、单次使用且绑定文件名/字节数/SHA-256 的上传令牌；只在仿真开关打开的回环端点可用。 | `writesData` | `fileName`* (string), `fileSize`* (integer；最小=1；最大=1610612736), `sha256`* (string) |
 | `vibekits.device.update_status` | `device__update_status` | 查看 VibeKits 候选状态 | 是 | 只读返回目标机当前是否正在接收、校验或应用签名候选。 | `readOnly` | `{}` |
@@ -166,7 +173,9 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.simulator.disconnect` | `simulator__disconnect` | 断开远程仿真机 | 是 | 关闭指定 ID 的隧道并回收本地监听，不在后台遗留连接。 | `controlsDevice` | `routingId`* (string) |
 | `vibekits.simulator.install_candidate` | `simulator__install_candidate` | 安装远程仿真机 VibeKits 候选 | 是 | 通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。 | `controlsDevice` | `routingId`* (string), `packagePath`* (string), `apply` (boolean) |
 | `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关远程仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.simulator.ssh_exec` | `simulator__ssh_exec` | 在远程仿真机执行命令 | 是 | 通过已经完成主机指纹校验和首次公钥授权的 SSH 隧道，在指定设备 ID 上执行调试命令；返回有界标准输出、错误输出和退出码。 | `controlsDevice` | `routingId`* (string), `command`* (string) |
 | `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为远程仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
+| `vibekits.simulator.upload_file` | `simulator__upload_file` | 上传文件到远程仿真机 | 是 | 通过已验证的 SSH 隧道上传本机文件到目标设备的 VibeKits 专用暂存目录，并在两端计算 SHA-256；不接受目录或相对路径。 | `writesData` | `routingId`* (string), `localPath`* (string) |
 | `vibekits.system.capability_check` | `system__capability_check` | 检查智能体工具链 | 是 | 只读核对 Vibekits 向 Harness 公开的每个工具是否具有本地执行器，并列出因安全或环境原因未公开的能力。用于任务前自检，不能替代硬件和外部服务的真实验收。 | `readOnly` | `{}` |
 | `vibekits.system.describe_tool` | `system__describe_tool` | 精确说明工具参数 | 是 | 按工具 ID 返回当前运行版本的完整 inputSchema、必填项、枚举、默认值、风险和自动配置原则。回答参数配置问题前必须调用。 | `readOnly` | `toolId`* (string) |
 | `vibekits.system.resources` | `system__resources` | 检查系统资源 | 是 | 只读采样本机 Windows/macOS/Android，或通过 Vibekits 内置 ADB 采样指定 Android 设备。返回 CPU、内存、GPU、磁盘、Top 进程、异常建议和证据来源。单次快照正常时不得断言间歇性卡顿已排除。 | `readOnly` | `adbSerial` (string), `samples` (integer；最小=1；最大=10), `intervalMs` (integer；最小=250；最大=5000) |

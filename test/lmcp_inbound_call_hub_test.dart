@@ -88,4 +88,44 @@ void main() {
     releaseCleanup.complete();
     await forceClose;
   });
+
+  test('首次敏感调用必须等待本机批准且拒绝后不可继续', () async {
+    final hub = LmcpInboundCallHub(minimumVisibleDuration: Duration.zero);
+    addTearDown(hub.dispose);
+    final approvedCall = hub.begin(
+      traceId: 'trace-approve',
+      callerAppId: 'vibekits-controller',
+      callerInstanceId: '4456560334',
+      callerAddress: '127.0.0.1',
+      toolId: 'vibekits.device.ssh_authorize',
+      toolName: '授权远程仿真 SSH 公钥',
+      arguments: const <String, Object?>{'publicKey': 'secret'},
+      scopeSummary: '本次操作需目标机明确批准',
+      approvalRequired: true,
+    );
+    expect(hub.snapshots.single.phase, LmcpInboundCallPhase.waitingApproval);
+    final approval = approvedCall.waitForApproval();
+    hub.approve(approvedCall.traceId);
+    expect(await approval, isTrue);
+    expect(hub.snapshots.single.phase, LmcpInboundCallPhase.running);
+
+    final deniedCall = hub.begin(
+      traceId: 'trace-deny',
+      callerAppId: 'vibekits-controller',
+      callerInstanceId: '4456560334',
+      callerAddress: '127.0.0.1',
+      toolId: 'vibekits.device.app_uninstall',
+      toolName: '卸载远程应用',
+      arguments: const <String, Object?>{},
+      scopeSummary: '本次操作需目标机明确批准',
+      approvalRequired: true,
+    );
+    final denial = deniedCall.waitForApproval();
+    hub.deny(deniedCall.traceId);
+    expect(await denial, isFalse);
+    expect(
+      hub.snapshots.singleWhere((item) => item.traceId == 'trace-deny').phase,
+      LmcpInboundCallPhase.cancelled,
+    );
+  });
 }

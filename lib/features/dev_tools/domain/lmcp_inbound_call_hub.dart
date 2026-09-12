@@ -1,7 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
-enum LmcpInboundCallPhase { running, cancelling, succeeded, failed, cancelled }
+enum LmcpInboundCallPhase {
+  waitingApproval,
+  running,
+  cancelling,
+  succeeded,
+  failed,
+  cancelled,
+}
 
 class LmcpUserTerminatedException implements Exception {
   const LmcpUserTerminatedException();
@@ -149,6 +156,8 @@ class LmcpInboundCallHandle {
   final String traceId;
   final LmcpInboundCallCancellation cancellation;
 
+  Future<bool> waitForApproval() => _hub._waitForApproval(traceId);
+
   void update({String? taskId, double? progress, String? statusMessage}) {
     _hub._update(
       traceId,
@@ -182,6 +191,7 @@ class LmcpInboundCallHub {
       <String, LmcpInboundCallSnapshot>{};
   final Map<String, LmcpInboundCallCancellation> _cancellations =
       <String, LmcpInboundCallCancellation>{};
+  final Map<String, Completer<bool>> _approvals = <String, Completer<bool>>{};
   final Map<String, Timer> _removalTimers = <String, Timer>{};
 
   Stream<List<LmcpInboundCallSnapshot>> get changes => _changes.stream;
@@ -201,6 +211,7 @@ class LmcpInboundCallHub {
     required String toolName,
     required Map<String, Object?> arguments,
     required String scopeSummary,
+    bool approvalRequired = false,
   }) {
     final DateTime now = _clock();
     final LmcpInboundCallCancellation cancellation =
@@ -217,18 +228,55 @@ class LmcpInboundCallHub {
       scopeSummary: _bounded(scopeSummary, 240),
       startedAt: now,
       updatedAt: now,
-      phase: LmcpInboundCallPhase.running,
-      statusMessage: '正在调用',
+      phase: approvalRequired
+          ? LmcpInboundCallPhase.waitingApproval
+          : LmcpInboundCallPhase.running,
+      statusMessage: approvalRequired ? '等待本机批准' : '正在调用',
     );
     _cancellations[traceId] = cancellation;
+    if (approvalRequired) _approvals[traceId] = Completer<bool>();
     _emit();
     return LmcpInboundCallHandle._(this, traceId, cancellation);
+  }
+
+  Future<bool> _waitForApproval(String traceId) async {
+    final completer = _approvals[traceId];
+    if (completer == null) return true;
+    final allowed = await completer.future;
+    _approvals.remove(traceId);
+    final current = _calls[traceId];
+    if (allowed && current != null && !current.terminal) {
+      _calls[traceId] = current.copyWith(
+        updatedAt: _clock(),
+        phase: LmcpInboundCallPhase.running,
+        statusMessage: '已批准，正在调用',
+      );
+      _emit();
+    }
+    return allowed;
+  }
+
+  void approve(String traceId) => _resolveApproval(traceId, true);
+
+  void deny(String traceId) => _resolveApproval(traceId, false);
+
+  void _resolveApproval(String traceId, bool allowed) {
+    final completer = _approvals[traceId];
+    if (completer == null || completer.isCompleted) return;
+    completer.complete(allowed);
+    if (!allowed) {
+      _finish(traceId, LmcpInboundCallPhase.cancelled, '已由本机用户拒绝');
+    }
   }
 
   Future<void> forceClose(String traceId) async {
     final LmcpInboundCallSnapshot? current = _calls[traceId];
     final LmcpInboundCallCancellation? cancellation = _cancellations[traceId];
     if (current == null || cancellation == null || current.terminal) return;
+    if (current.phase == LmcpInboundCallPhase.waitingApproval) {
+      _resolveApproval(traceId, false);
+      return;
+    }
     _calls[traceId] = current.copyWith(
       updatedAt: _clock(),
       phase: LmcpInboundCallPhase.cancelling,
@@ -276,6 +324,8 @@ class LmcpInboundCallHub {
       statusMessage: _bounded(statusMessage, 240),
     );
     _cancellations.remove(traceId);
+    final approval = _approvals.remove(traceId);
+    if (approval != null && !approval.isCompleted) approval.complete(false);
     _emit();
     final Duration elapsed = now.difference(current.startedAt);
     final Duration remaining = elapsed >= minimumVisibleDuration
@@ -298,6 +348,10 @@ class LmcpInboundCallHub {
       timer.cancel();
     }
     _removalTimers.clear();
+    for (final approval in _approvals.values) {
+      if (!approval.isCompleted) approval.complete(false);
+    }
+    _approvals.clear();
     await _changes.close();
   }
 }

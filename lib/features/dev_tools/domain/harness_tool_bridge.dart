@@ -35,6 +35,7 @@ import 'harness_remote_management_bridge.dart';
 import 'harness_simulator_access_settings.dart';
 import 'harness_simulator_controller.dart';
 import 'harness_simulator_target_runtime.dart';
+import 'harness_system_ssh_service.dart';
 import 'harness_work_status.dart';
 import 'lark_cli_service.dart';
 import 'lan_peer_discovery_service.dart';
@@ -443,10 +444,19 @@ class VibekitsHarnessToolBridge {
   static const String simulatorDisconnectId = 'vibekits.simulator.disconnect';
   static const String simulatorInstallCandidateId =
       'vibekits.simulator.install_candidate';
+  static const String simulatorSshExecId = 'vibekits.simulator.ssh_exec';
+  static const String simulatorUploadFileId = 'vibekits.simulator.upload_file';
   static const String deviceProcessesId = 'vibekits.device.processes';
   static const String deviceLogsId = 'vibekits.device.logs';
   static const String deviceCrashReportsId = 'vibekits.device.crash_reports';
+  static const String deviceApplicationsId = 'vibekits.device.applications';
   static const String deviceAppControlId = 'vibekits.device.app_control';
+  static const String deviceAppInstallId = 'vibekits.device.app_install';
+  static const String deviceAppUninstallId = 'vibekits.device.app_uninstall';
+  static const String deviceSshIdentityId = 'vibekits.device.ssh_identity';
+  static const String deviceSshKeyStatusId = 'vibekits.device.ssh_key_status';
+  static const String deviceSshAuthorizeId = 'vibekits.device.ssh_authorize';
+  static const String deviceSshRevokeId = 'vibekits.device.ssh_revoke';
   static const String deviceUpdateBeginId = 'vibekits.device.update_begin';
   static const String deviceUpdateStatusId = 'vibekits.device.update_status';
   static const String deviceUpdateApplyId = 'vibekits.device.update_apply';
@@ -681,6 +691,30 @@ class VibekitsHarnessToolBridge {
       },
       required: const <String>['routingId', 'packagePath'],
     ),
+    simulatorSshExecId: _definition(
+      id: simulatorSshExecId,
+      name: '在远程仿真机执行命令',
+      description:
+          '通过已经完成主机指纹校验和首次公钥授权的 SSH 隧道，在指定设备 ID 上执行调试命令；返回有界标准输出、错误输出和退出码。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'routingId': _string('已连接的 VibeKits ID'),
+        'command': _string('要在目标设备执行的单条调试命令'),
+      },
+      required: const <String>['routingId', 'command'],
+    ),
+    simulatorUploadFileId: _definition(
+      id: simulatorUploadFileId,
+      name: '上传文件到远程仿真机',
+      description:
+          '通过已验证的 SSH 隧道上传本机文件到目标设备的 VibeKits 专用暂存目录，并在两端计算 SHA-256；不接受目录或相对路径。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'routingId': _string('已连接的 VibeKits ID'),
+        'localPath': _string('本机待上传文件的绝对路径'),
+      },
+      required: const <String>['routingId', 'localPath'],
+    ),
     deviceProcessesId: _definition(
       id: deviceProcessesId,
       name: '检查本机应用进程',
@@ -728,6 +762,19 @@ class VibekitsHarnessToolBridge {
       },
       required: const <String>['appName'],
     ),
+    deviceApplicationsId: _definition(
+      id: deviceApplicationsId,
+      name: '列出被仿真机软件',
+      description: '读取被仿真设备已安装的软件身份、版本、位置及是否可卸载；安装或卸载前先用此结果锁定唯一目标。',
+      properties: <String, Object?>{
+        'query': _string('可选；App 名、包名或发布者的一部分'),
+        'limit': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 200,
+        },
+      },
+    ),
     deviceAppControlId: _definition(
       id: deviceAppControlId,
       name: '启动或停止本机应用',
@@ -742,6 +789,67 @@ class VibekitsHarnessToolBridge {
         'target': _string('应用名、进程名或受支持的绝对路径'),
       },
       required: const <String>['action', 'target'],
+    ),
+    deviceAppInstallId: _definition(
+      id: deviceAppInstallId,
+      name: '安装被仿真机软件',
+      description:
+          '在已授权远程仿真的目标机安装软件。可先用 network.download 把 HTTPS 安装包下载到目标机；macOS 仅接受签名并通过 Gatekeeper、只含单一 App 的 ZIP，Windows 仅接受 Authenticode 有效的 MSI。安装前校验 SHA-256 和预期包名或发布者，覆盖时保留回滚副本。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'packagePath': _string('目标机上安装包的绝对路径'),
+        'sha256': _string('安装包的 64 位十六进制 SHA-256'),
+        'expectedIdentity': _string('macOS Bundle ID 或 Windows 签名发布者'),
+      },
+      required: const <String>['packagePath', 'sha256', 'expectedIdentity'],
+    ),
+    deviceAppUninstallId: _definition(
+      id: deviceAppUninstallId,
+      name: '卸载被仿真机软件',
+      description:
+          '卸载 applications 工具唯一确认的软件。macOS 按 Bundle ID 移入当前用户废纸篓并返回恢复路径；Windows 按注册表唯一身份启动官方卸载器。禁止用本工具卸载 VibeKits 自身。',
+      risk: HarnessToolRisk.destructive,
+      properties: <String, Object?>{
+        'identity': _string('applications 工具返回的唯一软件身份'),
+      },
+      required: const <String>['identity'],
+    ),
+    deviceSshIdentityId: _definition(
+      id: deviceSshIdentityId,
+      name: '读取被仿真机 SSH 身份',
+      description: '只读返回目标机 SSH 用户、固定端口和 Ed25519 主机指纹；控制端必须在登录前核对该指纹。',
+      properties: const <String, Object?>{},
+    ),
+    deviceSshKeyStatusId: _definition(
+      id: deviceSshKeyStatusId,
+      name: '检查仿真设备 SSH 公钥',
+      description: '只读检查当前控制端设备专用公钥是否已在目标机授权，不返回任何私钥或其他密钥内容。',
+      properties: <String, Object?>{
+        'peerId': _string('发起连接的 VibeKits 设备 ID'),
+        'publicKey': _string('控制端生成的 ssh-ed25519 公钥'),
+      },
+      required: const <String>['peerId', 'publicKey'],
+    ),
+    deviceSshAuthorizeId: _definition(
+      id: deviceSshAuthorizeId,
+      name: '批准仿真设备 SSH 公钥',
+      description:
+          '首次连接时由目标机用户明确批准，把控制端设备专用 Ed25519 公钥写入当前用户 authorized_keys；密钥仅允许来自回环隧道，不开放公网 SSH。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'peerId': _string('发起连接的 VibeKits 设备 ID'),
+        'publicKey': _string('控制端生成的 ssh-ed25519 公钥'),
+      },
+      required: const <String>['peerId', 'publicKey'],
+    ),
+    deviceSshRevokeId: _definition(
+      id: deviceSshRevokeId,
+      name: '撤销仿真设备 SSH 公钥',
+      description:
+          '按控制端设备 ID 只移除 VibeKits 管理的 authorized_keys 条目，不改变用户自己的 SSH 密钥。',
+      risk: HarnessToolRisk.destructive,
+      properties: <String, Object?>{'peerId': _string('需要撤销的 VibeKits 设备 ID')},
+      required: const <String>['peerId'],
     ),
     deviceUpdateBeginId: _definition(
       id: deviceUpdateBeginId,
@@ -2530,6 +2638,7 @@ class VibekitsHarnessToolBridge {
       'vibekits.git.',
       'vibekits.github',
       'vibekits.project.',
+      'vibekits.device.',
     };
     return prefixes.any(toolId.startsWith);
   }
@@ -2750,10 +2859,19 @@ class VibekitsHarnessToolBridge {
     if (toolId == simulatorInstallCandidateId) {
       return _installSimulatorCandidate;
     }
+    if (toolId == simulatorSshExecId) return _runSimulatorSshCommand;
+    if (toolId == simulatorUploadFileId) return _uploadSimulatorFile;
     if (toolId == deviceProcessesId) return _inspectDeviceProcesses;
     if (toolId == deviceLogsId) return _readDeviceLogs;
     if (toolId == deviceCrashReportsId) return _readDeviceCrashReports;
+    if (toolId == deviceApplicationsId) return _listDeviceApplications;
     if (toolId == deviceAppControlId) return _controlDeviceApplication;
+    if (toolId == deviceAppInstallId) return _installDeviceApplication;
+    if (toolId == deviceAppUninstallId) return _uninstallDeviceApplication;
+    if (toolId == deviceSshIdentityId) return _readDeviceSshIdentity;
+    if (toolId == deviceSshKeyStatusId) return _readDeviceSshKeyStatus;
+    if (toolId == deviceSshAuthorizeId) return _authorizeDeviceSshKey;
+    if (toolId == deviceSshRevokeId) return _revokeDeviceSshKey;
     if (toolId == deviceUpdateBeginId) return _beginDeviceUpdate;
     if (toolId == deviceUpdateStatusId) return _deviceUpdateStatus;
     if (toolId == deviceUpdateApplyId) return _applyDeviceUpdate;
@@ -3249,6 +3367,20 @@ class VibekitsHarnessToolBridge {
     apply: arguments['apply'] != false,
   );
 
+  Future<Map<String, Object?>> _runSimulatorSshCommand(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.runSshCommand(
+    '${arguments['routingId'] ?? ''}',
+    '${arguments['command'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _uploadSimulatorFile(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.uploadFile(
+    '${arguments['routingId'] ?? ''}',
+    '${arguments['localPath'] ?? ''}',
+  );
+
   Future<Map<String, Object?>> _inspectDeviceProcesses(
     Map<String, Object?> arguments,
   ) => NativeAppDebugService.inspectProcesses(
@@ -3271,11 +3403,56 @@ class VibekitsHarnessToolBridge {
     limit: _integer(arguments['limit'], 5),
   );
 
+  Future<Map<String, Object?>> _listDeviceApplications(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.listApplications(
+    query: '${arguments['query'] ?? ''}',
+    limit: _integer(arguments['limit'], 100),
+  );
+
   Future<Map<String, Object?>> _controlDeviceApplication(
     Map<String, Object?> arguments,
   ) => NativeAppDebugService.controlApplication(
     action: '${arguments['action'] ?? ''}',
     target: '${arguments['target'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _installDeviceApplication(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.installApplication(
+    packagePath: '${arguments['packagePath'] ?? ''}',
+    expectedSha256: '${arguments['sha256'] ?? ''}',
+    expectedIdentity: '${arguments['expectedIdentity'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _uninstallDeviceApplication(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.uninstallApplication(
+    identity: '${arguments['identity'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _readDeviceSshIdentity(
+    Map<String, Object?> arguments,
+  ) => HarnessSystemSshService.identity();
+
+  Future<Map<String, Object?>> _readDeviceSshKeyStatus(
+    Map<String, Object?> arguments,
+  ) => HarnessSystemSshService.publicKeyStatus(
+    peerId: '${arguments['peerId'] ?? ''}',
+    publicKey: '${arguments['publicKey'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _authorizeDeviceSshKey(
+    Map<String, Object?> arguments,
+  ) => HarnessSystemSshService.authorizePublicKey(
+    peerId: '${arguments['peerId'] ?? ''}',
+    publicKey: '${arguments['publicKey'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _revokeDeviceSshKey(
+    Map<String, Object?> arguments,
+  ) => HarnessSystemSshService.revokePublicKeys(
+    peerId: '${arguments['peerId'] ?? ''}',
   );
 
   Future<Map<String, Object?>> _beginDeviceUpdate(

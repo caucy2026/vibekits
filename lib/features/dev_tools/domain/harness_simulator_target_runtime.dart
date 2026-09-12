@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 
 import 'harness_remote_access_settings.dart';
 import 'harness_simulator_access_settings.dart';
+import 'harness_system_ssh_service.dart';
 import 'lan_mcp_tool_server.dart';
 import 'rustdesk_harness_share_service.dart';
 
@@ -58,6 +59,11 @@ typedef HarnessSimulatorConnectionLister =
     Future<List<RustDeskHarnessIncomingConnection>> Function(String executable);
 typedef HarnessSimulatorRelayFingerprintLoader =
     Future<String> Function(String executable);
+typedef HarnessSimulatorSshInspector =
+    Future<HarnessSystemSshSnapshot> Function();
+typedef HarnessSimulatorSshSetter =
+    Future<HarnessSystemSshSnapshot> Function(bool enabled);
+typedef HarnessSimulatorSshKeyRevoker = Future<void> Function();
 
 /// Owns the explicit "use this device as a simulator" authorization gate.
 ///
@@ -74,6 +80,9 @@ final class HarnessSimulatorTargetRuntime {
     HarnessSimulatorNativeGateSetter? setNativeGate,
     HarnessSimulatorConnectionLister? listConnections,
     HarnessSimulatorRelayFingerprintLoader? relayFingerprint,
+    HarnessSimulatorSshInspector? inspectSsh,
+    HarnessSimulatorSshSetter? setSsh,
+    HarnessSimulatorSshKeyRevoker? revokeSshKeys,
     Duration connectionPollInterval = const Duration(seconds: 1),
     Duration hostRestartTimeout = const Duration(seconds: 5),
   }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
@@ -96,6 +105,13 @@ final class HarnessSimulatorTargetRuntime {
            ((executable) =>
                RustDeskHarnessShareService.connections(executable)),
        _relayFingerprint = relayFingerprint ?? _loadRelayFingerprint,
+       _inspectSsh = inspectSsh ?? HarnessSystemSshService.inspect,
+       _setSsh = setSsh ?? HarnessSystemSshService.setEnabled,
+       _revokeSshKeys =
+           revokeSshKeys ??
+           (() async {
+             await HarnessSystemSshService.revokeAllManagedPublicKeys();
+           }),
        _connectionPollInterval = connectionPollInterval,
        _hostRestartTimeout = hostRestartTimeout;
 
@@ -111,6 +127,9 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorNativeGateSetter _setNativeGate;
   final HarnessSimulatorConnectionLister _listConnections;
   final HarnessSimulatorRelayFingerprintLoader _relayFingerprint;
+  final HarnessSimulatorSshInspector _inspectSsh;
+  final HarnessSimulatorSshSetter _setSsh;
+  final HarnessSimulatorSshKeyRevoker _revokeSshKeys;
   final Duration _connectionPollInterval;
   final Duration _hostRestartTimeout;
   final StreamController<HarnessSimulatorTargetSnapshot> _changes =
@@ -122,6 +141,7 @@ final class HarnessSimulatorTargetRuntime {
   bool _pollingConnections = false;
   int _generation = 0;
   bool _changing = false;
+  bool _sshChangedByRuntime = false;
   HarnessSimulatorTargetSnapshot _latest = const HarnessSimulatorTargetSnapshot(
     phase: HarnessSimulatorTargetPhase.disabled,
     message: '仿真机访问已关闭',
@@ -169,6 +189,7 @@ final class HarnessSimulatorTargetRuntime {
       ),
     );
     RustDeskHostInfo? host;
+    HarnessSystemSshSnapshot? ssh;
     try {
       if (persist) await _settings.saveEnabled(true);
       host = await _inspectHost();
@@ -193,6 +214,15 @@ final class HarnessSimulatorTargetRuntime {
         }
       }
       if (!host.callable) host = await _startHost();
+      if (Platform.isMacOS) {
+        ssh = await _inspectSsh();
+        if (!ssh.supported) throw UnsupportedError(ssh.message);
+        if (!ssh.enabled) {
+          ssh = await _setSsh(true);
+          _sshChangedByRuntime = ssh.changed;
+        }
+        if (!ssh.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
+      }
       await _setNativeGate(host.executable, true);
       final endpoint = await _startEndpoint();
       if (generation != _generation) {
@@ -207,6 +237,8 @@ final class HarnessSimulatorTargetRuntime {
           phase: HarnessSimulatorTargetPhase.ready,
           routingId: host.id,
           endpoint: '127.0.0.1:${endpoint.port}',
+          sshEndpoint: ssh?.endpoint ?? '',
+          sshUsername: ssh?.username ?? '',
           message: '仿真机可连接 · 告知对方本机 ID 即可调试',
         ),
       );
@@ -216,6 +248,14 @@ final class HarnessSimulatorTargetRuntime {
       final endpoint = _endpoint;
       _endpoint = null;
       await endpoint?.close();
+      if (_sshChangedByRuntime) {
+        try {
+          await _setSsh(false);
+        } on Object {
+          // Preserve the startup error while reporting the failed simulator.
+        }
+        _sshChangedByRuntime = false;
+      }
       if (host != null && host.executable.isNotEmpty) {
         try {
           await _setNativeGate(host.executable, false);
@@ -246,9 +286,14 @@ final class HarnessSimulatorTargetRuntime {
       _endpoint = null;
       await endpoint?.close();
       _stopConnectionPolling();
+      await _revokeSshKeys();
       final host = await _inspectHost();
       if (host.available && host.executable.isNotEmpty) {
         await _setNativeGate(host.executable, false);
+      }
+      if (_sshChangedByRuntime) {
+        await _setSsh(false);
+        _sshChangedByRuntime = false;
       }
       if (!HarnessRemoteAccessSettings.enabled) await _stopHost();
       _publish(

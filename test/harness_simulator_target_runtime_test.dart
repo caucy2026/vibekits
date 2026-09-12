@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_remote_access_settings.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_simulator_access_settings.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_simulator_target_runtime.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_system_ssh_service.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_mcp_tool_server.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
@@ -16,6 +17,13 @@ const _host = RustDeskHostInfo(
   registrationKeyConfirmed: true,
   state: 'registered',
   message: 'registered',
+);
+
+const _sshEnabled = HarnessSystemSshSnapshot(
+  supported: true,
+  enabled: true,
+  endpoint: '192.168.3.10:22',
+  username: 'newlink',
 );
 
 void main() {
@@ -41,6 +49,9 @@ void main() {
     final values = <String, String>{};
     var endpointClosed = false;
     var hostStopped = false;
+    var sshEnabled = false;
+    var sshKeysRevoked = false;
+    final sshChanges = <bool>[];
     final nativeGateValues = <bool>[];
     final runtime = HarnessSimulatorTargetRuntime(
       settings: HarnessSimulatorAccessSettings(
@@ -56,14 +67,32 @@ void main() {
       stopHost: () async => hostStopped = true,
       setNativeGate: (_, enabled) async => nativeGateValues.add(enabled),
       relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => HarnessSystemSshSnapshot(
+        supported: true,
+        enabled: sshEnabled,
+        endpoint: sshEnabled ? '192.168.3.10:22' : '',
+        username: 'newlink',
+      ),
+      revokeSshKeys: () async => sshKeysRevoked = true,
+      setSsh: (enabled) async {
+        sshEnabled = enabled;
+        sshChanges.add(enabled);
+        return HarnessSystemSshSnapshot(
+          supported: true,
+          enabled: enabled,
+          endpoint: enabled ? '192.168.3.10:22' : '',
+          username: 'newlink',
+          changed: true,
+        );
+      },
     );
 
     await runtime.enable();
     expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
     expect(runtime.latest.routingId, _host.id);
     expect(runtime.latest.endpoint, '127.0.0.1:32147');
-    expect(runtime.latest.sshEndpoint, isEmpty);
-    expect(runtime.latest.sshUsername, isEmpty);
+    expect(runtime.latest.sshEndpoint, '192.168.3.10:22');
+    expect(runtime.latest.sshUsername, 'newlink');
     expect(runtime.latest.message, contains('本机 ID'));
     expect(HarnessSimulatorAccessSettings.enabled, isTrue);
     expect(nativeGateValues, <bool>[true]);
@@ -74,6 +103,8 @@ void main() {
     expect(hostStopped, isTrue);
     expect(HarnessSimulatorAccessSettings.enabled, isFalse);
     expect(nativeGateValues, <bool>[true, false]);
+    expect(sshChanges, <bool>[true, false]);
+    expect(sshKeysRevoked, isTrue);
   });
 
   test('普通远程协助仍打开时关闭仿真机不会误停共享网络进程', () async {
@@ -92,6 +123,8 @@ void main() {
       stopHost: () async => hostStopped = true,
       setNativeGate: (_, _) async {},
       relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
     );
     HarnessRemoteAccessSettings.setEnabled(true);
 
@@ -129,6 +162,8 @@ void main() {
           : const <RustDeskHarnessIncomingConnection>[],
       connectionPollInterval: const Duration(milliseconds: 5),
       relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
     );
 
     await runtime.enable();
@@ -166,7 +201,7 @@ void main() {
     );
   });
 
-  test('启动恢复只恢复固定 MCP 端点且不依赖系统 SSH', () async {
+  test('启动恢复同时验证固定 MCP 与系统 SSH', () async {
     final values = <String, String>{
       'harness-simulator-v1-enabled': 'true',
       'harness-simulator-v1-relay-fingerprint': 'sha256:current',
@@ -188,6 +223,8 @@ void main() {
       stopHost: () async {},
       setNativeGate: (_, _) async {},
       relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
     );
 
     await runtime.restore();
@@ -238,6 +275,8 @@ void main() {
       },
       setNativeGate: (_, _) async {},
       relayFingerprint: (_) async => 'sha256:new-relay',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
       hostRestartTimeout: const Duration(milliseconds: 200),
     );
 
