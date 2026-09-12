@@ -16,7 +16,7 @@ dev.196 已完成控制端与被控端的仅凭 ID SSH/SFTP 实现、共享协�
 - SSH 与 SCP 都固定通过 RustDesk 回环隧道，使用 `BatchMode`、`IdentitiesOnly`、`StrictHostKeyChecking` 和独立 `known_hosts`；不接受用户手填 IP、端口、账号、密码、私钥或主机指纹。
 - 新增共享 Harness 工具：应用清单、签名安装、安全卸载、SSH 身份、SSH 公钥状态/授权/撤销，以及控制端 SSH 命令和文件上传。
 - macOS 安装仅接受 SHA-256 匹配、Gatekeeper 通过、Bundle ID 匹配的单 App ZIP；覆盖前备份，失败自动回滚。卸载按唯一 Bundle ID 移入废纸篓，并保护 VibeKits 自身。
-- Windows 与 macOS 共用应用清单、审批、协议和控制端逻辑；Windows 只接受 SHA-256 匹配、Authenticode 有效且发布者匹配的 MSI。Windows 系统 SSH 自动启停与 Windows 58 真机仍需单独验收。
+- Windows 与 macOS 共用应用清单、审批、协议和控制端逻辑；Windows 只接受 SHA-256 匹配、Authenticode 有效且发布者匹配的 MSI。Windows 系统 SSH 身份、公钥文件生命周期、D 盘 Release 和进程级启动已在 58 真机通过；经 VibeKits ID 的另一台 Windows 端到端仿真仍需单独验收。
 - 危险远程调用在目标端统一进入可见审批；拒绝或两分钟未处理时不执行。关闭仿真会回收端点、隧道和 VibeKits 管理的 SSH 公钥，不删除用户自己的 SSH 密钥。
 
 ## 自动化证据
@@ -39,6 +39,22 @@ dev.196 已完成控制端与被控端的仅凭 ID SSH/SFTP 实现、共享协�
 - 从最终 DMG 只读挂载、提取 App 后再次通过 Developer ID/Gatekeeper；真实启动发布 Harness 工具桥，校验到精确进程 PID，随后正常退出并清理临时副本。
 - 包内 Harness Node v22.19.0 在 arm64 与 Rosetta x86_64 下均可启动 DSH；Harness、ADB、7-Zip、GitHub CLI 与 Git 完整性门禁通过。
 
+## Windows 58 真机证据
+
+- 节点：`192.168.3.58`，Windows 10 22H2 / build 19045，全部源码、缓存、临时目录、Rust/C++ 与 Flutter 构建输出位于 `D:\KEMI-Test`。
+- Windows RustDesk Harness Relay 由源码提交 `447af40bd0cdd20321d0a982f3eb23cdd80887ac` Release 构建；EXE SHA-256 为 `07237288c52d66420482e7e042dabe064bd746b43ef7ab3cd48eda1a71413ffa`，来源 JSON、EXE 重算值和 AGPL 许可证齐全，状态命令返回合法离线 JSON。
+- Windows 静态分析 0 issue；远程访问、首次配对、项目/会话同步、并发命令、反馈、停止/撤权、仿真控制、SSH/SCP 和 Relay 生命周期定向回归 `90/90` 通过。
+- 真机发现标准用户无法直接读取 `C:\ProgramData\ssh\ssh_host_ed25519_key.pub`。提交 `694e20a` 改为从回环 `ssh-keyscan` 公钥计算相同 OpenSSH SHA-256 指纹，不提权、不关闭主机校验；真机实际完成身份读取、受限公钥写入、状态确认和精确撤销，`1/1` 通过。
+- 精确 Release 通过项目验证器：版本 `1.9.0-dev.196+2196`、40 个必需运行时、Git `2.55.0.windows.3`、GitHub CLI `2.100.0`；安装目录为 `D:\KEMI-Test\app\Vibekits-dev196-694e20a`，Dart `app.so` SHA-256 为 `e7cc41f7cfb782909dff8bae735c33c78d54da0cbfc2d7035d96167f6c6c8cfe`。
+- 三次会话 0 进程级启动均在 12 秒采样时存活，工作集约 82～94 MB；每次只停止精确测试 PID，最终 Node/Relay 残留为 0。SSH 会话 0 不能替代交互桌面，因此不把上述结果冒充 UI 点击验收。
+- 主 EXE 与 Relay 的 Authenticode 均为 `NotSigned`。该目录仅是 Windows 真机测试候选，不得发布或上传市场。
+
+## 目标 Mac 实时探测
+
+- 控制端只使用统一 ID `4456560334`。默认 P2P 探测均能启动本地回环监听，但远端 `32145`（首次证书配对）、`32147`（仿真 MCP）和 `22`（系统 SSH）全部返回 `transport_connect_failed` / 远端未监听。
+- 这证明当前阻塞不是控制端 ID 格式、监听端口分配或测试机 SSH，而是目标 Mac 未运行本文精确候选的仿真服务。由于目标没有任何可用 VibeKits/SSH 数据通道，不能在后台通过该 ID 自升级；必须先在目标机安装本文公证 DMG 并打开远程仿真开关。
+- 63 与 PAD 75 的 ADB 连接探测当前均为 `No route to host`，设备列表为空。本轮没有把离线状态记成真机通过。
+
 ## 物理双机必须取得的证据
 
 在目标 Mac `4456560334` 安装上述精确 DMG 并打开远程仿真后，按以下顺序验收，任何一步失败都不得标记完成：
@@ -55,5 +71,5 @@ dev.196 已完成控制端与被控端的仅凭 ID SSH/SFTP 实现、共享协�
 
 - 目标 `4456560334` 的 dev.196 精确安装和上述双机证据。
 - 63/PAD 的精确版本协同闭环。
-- Windows 58 的 dev.196 Release、系统 SSH 自动化和真机闭环。
+- Windows 58 经另一台 VibeKits ID 的端到端隧道登录、安装、日志和回滚；当前只完成本机系统 SSH 与 Release/进程门禁。
 - KEMI 商场上传、公开 CDN 回下载及当前版本无更新检查。

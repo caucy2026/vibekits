@@ -1626,3 +1626,5 @@
 - 首次独立构建副本同步中断造成 `pi-ai` 运行文件缺失，旧门禁直到签名深校验才报错；重建后新增 Harness Runtime 任意断链即禁止打包的前置门禁，防止残缺副本再次进入签名。
 - macOS 候选已完成 Universal `x86_64 + arm64`、macOS 12+、Developer ID、App/DMG 双层 Apple 公证与最终 DMG 真实启动。DMG 为 `/Volumes/ORICO/kemi-build-cache/vibekits-dev/run-20260913-dev196/package/Vibekits-1.9.0-dev.196+2196-macos-universal-notarized.dmg`，396205663 bytes，SHA-256 `7a4652f36e734eaa11b2f5691b5461cc34c8515bc7d795209c1bbb568aaed642`。
 - 本轮没有把本机自动测试冒充双机成功。目标 `4456560334` 尚未安装本文精确候选；首次公钥批准、真实主机指纹、P2P/HBBR SSH、SCP SHA、签名测试 App 安装/日志/回滚、63/PAD 协同和 Windows 58 真机仍是未完成门禁。完整证据与验收步骤见 `docs/acceptance/V1_9_0_DEV196_ID_ONLY_SSH_SIMULATOR_2026-09-13.md`。
+- Windows 58 随后完成 D 盘 Relay 源码构建、静态分析、共享远程协议 `90/90`、系统 SSH 真机身份/受限公钥/撤销 `1/1`、Release 40 项运行时验证及三次进程启动。修复 Windows 独占文件锁测试、配对广播竞态、`.exe` 工具名测试，以及标准用户无权读取 ProgramData 主机公钥时的回环 keyscan 指纹派生；最终测试目录的 EXE/Relay 均为 `NotSigned`，未发布。
+- 对目标统一 ID `4456560334` 的实时 P2P 探测显示远端 `32145`、`32147`、`22` 均未监听，目标尚未进入 dev.196 单开关仿真状态；63/75 同时为 `No route to host`。因此 Mac 双机 SSH/SCP、签名测试 App 安装/日志/回滚、PAD/63 和 Windows 跨机端到端门禁继续保持未完成，禁止用自动测试替代。
