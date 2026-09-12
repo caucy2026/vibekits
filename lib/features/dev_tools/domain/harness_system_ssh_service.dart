@@ -191,7 +191,15 @@ abstract final class HarnessSystemSshService {
       await temporary.delete();
       throw StateError('无法设置 SSH 授权文件权限');
     }
-    await temporary.rename(authorizedKeys.path);
+    if (Platform.isWindows) {
+      // File.rename cannot replace an existing file on Windows. The temporary
+      // file already has the restricted ACL, so copy its flushed bytes over
+      // the destination and remove only that exact temporary file.
+      await temporary.copy(authorizedKeys.path);
+      await temporary.delete();
+    } else {
+      await temporary.rename(authorizedKeys.path);
+    }
     return <String, Object?>{
       ...await identity(runner: run, inspector: inspector),
       'authorized': true,

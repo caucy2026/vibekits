@@ -202,14 +202,17 @@ void main() {
       List<String> arguments,
     ) async {
       executed.add('$executablePath ${arguments.join(' ')}');
-      if (executablePath.endsWith('ssh-keygen') && arguments.contains('-f')) {
+      if ((executablePath.endsWith('ssh-keygen') ||
+              executablePath.endsWith('ssh-keygen.exe')) &&
+          arguments.contains('-f')) {
         final keyPath = arguments[arguments.indexOf('-f') + 1];
         await File(keyPath).writeAsString('private-key');
         final key = base64Encode(List<int>.generate(48, (index) => index + 1));
         await File('$keyPath.pub').writeAsString('ssh-ed25519 $key controller');
         return ProcessResult(1, 0, '', '');
       }
-      if (executablePath.endsWith('ssh-keyscan')) {
+      if (executablePath.endsWith('ssh-keyscan') ||
+          executablePath.endsWith('ssh-keyscan.exe')) {
         return ProcessResult(
           1,
           0,
@@ -217,7 +220,9 @@ void main() {
           '',
         );
       }
-      if (executablePath.endsWith('ssh-keygen') && arguments.contains('-lf')) {
+      if ((executablePath.endsWith('ssh-keygen') ||
+              executablePath.endsWith('ssh-keygen.exe')) &&
+          arguments.contains('-lf')) {
         return ProcessResult(
           1,
           0,
@@ -225,7 +230,8 @@ void main() {
           '',
         );
       }
-      if (executablePath.endsWith('scp')) {
+      if (executablePath.endsWith('scp') ||
+          executablePath.endsWith('scp.exe')) {
         return ProcessResult(1, 0, '', '');
       }
       final command = arguments.isEmpty ? '' : arguments.last;

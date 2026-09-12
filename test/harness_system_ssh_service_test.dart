@@ -50,7 +50,8 @@ void main() {
       String executable,
       List<String> arguments,
     ) async {
-      if (executable.endsWith('ssh-keygen')) {
+      if (executable.endsWith('ssh-keygen') ||
+          executable.endsWith('ssh-keygen.exe')) {
         return ProcessResult(
           1,
           0,

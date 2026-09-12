@@ -50,9 +50,10 @@ void main() {
       requestedOperations: const {'session.history'},
     );
     final socket = await Socket.connect('127.0.0.1', host.boundPort!);
+    final pendingRequest = host.changes.firstWhere((rows) => rows.isNotEmpty);
     socket.write('${jsonEncode(request.toJson())}\n');
     await socket.flush();
-    await host.changes.firstWhere((rows) => rows.isNotEmpty);
+    await pendingRequest;
     expect(host.pending.single.request.routingId, '1554650784');
     await host.approve(
       nonce: request.nonce,

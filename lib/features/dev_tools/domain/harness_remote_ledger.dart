@@ -165,6 +165,22 @@ class HarnessRemoteLedger {
   static Map<String, dynamic> _copy(Map<String, Object?> value) =>
       jsonDecode(jsonEncode(value)) as Map<String, dynamic>;
 
+  /// Copies the durable journal through its already locked handle.
+  ///
+  /// Windows correctly rejects a second handle while the exclusive lock is
+  /// held. Crash-recovery tests therefore cannot use [File.copy] to capture
+  /// the exact pre-commit bytes as they can on POSIX systems.
+  Future<void> copyDurableSnapshotForTesting(File destination) async {
+    if (_closed || _broken) throw StateError('REMOTE_LEDGER_UNAVAILABLE');
+    await _writes;
+    final int position = await _file.position();
+    final int length = await _file.length();
+    await _file.setPosition(0);
+    final List<int> bytes = await _file.read(length);
+    await _file.setPosition(position);
+    await destination.writeAsBytes(bytes, flush: true);
+  }
+
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {

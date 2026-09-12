@@ -110,7 +110,8 @@ void main() {
       });
       await entered.future;
       // Copy a crash-time disk image after fsync and before the reply commit.
-      final crash = await file.copy('${directory.path}/crash.jsonl');
+      final crash = File('${directory.path}/crash.jsonl');
+      await ledger.copyDurableSnapshotForTesting(crash);
       release.complete();
       await run;
       await ledger.close();
