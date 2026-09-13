@@ -1762,16 +1762,18 @@ class _ProcessHarnessWebSession implements HarnessSessionHandle {
 
 Future<void> _stopProcessTree(Process process) async {
   if (Platform.isWindows) {
-    await Process.run('taskkill.exe', <String>[
+    final Process taskkill = await Process.start('taskkill.exe', <String>[
       '/PID',
       '${process.pid}',
       '/T',
       '/F',
-    ], runInShell: false).timeout(
-      const Duration(seconds: 5),
-      onTimeout: () => ProcessResult(0, -1, '', ''),
-    );
-    if (await _waitForProcessExit(process, const Duration(seconds: 2))) return;
+    ], runInShell: false);
+    try {
+      await taskkill.exitCode.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      taskkill.kill();
+    }
+    if (await _waitForProcessExit(process, const Duration(seconds: 1))) return;
     process.kill();
     if (await _waitForProcessExit(process, const Duration(seconds: 2))) return;
   } else {
