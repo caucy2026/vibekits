@@ -48,6 +48,7 @@ $required = @(
   'tools\harness\builtin-skills\kemi-s1-hardware-debug\agents\openai.yaml',
   'tools\harness\builtin-skills\kemi-s1-hardware-debug\references\s1-profile.md',
   'tools\harness\builtin-skills\kemi-s1-hardware-debug\references\hiv730-project-routing.md',
+  'tools\lark-cli\lark-cli.exe',
   'tools\mihomo\mihomo.exe',
   'tools\mihomo\vibekits-mihomo-runtime.json',
   'tools\mihomo\Country.mmdb',
@@ -117,4 +118,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Harness approval plugin syntax check failed' }
 & $node --check (Join-Path $bundle 'tools\harness\vibekits-session-rebind.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness session rebind helper syntax check failed' }
 
-Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; $ghVersion; required runtimes: $($required.Count)"
+$larkCli = Join-Path $bundle 'tools\lark-cli\lark-cli.exe'
+$larkVersion = (& $larkCli --version 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $larkVersion -notmatch '1\.0\.92') {
+  throw "Bundled Lark CLI failed version smoke test: $larkVersion"
+}
+$larkSchema = (& $larkCli schema calendar.events.get 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or
+    $larkSchema -notmatch 'calendar_id' -or
+    $larkSchema -notmatch 'calendar:calendar:readonly') {
+  throw 'Bundled Lark CLI failed calendar schema smoke test'
+}
+
+Write-Host "Verified bundle $bundle; version $ExpectedVersion; $gitVersion; $ghVersion; Lark CLI $larkVersion; required runtimes: $($required.Count)"

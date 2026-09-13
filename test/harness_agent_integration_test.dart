@@ -131,7 +131,15 @@ void main() {
         return 124;
       },
     );
-    expect(code, 0, reason: output.toString());
+    expect(
+      code,
+      0,
+      reason:
+          '${output.toString()}\n'
+          'modelRequests=${modelRequests.length} '
+          'taskRequests=${taskRequests.length} '
+          'nativeApprovals=$nativeApprovals',
+    );
     expect(output.toString(), contains('VIBEKITS_FULL_STACK_OK'));
     expect(taskRequests.length, greaterThanOrEqualTo(2));
     expect(

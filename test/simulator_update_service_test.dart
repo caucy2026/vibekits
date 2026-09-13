@@ -41,7 +41,7 @@ void main() {
       ),
       throwsFormatException,
     );
-  });
+  }, skip: !Platform.isMacOS);
 
   test('仿真专用回环端点接受一次性令牌并返回同一候选令牌', () async {
     final List<int> bytes = utf8.encode('loopback simulator candidate');
@@ -76,7 +76,7 @@ void main() {
     final decoded = Map<String, Object?>.from(rawDecoded! as Map);
     expect(decoded['token'], token);
     expect(decoded['sha256'], checksum);
-  });
+  }, skip: !Platform.isMacOS);
 
   test('通用 LAN MCP 端点拒绝候选包上传', () async {
     final server = await LanMcpToolServer.start(

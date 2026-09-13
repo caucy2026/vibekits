@@ -223,13 +223,17 @@ final class HarnessSimulatorTargetRuntime {
         }
         if (!ssh.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
       }
-      await _setNativeGate(host.executable, true);
       final endpoint = await _startEndpoint();
       if (generation != _generation) {
         await endpoint.close();
         return;
       }
       _endpoint = endpoint;
+      // Do not advertise the native RustDesk tunnel gate until the fixed
+      // loopback endpoint is actually listening. Otherwise a controller that
+      // connects during startup receives an immediate connection refusal even
+      // though the target UI is still preparing.
+      await _setNativeGate(host.executable, true);
       await _settings.saveRelayFingerprint(relayFingerprint);
       await _settings.saveRelayExecutable(relayExecutable);
       _publish(

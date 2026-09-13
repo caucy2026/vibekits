@@ -1,0 +1,44 @@
+# VibeKits 1.9.0-dev.201 远程仿真与并存验收记录
+
+日期：2026-09-13
+
+## 结论
+
+dev.201 修正仿真目标启动顺序：固定回环 MCP 端点 `127.0.0.1:32147` 必须先真实监听，随后才开放原生 RustDesk 仿真隧道授权，避免控制端在目标仍准备时收到即时连接拒绝。
+
+VibeKits 远程仿真保持独立：不依赖 KEMI 远程办公 App、桌面会话、进程、ID、配置、密码或 IPC。远程办公存在时仅可作为人工观察辅助；VibeKits 仍通过自己的 MCP、SSH/SFTP 和 ADB 通道完成工作。双方同时运行时不得互相启动、停止、切换或占用会话。
+
+## 自动门禁
+
+- macOS 全量 `flutter analyze`：0 issue。
+- macOS 远程仿真启动、控制端、RustDesk Harness、生命周期组合：32 passed，真实双机用例按环境开关跳过。
+- Windows 58 D 盘定向分析：0 issue。
+- Windows 58 远程仿真、SSH、ADB、Harness 工具桥与 RustDesk Harness 组合：77/77 passed。
+- 新增真实双机 ADB 验收步骤：设备目录、`getprop ro.product.model`、有界 logcat、push/pull 字节回环，以及显式提供测试 APK 时的覆盖安装。
+
+## macOS 候选
+
+- 版本：`1.9.0-dev.201+2201`。
+- Universal：`x86_64 arm64`；最低系统：macOS 12.0。
+- 36 个 Mach-O 使用 `Developer ID Application: zhen ji (26T5WV4GLP)` 签名；签名后本地 Harness 工具桥真实响应。
+- Apple 公证：`Accepted`，Submission ID `b1793214-20e7-4dac-ad61-744fc83a2dd0`。
+- staple/validate、深度验签和 Gatekeeper `Notarized Developer ID` 通过。
+- ZIP：`/Volumes/ORICO/kemi-build-cache/vibekits-dev201/delivery/Vibekits-1.9.0-dev.201+2201-macOS-universal-notarized.zip`
+- 大小：311,504,238 bytes。
+- SHA-256：`ea3c5b5ac1c246d2b18918ba3c26dad781e5d196678545d5a50bd1e41b89a14e`。
+
+## Windows 候选
+
+- Windows 58 D 盘增量 Release 构建成功，耗时 795.4 秒。
+- 包内版本 `1.9.0-dev.201+2201`；Git 2.55.0.windows.3、GitHub CLI 2.100.0、Lark CLI 1.0.92 和 41 项自包含运行时门禁通过。
+- Session 0 使用独立数据目录真实启动 20 秒，进程保持运行并生成 164-byte Harness bridge；随后只关闭该测试进程。
+- ZIP：`/Volumes/ORICO/kemi-build-cache/vibekits-dev201/delivery/Vibekits-1.9.0-dev.201+2201-windows-x64-final.zip`
+- 大小：302,356,754 bytes。
+- SHA-256：`6eacf24a03f7fec80e047e39551f30125b2f956206fe6a688939193d493fa1aa`。
+- 当前 Windows 包未取得 Authenticode 证据；可作为已真实启动的测试候选，不得表述为已签名 Windows 正式包。
+
+## 真实并存与剩余双机门禁
+
+本机真实观察到 KEMI 远程办公主进程、连接管理器与 `VibekitsHarness` 中继同时持续运行；VibeKits 中继返回 routing ID `1554650784`、HBBS online、registration key confirmed，查询过程未启动、停止或切换远程办公会话。
+
+目标 ID `4456560334` 的强制 HBBR 实测仍在连接固定目标 `127.0.0.1:32147` 时被目标端拒绝，说明目标机当前运行包没有让仿真 MCP 端点真实就绪。必须在该目标安装本页精确 dev.201 公证包、重新打开仿真开关后，继续完成 P2P 与 forceRelay 两轮 MCP、SSH/SFTP、日志和 ADB 真机闭环；该证据取得前不得宣称远程仿真最终完成或发布到正式渠道。

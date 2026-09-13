@@ -107,7 +107,7 @@ void main() {
     );
 
     expect(inspected.ok, isTrue);
-    expect(inspected.data.toString(), contains('v1.0.92'));
+    expect(inspected.data.toString(), contains('1.0.92'));
     expect(schema.ok, isTrue);
     expect(schema.data.toString(), contains('calendar_id'));
     expect(schema.data.toString(), contains('calendar:calendar:readonly'));

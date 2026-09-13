@@ -46,7 +46,10 @@ void main() {
         '${bundle.path}/dsh/lib/bin.js',
       );
       expect(moved, hasLength(1));
-      expect(await Link(moved.single).target(), bundle.path);
+      expect(
+        (await Link(moved.single).target()).replaceAll('\\', '/'),
+        bundle.path.replaceAll('\\', '/'),
+      );
       expect(await marker.readAsString(), 'signed');
       expect(
         await FileSystemEntity.type(

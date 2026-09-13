@@ -232,6 +232,12 @@ if(EXISTS "${HARNESS_RUNTIME_DIR}/harness-runtime.json")
     install(FILES "${CMAKE_SOURCE_DIR}/../native/lark_cli/windows/runtime/lark-cli.exe"
       DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/lark-cli"
       COMPONENT Runtime)
+  else()
+    install(CODE "
+      if(CMAKE_INSTALL_CONFIG_NAME STREQUAL \"Release\")
+        message(FATAL_ERROR \"Bundled Lark CLI runtime is missing. Run tool/prepare_lark_cli_runtime.ps1 before Release packaging.\")
+      endif()
+    " COMPONENT Runtime)
   endif()
 else()
   install(CODE "

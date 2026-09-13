@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-13 · dev.201 远程仿真启动顺序、跨平台包与远程办公并存
+
+- 统一明确独立性：VibeKits 的 `VibekitsHarness` 身份、配置、IPC、固定 MCP/SSH 端点和会话不依赖 KEMI 远程办公；远程办公存在时只能辅助人工观察，双方同时工作不得互相启动、停止、抢占或切换会话。
+- 修正目标端启动竞态：先让 `127.0.0.1:32147` 真实监听，再开放原生仿真隧道 gate；新增顺序回归，并扩展真实双机脚本覆盖 ADB 目录、shell、有限 logcat、push/pull 和可选 APK 安装。
+- macOS `1.9.0-dev.201+2201` 已完成 Universal/macOS 12+、36 个 Mach-O Developer ID、签名包内 Harness 实启、Apple 公证 `Accepted`（`b1793214-20e7-4dac-ad61-744fc83a2dd0`）、staple 与 Gatekeeper。Windows 58 D 盘同源候选完成 0 issue 定向分析、77/77 组合回归、Release 构建、41 项包内运行时校验和 Session 0 隔离真实启动；Windows 尚无 Authenticode 证据。
+- 目标 ID `4456560334` 的 forceRelay 仍被目标端 `32147` 拒绝，须先安装精确 dev.201 包再完成双机 MCP/SSH/SFTP/ADB 闭环。完整证据与两个候选 SHA-256 见 `docs/acceptance/V1_9_0_DEV201_REMOTE_SIMULATOR_COEXISTENCE_2026-09-13.md`。
+
 ## 2026-09-13 · dev.200 Harness 真实停止与退出清理
 
 - 新增桌面官方 Harness 真实长任务停止门禁，不再只验证正常完成。dev.199 首次执行暴露：Node 进程退出后，stdout/stderr、日志或回环工具服务器的异步清理可能无限等待，导致公开 `exitCode` 不完成，界面继续忙碌并影响后续发送；因此已经签名公证的 dev.199 候选立即作废，不得发布。

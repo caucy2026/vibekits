@@ -327,12 +327,11 @@ class LmcpInboundCallHub {
     final approval = _approvals.remove(traceId);
     if (approval != null && !approval.isCompleted) approval.complete(false);
     _emit();
-    final Duration elapsed = now.difference(current.startedAt);
-    final Duration remaining = elapsed >= minimumVisibleDuration
-        ? Duration.zero
-        : minimumVisibleDuration - elapsed;
     _removalTimers.remove(traceId)?.cancel();
-    _removalTimers[traceId] = Timer(remaining, () {
+    // The terminal result itself must remain readable for the full interval.
+    // Measuring from begin() made fast calls disappear immediately on slower
+    // Windows machines when setup work already exceeded that interval.
+    _removalTimers[traceId] = Timer(minimumVisibleDuration, () {
       _removalTimers.remove(traceId);
       _calls.remove(traceId);
       _emit();

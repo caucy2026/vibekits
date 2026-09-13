@@ -1182,10 +1182,16 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
   final String executableDirectory = File(
     Platform.resolvedExecutable,
   ).parent.path;
+  final String diagnosticRuntime =
+      Platform.environment['VIBEKITS_HARNESS_RUNTIME_ROOT']?.trim() ?? '';
   final Directory? appBundle = Platform.isMacOS
       ? macOsAppBundleForExecutable(Platform.resolvedExecutable)
       : null;
   final List<Directory> candidates = <Directory>[
+    if (!const bool.fromEnvironment('dart.vm.product') &&
+        diagnosticRuntime.isNotEmpty &&
+        File(diagnosticRuntime).isAbsolute)
+      Directory(diagnosticRuntime),
     if (appBundle != null)
       Directory(
         '${appBundle.path}${Platform.pathSeparator}Contents'

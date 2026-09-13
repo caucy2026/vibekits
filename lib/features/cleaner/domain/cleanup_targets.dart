@@ -579,7 +579,7 @@ abstract final class CleanupTargetDiscovery {
     String systemDrive,
   ) {
     final Directory users = Directory(_join(systemDrive, <String>['Users']));
-    if (!users.existsSync()) return;
+    if (!_directoryExists(users.path)) return;
     List<FileSystemEntity> profiles;
     try {
       profiles = users.listSync(followLinks: false);
@@ -598,7 +598,7 @@ abstract final class CleanupTargetDiscovery {
         final Directory appData = Directory(
           _join(profile.path, <String>['AppData', area]),
         );
-        if (!appData.existsSync()) continue;
+        if (!_directoryExists(appData.path)) continue;
         added += _discoverTransientChildren(
           targets,
           appData,
@@ -879,7 +879,7 @@ abstract final class CleanupTargetDiscovery {
     required String userData,
   }) {
     final Directory root = Directory(userData);
-    if (!root.existsSync()) return;
+    if (!_directoryExists(root.path)) return;
     List<FileSystemEntity> profiles;
     try {
       profiles = root.listSync(followLinks: false);
@@ -921,7 +921,7 @@ abstract final class CleanupTargetDiscovery {
     final Directory profiles = Directory(
       _join(local, <String>['Mozilla', 'Firefox', 'Profiles']),
     );
-    if (!profiles.existsSync()) return;
+    if (!_directoryExists(profiles.path)) return;
     try {
       for (final FileSystemEntity profile in profiles.listSync(
         followLinks: false,
@@ -956,7 +956,7 @@ abstract final class CleanupTargetDiscovery {
     String temp,
   ) {
     final Directory root = Directory(temp);
-    if (!root.existsSync()) return;
+    if (!_directoryExists(root.path)) return;
     final DateTime cutoff = DateTime.now().subtract(const Duration(hours: 24));
     try {
       for (final FileSystemEntity entity in root.listSync(followLinks: false)) {
@@ -1018,7 +1018,10 @@ abstract final class CleanupTargetDiscovery {
     CleanupRiskLevel riskLevel = CleanupRiskLevel.safe,
     String ruleSource = '内置规则',
   }) {
-    if (!Directory(path).existsSync()) return;
+    // Some Windows system caches are present but deny metadata access to
+    // non-administrator users. Discovery is best-effort: an inaccessible path
+    // must be omitted instead of aborting the whole cleaner (and its isolate).
+    if (!_directoryExists(path)) return;
     targets.add(
       CleanupScanTarget(
         id: id,
@@ -1048,7 +1051,7 @@ abstract final class CleanupTargetDiscovery {
     final Directory root = Directory(
       _join(local, <String>['Microsoft', 'VisualStudio']),
     );
-    if (!root.existsSync()) return;
+    if (!_directoryExists(root.path)) return;
     try {
       for (final FileSystemEntity product in root.listSync(
         followLinks: false,
@@ -1087,7 +1090,7 @@ abstract final class CleanupTargetDiscovery {
       ('Google', 'Android Studio'),
     ]) {
       final Directory root = Directory(_join(local, <String>[vendor]));
-      if (!root.existsSync()) continue;
+      if (!_directoryExists(root.path)) continue;
       try {
         for (final FileSystemEntity product in root.listSync(
           followLinks: false,
@@ -1128,6 +1131,14 @@ abstract final class CleanupTargetDiscovery {
       } on FileSystemException {
         continue;
       }
+    }
+  }
+
+  static bool _directoryExists(String path) {
+    try {
+      return Directory(path).existsSync();
+    } on FileSystemException {
+      return false;
     }
   }
 

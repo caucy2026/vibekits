@@ -172,7 +172,10 @@ abstract final class SystemResourceService {
     ResourceProcessRunner? processRunner,
   }) async {
     if (Platform.isWindows) {
-      return _inspectWindows(processRunner ?? Process.run);
+      final SystemResourceProbeController? controller = processRunner == null
+          ? SystemResourceProbeController()
+          : null;
+      return _inspectWindows(processRunner ?? controller!.run);
     }
     if (Platform.isAndroid) {
       final ProcessResult result = await (processRunner ?? Process.run)(
@@ -577,30 +580,68 @@ echo __MODEL__; getprop ro.product.model
   static const String _windowsProbeScript = r'''
 $ErrorActionPreference='SilentlyContinue'
 Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class VibeKitsSystemTimes {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct FileTime { public uint Low; public uint High; }
+  [DllImport("kernel32.dll", SetLastError = true)]
+  static extern bool GetSystemTimes(out FileTime idle, out FileTime kernel, out FileTime user);
+  static long Value(FileTime value) { return ((long)value.High << 32) | value.Low; }
+  public static long[] Read() {
+    FileTime idle, kernel, user;
+    if (!GetSystemTimes(out idle, out kernel, out user)) return new long[] { 0, 0 };
+    return new long[] { Value(idle), Value(kernel) + Value(user) };
+  }
+}
+'@
 $info=New-Object Microsoft.VisualBasic.Devices.ComputerInfo
 $logical=[Math]::Max(1,[int]$env:NUMBER_OF_PROCESSORS)
 $first=@{}
-Get-Process | ForEach-Object {$first[$_.Id]=[double]$_.CPU}
+$tracked=@(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 32)
+foreach($process in $tracked) {
+  try {$first[$process.Id]=[double]$process.CPU} catch {}
+}
+$systemFirst=[VibeKitsSystemTimes]::Read()
 $interval=0.45
 Start-Sleep -Milliseconds 450
-$samples=@()
-$cpuTotal=0.0
-Get-Process | ForEach-Object {
-  $before=$first[$_.Id]
-  $delta=if($null -eq $before){0}else{[Math]::Max(0,[double]$_.CPU-$before)}
-  $percent=[Math]::Min(100,[Math]::Round($delta/$interval/$logical*100,1))
-  $cpuTotal+=$percent
-  $samples+=[pscustomobject]@{pid=[int]$_.Id;name=$_.ProcessName;cpuPercent=$percent;memoryBytes=[int64]$_.WorkingSet64}
-}
+$systemSecond=[VibeKitsSystemTimes]::Read()
+$systemDelta=[Math]::Max(1,[double]($systemSecond[1]-$systemFirst[1]))
+$idleDelta=[Math]::Max(0,[double]($systemSecond[0]-$systemFirst[0]))
+$cpuTotal=[Math]::Min(100,[Math]::Max(0,[Math]::Round((1-$idleDelta/$systemDelta)*100,1)))
+$trackedIds=@{}; foreach($process in $tracked){$trackedIds[$process.Id]=$true}
+$samples=@(foreach($process in @(Get-Process | Where-Object {$trackedIds.ContainsKey($_.Id)})) {
+  try {
+    $before=$first[$process.Id]
+    $delta=if($null -eq $before){0}else{[Math]::Max(0,[double]$process.CPU-$before)}
+    $percent=[Math]::Min(100,[Math]::Round($delta/$interval/$logical*100,1))
+    [pscustomobject]@{pid=[int]$process.Id;name=$process.ProcessName;cpuPercent=$percent;memoryBytes=[int64]$process.WorkingSet64}
+  } catch {}
+})
 $top=$samples | Sort-Object @{Expression={$_.cpuPercent};Descending=$true},@{Expression={$_.memoryBytes};Descending=$true} | Select-Object -First 15
 $disks=[System.IO.DriveInfo]::GetDrives() | Where-Object {$_.DriveType -eq 'Fixed' -and $_.IsReady} | ForEach-Object {[pscustomobject]@{name=$_.Name.TrimEnd('\');totalBytes=[int64]$_.TotalSize;freeBytes=[int64]$_.AvailableFreeSpace}}
-$videoKeys=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Video\*\0000' | Where-Object {$_.DriverDesc}
-$gpuNames=@($videoKeys | ForEach-Object {$_.DriverDesc} | Select-Object -Unique)
-$gpuMemory=($videoKeys | ForEach-Object {if($_.'HardwareInformation.MemorySize'){[int64]$_.'HardwareInformation.MemorySize'}else{0}} | Measure-Object -Sum).Sum
+$gpuNames=@()
+$gpuMemory=[int64]0
+try {
+  $videoRoot=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Video')
+  foreach($adapter in @($videoRoot.GetSubKeyNames())) {
+    $videoKey=$videoRoot.OpenSubKey($adapter + '\0000')
+    if($null -eq $videoKey){continue}
+    $driver=$videoKey.GetValue('DriverDesc')
+    if($driver){$gpuNames+=([string]$driver)}
+    $memory=$videoKey.GetValue('HardwareInformation.MemorySize')
+    if($memory -is [int]){$gpuMemory+=[uint32]$memory}
+    elseif($memory -is [long]){$gpuMemory+=[int64]$memory}
+    $videoKey.Dispose()
+  }
+  $videoRoot.Dispose()
+  $gpuNames=@($gpuNames | Select-Object -Unique)
+} catch {}
 # GPU Engine performance counters are optional and can block indefinitely on
 # machines where the provider is absent or rebuilding. Names and installed
 # memory remain useful evidence; utilization is reported as unavailable so a
 # secondary metric can never stall the complete physical resource snapshot.
-[pscustomobject]@{target=$env:COMPUTERNAME;cpuPercent=[Math]::Min(100,[Math]::Round($cpuTotal,1));logicalProcessors=$logical;memoryTotalBytes=[int64]$info.TotalPhysicalMemory;memoryAvailableBytes=[int64]$info.AvailablePhysicalMemory;gpuNames=$gpuNames;gpuPercent=$null;gpuMemoryTotalBytes=if($gpuMemory){[int64]$gpuMemory}else{$null};gpuMemoryUsedBytes=$null;storage=@($disks);processes=@($top)} | ConvertTo-Json -Depth 5 -Compress
+[pscustomobject]@{target=$env:COMPUTERNAME;cpuPercent=[Math]::Min(100,[Math]::Round($cpuTotal,1));logicalProcessors=$logical;memoryTotalBytes=[int64]$info.TotalPhysicalMemory;memoryAvailableBytes=[int64]$info.AvailablePhysicalMemory;gpuNames=$gpuNames;gpuPercent=$null;gpuMemoryTotalBytes=if($gpuMemory -gt 0){[int64]$gpuMemory}else{$null};gpuMemoryUsedBytes=$null;storage=@($disks);processes=@($top)} | ConvertTo-Json -Depth 5 -Compress
 ''';
 }

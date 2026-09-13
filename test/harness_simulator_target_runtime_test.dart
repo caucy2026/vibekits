@@ -107,6 +107,37 @@ void main() {
     expect(sshKeysRevoked, isTrue);
   });
 
+  test('固定回环端点就绪后才开放原生仿真隧道', () async {
+    final order = <String>[];
+    final runtime = HarnessSimulatorTargetRuntime(
+      settings: HarnessSimulatorAccessSettings(
+        read: (_) async => null,
+        write: (_, _) async {},
+      ),
+      inspectHost: () async => _host,
+      startHost: () async => _host,
+      startEndpoint: () async {
+        order.add('endpoint-listening');
+        return HarnessSimulatorEndpointLease(
+          port: HarnessSimulatorTargetRuntime.remotePort,
+          close: () async {},
+        );
+      },
+      stopHost: () async {},
+      setNativeGate: (_, enabled) async {
+        if (enabled) order.add('native-gate-open');
+      },
+      relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
+    );
+
+    await runtime.enable();
+
+    expect(order, <String>['endpoint-listening', 'native-gate-open']);
+    await runtime.disable();
+  });
+
   test('普通远程协助仍打开时关闭仿真机不会误停共享网络进程', () async {
     var hostStopped = false;
     final runtime = HarnessSimulatorTargetRuntime(

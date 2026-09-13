@@ -78,6 +78,119 @@ void main() {
           // closeAll remains the authoritative transport cleanup path.
         }
       });
+      final String adbSerial =
+          Platform.environment['VIBEKITS_REAL_REMOTE_ADB_SERIAL'] ?? '';
+      var adbVerified = false;
+      if (adbSerial.isNotEmpty) {
+        final Map<String, Object?> adbList = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.adb.list_devices',
+            const <String, Object?>{},
+          ),
+        );
+        final List<Object?> devices = List<Object?>.from(
+          adbList['devices']! as List,
+        );
+        expect(
+          devices.whereType<Map>().any(
+            (Map<Object?, Object?> device) =>
+                '${device['serial']}' == adbSerial &&
+                '${device['state']}' == 'device',
+          ),
+          isTrue,
+        );
+        final Map<String, Object?> adbIdentity = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.adb.shell',
+            <String, Object?>{
+              'serial': adbSerial,
+              'arguments': const <String>['getprop', 'ro.product.model'],
+            },
+          ),
+        );
+        expect('${adbIdentity['stdout']}'.trim(), isNotEmpty);
+        _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.adb.logcat',
+            <String, Object?>{'serial': adbSerial, 'lines': 20},
+          ),
+        );
+
+        final String androidPath =
+            '/data/local/tmp/vibekits-simulator-$routingId-proof.txt';
+        final String roundTripPath = '$remotePath.adb-roundtrip';
+        addTearDown(() async {
+          try {
+            await controller.call(
+              routingId,
+              'vibekits.adb.shell',
+              <String, Object?>{
+                'serial': adbSerial,
+                'arguments': <String>['rm', '-f', androidPath],
+              },
+            );
+            await controller.runSshCommand(routingId, "rm -f '$roundTripPath'");
+          } on Object {
+            // The transport teardown still closes every managed tunnel.
+          }
+        });
+        _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.adb.push_file',
+            <String, Object?>{
+              'serial': adbSerial,
+              'localPath': remotePath,
+              'remotePath': androidPath,
+            },
+          ),
+        );
+        final Map<String, Object?> adbPull = _toolData(
+          await controller
+              .call(routingId, 'vibekits.adb.pull_file', <String, Object?>{
+                'serial': adbSerial,
+                'remotePath': androidPath,
+                'localPath': roundTripPath,
+                'overwrite': true,
+              }),
+        );
+        expect(adbPull['bytes'], upload['bytes']);
+
+        final String apkPath =
+            Platform.environment['VIBEKITS_REAL_REMOTE_APK_PATH'] ?? '';
+        if (apkPath.isNotEmpty) {
+          final Map<String, Object?> apkUpload = await controller.uploadFile(
+            routingId,
+            apkPath,
+          );
+          final String remoteApkPath = '${apkUpload['remotePath']}';
+          addTearDown(() async {
+            try {
+              await controller.runSshCommand(
+                routingId,
+                "rm -f '$remoteApkPath'",
+              );
+            } on Object {
+              // The target may already be offline during teardown.
+            }
+          });
+          _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.adb.install_apk',
+              <String, Object?>{
+                'serial': adbSerial,
+                'apkPath': remoteApkPath,
+                'replace': true,
+              },
+            ),
+          );
+        }
+        adbVerified = true;
+      }
       Map<String, Object?> assistance = _toolData(
         await controller.call(
           routingId,
@@ -119,6 +232,7 @@ void main() {
         'forceRelay=$forceRelay responseKeys=${result.keys.length} '
         'sshReady=${sshProbe['ok'] == true} '
         'uploadBytes=${upload['bytes']} uploadShaVerified=true '
+        'adbVerified=$adbVerified '
         'assistanceEnabled=${assistance['enabled'] == true}',
       );
     },

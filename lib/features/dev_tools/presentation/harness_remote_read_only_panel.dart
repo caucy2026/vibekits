@@ -54,7 +54,9 @@ class HarnessRemoteReadOnlyPanel extends StatelessWidget {
                         ),
                         Text(
                           stale
-                              ? model.error ?? '连接中断，以下为最后一次同步记录'
+                              ? model.error == null
+                                    ? '连接中断，以下为最后一次同步记录'
+                                    : '${model.error} · 以下为最后一次同步记录'
                               : '项目状态已同步${_latency(model.roundTrip)}',
                         ),
                       ],
