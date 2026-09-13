@@ -21,6 +21,8 @@ dev.205 在 RustDesk Harness 服务进程内登记由原生握手得到的真实
 - VibeKits 共享回归：远程仿真控制器、Android 双屏合同和主页远程状态共 18/18 通过。
 - macOS 候选：`1.9.0.205 (2205)`；主程序及内置 Harness Relay 均为 `x86_64 + arm64`，完整 macOS 12+ 运行时门禁通过。
 - Developer ID：`Developer ID Application: zhen ji (26T5WV4GLP)`；36 个 Mach-O 深度严格验签通过，签名后 Node/DSH 实启通过。
+- Apple 公证：`Accepted`，Submission ID `d28c4486-3056-4e3a-8d1b-dd628be02c98`；ticket 已 staple/validate，Gatekeeper 为 `Notarized Developer ID`。
+- 最终 Mac ZIP：`/Volumes/ORICO/kemi-build-cache/vibekits-dev205/delivery/Vibekits-1.9.0-dev.205+2205-macOS-universal-notarized.zip`，311,597,307 bytes，SHA-256 `2465b92b35954b81ef6ca5f04f4953f70db12035273210b3d55fba745c3c5368`。
 - PAD 63（`1.9.0-dev.204+2204`）连接目标 Mac ID `1554650784`：真实显示 `204 项工具`，并报告“进程与文件自检通过”。
 - Windows 58 连接同一目标：强制 HBBR 与直连优先/自动回退两条路径均通过；每次均取得 204 项工具、SSH 就绪、远程命令、28 字节 SFTP 上传与远端 SHA-256 回读。
 - 目标 Mac 原生连接表在 Windows 测试期间记录真实控制端 `peerId=8296293831`、`authorized=true`、`portForward=127.0.0.1:22`，证明授权来自原生 P2P 隧道身份而非请求头。
@@ -28,4 +30,4 @@ dev.205 在 RustDesk Harness 服务进程内登记由原生握手得到的真实
 
 ## 结论与剩余发布门禁
 
-本轮“58 和 63 双向作为控制端仿真目标 Mac”已通过，且 Windows 的 SSH/文件能力与 PAD 的 MCP 能力均为真实设备证据。dev.205 在完成 Apple 公证、staple、Gatekeeper 和最终归档校验前仍只能称为签名候选；不得把未公证包标记为正式市场版本。
+本轮“58 和 63 双向作为控制端仿真目标 Mac”已通过，且 Windows 的 SSH/文件能力与 PAD 的 MCP 能力均为真实设备证据。dev.205 Mac 已完成 Developer ID、公证、staple、Gatekeeper 和最终归档校验，可以作为本轮正式 Mac 交付候选。

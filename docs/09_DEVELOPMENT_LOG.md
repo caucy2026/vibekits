@@ -1703,4 +1703,4 @@
 
 - 修复受管 RustDesk Harness 快速隧道不经过远程桌面 Connection Manager 时丢失真实控制端身份的问题：服务进程直接登记原生握手 peer、连接号和固定转发目标，连接关闭即清理；授权继续只接受原生连接或已持久授权的精确 SSH 公钥，不信任请求头自报身份。
 - Windows 58 对本机目标 ID `1554650784` 的强制 HBBR 与直连优先/自动回退均真实通过 204 项工具、SSH 命令、28 字节文件上传和 SHA-256 回读；PAD 63 对同一目标真实通过 204 项工具及进程/文件自检。RustDesk 双平台单测 2/2、VibeKits 共用回归 18/18 通过。
-- macOS dev.205 候选为 Universal `x86_64 + arm64`、macOS 12+，36 个 Mach-O Developer ID 深度验签及签名后 Harness/Node/DSH 门禁通过。Apple 公证和最终归档仍按发布门禁执行。完整证据见 `docs/acceptance/V1_9_0_DEV205_DUAL_CONTROLLER_REMOTE_SIMULATION_2026-09-14.md`。
+- macOS dev.205 候选为 Universal `x86_64 + arm64`、macOS 12+，36 个 Mach-O Developer ID 深度验签及签名后 Harness/Node/DSH 门禁通过；Apple 公证 `Accepted`（`d28c4486-3056-4e3a-8d1b-dd628be02c98`），staple、Gatekeeper 与最终 ZIP 校验均通过。完整证据见 `docs/acceptance/V1_9_0_DEV205_DUAL_CONTROLLER_REMOTE_SIMULATION_2026-09-14.md`。
