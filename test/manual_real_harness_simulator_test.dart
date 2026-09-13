@@ -78,6 +78,132 @@ void main() {
           // closeAll remains the authoritative transport cleanup path.
         }
       });
+      final String macPackage =
+          Platform.environment['VIBEKITS_REAL_REMOTE_MAC_PACKAGE'] ?? '';
+      var appLifecycleVerified = false;
+      if (macPackage.isNotEmpty) {
+        final String appIdentity =
+            Platform.environment['VIBEKITS_REAL_REMOTE_MAC_IDENTITY'] ?? '';
+        final String appName =
+            Platform.environment['VIBEKITS_REAL_REMOTE_MAC_APP_NAME'] ?? '';
+        final String processName =
+            Platform.environment['VIBEKITS_REAL_REMOTE_MAC_PROCESS_NAME'] ??
+            appName;
+        expect(appIdentity, isNotEmpty);
+        expect(appName, isNotEmpty);
+        expect(processName, isNotEmpty);
+        expect(File(macPackage).existsSync(), isTrue);
+
+        final Map<String, Object?> packageUpload = await controller.uploadFile(
+          routingId,
+          macPackage,
+        );
+        final String remotePackage = '${packageUpload['remotePath']}';
+        addTearDown(() async {
+          try {
+            await controller.runSshCommand(routingId, "rm -f '$remotePackage'");
+          } on Object {
+            // Transport cleanup remains authoritative when the target closes.
+          }
+        });
+
+        Future<void> installLaunchInspectAndRemove() async {
+          final Map<String, Object?> installed = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.app_install',
+              <String, Object?>{
+                'packagePath': remotePackage,
+                'sha256': '${packageUpload['sha256']}',
+                'expectedIdentity': appIdentity,
+              },
+            ),
+          );
+          expect(installed['ok'], isTrue);
+          expect(installed['platform'], 'macos');
+          expect(installed['identity'], appIdentity);
+
+          final Map<String, Object?> listed = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.applications',
+              <String, Object?>{'query': appIdentity, 'limit': 20},
+            ),
+          );
+          expect(
+            (listed['applications']! as List).whereType<Map>().any(
+              (Map<Object?, Object?> app) => app['bundleId'] == appIdentity,
+            ),
+            isTrue,
+          );
+
+          final Map<String, Object?> launched = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.app_control',
+              <String, Object?>{'action': 'launch', 'target': appName},
+            ),
+          );
+          expect(launched['ok'], isTrue);
+          await Future<void>.delayed(const Duration(seconds: 1));
+
+          final Map<String, Object?> running = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.processes',
+              <String, Object?>{'query': processName, 'limit': 20},
+            ),
+          );
+          expect((running['processes']! as List), isNotEmpty);
+          final Map<String, Object?> logs = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.logs',
+              <String, Object?>{
+                'processName': processName,
+                'seconds': 120,
+                'maxLines': 100,
+              },
+            ),
+          );
+          expect(logs['source'], 'macOS Unified Log');
+
+          final Map<String, Object?> stopped = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.app_control',
+              <String, Object?>{'action': 'stop', 'target': processName},
+            ),
+          );
+          expect(stopped['ok'], isTrue);
+          final Map<String, Object?> removed = _toolData(
+            await controller.call(
+              routingId,
+              'vibekits.device.app_uninstall',
+              <String, Object?>{'identity': appIdentity},
+            ),
+          );
+          expect(removed['ok'], isTrue);
+          expect(removed['state'], 'moved_to_trash');
+        }
+
+        addTearDown(() async {
+          try {
+            await controller.call(
+              routingId,
+              'vibekits.device.app_uninstall',
+              <String, Object?>{'identity': appIdentity},
+            );
+          } on Object {
+            // A successful test already removed the fixture.
+          }
+        });
+        await installLaunchInspectAndRemove();
+        // Repeating the whole sensitive lifecycle verifies that the target
+        // does not ask this already verified caller to authorize again.
+        await installLaunchInspectAndRemove();
+        appLifecycleVerified = true;
+      }
       final String adbSerial =
           Platform.environment['VIBEKITS_REAL_REMOTE_ADB_SERIAL'] ?? '';
       var adbVerified = false;
@@ -232,12 +358,13 @@ void main() {
         'forceRelay=$forceRelay responseKeys=${result.keys.length} '
         'sshReady=${sshProbe['ok'] == true} '
         'uploadBytes=${upload['bytes']} uploadShaVerified=true '
+        'appLifecycleVerified=$appLifecycleVerified '
         'adbVerified=$adbVerified '
         'assistanceEnabled=${assistance['enabled'] == true}',
       );
     },
     skip: enabled ? false : 'set VIBEKITS_REAL_REMOTE_SIMULATOR=1',
-    timeout: const Timeout(Duration(minutes: 2)),
+    timeout: const Timeout(Duration(minutes: 5)),
   );
 }
 
