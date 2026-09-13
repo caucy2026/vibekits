@@ -1697,4 +1697,5 @@
 - 首次 SSH 批准写入的受限公钥标记现在作为一次授权的持久证据；活动原生连接表短暂缺行时，同一精确 peer 可继续敏感 App 生命周期，其他 peer、伪造 ID、普通 LAN MCP 和已撤销标记均失败关闭。
 - 相关静态分析 0 issue，SSH/目标运行时/LAN MCP 专项 23/23 通过；全量 Flutter 回归 865 项通过、20 项显式真实环境门禁跳过、0 失败。提交为 `f481ef8`。
 - Universal macOS 12+ 候选完成 36 个 Mach-O Developer ID 签名、签名后 Harness 实启、Apple 公证 `Accepted`（Submission ID `7e4a9856-72a5-4942-938e-ce576910099b`）、staple 与 Gatekeeper；最终 ZIP SHA-256 为 `aa9e7df43bcf2601b90f7782770ec187e852f9e744ea648f63e790133e1c1403`。
-- 目标安装 dev.204 后的双轮敏感 App 生命周期、远程项目/会话/命令/反馈/停止、63 真机和 Windows 58 dev.204 回归仍是未完成门禁。完整记录见 `docs/acceptance/V1_9_0_DEV204_ID_ONLY_AUTHORIZATION_2026-09-13.md`。
+- 63/75 PAD 已恢复 ADB 在线；63 的 dev.191 与 75 的 dev.188 均真实启动到 `SingleScreenActivity` 且进程存活。该结果只关闭旧版 Android 基础启动门禁，不能代替新版协同协议验收。
+- 目标安装 dev.204 后的双轮敏感 App 生命周期、远程项目/会话/命令/反馈/停止、63/75 新版协议和 Windows 58 dev.204 回归仍是未完成门禁。完整记录见 `docs/acceptance/V1_9_0_DEV204_ID_ONLY_AUTHORIZATION_2026-09-13.md`。

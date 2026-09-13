@@ -33,9 +33,10 @@
 - Apple 公证：`Accepted`，Submission ID `7e4a9856-72a5-4942-938e-ce576910099b`；staple、Gatekeeper `Notarized Developer ID` 和签名后本地 Harness 实启均通过。
 - 最终 ZIP：`/Volumes/ORICO/kemi-build-cache/vibekits-dev204/run-20260913-id-only-fix/delivery/Vibekits-1.9.0-dev.204+2204-macOS-universal-notarized.zip`。
 - ZIP 大小：311,507,939 bytes；SHA-256：`aa9e7df43bcf2601b90f7782770ec187e852f9e744ea648f63e790133e1c1403`。
+- 63 PAD 已恢复 ADB 在线：当前安装 `1.9.0-dev.191+2191`，可启动到 `SingleScreenActivity` 且进程存活；75 PAD 的 `1.9.0-dev.188+2188` 同样可启动。两项只证明旧版 Android 基础可用性，不替代 dev.204 协同协议或新版 APK 验收。
 
 ## 仍未完成的真实门禁
 
 目标 `4456560334` 必须安装上述精确 dev.204 包后，连续执行两遍安装、清单、启动、进程、Unified Log、停止和安全卸载，第二遍不得再次弹出 VibeKits 授权；最后确认 MCP/SSH 隧道和临时文件清零。
 
-远程协助的首次证书配对、项目/会话/历史同步、发送、增量反馈、独立停止和断开仍需真实双机证据。63 当前离线，不能用 75 或自动测试代替；Windows 58 还需同步 dev.204 并完成共享逻辑与真机运行回归。上述证据全部取得前，不声称整项远程协助/仿真发布门禁完成。
+远程协助的首次证书配对、项目/会话/历史同步、发送、增量反馈、独立停止和断开仍需真实双机证据。63/75 当前只完成旧版 App 启动可用性，尚未安装含 dev.204 共用逻辑的新 APK；Windows 58 还需同步 dev.204 并完成共享逻辑与真机运行回归。上述证据全部取得前，不声称整项远程协助/仿真发布门禁完成。
