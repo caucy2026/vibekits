@@ -1,6 +1,6 @@
 /// 与 pubspec.yaml 和 Windows Release 资源保持一致。
 abstract final class AppVersion {
-  static const String semantic = '1.9.0-dev.198';
-  static const int build = 2198;
+  static const String semantic = '1.9.0-dev.199';
+  static const int build = 2199;
   static const String display = 'v$semantic+$build';
 }

@@ -1,5 +1,12 @@
 # Vibekits 开发日志
 
+## 2026-09-13 · dev.199 Relay 来源与跨平台打包门禁修复
+
+- 实机升级验证确认 dev.198 打包了不支持 `--vibekits-harness-remote-assistance-access` 的旧 Relay；该候选作废，不得交付。
+- macOS 导入和最终打包同时强制检查远程协助 gate、连接、超时和 `stdin_eof_v1` 生命周期标记，并继续强制 Universal 架构。
+- Windows 构建改为真正执行 `vibekits_harness_relay::tests` 库级测试，拒绝“二进制构建成功但 0 项测试”的假绿，并同步检查远程协助 gate 标记。
+- RustDesk 传输源码提交固定为 `6b90c3ae6`；完整签名、公证和跨设备运行门禁通过前，dev.199 仍为阻断状态。
+
 ## 2026-09-13 · dev.198 远程协助旧 Relay 覆盖升级修复
 
 - dev.197 正式包真实运行时发现：已打开仿真后再打开远程协助，仍在运行的 dev.196 Relay 对新 gate 命令以退出码 2 和固定 `unsupported` 文本拒绝；控制层过早抛错，既有旧服务接管路径未执行。dev.197 因此不作为最终交付候选。

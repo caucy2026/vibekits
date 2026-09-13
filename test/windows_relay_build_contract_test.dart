@@ -20,12 +20,17 @@ void main() {
       expect(prepare, contains(r'RedirectStandardOutput = $true'));
       expect(prepare, contains(r'RedirectStandardError = $true'));
       expect(prepare, contains('cargo test --locked'));
+      expect(prepare, contains("--lib 'vibekits_harness_relay::tests'"));
       expect(prepare, contains('--features flutter'));
       expect(prepare, contains('cargo build --locked --release'));
       expect(prepare, contains('--target x86_64-pc-windows-msvc'));
       expect(prepare, contains('transport_connected'));
       expect(prepare, contains('transport_connect_timeout'));
       expect(prepare, contains('stdin_eof_v1'));
+      expect(
+        prepare,
+        contains('vibekits-harness-remote-assistance-access'),
+      );
       expect(prepare, contains('RUSTDESK-AGPL-3.0.txt'));
       expect(prepare, contains('Get-FileHash'));
       expect(cmake, contains('vibekits-harness-relay.json'));

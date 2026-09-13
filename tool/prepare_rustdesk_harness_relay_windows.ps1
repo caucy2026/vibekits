@@ -140,7 +140,7 @@ $env:PATH = "$(Join-Path $cargoHome 'bin');$env:PATH"
 
 Push-Location $RustDeskSource
 try {
-  & $cargo test --locked --target x86_64-pc-windows-msvc --features flutter --bin vibekits-harness-relay
+  & $cargo test --locked --target x86_64-pc-windows-msvc --features flutter --lib 'vibekits_harness_relay::tests'
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Rust tests failed' }
   & $cargo build --locked --release --target x86_64-pc-windows-msvc --features flutter --bin vibekits-harness-relay
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Release build failed' }
@@ -154,7 +154,12 @@ if (-not (Test-Path -LiteralPath $builtRelay -PathType Leaf)) {
   throw "Cargo did not produce the expected relay: $builtRelay"
 }
 $binaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($builtRelay))
-foreach ($marker in @('transport_connected', 'transport_connect_timeout', 'stdin_eof_v1')) {
+foreach ($marker in @(
+  'transport_connected',
+  'transport_connect_timeout',
+  'stdin_eof_v1',
+  'vibekits-harness-remote-assistance-access'
+)) {
   if (-not $binaryText.Contains($marker)) {
     throw "Harness relay is stale; missing marker: $marker"
   }
