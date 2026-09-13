@@ -25,4 +25,14 @@
 
 ## macOS 交付状态
 
-macOS Universal 12+、Developer ID、Apple 公证、staple、Gatekeeper、最终 ZIP 哈希与解包复验将在精确 dev.202 候选生成后补记。目标 Mac 安装前不把本机自动测试冒充双机验收成功。
+- 精确版本：`1.9.0-dev.202+2202`；Info.plist 为 `1.9.0.202 / 2202`。
+- Universal：`x86_64 arm64`；最低系统：macOS 12.0。
+- 完整运行时门禁通过：Harness、ADB、7-Zip/RAR、Git、GitHub CLI 及 App/Framework 均满足双架构和最低系统要求。
+- 36 个 Mach-O 使用 `Developer ID Application: zhen ji (26T5WV4GLP)`、Hardened Runtime 和 Apple 安全时间戳签名，深度严格验签通过。
+- 签名后及最终 ZIP 解包后均真实启动精确候选，本地 Harness 工具桥响应成功并正常退出。
+- Apple 公证：`Accepted`，Submission ID `56900286-5ce7-4e37-9762-5ce784a867b9`；App 已 staple/validate，Gatekeeper 为 `Notarized Developer ID`。
+- 最终 ZIP：`/Volumes/ORICO/kemi-build-cache/vibekits-dev202/run-20260913-one-time-auth/delivery/Vibekits-1.9.0-dev.202+2202-macOS-universal-notarized.zip`
+- 大小：311,506,250 bytes。
+- SHA-256：`fb0ffc4f46ab9d238df2356d861ccad8db686298d620a46c38c07e4a323b6406`。
+
+目标 Mac 安装前不把本机自动测试冒充双机验收成功。首次安装后应打开一次远程仿真，再用同一控制端 ID 连做两次敏感操作，确认第二次不出现应用内重复批准；随后关闭开关并确认连接和受管 SSH 授权均失效。

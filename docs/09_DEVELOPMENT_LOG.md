@@ -1679,3 +1679,4 @@
 - 授权不再只相信 HTTP 请求头里的设备 ID。目标端会实时查询原生连接表，只有 `peerId` 一致、连接已授权、未断开且确实连接固定回环端点 `32147` 时才继承授权；伪造 ID、普通 LAN MCP、缺少身份或断开的连接全部失败关闭。
 - 关闭远程仿真会关闭固定端点、关闭原生通道授权并撤销 VibeKits 管理的 SSH 公钥；设备身份变化、权限范围扩大、用户撤销或系统安全机制要求时仍需重新授权。macOS 自身强制的隐私/管理员提示不被绕过。
 - 版本、构建号、LMCP appVersion 和 catalogRevision 同步到 `1.9.0-dev.202+2202`。全量静态分析 0 issue；全量 Flutter 回归 864 项通过、21 项按真实设备/联网条件跳过、0 失败；一次授权与防伪专项组合 56 项通过、1 项真实资源探针按条件跳过。
+- 精确 Universal macOS 12+ 候选完成 36 个 Mach-O Developer ID 签名、签名后 Harness 实启、Apple 公证 `Accepted`（Submission ID `56900286-5ce7-4e37-9762-5ce784a867b9`）、staple、Gatekeeper、最终 ZIP 解包复验与再次实启。最终 ZIP SHA-256 为 `fb0ffc4f46ab9d238df2356d861ccad8db686298d620a46c38c07e4a323b6406`；目标双机一次授权行为仍须安装该精确包后验收，不用本机自动测试冒充。
