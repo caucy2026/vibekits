@@ -44,6 +44,16 @@ void main() {
         ),
         isTrue,
       );
+      // Probe an in-memory tool before any OS process is spawned. This keeps
+      // a transport lifecycle failure distinct from a target command timeout.
+      final Map<String, Object?> assistanceProbe = _toolData(
+        await controller.call(
+          routingId,
+          'vibekits.remote_assistance.status',
+          const <String, Object?>{},
+        ),
+      );
+      expect(assistanceProbe, isNotEmpty);
       final Map<String, Object?> result = await controller.call(
         routingId,
         'vibekits.device.processes',

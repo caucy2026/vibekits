@@ -274,6 +274,32 @@ abstract final class HarnessSystemSshService {
     };
   }
 
+  /// Returns whether this controller completed the one-time SSH pairing.
+  ///
+  /// The marker is written only by [authorizePublicKey] after target-side
+  /// approval. It lets later sensitive simulator calls reuse that durable
+  /// grant even when the native connection-status IPC has already coalesced
+  /// the short-lived HTTP port-forward row.
+  static Future<bool> hasAuthorizedPeer({
+    required String peerId,
+    Directory? homeDirectory,
+  }) async {
+    final String normalizedPeerId = peerId.trim();
+    if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(normalizedPeerId)) {
+      return false;
+    }
+    final String home = homeDirectory?.absolute.path ?? _userHome();
+    if (home.isEmpty) return false;
+    final File authorizedKeys = File('$home/.ssh/authorized_keys');
+    if (!await authorizedKeys.exists()) return false;
+    final String markerPrefix = 'vibekits-simulator-$normalizedPeerId-';
+    return (await authorizedKeys.readAsLines()).any((String line) {
+      final String trimmed = line.trim();
+      return trimmed.startsWith('from="127.0.0.1",') &&
+          trimmed.contains(' $markerPrefix');
+    });
+  }
+
   static Future<Map<String, Object?>> revokePublicKeys({
     required String peerId,
     Directory? homeDirectory,

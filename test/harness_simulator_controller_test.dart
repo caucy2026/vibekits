@@ -217,9 +217,13 @@ void main() {
         final knownHostsOption = arguments.firstWhere(
           (argument) => argument.startsWith('UserKnownHostsFile='),
         );
-        final knownHostsPath = knownHostsOption.substring(
+        final rawKnownHostsPath = knownHostsOption.substring(
           'UserKnownHostsFile='.length,
         );
+        final knownHostsPath =
+            rawKnownHostsPath.startsWith('"') && rawKnownHostsPath.endsWith('"')
+            ? rawKnownHostsPath.substring(1, rawKnownHostsPath.length - 1)
+            : rawKnownHostsPath;
         await File(
           knownHostsPath,
         ).writeAsString('[127.0.0.1]:43214 ssh-ed25519 AAAATESTHOSTKEY\n');
@@ -288,7 +292,7 @@ void main() {
       },
       mcpClient: mcp,
       processRunner: processRunner,
-      sshKeyRoot: Directory('${temporary.path}/keys'),
+      sshKeyRoot: Directory('${temporary.path}/keys with space'),
     );
 
     final connected = await controller.connect('4456560334');
@@ -304,6 +308,7 @@ void main() {
       executed.any(
         (line) =>
             line.contains('StrictHostKeyChecking=accept-new') &&
+            line.contains('UserKnownHostsFile="') &&
             line.contains('KexAlgorithms=curve25519-sha256') &&
             line.contains('HostKeyAlgorithms=ssh-ed25519'),
       ),

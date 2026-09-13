@@ -557,7 +557,7 @@ final class HarnessSimulatorController {
     '-o',
     'StrictHostKeyChecking=yes',
     '-o',
-    'UserKnownHostsFile=${ssh.knownHostsPath}',
+    _knownHostsOption(ssh.knownHostsPath),
     '-o',
     'GlobalKnownHostsFile=/dev/null',
     '-o',
@@ -579,7 +579,7 @@ final class HarnessSimulatorController {
     '-o',
     'StrictHostKeyChecking=yes',
     '-o',
-    'UserKnownHostsFile=${ssh.knownHostsPath}',
+    _knownHostsOption(ssh.knownHostsPath),
     '-o',
     'GlobalKnownHostsFile=/dev/null',
     '-o',
@@ -691,7 +691,7 @@ final class HarnessSimulatorController {
         '-o',
         'StrictHostKeyChecking=accept-new',
         '-o',
-        'UserKnownHostsFile=${knownHosts.path}',
+        _knownHostsOption(knownHosts.path),
         '-o',
         'GlobalKnownHostsFile=/dev/null',
         '-o',
@@ -707,9 +707,14 @@ final class HarnessSimulatorController {
         '$username@127.0.0.1',
       ]).timeout(timeout);
       await tunnel.waitUntilConnected(timeout: timeout);
-      await captureFuture;
+      final ProcessResult captureResult = await captureFuture;
       if (!await knownHosts.exists() || await knownHosts.length() == 0) {
-        throw StateError('无法读取隧道后的 SSH 主机密钥');
+        final String detail = _boundedOutput('${captureResult.stderr}').trim();
+        throw StateError(
+          '无法读取隧道后的 SSH 主机密钥'
+          '（exit=${captureResult.exitCode}'
+          '${detail.isEmpty ? '' : '，$detail'}）',
+        );
       }
       final scannedFingerprint = await _processRunner(
         _sshKeygenExecutable(),
@@ -733,7 +738,7 @@ final class HarnessSimulatorController {
         '-o',
         'StrictHostKeyChecking=yes',
         '-o',
-        'UserKnownHostsFile=${knownHosts.path}',
+        _knownHostsOption(knownHosts.path),
         '-o',
         'GlobalKnownHostsFile=/dev/null',
         '-i',
@@ -784,6 +789,16 @@ final class HarnessSimulatorController {
       Platform.isWindows ? 'scp.exe' : '/usr/bin/scp';
   static String _sshKeygenExecutable() =>
       Platform.isWindows ? 'ssh-keygen.exe' : '/usr/bin/ssh-keygen';
+
+  /// OpenSSH parses values passed through `-o` as configuration text even
+  /// when the process argument itself is already a single argv entry. Quote
+  /// paths so macOS' `Application Support` and Windows user directories do
+  /// not get truncated at the first space.
+  static String _knownHostsOption(String path) {
+    final String normalized = path.replaceAll('\\', '/').replaceAll('"', r'\"');
+    return 'UserKnownHostsFile="$normalized"';
+  }
+
   Future<Map<String, Object?>> installCandidate(
     String routingId,
     String packagePath, {

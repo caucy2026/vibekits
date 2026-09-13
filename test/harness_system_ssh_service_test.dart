@@ -84,6 +84,20 @@ void main() {
     expect(text, contains('from="127.0.0.1"'));
     expect(text, contains('no-port-forwarding'));
     expect(text, contains('vibekits-simulator-4456560334-'));
+    expect(
+      await HarnessSystemSshService.hasAuthorizedPeer(
+        peerId: '4456560334',
+        homeDirectory: home,
+      ),
+      isTrue,
+    );
+    expect(
+      await HarnessSystemSshService.hasAuthorizedPeer(
+        peerId: '4456560335',
+        homeDirectory: home,
+      ),
+      isFalse,
+    );
 
     final status = await HarnessSystemSshService.publicKeyStatus(
       peerId: '4456560334',
@@ -96,6 +110,13 @@ void main() {
       homeDirectory: home,
     );
     expect(revoked['removed'], 1);
+    expect(
+      await HarnessSystemSshService.hasAuthorizedPeer(
+        peerId: '4456560334',
+        homeDirectory: home,
+      ),
+      isFalse,
+    );
     expect(
       await authorizedKeys.readAsString(),
       'ssh-ed25519 EXISTING user-owned\n',

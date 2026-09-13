@@ -64,6 +64,8 @@ typedef HarnessSimulatorSshInspector =
 typedef HarnessSimulatorSshSetter =
     Future<HarnessSystemSshSnapshot> Function(bool enabled);
 typedef HarnessSimulatorSshKeyRevoker = Future<void> Function();
+typedef HarnessSimulatorPeerAuthorizationChecker =
+    Future<bool> Function(String peerId);
 
 /// Owns the explicit "use this device as a simulator" authorization gate.
 ///
@@ -83,6 +85,7 @@ final class HarnessSimulatorTargetRuntime {
     HarnessSimulatorSshInspector? inspectSsh,
     HarnessSimulatorSshSetter? setSsh,
     HarnessSimulatorSshKeyRevoker? revokeSshKeys,
+    HarnessSimulatorPeerAuthorizationChecker? isPeerAuthorized,
     Duration connectionPollInterval = const Duration(seconds: 1),
     Duration hostRestartTimeout = const Duration(seconds: 5),
   }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
@@ -112,6 +115,10 @@ final class HarnessSimulatorTargetRuntime {
            (() async {
              await HarnessSystemSshService.revokeAllManagedPublicKeys();
            }),
+       _isPeerAuthorized =
+           isPeerAuthorized ??
+           ((String peerId) =>
+               HarnessSystemSshService.hasAuthorizedPeer(peerId: peerId)),
        _connectionPollInterval = connectionPollInterval,
        _hostRestartTimeout = hostRestartTimeout;
 
@@ -130,6 +137,7 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorSshInspector _inspectSsh;
   final HarnessSimulatorSshSetter _setSsh;
   final HarnessSimulatorSshKeyRevoker _revokeSshKeys;
+  final HarnessSimulatorPeerAuthorizationChecker _isPeerAuthorized;
   final Duration _connectionPollInterval;
   final Duration _hostRestartTimeout;
   final StreamController<HarnessSimulatorTargetSnapshot> _changes =
@@ -391,7 +399,7 @@ final class HarnessSimulatorTargetRuntime {
     String callerId,
   ) async {
     final connections = await _listConnections(executable);
-    return connections.any(
+    final bool active = connections.any(
       (connection) =>
           connection.peerId == callerId &&
           connection.authorized &&
@@ -399,6 +407,8 @@ final class HarnessSimulatorTargetRuntime {
           (connection.portForward == '127.0.0.1:$remotePort' ||
               connection.portForward == 'localhost:$remotePort'),
     );
+    if (active) return true;
+    return _isPeerAuthorized(callerId);
   }
 
   Future<void> _pollConnections(int generation) async {
