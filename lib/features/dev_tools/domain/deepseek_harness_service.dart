@@ -1559,16 +1559,25 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
         .listen((String chunk) => _forward('stderr', chunk));
     _exitCode = _process.exitCode.then((int code) async {
       _running = false;
-      await _stdout.cancel();
-      await _stderr.cancel();
+      await _awaitHarnessCleanup(
+        Future.wait<void>(<Future<void>>[_stdout.cancel(), _stderr.cancel()]),
+        timeout: const Duration(seconds: 1),
+      );
       _log.writeln(
         '[${DateTime.now().toUtc().toIso8601String()}] exitCode=$code',
       );
-      await _log.flush();
-      await _log.close();
-      await _output.close();
-      await _toolServer.close();
-      await PlatformProcessLifecycle.releaseProcessTree(_process.pid);
+      await _awaitHarnessCleanup(
+        Future.wait<void>(<Future<void>>[
+          _flushAndCloseHarnessLog(_log),
+          _output.close(),
+          _toolServer.close(),
+        ]),
+        timeout: const Duration(seconds: 3),
+      );
+      await _awaitHarnessCleanup(
+        PlatformProcessLifecycle.releaseProcessTree(_process.pid),
+        timeout: const Duration(seconds: 1),
+      );
       return code;
     });
   }
@@ -1591,7 +1600,7 @@ class _ProcessHarnessAgent implements HarnessAgentHandle {
     _log.write(
       '[${DateTime.now().toUtc().toIso8601String()}][$channel] $safeChunk',
     );
-    _output.add(safeChunk);
+    if (!_output.isClosed) _output.add(safeChunk);
   }
 
   @override
@@ -1762,8 +1771,41 @@ Future<void> _stopProcessTree(Process process) async {
       const Duration(seconds: 5),
       onTimeout: () => ProcessResult(0, -1, '', ''),
     );
+    if (await _waitForProcessExit(process, const Duration(seconds: 2))) return;
+    process.kill();
+    if (await _waitForProcessExit(process, const Duration(seconds: 2))) return;
   } else {
     process.kill(ProcessSignal.sigterm);
+    if (await _waitForProcessExit(process, const Duration(seconds: 2))) return;
+    process.kill(ProcessSignal.sigkill);
+    if (await _waitForProcessExit(process, const Duration(seconds: 3))) return;
+  }
+  throw StateError('Harness 进程未能停止');
+}
+
+Future<bool> _waitForProcessExit(Process process, Duration timeout) async {
+  try {
+    await process.exitCode.timeout(timeout);
+    return true;
+  } on TimeoutException {
+    return false;
+  }
+}
+
+Future<void> _flushAndCloseHarnessLog(IOSink log) async {
+  await log.flush();
+  await log.close();
+}
+
+Future<void> _awaitHarnessCleanup(
+  Future<void> cleanup, {
+  required Duration timeout,
+}) async {
+  try {
+    await cleanup.timeout(timeout);
+  } on Object {
+    // Process shutdown must not leave the UI permanently busy because one
+    // already-doomed stream, log sink, or loopback connection is slow to close.
   }
 }
 

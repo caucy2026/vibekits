@@ -157,4 +157,59 @@ void main() {
       contains('VIBEKITS_NATIVE_OK'),
     );
   }, timeout: const Timeout(Duration(seconds: 75)));
+
+  test('官方 Harness 长任务可停止并清理进程', () async {
+    final Directory workspace = await Directory.systemTemp.createTemp(
+      'vibekits_harness_stop_',
+    );
+    addTearDown(() => workspace.delete(recursive: true));
+    final HttpServer model = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(() => model.close(force: true));
+    final Completer<void> requestSeen = Completer<void>();
+    final Completer<void> releaseResponse = Completer<void>();
+    model.listen((HttpRequest request) async {
+      if (!requestSeen.isCompleted) requestSeen.complete();
+      request.response.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'text/event-stream; charset=utf-8',
+      );
+      request.response.write(
+        'data: {"choices":[{"delta":{"content":"RUNNING"}}]}\n\n',
+      );
+      await request.response.flush();
+      await releaseResponse.future;
+      try {
+        await request.response.close();
+      } on Object {
+        // The stopped Harness is expected to close its HTTP client first.
+      }
+    });
+    addTearDown(() {
+      if (!releaseResponse.isCompleted) releaseResponse.complete();
+    });
+
+    final HarnessAgentHandle handle = await DeepSeekHarnessService.startAgent(
+      HarnessAgentRequest(
+        workspace: workspace.path,
+        prompt: '保持运行直到停止测试结束',
+        apiKey: 'test-key',
+        baseUrl: 'http://127.0.0.1:${model.port}',
+        harnessHomeDirectory:
+            '${workspace.path}${Platform.pathSeparator}harness-home',
+        approveTool: (_) async => true,
+      ),
+    );
+    addTearDown(() async {
+      if (handle.running) await handle.stop();
+    });
+    await requestSeen.future.timeout(const Duration(seconds: 30));
+    expect(handle.running, isTrue);
+    await handle.stop().timeout(const Duration(seconds: 10));
+    expect(handle.running, isFalse);
+    await handle.exitCode.timeout(const Duration(seconds: 5));
+    if (!releaseResponse.isCompleted) releaseResponse.complete();
+  }, timeout: const Timeout(Duration(seconds: 55)));
 }
