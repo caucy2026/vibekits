@@ -5,6 +5,8 @@ import 'harness_tool_bridge.dart';
 import 'lmcp_inbound_call_hub.dart';
 import 'simulator_update_service.dart';
 
+typedef SimulatorCallerAuthorizer = Future<bool> Function(String callerId);
+
 /// MCP JSON-RPC endpoint exposed only while the user enables LAN MCP.
 ///
 /// Discovery is handled separately by [LanPeerDiscoveryService]. This server
@@ -16,6 +18,9 @@ class LanMcpToolServer {
     this._server,
     this._bridge, {
     required this.allowSimulatorUpdateUpload,
+    required this.trustSimulatorCallerAfterEnable,
+    required this.authorizeSimulatorCaller,
+    required this.sensitiveApprovalTimeout,
   });
 
   static const int maxRequestBytes = 1024 * 1024;
@@ -24,6 +29,9 @@ class LanMcpToolServer {
   final HttpServer _server;
   final VibekitsHarnessToolBridge _bridge;
   final bool allowSimulatorUpdateUpload;
+  final bool trustSimulatorCallerAfterEnable;
+  final SimulatorCallerAuthorizer? authorizeSimulatorCaller;
+  final Duration sensitiveApprovalTimeout;
   int _traceSequence = 0;
 
   int get port => _server.port;
@@ -34,6 +42,9 @@ class LanMcpToolServer {
     InternetAddress? bindAddress,
     int port = 0,
     bool allowSimulatorUpdateUpload = false,
+    bool trustSimulatorCallerAfterEnable = false,
+    SimulatorCallerAuthorizer? authorizeSimulatorCaller,
+    Duration sensitiveApprovalTimeout = const Duration(minutes: 2),
   }) async {
     final HttpServer server = await HttpServer.bind(
       bindAddress ?? InternetAddress.anyIPv4,
@@ -44,6 +55,9 @@ class LanMcpToolServer {
       server,
       bridge ?? VibekitsHarnessToolBridge(),
       allowSimulatorUpdateUpload: allowSimulatorUpdateUpload,
+      trustSimulatorCallerAfterEnable: trustSimulatorCallerAfterEnable,
+      authorizeSimulatorCaller: authorizeSimulatorCaller,
+      sensitiveApprovalTimeout: sensitiveApprovalTimeout,
     );
     server.listen(result._handle, onError: (_) {});
     return result;
@@ -137,12 +151,10 @@ class LanMcpToolServer {
           final Map<String, Object?> arguments = rawArguments is Map
               ? Map<String, Object?>.from(rawArguments)
               : const <String, Object?>{};
-          final bool simulatorSshPreauthorized =
-              _isSimulatorSshBootstrapPreauthorized(
+          final bool rememberedSimulatorAuthorization =
+              await _isRememberedSimulatorCaller(
                 request,
                 remoteAddress: remoteAddress,
-                toolId: name,
-                arguments: arguments,
               );
           final HarnessToolDefinition? definition = _bridge.executableCatalog
               .where((tool) => tool.id == name)
@@ -150,7 +162,7 @@ class LanMcpToolServer {
           LmcpInboundCallHandle? approvalCall;
           if (_requiresTargetApproval(name) &&
               definition != null &&
-              !simulatorSshPreauthorized) {
+              !rememberedSimulatorAuthorization) {
             final traceId =
                 'simulator-${DateTime.now().microsecondsSinceEpoch}-${_traceSequence++}';
             approvalCall = LmcpInboundCallHub.instance.begin(
@@ -166,7 +178,7 @@ class LanMcpToolServer {
               approvalRequired: true,
             );
             final allowed = await approvalCall.waitForApproval().timeout(
-              const Duration(minutes: 2),
+              sensitiveApprovalTimeout,
               onTimeout: () => false,
             );
             if (!allowed) {
@@ -190,7 +202,8 @@ class LanMcpToolServer {
             result = await _bridge.invoke(
               toolId: name,
               arguments: arguments,
-              preauthorized: approvalCall != null || simulatorSshPreauthorized,
+              preauthorized:
+                  approvalCall != null || rememberedSimulatorAuthorization,
               approve: (_) async => true,
             );
             if (result.ok) {
@@ -226,23 +239,24 @@ class LanMcpToolServer {
       toolId == VibekitsHarnessToolBridge.deviceSshAuthorizeId ||
       toolId == VibekitsHarnessToolBridge.deviceSshRevokeId;
 
-  bool _isSimulatorSshBootstrapPreauthorized(
+  Future<bool> _isRememberedSimulatorCaller(
     HttpRequest request, {
     required String remoteAddress,
-    required String toolId,
-    required Map<String, Object?> arguments,
-  }) {
-    if (!allowSimulatorUpdateUpload || remoteAddress != '127.0.0.1') {
-      return false;
-    }
-    if (toolId != VibekitsHarnessToolBridge.deviceSshAuthorizeId &&
-        toolId != VibekitsHarnessToolBridge.deviceSshRevokeId) {
+  }) async {
+    if (!trustSimulatorCallerAfterEnable ||
+        !allowSimulatorUpdateUpload ||
+        remoteAddress != '127.0.0.1' ||
+        authorizeSimulatorCaller == null) {
       return false;
     }
     final String callerId =
         request.headers.value('x-vibekits-caller-id')?.trim() ?? '';
-    return RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(callerId) &&
-        '${arguments['peerId'] ?? ''}'.trim() == callerId;
+    if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(callerId)) return false;
+    try {
+      return await authorizeSimulatorCaller!(callerId);
+    } on Object {
+      return false;
+    }
   }
 
   Future<void> _handleSimulatorUpdateUpload(HttpRequest request) async {

@@ -91,7 +91,7 @@ final class HarnessSimulatorTargetRuntime {
        _startHost =
            startHost ??
            (() => RustDeskHarnessShareService.ensureHostAvailable()),
-       _startEndpoint = startEndpoint ?? _startDefaultEndpoint,
+       _startEndpoint = startEndpoint,
        _stopHost = stopHost ?? RustDeskHarnessShareService.stopHost,
        _setNativeGate =
            setNativeGate ??
@@ -122,7 +122,7 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorAccessSettings _settings;
   final HarnessSimulatorHostInspector _inspectHost;
   final HarnessSimulatorHostStarter _startHost;
-  final HarnessSimulatorEndpointStarter _startEndpoint;
+  final HarnessSimulatorEndpointStarter? _startEndpoint;
   final HarnessSimulatorHostStopper _stopHost;
   final HarnessSimulatorNativeGateSetter _setNativeGate;
   final HarnessSimulatorConnectionLister _listConnections;
@@ -150,11 +150,19 @@ final class HarnessSimulatorTargetRuntime {
   HarnessSimulatorTargetSnapshot get latest => _latest;
   Stream<HarnessSimulatorTargetSnapshot> get changes => _changes.stream;
 
-  static Future<HarnessSimulatorEndpointLease> _startDefaultEndpoint() async {
+  static Future<HarnessSimulatorEndpointLease> _startDefaultEndpoint(
+    SimulatorCallerAuthorizer authorizeSimulatorCaller,
+  ) async {
     final server = await LanMcpToolServer.start(
       bindAddress: InternetAddress.loopbackIPv4,
       port: remotePort,
       allowSimulatorUpdateUpload: true,
+      // Enabling the simulator switch is the target owner's durable grant.
+      // The fixed loopback endpoint is reachable only through the isolated
+      // VibeKits carrier, so the same controller ID must not prompt again for
+      // every install, uninstall or managed SSH operation.
+      trustSimulatorCallerAfterEnable: true,
+      authorizeSimulatorCaller: authorizeSimulatorCaller,
     );
     return HarnessSimulatorEndpointLease(
       port: server.port,
@@ -223,7 +231,13 @@ final class HarnessSimulatorTargetRuntime {
         }
         if (!ssh.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
       }
-      final endpoint = await _startEndpoint();
+      final customEndpoint = _startEndpoint;
+      final endpoint = customEndpoint != null
+          ? await customEndpoint()
+          : await _startDefaultEndpoint(
+              (callerId) =>
+                  _isActiveSimulatorCaller(host!.executable, callerId),
+            );
       if (generation != _generation) {
         await endpoint.close();
         return;
@@ -370,6 +384,21 @@ final class HarnessSimulatorTargetRuntime {
     _connectionPoller?.cancel();
     _connectionPoller = null;
     _hostExecutable = '';
+  }
+
+  Future<bool> _isActiveSimulatorCaller(
+    String executable,
+    String callerId,
+  ) async {
+    final connections = await _listConnections(executable);
+    return connections.any(
+      (connection) =>
+          connection.peerId == callerId &&
+          connection.authorized &&
+          !connection.disconnected &&
+          (connection.portForward == '127.0.0.1:$remotePort' ||
+              connection.portForward == 'localhost:$remotePort'),
+    );
   }
 
   Future<void> _pollConnections(int generation) async {
