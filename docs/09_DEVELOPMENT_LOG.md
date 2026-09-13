@@ -6,6 +6,8 @@
 - macOS 导入和最终打包同时强制检查远程协助 gate、连接、超时和 `stdin_eof_v1` 生命周期标记，并继续强制 Universal 架构。
 - Windows 构建改为真正执行 `vibekits_harness_relay::tests` 库级测试，拒绝“二进制构建成功但 0 项测试”的假绿，并同步检查远程协助 gate 标记。
 - RustDesk 传输源码提交固定为 `6b90c3ae6`；完整签名、公证和跨设备运行门禁通过前，dev.199 仍为阻断状态。
+- 精确 `9451cf4` macOS 隔离候选已通过 Universal/macOS 12+ 全功能兼容门禁；全量 Flutter 为 `859` 通过、`0` 失败、`21` 个真实设备/网络/平台门禁显式跳过，静态检查 `0 issue`。PAD 75 的配对请求已通过统一 ID 抵达本机固定端点并出现证书批准卡片，但尚未取得操作发生时的“确认并记住”，因此项目/会话、命令/反馈/停止仍未通过。
+- 63 当前 ICMP、ADB、SSH 均不可用。Windows 58 已完成精确 Relay、`144/144` 定向回归、0 issue 静态检查、Release 构建、40 项随包运行时校验和三次冷启动；最终包内 MCP 字节也已驱动官方 Harness 完成真实模型请求、SHA-256 工具、原生批准命令、最终反馈和正常退出。Windows EXE 仍为 `NotSigned`，且 SSH Session 0 启动不能代替可见桌面 UI 验收，因此仍不发布。精确 macOS 候选已完成 36 个 Mach-O 的 Developer ID 签名、公证 `Accepted`、staple、Gatekeeper、正常后台启动和“直接使用签名后包内 runtime”的真实智能体闭环；最终 ZIP SHA-256 为 `224718b6bb05fb78ad3bd0345a6bd6aff2ba3af3e8bf97c859e79e752082b256`。另一个已获得 Apple ticket 的 `e5615bb` 分支候选与当前 `9451cf4` 相差 26 个文件，不作为本轮交付。完整实时门禁见 `docs/acceptance/V1_9_0_DEV199_REMOTE_ASSISTANCE_RELEASE_GATE_2026-09-13.md`。
 
 ## 2026-09-13 · dev.198 远程协助旧 Relay 覆盖升级修复
 
