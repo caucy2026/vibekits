@@ -27,6 +27,8 @@ dev.205 在 RustDesk Harness 服务进程内登记由原生握手得到的真实
 - Windows 58 连接同一目标：强制 HBBR 与直连优先/自动回退两条路径均通过；每次均取得 204 项工具、SSH 就绪、远程命令、28 字节 SFTP 上传与远端 SHA-256 回读。
 - 目标 Mac 原生连接表在 Windows 测试期间记录真实控制端 `peerId=8296293831`、`authorized=true`、`portForward=127.0.0.1:22`，证明授权来自原生 P2P 隧道身份而非请求头。
 - Windows 新 Relay SHA-256：`CFE1F22B6D4B3CB09C13D1940634DDC69EF8C4434589DD31D012AB4E15C6F615`，已同步到构建包和源码运行时目录；旧文件保留为 `*.pre-dev205.exe` 便于回滚。
+- Windows 58 dev.205 Release 构建成功，项目验证器确认版本 `1.9.0-dev.205+2205` 及 41 项自包含运行时；真机启动 8 秒保持存活，包内 Relay 返回 `routingId=8296293831`、`state=registered`。
+- Windows 便携 ZIP：`Vibekits-1.9.0-dev.205+2205-windows-x64-portable.zip`，319,553,505 bytes，SHA-256 `929e05ed4b294f2cdbd72e7a5d98010e615d94889d34bc2cb2b0bb2200792b38`。
 
 ## 结论与剩余发布门禁
 
