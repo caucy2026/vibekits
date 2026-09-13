@@ -2203,10 +2203,16 @@ window.__vibekitsHarnessQueueBridge?.submit(
 
   Widget _buildRemoteAssistanceBar() {
     final controllerSession = HarnessRemoteControllerRuntime.instance.session;
+    final simulatorControllerStatus = HarnessSimulatorController.shared.status();
+    final simulatorControllerConnected =
+        simulatorControllerStatus['connected'] == true;
+    final showInboundAssistance =
+        HarnessRemoteAccessSettings.enabled && !Platform.isAndroid;
     if (!shouldShowHarnessRemoteStatus(
       simulatorEnabled: HarnessSimulatorTargetRuntime.shared.latest.enabled,
-      assistanceEnabled: HarnessRemoteAccessSettings.enabled,
-      hasControllerSession: controllerSession != null,
+      assistanceEnabled: showInboundAssistance,
+      hasControllerSession:
+          controllerSession != null || simulatorControllerConnected,
     )) {
       return const SizedBox.shrink();
     }
@@ -2227,6 +2233,47 @@ window.__vibekitsHarnessQueueBridge?.submit(
                 maxLines: 1,
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
+            ),
+            StreamBuilder<Map<String, Object?>>(
+              stream: HarnessSimulatorController.shared.changes,
+              initialData: simulatorControllerStatus,
+              builder: (BuildContext context, snapshot) {
+                final status =
+                    snapshot.data ?? HarnessSimulatorController.shared.status();
+                final sessions = status['sessions'];
+                if (status['connected'] != true ||
+                    sessions is! List ||
+                    sessions.isEmpty ||
+                    sessions.first is! Map) {
+                  return const SizedBox.shrink();
+                }
+                final first = Map<String, Object?>.from(sessions.first as Map);
+                final routingId = '${first['routingId'] ?? ''}'.trim();
+                return Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Row(
+                    key: const Key(
+                      'official-harness-controller-simulator-status',
+                    ),
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
             StreamBuilder<HarnessSimulatorTargetSnapshot>(
               stream: HarnessSimulatorTargetRuntime.shared.changes,
@@ -2276,6 +2323,9 @@ window.__vibekitsHarnessQueueBridge?.submit(
               builder: (BuildContext context, snapshot) {
                 final controllerSession =
                     HarnessRemoteControllerRuntime.instance.session;
+                if (Platform.isAndroid && controllerSession == null) {
+                  return const SizedBox.shrink();
+                }
                 if (controllerSession != null) {
                   return Row(
                     key: const Key('official-harness-remote-link-status'),

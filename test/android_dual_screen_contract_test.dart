@@ -106,5 +106,35 @@ void main() {
     expect(shell, contains('NavigationDestinationLabelBehavior.alwaysShow'));
     expect(shell, contains("Key('android-exit-app')"));
     expect(shell, contains('退出应用（关闭两屏）'));
+    expect(
+      shell,
+      contains('if (Platform.isAndroid) const SizedBox(width: 48)'),
+      reason: 'PAD 顶部操作必须避开系统右侧快捷栏的触摸热区',
+    );
+    expect(
+      shell,
+      contains('if (Platform.isAndroid) {\n      unawaited(present());'),
+      reason: 'PAD 设置弹窗不得依赖仅用于桌面 WebView 的输入门禁',
+    );
+    expect(
+      File(
+        'lib/features/local_models/presentation/official_harness_workspace.dart',
+      ).readAsStringSync(),
+      allOf(
+        contains('official-harness-controller-simulator-status'),
+        contains('Platform.isAndroid && controllerSession == null'),
+      ),
+      reason: 'PAD 主界面应显示主动仿真状态，并隐藏无关的被协助等待状态',
+    );
+    expect(
+      File(
+        'lib/features/local_models/presentation/deepseek_agent_workspace.dart',
+      ).readAsStringSync(),
+      allOf(
+        contains('agent-controller-simulator-status'),
+        contains('Platform.isAndroid && controllerSession == null'),
+      ),
+      reason: 'PAD 回退工作区必须遵循相同的主动仿真状态规则',
+    );
   });
 }

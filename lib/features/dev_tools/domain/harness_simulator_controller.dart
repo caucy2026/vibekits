@@ -112,10 +112,16 @@ final class _LoopbackHarnessSimulatorMcpClient
     String toolId,
     Map<String, Object?> arguments, {
     String callerId = '',
-  }) => _rpc(localPort, 3, 'tools/call', <String, Object?>{
-    'name': toolId,
-    'arguments': arguments,
-  }, callerId: callerId);
+  }) => _rpc(
+    localPort,
+    3,
+    'tools/call',
+    <String, Object?>{'name': toolId, 'arguments': arguments},
+    callerId: callerId,
+    timeout: toolId == 'vibekits.device.ssh_authorize'
+        ? const Duration(minutes: 2)
+        : const Duration(seconds: 8),
+  );
 
   Future<Map<String, Object?>> _rpc(
     int port,
@@ -123,6 +129,7 @@ final class _LoopbackHarnessSimulatorMcpClient
     String method,
     Map<String, Object?> params, {
     String callerId = '',
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     late final Map<String, Object?> response;
     try {
@@ -131,7 +138,7 @@ final class _LoopbackHarnessSimulatorMcpClient
         'id': id,
         'method': method,
         'params': params,
-      }, callerId: callerId);
+      }, callerId: callerId, timeout: timeout);
     } on HarnessSimulatorControllerException catch (error) {
       throw HarnessSimulatorControllerException(
         error.code,
@@ -182,12 +189,13 @@ final class _LoopbackHarnessSimulatorMcpClient
     int port,
     Map<String, Object?> payload, {
     String callerId = '',
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client
           .postUrl(Uri.parse('http://127.0.0.1:$port/mcp'))
-          .timeout(const Duration(seconds: 8));
+          .timeout(timeout);
       request.persistentConnection = false;
       request.headers.contentType = ContentType.json;
       request.headers.set('MCP-Protocol-Version', _protocolVersion);
@@ -197,11 +205,9 @@ final class _LoopbackHarnessSimulatorMcpClient
       final bytes = utf8.encode(jsonEncode(payload));
       request.contentLength = bytes.length;
       request.add(bytes);
-      final response = await request.close().timeout(
-        const Duration(seconds: 8),
-      );
+      final response = await request.close().timeout(timeout);
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in response.timeout(const Duration(seconds: 8))) {
+      await for (final chunk in response.timeout(timeout)) {
         builder.add(chunk);
         if (builder.length > _maxResponseBytes) {
           throw const HarnessSimulatorControllerException(
@@ -301,6 +307,12 @@ final class HarnessSimulatorController {
   final bool enableSshBootstrap;
   final Map<String, _HarnessSimulatorSession> _sessions =
       <String, _HarnessSimulatorSession>{};
+  final StreamController<Map<String, Object?>> _changes =
+      StreamController<Map<String, Object?>>.broadcast(sync: true);
+
+  /// Process-local controller state used only to project an outgoing simulator
+  /// connection into the shell. Transport ownership remains in this class.
+  Stream<Map<String, Object?>> get changes => _changes.stream;
 
   static Future<RustDeskHarnessTunnelLease> _defaultOpenTunnel(
     String executable,
@@ -392,6 +404,7 @@ final class HarnessSimulatorController {
         connectedAt: DateTime.now().toUtc(),
       );
       _sessions[id] = session;
+      _publishStatus();
       return _snapshot(session);
     } on Object catch (error) {
       await tunnel.close();
@@ -907,6 +920,7 @@ final class HarnessSimulatorController {
     final session = _sessions.remove(id);
     await session?.ssh?.tunnel.close();
     await session?.tunnel.close();
+    _publishStatus();
     return <String, Object?>{'connected': false, 'routingId': id};
   }
 
@@ -917,6 +931,11 @@ final class HarnessSimulatorController {
       await session.ssh?.tunnel.close();
       await session.tunnel.close();
     }
+    _publishStatus();
+  }
+
+  void _publishStatus() {
+    if (!_changes.isClosed) _changes.add(status());
   }
 
   _HarnessSimulatorSession _requireSession(String routingId) {

@@ -1699,3 +1699,8 @@
 - Universal macOS 12+ 候选完成 36 个 Mach-O Developer ID 签名、签名后 Harness 实启、Apple 公证 `Accepted`（Submission ID `7e4a9856-72a5-4942-938e-ce576910099b`）、staple 与 Gatekeeper；最终 ZIP SHA-256 为 `aa9e7df43bcf2601b90f7782770ec187e852f9e744ea648f63e790133e1c1403`。
 - 63/75 PAD 已恢复 ADB 在线；63 的 dev.191 与 75 的 dev.188 均真实启动到 `SingleScreenActivity` 且进程存活。该结果只关闭旧版 Android 基础启动门禁，不能代替新版协同协议验收。
 - 目标安装 dev.204 后的双轮敏感 App 生命周期、远程项目/会话/命令/反馈/停止、63/75 新版协议和 Windows 58 dev.204 回归仍是未完成门禁。完整记录见 `docs/acceptance/V1_9_0_DEV204_ID_ONLY_AUTHORIZATION_2026-09-13.md`。
+# 2026-09-14 · 1.9.0-dev.205+2205 · Windows 58 / PAD 63 双控制端远程仿真闭环
+
+- 修复受管 RustDesk Harness 快速隧道不经过远程桌面 Connection Manager 时丢失真实控制端身份的问题：服务进程直接登记原生握手 peer、连接号和固定转发目标，连接关闭即清理；授权继续只接受原生连接或已持久授权的精确 SSH 公钥，不信任请求头自报身份。
+- Windows 58 对本机目标 ID `1554650784` 的强制 HBBR 与直连优先/自动回退均真实通过 204 项工具、SSH 命令、28 字节文件上传和 SHA-256 回读；PAD 63 对同一目标真实通过 204 项工具及进程/文件自检。RustDesk 双平台单测 2/2、VibeKits 共用回归 18/18 通过。
+- macOS dev.205 候选为 Universal `x86_64 + arm64`、macOS 12+，36 个 Mach-O Developer ID 深度验签及签名后 Harness/Node/DSH 门禁通过。Apple 公证和最终归档仍按发布门禁执行。完整证据见 `docs/acceptance/V1_9_0_DEV205_DUAL_CONTROLLER_REMOTE_SIMULATION_2026-09-14.md`。

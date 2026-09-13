@@ -306,17 +306,18 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _openSettings() {
-    unawaited(
-      HarnessWebViewInputGate.runWithOverlay<void>(
-        () => showDialog<void>(
-          context: context,
-          builder: (BuildContext context) => _DeferredSettingsDialog(
-            initial: widget.settingsController.value,
-            onSave: widget.settingsController.update,
-          ),
-        ),
+    Future<void> present() => showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => _DeferredSettingsDialog(
+        initial: widget.settingsController.value,
+        onSave: widget.settingsController.update,
       ),
     );
+    if (Platform.isAndroid) {
+      unawaited(present());
+      return;
+    }
+    unawaited(HarnessWebViewInputGate.runWithOverlay<void>(present));
   }
 
   Future<void> _handleDroppedFiles(List<String> paths) async {
@@ -876,6 +877,10 @@ class _MainShellState extends State<MainShell> {
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
+          // KEMI PAD reserves the far-right screen edge for its system
+          // shortcut rail. Keep both app actions outside that gesture zone so
+          // tapping Settings cannot open the system rail instead.
+          if (Platform.isAndroid) const SizedBox(width: 48),
         ],
       ),
     );

@@ -48,6 +48,9 @@ void main() {
       mcpClient: mcp,
       enableSshBootstrap: false,
     );
+    final statusChanges = <Map<String, Object?>>[];
+    final statusSubscription = controller.changes.listen(statusChanges.add);
+    addTearDown(statusSubscription.cancel);
 
     final connected = await controller.connect('9464730211');
     expect(connected['connected'], isTrue);
@@ -55,6 +58,7 @@ void main() {
     expect(connected['toolCount'], 2);
     expect(connected, isNot(contains('localPort')));
     expect(process.readyWaits, 1);
+    expect(statusChanges.last['connected'], isTrue);
 
     final catalog = controller.catalog('9464730211');
     expect(
@@ -73,6 +77,7 @@ void main() {
     expect(disconnected['connected'], isFalse);
     expect(process.terminated, isTrue);
     expect(controller.status('9464730211')['connected'], isFalse);
+    expect(statusChanges.last['connected'], isFalse);
   });
 
   test('强制中继只改变内部传输且不要求用户提供端口或凭据', () async {

@@ -21,6 +21,7 @@ import '../../dev_tools/domain/harness_remote_access_settings.dart';
 import '../../dev_tools/domain/harness_remote_pairing_service.dart';
 import '../../dev_tools/domain/harness_remote_peer_store.dart';
 import '../../dev_tools/domain/harness_simulator_target_runtime.dart';
+import '../../dev_tools/domain/harness_simulator_controller.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
@@ -2488,10 +2489,16 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Widget _buildCoordinationModeBar() {
     final controllerSession = HarnessRemoteControllerRuntime.instance.session;
+    final simulatorControllerStatus = HarnessSimulatorController.shared.status();
+    final simulatorControllerConnected =
+        simulatorControllerStatus['connected'] == true;
+    final showInboundAssistance =
+        HarnessRemoteAccessSettings.enabled && !Platform.isAndroid;
     if (!shouldShowHarnessRemoteStatus(
       simulatorEnabled: HarnessSimulatorTargetRuntime.shared.latest.enabled,
-      assistanceEnabled: HarnessRemoteAccessSettings.enabled,
-      hasControllerSession: controllerSession != null,
+      assistanceEnabled: showInboundAssistance,
+      hasControllerSession:
+          controllerSession != null || simulatorControllerConnected,
     )) {
       return const SizedBox.shrink();
     }
@@ -2511,6 +2518,30 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 key: Key('agent-coordination-status'),
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
+            ),
+            StreamBuilder<Map<String, Object?>>(
+              stream: HarnessSimulatorController.shared.changes,
+              initialData: simulatorControllerStatus,
+              builder: (BuildContext context, snapshot) {
+                final status =
+                    snapshot.data ?? HarnessSimulatorController.shared.status();
+                final sessions = status['sessions'];
+                if (status['connected'] != true ||
+                    sessions is! List ||
+                    sessions.isEmpty ||
+                    sessions.first is! Map) {
+                  return const SizedBox.shrink();
+                }
+                final first = Map<String, Object?>.from(sessions.first as Map);
+                final routingId = '${first['routingId'] ?? ''}'.trim();
+                return KeyedSubtree(
+                  key: const Key('agent-controller-simulator-status'),
+                  child: _remoteStatusChip(
+                    Colors.green,
+                    routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
+                  ),
+                );
+              },
             ),
             StreamBuilder<HarnessSimulatorTargetSnapshot>(
               stream: HarnessSimulatorTargetRuntime.shared.changes,
@@ -2542,6 +2573,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               builder: (BuildContext context, snapshot) {
                 final controllerSession =
                     HarnessRemoteControllerRuntime.instance.session;
+                if (Platform.isAndroid && controllerSession == null) {
+                  return const SizedBox.shrink();
+                }
                 if (controllerSession != null) {
                   return _remoteStatusChip(
                     controllerSession.model.stale
