@@ -1689,3 +1689,12 @@
 - 真机脚本新增独立公证测试 App 的上传、安装、清单、启动、进程、Unified Log、停止与安全卸载，并连续执行两遍敏感生命周期，防止再次把“首次成功”误当作“一次授权持续可用”。
 - dev.203 macOS 候选为 Universal `x86_64 + arm64`、macOS 12+，Developer ID、Apple 公证 `Accepted`（Submission ID `7bf62275-26d3-4f77-bff1-46e7637542e6`）、staple、Gatekeeper、最终解包实启与 204 项本机工具目录均通过；最终 ZIP SHA-256 为 `7e381a3feb09601859e9568656607146c33e45430ab2c40c32719486373dff6b`。
 - 75 Pad 当前 ADB 在线且 dev.188 可启动；63 离线。目标 `4456560334` 仍返回 dev.202 的首个只读调用超时，必须覆盖 dev.203 后重跑 P2P、强制 HBBR、SSH/SFTP、双轮应用生命周期和清理，未通过前不标记完成。完整记录见 `docs/acceptance/V1_9_0_DEV203_REMOTE_SIMULATOR_GATE_2026-09-13.md`。
+
+## 2026-09-13 · 1.9.0-dev.204+2204 · 仅凭 ID SSH 引导与一次授权持久复用
+
+- 目标 `4456560334` 的默认 P2P/自动回退和强制 HBBR 两条真实路径均已取得 204 项目录、状态、进程、SSH 命令、SFTP 上传及远端 SHA-256；这证明 RustDesk 数据面与 HBBR 生命周期可用。
+- 修复 OpenSSH `UserKnownHostsFile` 位于 `Application Support` 时未引用空格路径的问题；新增真实空格路径回归，避免再次出现“keyscan 成功但 known_hosts 为空”。
+- 首次 SSH 批准写入的受限公钥标记现在作为一次授权的持久证据；活动原生连接表短暂缺行时，同一精确 peer 可继续敏感 App 生命周期，其他 peer、伪造 ID、普通 LAN MCP 和已撤销标记均失败关闭。
+- 相关静态分析 0 issue，SSH/目标运行时/LAN MCP 专项 23/23 通过；全量 Flutter 回归 865 项通过、20 项显式真实环境门禁跳过、0 失败。提交为 `f481ef8`。
+- Universal macOS 12+ 候选完成 36 个 Mach-O Developer ID 签名、签名后 Harness 实启、Apple 公证 `Accepted`（Submission ID `7e4a9856-72a5-4942-938e-ce576910099b`）、staple 与 Gatekeeper；最终 ZIP SHA-256 为 `aa9e7df43bcf2601b90f7782770ec187e852f9e744ea648f63e790133e1c1403`。
+- 目标安装 dev.204 后的双轮敏感 App 生命周期、远程项目/会话/命令/反馈/停止、63 真机和 Windows 58 dev.204 回归仍是未完成门禁。完整记录见 `docs/acceptance/V1_9_0_DEV204_ID_ONLY_AUTHORIZATION_2026-09-13.md`。
