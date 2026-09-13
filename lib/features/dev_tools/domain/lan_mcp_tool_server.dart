@@ -151,18 +151,19 @@ class LanMcpToolServer {
           final Map<String, Object?> arguments = rawArguments is Map
               ? Map<String, Object?>.from(rawArguments)
               : const <String, Object?>{};
-          final bool rememberedSimulatorAuthorization =
-              await _isRememberedSimulatorCaller(
-                request,
-                remoteAddress: remoteAddress,
-              );
           final HarnessToolDefinition? definition = _bridge.executableCatalog
               .where((tool) => tool.id == name)
               .firstOrNull;
+          final bool requiresTargetApproval =
+              definition != null && _requiresTargetApproval(name);
+          final bool rememberedSimulatorAuthorization = requiresTargetApproval
+              ? await _isRememberedSimulatorCaller(
+                  request,
+                  remoteAddress: remoteAddress,
+                )
+              : false;
           LmcpInboundCallHandle? approvalCall;
-          if (_requiresTargetApproval(name) &&
-              definition != null &&
-              !rememberedSimulatorAuthorization) {
+          if (requiresTargetApproval && !rememberedSimulatorAuthorization) {
             final traceId =
                 'simulator-${DateTime.now().microsecondsSinceEpoch}-${_traceSequence++}';
             approvalCall = LmcpInboundCallHub.instance.begin(

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -225,6 +226,44 @@ void main() {
     );
     expect((response['result'] as Map)['isError'], isTrue);
     expect(invoked, isFalse);
+  });
+
+  test('只读工具绝不等待敏感授权身份查询', () async {
+    var authorizationQueries = 0;
+    final bridge = VibekitsHarnessToolBridge(
+      handlers: <String, HarnessToolHandler>{
+        VibekitsHarnessToolBridge.deviceProcessesId: (arguments) async =>
+            <String, Object?>{'processes': <Object?>[]},
+      },
+    );
+    final server = await LanMcpToolServer.start(
+      bridge: bridge,
+      bindAddress: InternetAddress.loopbackIPv4,
+      allowSimulatorUpdateUpload: true,
+      trustSimulatorCallerAfterEnable: true,
+      authorizeSimulatorCaller: (_) async {
+        authorizationQueries++;
+        await Completer<void>().future;
+        return false;
+      },
+    );
+    addTearDown(server.close);
+
+    final response = await _request(
+      server.loopbackEndpoint,
+      <String, Object?>{
+        'jsonrpc': '2.0',
+        'id': 9,
+        'method': 'tools/call',
+        'params': <String, Object?>{
+          'name': VibekitsHarnessToolBridge.deviceProcessesId,
+          'arguments': const <String, Object?>{},
+        },
+      },
+      headers: const <String, String>{'x-vibekits-caller-id': '8296293831'},
+    ).timeout(const Duration(seconds: 1));
+    expect((response['result'] as Map)['isError'], isFalse);
+    expect(authorizationQueries, 0);
   });
 }
 
