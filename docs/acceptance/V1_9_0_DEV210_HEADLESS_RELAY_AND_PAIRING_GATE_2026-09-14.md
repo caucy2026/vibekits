@@ -29,12 +29,12 @@
 
 1. Apple 公证上传被当前工具审批阻断；尚无 `Accepted`、staple 或 Gatekeeper `Notarized Developer ID` 证据。
 2. 目标 `4456560334` 尚未安装 dev.210，因此不能把旧 dev.207 的 `PAIRING_CHANNEL_CLOSED` 当成新版本结果。安装精确候选后仍需真实验证首次授权、第二次免授权、项目/会话同步、命令/反馈/停止，以及上传、卸载、安装、启动、日志和截图。
-3. 63 真机 ADB 已恢复在线，型号为 `KEMI Vibe Pads S1`，但设备上没有安装 `com.vibekits.vibekits`。dev.210 Android Release 构建在下载 Gradle 8.14.3 时网络超时，未生成 APK，因此不得声称 63 已通过。
+3. dev.210 Android Release 已使用既有 Gradle 8.14.3 与三个 sqlite3 ABI 缓存成功构建；测试 APK 为 `versionName=1.9.0-dev.210`、`versionCode=2210`，SHA-256 `1d29471a4c9bc5895a83e796fb75ee3b2d3de51e8c5a1a6e869708f0494378c9`。该 APK 仅为 Android Debug 证书签名，不能正式发布。63 当前不在 Harness ADB 就绪列表，`adb.connect` 10 秒超时，TCP 复核为 `Host is down`，因此尚未安装或启动，不得声称 63 已通过。详见 `docs/diagnostics/KEMI_S1_20260914_191536_dev210_release.md`。
 4. Windows 同源逻辑已有 Dart 回归覆盖，但本轮尚未在 Windows 58 的 D 盘重新构建并真实启动；不得声称 Windows Release 已通过。
 
 ## 下一步验收顺序
 
 1. 获得精确 ZIP 的 Apple 公证上传授权，完成 `Accepted`、staple、Gatekeeper 和最终 ZIP 重封装。
 2. 在目标 Mac 安装同一精确 dev.210，后台按 ID 完成配对与仿真闭环；全程不得启动远程桌面 UI。
-3. 恢复 63 后验证 Android/PAD 控制端连接、命令和停止。
+3. 63 恢复在线后重跑 `manual_real_s1_release_acceptance_test.dart`，完成严格身份、文件往返、截图、安装、版本、启动、PID 和 Logcat 验收。
 4. 在 Windows 58 的 D 盘用同一源码构建 Release，完成随包 relay、Harness、安装启动和共享逻辑门禁。
