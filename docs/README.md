@@ -2,6 +2,8 @@
 
 本目录是 Windows/macOS 的统一产品、设计、实现和验收基线。需求变更必须先更新文档与验收编号，再修改代码。
 
+最新验收：[dev.210 无界面 Relay 与配对门禁](acceptance/V1_9_0_DEV210_HEADLESS_RELAY_AND_PAIRING_GATE_2026-09-14.md)——桌面程序硬拒绝、隧道强制回收、108 项远程协议回归、Universal macOS 12+ Developer ID 签名候选及未完成门禁。
+
 ## 阅读顺序
 
 1. [统一产品需求](00_PRODUCT_REQUIREMENTS.md)——最高产品与研发基线

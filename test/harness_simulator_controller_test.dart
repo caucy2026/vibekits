@@ -12,7 +12,9 @@ void main() {
     final temporary = await Directory.systemTemp.createTemp(
       'vibekits_simulator_controller_',
     );
-    final executable = File('${temporary.path}/relay');
+    final executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
 
@@ -84,7 +86,9 @@ void main() {
     final temporary = await Directory.systemTemp.createTemp(
       'vibekits_simulator_relay_',
     );
-    final executable = File('${temporary.path}/relay');
+    final executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     final process = _FakeManagedProcess();
@@ -157,7 +161,9 @@ void main() {
     final temporary = await Directory.systemTemp.createTemp(
       'vibekits_simulator_activation_',
     );
-    final executable = File('${temporary.path}/relay');
+    final executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     addTearDown(() => temporary.delete(recursive: true));
     final events = <String>[];
@@ -192,7 +198,9 @@ void main() {
       'vibekits_simulator_ssh_',
     );
     addTearDown(() => temporary.delete(recursive: true));
-    final executable = File('${temporary.path}/relay');
+    final executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     final upload = File('${temporary.path}/Demo.zip');
     await upload.writeAsString('signed-test-candidate');
@@ -362,6 +370,7 @@ final class _FakeManagedProcess implements RustDeskManagedProcess {
   final Completer<int> _exit = Completer<int>();
   int readyWaits = 0;
   bool terminated = false;
+  bool forceTerminated = false;
 
   @override
   Future<int> get exitCode => _exit.future;
@@ -370,6 +379,13 @@ final class _FakeManagedProcess implements RustDeskManagedProcess {
   bool terminate() {
     terminated = true;
     if (!_exit.isCompleted) _exit.complete(0);
+    return true;
+  }
+
+  @override
+  bool forceTerminate() {
+    forceTerminated = true;
+    if (!_exit.isCompleted) _exit.complete(-9);
     return true;
   }
 

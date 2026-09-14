@@ -343,17 +343,31 @@ final class HarnessRemotePairingClient {
         }
       }
       if (socket == null) throw StateError('PAIRING_TUNNEL_UNAVAILABLE');
-      await tunnel.waitUntilConnected(timeout: timeout);
-      socket.add(utf8.encode('${jsonEncode(request.toJson())}\n'));
-      await socket.flush();
-      final responseLine = cancellation == null
-          ? await _readBoundedLine(socket, timeout: timeout)
-          : await Future.any<String>(<Future<String>>[
+      // The real request must be the demand connection that drives the
+      // RustDesk port-forward login. Waiting for `transport_connected` before
+      // writing leaves an empty TCP stream in the native login phase; some
+      // relay paths close that stream as soon as they switch to raw forwarding,
+      // so the pairing host only observes EOF (PAIRING_CHANNEL_CLOSED).
+      final responseFuture = cancellation == null
+          ? _readBoundedLine(socket, timeout: timeout)
+          : Future.any<String>(<Future<String>>[
               _readBoundedLine(socket, timeout: timeout),
               cancellation.then<String>(
                 (_) => throw StateError('PAIRING_CANCELLED'),
               ),
             ]);
+      // Observe early remote failures while the native carrier is still
+      // producing the more useful connection error below.
+      unawaited(
+        responseFuture.then<void>(
+          (_) {},
+          onError: (Object error, StackTrace stackTrace) {},
+        ),
+      );
+      socket.add(utf8.encode('${jsonEncode(request.toJson())}\n'));
+      await socket.flush();
+      await tunnel.waitUntilConnected(timeout: timeout);
+      final responseLine = await responseFuture;
       final decoded = jsonDecode(responseLine);
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Invalid Harness pairing response');

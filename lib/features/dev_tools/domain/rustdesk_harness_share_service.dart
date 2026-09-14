@@ -60,6 +60,7 @@ abstract interface class RustDeskManagedProcess {
   Future<void> waitUntilListening({Duration timeout});
   Future<void> waitUntilReady({Duration timeout});
   bool terminate();
+  bool forceTerminate();
 }
 
 final class _IoRustDeskManagedProcess implements RustDeskManagedProcess {
@@ -141,6 +142,9 @@ final class _IoRustDeskManagedProcess implements RustDeskManagedProcess {
 
   @override
   bool terminate() => process.kill(ProcessSignal.sigterm);
+
+  @override
+  bool forceTerminate() => process.kill(ProcessSignal.sigkill);
 }
 
 /// Owns exactly one native carrier port-forward process.
@@ -190,8 +194,15 @@ final class RustDeskHarnessTunnelLease {
     try {
       await process.exitCode.timeout(timeout);
     } on TimeoutException {
-      // The native process owns no user data. If SIGTERM is delayed, report
-      // the lease closed and let the OS reap it; callers must not reuse it.
+      // A stale tunnel is still a live remote connection. Never report the
+      // lease closed while leaving that process behind: escalate from the
+      // cooperative signal to an unconditional process termination.
+      process.forceTerminate();
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 1));
+      } on TimeoutException {
+        throw StateError('HARNESS_TUNNEL_PROCESS_DID_NOT_EXIT');
+      }
     }
   }
 }
@@ -394,9 +405,7 @@ abstract final class RustDeskHarnessShareService {
       await _androidJson('inspect');
       return;
     }
-    if (executable.trim().isEmpty || !File(executable).existsSync()) {
-      throw StateError('VibeKits 包内 Harness 传输引擎不存在');
-    }
+    _validateRelayExecutable(executable);
     await (launcher ?? _launchDetached)(executable, const <String>[
       '--vibekits-harness-service',
     ]);
@@ -567,10 +576,7 @@ abstract final class RustDeskHarnessShareService {
     required int localPort,
     required int remotePort,
   }) {
-    if (!Platform.isAndroid &&
-        (executable.trim().isEmpty || !File(executable).existsSync())) {
-      throw StateError('Harness 中继引擎不存在');
-    }
+    if (!Platform.isAndroid) _validateRelayExecutable(executable);
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(routingId)) {
       throw const FormatException('Harness 远端 ID 必须是 6～16 位数字');
     }
@@ -580,6 +586,25 @@ abstract final class RustDeskHarnessShareService {
     if ((remotePort < 1024 && remotePort != simulatorSshRemotePort) ||
         remotePort > 65535) {
       throw const FormatException('Harness 远端服务端口无效');
+    }
+  }
+
+  /// Refuse a desktop RustDesk/KEMI executable even if a stale preference or
+  /// caller passes one explicitly. Harness transport is a dedicated headless
+  /// companion binary; accepting a general desktop client here can open a
+  /// remote-desktop window when an argument is missing or unsupported.
+  static void _validateRelayExecutable(String executable) {
+    final File file = File(executable.trim());
+    final String expectedName = Platform.isWindows
+        ? 'vibekits-harness-relay.exe'
+        : 'vibekits-harness-relay';
+    final String actualName = file.uri.pathSegments.isEmpty
+        ? ''
+        : file.uri.pathSegments.last;
+    if (!file.existsSync() || actualName != expectedName) {
+      throw StateError(
+        'HARNESS_HEADLESS_RELAY_REQUIRED: only $expectedName is allowed',
+      );
     }
   }
 

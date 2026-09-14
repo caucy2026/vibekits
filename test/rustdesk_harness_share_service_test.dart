@@ -5,10 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
 final class _FakeManagedProcess implements RustDeskManagedProcess {
-  _FakeManagedProcess({this.readyError});
+  _FakeManagedProcess({this.readyError, this.completeOnTerminate = true});
   final _exit = Completer<int>();
   final Object? readyError;
+  final bool completeOnTerminate;
   bool terminated = false;
+  bool forceTerminated = false;
 
   @override
   Future<int> get exitCode => _exit.future;
@@ -28,7 +30,14 @@ final class _FakeManagedProcess implements RustDeskManagedProcess {
   @override
   bool terminate() {
     terminated = true;
-    if (!_exit.isCompleted) _exit.complete(0);
+    if (completeOnTerminate && !_exit.isCompleted) _exit.complete(0);
+    return true;
+  }
+
+  @override
+  bool forceTerminate() {
+    forceTerminated = true;
+    if (!_exit.isCompleted) _exit.complete(-9);
     return true;
   }
 }
@@ -53,6 +62,37 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('桌面远程控制程序不能作为 Harness 后台隧道启动', () async {
+    if (Platform.isAndroid) return;
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_desktop_client_rejection_',
+    );
+    final File desktopClient = File(
+      '${temporary.path}${Platform.pathSeparator}'
+      '${Platform.isWindows ? 'KEMI-Remote.exe' : 'KEMI远程办公'}',
+    );
+    await desktopClient.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+
+    bool launched = false;
+    await expectLater(
+      RustDeskHarnessShareService.launchTunnel(
+        desktopClient.path,
+        routingId: '1554650784',
+        localPort: 32147,
+        launcher: (_, _) async => launched = true,
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('HARNESS_HEADLESS_RELAY_REQUIRED'),
+        ),
+      ),
+    );
+    expect(launched, isFalse);
   });
 
   test('RustDesk 网页端只接受无凭据 HTTP/HTTPS 地址', () {
@@ -500,6 +540,30 @@ void main() {
     expect(lease.closed, isTrue);
     expect(process.terminated, isTrue);
     expect(await lease.exitCode, 0);
+  });
+
+  test('受管 Harness 隧道在正常终止超时后必须强制回收', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_harness_forced_close_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final process = _FakeManagedProcess(completeOnTerminate: false);
+    final lease = await RustDeskHarnessShareService.openTunnel(
+      executable.path,
+      routingId: '1554650784',
+      localPort: 32148,
+      launcher: (_, _) async => process,
+    );
+
+    await lease.close(timeout: Duration.zero);
+
+    expect(process.terminated, isTrue);
+    expect(process.forceTerminated, isTrue);
+    expect(await lease.exitCode, -9);
   });
 
   test('受管 Harness 隧道区分监听就绪与远端传输就绪', () async {

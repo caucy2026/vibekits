@@ -28,6 +28,12 @@ final class _Process implements RustDeskManagedProcess {
     if (!exit.isCompleted) exit.complete(0);
     return true;
   }
+
+  @override
+  bool forceTerminate() {
+    if (!exit.isCompleted) exit.complete(-9);
+    return true;
+  }
 }
 
 final class _Channel implements HarnessRemoteChannel {
@@ -141,6 +147,15 @@ void main() {
   });
 
   test('已配对设备完成隧道、证书、hello、状态同步并统一关闭', () async {
+    final Directory relayDirectory = await Directory.systemTemp.createTemp(
+      'vibekits_controller_session_relay_',
+    );
+    final File relayExecutable = File(
+      '${relayDirectory.path}${Platform.pathSeparator}'
+      '${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await relayExecutable.writeAsBytes(const <int>[0]);
+    addTearDown(() => relayDirectory.delete(recursive: true));
     final credentials = <String, String>{};
     final identity = await HarnessRemoteIdentityStore(
       read: (key) async => credentials[key],
@@ -162,7 +177,7 @@ void main() {
     final channel = _Channel(peer.deviceId);
     List<Map<String, dynamic>> restored = const [];
     final session = await HarnessRemoteControllerSession.connect(
-      executable: Platform.resolvedExecutable,
+      executable: relayExecutable.path,
       peer: peer,
       identity: identity,
       forceRelay: true,

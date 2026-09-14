@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -44,6 +45,13 @@ void main() {
       );
       final applications = (apps['applications'] as List?) ?? const [];
       expect(applications, isNotEmpty, reason: 'target app is not installed');
+      final assistance = _toolData(
+        await controller.call(
+          routingId,
+          'vibekits.remote_assistance.status',
+          const <String, Object?>{},
+        ),
+      );
 
       final launch = _toolData(
         await controller.call(
@@ -91,6 +99,29 @@ void main() {
         "/usr/sbin/spctl -a -t exec -vv '/Applications/KEMI远程办公.app'",
       );
       expect(gatekeeper['ok'], isTrue, reason: '$gatekeeper');
+      final executableHash = await controller.runSshCommand(
+        routingId,
+        "/usr/bin/shasum -a 256 '/Applications/KEMI远程办公.app/Contents/MacOS/KEMI远程办公'",
+      );
+      expect(executableHash['ok'], isTrue, reason: '$executableHash');
+      final expectedExecutableHash =
+          Platform.environment['VIBEKITS_REAL_REMOTE_MAC_EXECUTABLE_SHA256'] ??
+          '';
+      if (expectedExecutableHash.isNotEmpty) {
+        expect(
+          '${executableHash['stdout']}'.trim().toLowerCase(),
+          startsWith(expectedExecutableHash.toLowerCase()),
+        );
+      }
+      final market = await controller.runSshCommand(
+        routingId,
+        "/usr/bin/curl --fail --silent --show-error --max-time 15 'https://kemi.newlinksz.com/kd-api/api/store/apps?page=1&pageSize=100&os=macos'",
+      );
+      expect(market['ok'], isTrue, reason: '$market');
+      final marketEnvelope = jsonDecode('${market['stdout']}');
+      expect(marketEnvelope, isA<Map>());
+      expect((marketEnvelope as Map)['status'], 200);
+      expect(((marketEnvelope['data'] as Map)['list'] as List), isNotEmpty);
 
       final app = applications.whereType<Map>().first;
       final processList = (processes['processes'] as List?) ?? const [];
@@ -105,6 +136,9 @@ void main() {
         'launchOk=${launch['ok']} processes=${processList.length} '
         'logLines=${logLines.length} crashReports=${reports.length} '
         'signature=true gatekeeper=true '
+        'executableHash=true marketApps=true '
+        'assistanceEnabled=${assistance['enabled']} '
+        'assistancePhase=${assistance['phase']} '
         'screenshot=${screenshotFile.path} sha=${screenshot['sha256']}',
       );
     },
