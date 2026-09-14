@@ -16,6 +16,7 @@
 
 - 远程协议与仿真组合回归：`108/108` 通过。
 - 覆盖：首次密码校验与证书配对、证书固定和防篡改、授权范围、项目/会话快照、命令反馈、独立停止、断线与重连、直连/HBBR 参数、隧道强制回收、仅凭 ID 的 SSH 公钥引导、文件上传及主机指纹校验、PAD 控制端限制。
+- Windows 节点与共享逻辑补充回归：`23/23` 通过，覆盖 helper 协议/签名/回执、UAC 失败状态、独立 Ed25519 设备登记与撤销、D 盘范围门禁、安装卸载 MCP 授权路由；这仍不替代 Windows 真机 Release 构建和启动。
 - `flutter analyze --no-pub`：`No issues found`。
 - Release 构建：成功，App 约 `823.2 MB`。
 - 兼容性脚本：App、Harness、ADB、7-Zip、GitHub CLI、Git、Flutter frameworks 全部为 `arm64 + x86_64`，最低系统为 macOS 12.0。
