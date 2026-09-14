@@ -195,11 +195,50 @@ void main() {
       expect(await download.readAsBytes(), content);
       expect(await screenshot.length(), greaterThan(64));
 
-      await invoke(VibekitsHarnessToolBridge.adbInstallApkId, <String, Object?>{
-        'serial': target,
-        'apkPath': apkPath,
-        'replace': true,
-      });
+      final installedMetadata = await invoke(
+        VibekitsHarnessToolBridge.adbShellId,
+        <String, Object?>{
+          'serial': target,
+          'arguments': <String>[
+            'dumpsys',
+            'package',
+            'com.vibekits.vibekits',
+            '|',
+            'grep',
+            '-E',
+            'versionName|versionCode|signatures|apkSigningVersion|SigningDetails',
+          ],
+        },
+      );
+      final preinstallEvidence = File(
+        '${evidenceRoot.path}/preinstall-$suffix.json',
+      );
+      await preinstallEvidence.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+          'target': target,
+          'package': 'com.vibekits.vibekits',
+          'metadata': '${installedMetadata['stdout'] ?? ''}',
+          'screenshotPath': screenshot.path,
+        }),
+        flush: true,
+      );
+      // ignore: avoid_print
+      print('VIBEKITS_REAL_S1_PREINSTALL=${preinstallEvidence.path}');
+
+      final installedMetadataText = '${installedMetadata['stdout'] ?? ''}';
+      final alreadyExact =
+          installedMetadataText.contains('versionName=1.9.0-dev.210') &&
+          installedMetadataText.contains('versionCode=2210');
+      if (!alreadyExact) {
+        await invoke(
+          VibekitsHarnessToolBridge.adbInstallApkId,
+          <String, Object?>{
+            'serial': target,
+            'apkPath': apkPath,
+            'replace': true,
+          },
+        );
+      }
       final version = await invoke(
         VibekitsHarnessToolBridge.adbShellId,
         <String, Object?>{
@@ -239,6 +278,15 @@ void main() {
         },
       );
       expect('${process['stdout']}'.trim(), isNotEmpty);
+      final postLaunchScreenshot = File(
+        '${evidenceRoot.path}/screen-$suffix-post-launch.png',
+      );
+      await invoke(VibekitsHarnessToolBridge.adbScreenshotId, <String, Object?>{
+        'serial': target,
+        'localPath': postLaunchScreenshot.path,
+        'overwrite': true,
+      });
+      expect(await postLaunchScreenshot.length(), greaterThan(64));
       final logcat = await invoke(
         VibekitsHarnessToolBridge.adbLogcatId,
         <String, Object?>{'serial': target, 'lines': 200},
@@ -252,11 +300,14 @@ void main() {
           'identity': identity,
           'serialPorts': serialPorts['ports'],
           'packageVersion': '${version['stdout']}'.trim(),
+          'installSkippedAsExactVersion': alreadyExact,
           'pid': '${process['stdout']}'.trim(),
           'logcatBytes': utf8.encode('${logcat['stdout'] ?? ''}').length,
           'roundTripBytes': content.length,
           'screenshotPath': screenshot.path,
           'screenshotBytes': await screenshot.length(),
+          'postLaunchScreenshotPath': postLaunchScreenshot.path,
+          'postLaunchScreenshotBytes': await postLaunchScreenshot.length(),
           'evidenceSource': 'vibekits-harness-tool-bridge',
         }),
         flush: true,

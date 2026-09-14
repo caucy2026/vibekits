@@ -29,7 +29,7 @@
 
 1. Apple 公证上传被当前工具审批阻断；尚无 `Accepted`、staple 或 Gatekeeper `Notarized Developer ID` 证据。
 2. 目标 `4456560334` 尚未安装 dev.210，因此不能把旧 dev.207 的 `PAIRING_CHANNEL_CLOSED` 当成新版本结果。安装精确候选后仍需真实验证首次授权、第二次免授权、项目/会话同步、命令/反馈/停止，以及上传、卸载、安装、启动、日志和截图。
-3. dev.210 Android Release 已使用既有 Gradle 8.14.3 与三个 sqlite3 ABI 缓存成功构建；测试 APK 为 `versionName=1.9.0-dev.210`、`versionCode=2210`，SHA-256 `1d29471a4c9bc5895a83e796fb75ee3b2d3de51e8c5a1a6e869708f0494378c9`。该 APK 仅为 Android Debug 证书签名，不能正式发布。63 当前不在 Harness ADB 就绪列表，`adb.connect` 10 秒超时，TCP 复核为 `Host is down`，因此尚未安装或启动，不得声称 63 已通过。详见 `docs/diagnostics/KEMI_S1_20260914_191536_dev210_release.md`。
+3. dev.210 Android Release 已使用既有 Gradle 8.14.3 与三个 sqlite3 ABI 缓存成功构建。最终 PAD 候选为 `versionName=1.9.0-dev.210`、`versionCode=2210`，APK v2/v3 与 KEMI 证书 SHA-256 `c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8` 均通过，APK SHA-256 为 `6105d6ab8b0c080c21ad97d1b3aa94e4c6c1164b8c511249b115b286f9f423da`。75 已通过严格身份、文件往返、截图、无损覆盖、版本、启动、PID、Logcat 和启动后视觉检查；再次运行会识别精确版本并跳过重复安装。63 当前仍为 `Host is down`，因此不能用 75 替代 63 门禁。详见 `docs/diagnostics/KEMI_S1_20260914_193300_dev210_pad75.md` 与 `docs/diagnostics/KEMI_S1_20260914_191536_dev210_release.md`。
 4. Windows 同源逻辑已有 Dart 回归覆盖，但本轮尚未在 Windows 58 的 D 盘重新构建并真实启动；不得声称 Windows Release 已通过。
 
 ## 下一步验收顺序
