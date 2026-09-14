@@ -5,6 +5,7 @@ import 'dart:math';
 import 'harness_remote_commands.dart';
 import 'harness_remote_connection.dart';
 import 'harness_remote_execution.dart';
+import 'harness_runtime_log_store.dart';
 
 /// One authenticated controller. Work is not serialized behind a long prompt:
 /// a cancel command can arrive while its prompt request is still outstanding.
@@ -22,9 +23,22 @@ class HarnessRemoteServerConnection {
     _subscription = channel.frames.listen(
       _receive,
       onError: (Object error) {
+        unawaited(
+          HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+            'kind': 'harness-remote-channel-error',
+            'errorType': error.runtimeType.toString(),
+            'at': DateTime.now().toUtc().toIso8601String(),
+          }),
+        );
         unawaited(close());
       },
       onDone: () {
+        unawaited(
+          HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+            'kind': 'harness-remote-channel-done',
+            'at': DateTime.now().toUtc().toIso8601String(),
+          }),
+        );
         unawaited(close());
       },
     );
@@ -73,7 +87,14 @@ class HarnessRemoteServerConnection {
       }
       _pending.add(id);
       unawaited(_dispatch(id, frame['payload'] as Map<String, dynamic>));
-    } catch (_) {
+    } catch (error) {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'kind': 'harness-remote-frame-rejected',
+          'errorType': error.runtimeType.toString(),
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
       unawaited(close());
     }
   }
@@ -173,7 +194,14 @@ class HarnessRemoteServerConnection {
         });
         await _outbound;
       }
-    } catch (_) {
+    } catch (error) {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'kind': 'harness-remote-response-write-failure',
+          'errorType': error.runtimeType.toString(),
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
       await close();
     } finally {
       _pending.remove(id);

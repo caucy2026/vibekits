@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -55,12 +56,25 @@ void main() {
     await socket.flush();
     await pendingRequest;
     expect(host.pending.single.request.routingId, '1554650784');
-    await host.approve(
+    final endpointReady = Completer<void>();
+    var endpointReloadStarted = false;
+    var approvalCompleted = false;
+    final approvalFuture = host.approve(
       nonce: request.nonce,
       hostRoutingId: '2602628020',
       grantedWorkspaceIds: const {'w1'},
       grantedOperations: const {'session.history'},
+      beforeReply: () async {
+        endpointReloadStarted = true;
+        await endpointReady.future;
+      },
     );
+    approvalFuture.whenComplete(() => approvalCompleted = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(endpointReloadStarted, true);
+    expect(approvalCompleted, false);
+    endpointReady.complete();
+    await approvalFuture;
     final responseLine = await socket
         .cast<List<int>>()
         .transform(utf8.decoder)
@@ -115,5 +129,44 @@ void main() {
     expect(responseLine, isNot(contains('wrong-password')));
     expect(host.pending, isEmpty);
     await socket.close();
+  });
+
+  test('载体断开会立即撤销待确认请求而不是留下失效弹窗', () async {
+    final host = HarnessRemotePairingHost(
+      identityStore: HarnessRemoteIdentityStore(
+        read: (key) async => null,
+        write: (key, value) async {},
+      ),
+      peerStore: HarnessRemotePeerStore(
+        read: (key) async => null,
+        write: (key, value) async {},
+      ),
+      listenPort: 0,
+    );
+    await host.start();
+    addTearDown(host.stop);
+    final controller = await HarnessRemoteIdentityStore(
+      read: (key) async => null,
+      write: (key, value) async {},
+    ).loadOrCreate();
+    final request = HarnessRemotePairingRequest.create(
+      routingId: '1554650784',
+      deviceId: controller.deviceId,
+      certificatePem: controller.certificatePem,
+      requestedWorkspaceIds: const {'w1'},
+      requestedOperations: const {'session.history'},
+      password: '12345678',
+    );
+    final socket = await Socket.connect('127.0.0.1', host.boundPort!);
+    final appeared = host.changes.firstWhere((rows) => rows.isNotEmpty);
+    socket.write('${jsonEncode(request.toJson())}\n');
+    await socket.flush();
+    await appeared;
+    expect(host.pending, hasLength(1));
+
+    final disappeared = host.changes.firstWhere((rows) => rows.isEmpty);
+    socket.destroy();
+    await disappeared.timeout(const Duration(seconds: 2));
+    expect(host.pending, isEmpty);
   });
 }

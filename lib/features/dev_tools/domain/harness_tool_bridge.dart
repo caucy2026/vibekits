@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -237,6 +238,7 @@ class VibekitsHarnessToolBridge {
     HarnessMcpAutoInvoker? mcpAutoInvoker,
     HarnessMcpReputationLoader? mcpReputationLoader,
     HarnessMcpReputationRater? mcpReputationRater,
+    String? workspaceRoot,
     bool agentOrchestrated = false,
     HarnessAgentActivityProbe? agentActive,
   }) => VibekitsHarnessToolBridge._(
@@ -268,6 +270,7 @@ class VibekitsHarnessToolBridge {
     mcpAutoInvoker,
     mcpReputationLoader,
     mcpReputationRater,
+    workspaceRoot,
     agentOrchestrated,
     agentActive,
   );
@@ -301,6 +304,7 @@ class VibekitsHarnessToolBridge {
     this._mcpAutoInvoker,
     this._mcpReputationLoader,
     this._mcpReputationRater,
+    this._workspaceRoot,
     this._agentOrchestrated,
     this._agentActive,
   );
@@ -339,6 +343,9 @@ class VibekitsHarnessToolBridge {
   static const String gitBackupPushId = 'vibekits.git.backup_push';
   static const String gitVerifyRemoteRefId = 'vibekits.git.verify_remote_ref';
   static const String fileSearchId = 'vibekits.files.search';
+  static const String workspaceListFilesId = 'vibekits.workspace.list_files';
+  static const String workspaceReadTextId = 'vibekits.workspace.read_text';
+  static const String workspaceWriteTextId = 'vibekits.workspace.write_text';
   static const String apiRequestId = 'vibekits.http.request';
   static const String networkDownloadId = 'vibekits.network.download';
   static const String larkCliInspectId = 'vibekits.feishu.inspect';
@@ -446,7 +453,11 @@ class VibekitsHarnessToolBridge {
       'vibekits.simulator.install_candidate';
   static const String simulatorSshExecId = 'vibekits.simulator.ssh_exec';
   static const String simulatorUploadFileId = 'vibekits.simulator.upload_file';
+  static const String simulatorDownloadFileId =
+      'vibekits.simulator.download_file';
+  static const String simulatorScreenshotId = 'vibekits.simulator.screenshot';
   static const String deviceProcessesId = 'vibekits.device.processes';
+  static const String deviceScreenshotId = 'vibekits.device.screenshot';
   static const String deviceLogsId = 'vibekits.device.logs';
   static const String deviceCrashReportsId = 'vibekits.device.crash_reports';
   static const String deviceApplicationsId = 'vibekits.device.applications';
@@ -503,6 +514,7 @@ class VibekitsHarnessToolBridge {
   final HarnessMcpAutoInvoker? _mcpAutoInvoker;
   final HarnessMcpReputationLoader? _mcpReputationLoader;
   final HarnessMcpReputationRater? _mcpReputationRater;
+  final String? _workspaceRoot;
   final bool _agentOrchestrated;
   final HarnessAgentActivityProbe? _agentActive;
   final Map<String, String> _agentOwnedAndroidPackages = <String, String>{};
@@ -550,6 +562,65 @@ class VibekitsHarnessToolBridge {
   _definitions = <String, HarnessToolDefinition>{
     for (final ToolSpec spec in allDevToolRegistry)
       'vibekits.${spec.id}': _fromToolSpec(spec),
+    workspaceListFilesId: _definition(
+      id: workspaceListFilesId,
+      name: '列出当前工作区文件',
+      description:
+          '只读列出当前 Harness 工作区内的文件和目录。路径只能相对工作区，不能访问工作区外部。编写或修改项目前先调用此工具了解现状。',
+      properties: <String, Object?>{
+        'path': _string('可选；工作区内相对目录，默认 .'),
+        'maxDepth': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 5,
+          'description': '递归深度，默认 3',
+        },
+        'maxEntries': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 500,
+          'description': '最多返回条目数，默认 200',
+        },
+      },
+      available: _workspaceRoot != null,
+    ),
+    workspaceReadTextId: _definition(
+      id: workspaceReadTextId,
+      name: '读取当前工作区文本',
+      description: '读取当前 Harness 工作区内的 UTF-8 文本文件。路径只能相对工作区，不能跟随符号链接访问外部。',
+      properties: <String, Object?>{
+        'path': _string('工作区内相对文件路径'),
+        'maxBytes': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 262144,
+          'description': '最多读取字节数，默认 131072',
+        },
+      },
+      required: const <String>['path'],
+      available: _workspaceRoot != null,
+    ),
+    workspaceWriteTextId: _definition(
+      id: workspaceWriteTextId,
+      name: '写入当前工作区文本',
+      description:
+          '在当前 Harness 工作区内创建或更新 UTF-8 文本文件，并自动创建父目录。只允许相对路径；覆盖已有文件必须明确设置 overwrite=true。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'path': _string('工作区内相对文件路径'),
+        'content': const <String, Object?>{
+          'type': 'string',
+          'maxLength': 524288,
+          'description': '完整 UTF-8 文件内容，最多 512 KiB',
+        },
+        'overwrite': const <String, Object?>{
+          'type': 'boolean',
+          'description': '已有文件是否覆盖，默认 false',
+        },
+      },
+      required: const <String>['path', 'content'],
+      available: _workspaceRoot != null,
+    ),
     systemResourcesId: _definition(
       id: systemResourcesId,
       name: '检查系统资源',
@@ -714,6 +785,32 @@ class VibekitsHarnessToolBridge {
         'localPath': _string('本机待上传文件的绝对路径'),
       },
       required: const <String>['routingId', 'localPath'],
+    ),
+    simulatorDownloadFileId: _definition(
+      id: simulatorDownloadFileId,
+      name: '从远程仿真机下载文件',
+      description: '通过已验证的 SSH 隧道下载目标机上的单个文件到本机受控临时目录，返回字节数和 SHA-256。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'routingId': _string('已连接的 VibeKits ID'),
+        'remotePath': _string('目标机上的绝对文件路径'),
+      },
+      required: const <String>['routingId', 'remotePath'],
+    ),
+    simulatorScreenshotId: _definition(
+      id: simulatorScreenshotId,
+      name: '查看远程仿真机当前屏幕',
+      description: '只需设备 ID；在目标 VibeKits 内截取一帧，再通过已验证通道下载到本机。不启动远程桌面，不持续录屏。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'routingId': _string('已连接的 VibeKits ID')},
+      required: const <String>['routingId'],
+    ),
+    deviceScreenshotId: _definition(
+      id: deviceScreenshotId,
+      name: '截取被仿真机当前屏幕',
+      description: '在远程仿真开关已打开时截取单帧屏幕，返回目标机临时图片路径、尺寸、大小和 SHA-256。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: const <String, Object?>{},
     ),
     deviceProcessesId: _definition(
       id: deviceProcessesId,
@@ -2717,6 +2814,15 @@ class VibekitsHarnessToolBridge {
   HarnessToolHandler? _handlerFor(String toolId) {
     final HarnessToolHandler? custom = _customHandlers[toolId];
     if (custom != null) return custom;
+    if (toolId == workspaceListFilesId && _workspaceRoot != null) {
+      return _listWorkspaceFiles;
+    }
+    if (toolId == workspaceReadTextId && _workspaceRoot != null) {
+      return _readWorkspaceText;
+    }
+    if (toolId == workspaceWriteTextId && _workspaceRoot != null) {
+      return _writeWorkspaceText;
+    }
     if (toolId == adbListDevicesId) return _listAdbDevices;
     if (toolId == adbConnectId) return _connectAdb;
     if (toolId == adbCommandId) return _runAdbCommand;
@@ -2861,6 +2967,9 @@ class VibekitsHarnessToolBridge {
     }
     if (toolId == simulatorSshExecId) return _runSimulatorSshCommand;
     if (toolId == simulatorUploadFileId) return _uploadSimulatorFile;
+    if (toolId == simulatorDownloadFileId) return _downloadSimulatorFile;
+    if (toolId == simulatorScreenshotId) return _captureSimulatorScreenshot;
+    if (toolId == deviceScreenshotId) return _captureDeviceScreenshot;
     if (toolId == deviceProcessesId) return _inspectDeviceProcesses;
     if (toolId == deviceLogsId) return _readDeviceLogs;
     if (toolId == deviceCrashReportsId) return _readDeviceCrashReports;
@@ -2925,6 +3034,147 @@ class VibekitsHarnessToolBridge {
       'requiresAdministrator': Platform.isWindows,
     };
   }
+
+  Future<Map<String, Object?>> _listWorkspaceFiles(
+    Map<String, Object?> arguments,
+  ) async {
+    final Directory root = _workspaceDirectory;
+    final String startPath = _resolveWorkspacePath(
+      arguments['path'],
+      allowRoot: true,
+    );
+    final Directory start = Directory(startPath);
+    if (!await start.exists()) throw StateError('工作区目录不存在');
+    final int maxDepth = _integer(arguments['maxDepth'], 3).clamp(1, 5);
+    final int maxEntries = _integer(arguments['maxEntries'], 200).clamp(1, 500);
+    final List<Map<String, Object?>> entries = <Map<String, Object?>>[];
+    final List<(Directory, int)> pending = <(Directory, int)>[(start, 0)];
+    while (pending.isNotEmpty && entries.length < maxEntries) {
+      final (Directory directory, int depth) = pending.removeLast();
+      final List<FileSystemEntity> children = await directory
+          .list(followLinks: false)
+          .toList();
+      children.sort((a, b) => a.path.compareTo(b.path));
+      for (final FileSystemEntity child in children) {
+        if (entries.length >= maxEntries) break;
+        final FileSystemEntityType type = await FileSystemEntity.type(
+          child.path,
+          followLinks: false,
+        );
+        final String relative = child.path
+            .substring(root.path.length + 1)
+            .replaceAll(Platform.pathSeparator, '/');
+        entries.add(<String, Object?>{
+          'path': relative,
+          'type': type == FileSystemEntityType.directory
+              ? 'directory'
+              : type == FileSystemEntityType.file
+              ? 'file'
+              : type == FileSystemEntityType.link
+              ? 'link'
+              : 'other',
+          if (type == FileSystemEntityType.file)
+            'bytes': await File(child.path).length(),
+        });
+        if (type == FileSystemEntityType.directory && depth + 1 < maxDepth) {
+          pending.add((Directory(child.path), depth + 1));
+        }
+      }
+    }
+    entries.sort(
+      (Map<String, Object?> a, Map<String, Object?> b) =>
+          '${a['path']}'.compareTo('${b['path']}'),
+    );
+    return <String, Object?>{
+      'workspace': root.path,
+      'entries': entries,
+      'truncated': entries.length >= maxEntries,
+    };
+  }
+
+  Future<Map<String, Object?>> _readWorkspaceText(
+    Map<String, Object?> arguments,
+  ) async {
+    final String path = _resolveWorkspacePath(arguments['path']);
+    final File file = File(path);
+    if (!await file.exists()) throw StateError('工作区文件不存在');
+    final int maxBytes = _integer(
+      arguments['maxBytes'],
+      131072,
+    ).clamp(1, 262144);
+    final int length = await file.length();
+    if (length > maxBytes) {
+      throw StateError('文件为 $length 字节，超过本次读取上限 $maxBytes 字节');
+    }
+    final List<int> bytes = await file.readAsBytes();
+    return <String, Object?>{
+      'path': _workspaceRelativePath(path),
+      'bytes': bytes.length,
+      'content': utf8.decode(bytes),
+    };
+  }
+
+  Future<Map<String, Object?>> _writeWorkspaceText(
+    Map<String, Object?> arguments,
+  ) async {
+    final String path = _resolveWorkspacePath(arguments['path']);
+    final String content = '${arguments['content'] ?? ''}';
+    final int bytes = utf8.encode(content).length;
+    if (bytes > 524288) throw StateError('写入内容超过 512 KiB');
+    final File file = File(path);
+    final bool existed = await file.exists();
+    if (existed && arguments['overwrite'] != true) {
+      throw StateError('目标文件已存在；确认更新时请设置 overwrite=true');
+    }
+    await file.parent.create(recursive: true);
+    await file.writeAsString(content, encoding: utf8, flush: true);
+    return <String, Object?>{
+      'path': _workspaceRelativePath(path),
+      'bytes': bytes,
+      'created': !existed,
+      'overwritten': existed,
+    };
+  }
+
+  Directory get _workspaceDirectory {
+    final String? configured = _workspaceRoot?.trim();
+    if (configured == null || configured.isEmpty) {
+      throw StateError('当前 Harness 没有绑定工作区');
+    }
+    return Directory(configured).absolute;
+  }
+
+  String _resolveWorkspacePath(Object? value, {bool allowRoot = false}) {
+    final Directory root = _workspaceDirectory;
+    final String raw = (value ?? '').toString().trim().replaceAll('\\', '/');
+    if (allowRoot && (raw.isEmpty || raw == '.')) return root.path;
+    if (raw.isEmpty || raw.startsWith('/') || File(raw).isAbsolute) {
+      throw const FormatException('必须提供工作区内相对路径');
+    }
+    final List<String> segments = raw.split('/');
+    if (segments.any(
+      (String segment) =>
+          segment.isEmpty ||
+          segment == '.' ||
+          segment == '..' ||
+          segment.contains(RegExp(r'[\r\n\x00]')),
+    )) {
+      throw const FormatException('工作区路径不能包含空段、.、..、换行或 NUL');
+    }
+    String cursor = root.path;
+    for (final String segment in segments) {
+      cursor = '$cursor${Platform.pathSeparator}$segment';
+      if (FileSystemEntity.typeSync(cursor, followLinks: false) ==
+          FileSystemEntityType.link) {
+        throw const FormatException('工作区路径不能经过符号链接');
+      }
+    }
+    return cursor;
+  }
+
+  String _workspaceRelativePath(String path) => path
+      .substring(_workspaceDirectory.path.length + 1)
+      .replaceAll(Platform.pathSeparator, '/');
 
   Future<Map<String, Object?>> _captureStart(
     Map<String, Object?> arguments,
@@ -3380,6 +3630,23 @@ class VibekitsHarnessToolBridge {
     '${arguments['routingId'] ?? ''}',
     '${arguments['localPath'] ?? ''}',
   );
+
+  Future<Map<String, Object?>> _downloadSimulatorFile(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.downloadFile(
+    '${arguments['routingId'] ?? ''}',
+    '${arguments['remotePath'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _captureSimulatorScreenshot(
+    Map<String, Object?> arguments,
+  ) => HarnessSimulatorController.shared.captureScreenshot(
+    '${arguments['routingId'] ?? ''}',
+  );
+
+  Future<Map<String, Object?>> _captureDeviceScreenshot(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.captureScreenshot();
 
   Future<Map<String, Object?>> _inspectDeviceProcesses(
     Map<String, Object?> arguments,
@@ -5792,6 +6059,7 @@ class VibekitsHarnessToolBridge {
     HarnessToolRisk risk = HarnessToolRisk.readOnly,
     required Map<String, Object?> properties,
     List<String> required = const <String>[],
+    bool available = true,
   }) => HarnessToolDefinition(
     id: id,
     name: name,
@@ -5812,7 +6080,7 @@ class VibekitsHarnessToolBridge {
       if (required.isNotEmpty) 'required': required,
       'additionalProperties': false,
     },
-    available: true,
+    available: available,
   );
 
   static HarnessToolDefinition _unavailableDefinition({

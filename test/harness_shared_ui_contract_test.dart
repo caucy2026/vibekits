@@ -181,6 +181,31 @@ void main() {
     expect(watchdog, contains("error?.code !== 'ESRCH'"));
   });
 
+  test(
+    'mobile Harness keeps tool payloads in the shared collapsed timeline',
+    () {
+      final String service = File(
+        'lib/features/dev_tools/domain/deepseek_harness_service.dart',
+      ).readAsStringSync();
+      final int mobileStart = service.indexOf('class _MobileHarnessAgent');
+      final int mobileEnd = service.indexOf(
+        'class _ProcessHarnessAgent',
+        mobileStart,
+      );
+      expect(mobileStart, greaterThanOrEqualTo(0));
+      expect(mobileEnd, greaterThan(mobileStart));
+      final String mobileAgent = service.substring(mobileStart, mobileEnd);
+
+      expect(mobileAgent, contains('final HttpClient client = _client ??='));
+      expect(
+        mobileAgent,
+        contains('connectionTimeout = const Duration(seconds: 30)'),
+      );
+      expect(mobileAgent, isNot(contains('[Harness 工具调用]')));
+      expect(mobileAgent, isNot(contains('[Harness 工具结果]')));
+    },
+  );
+
   test('session delete and cross-project move bridge both desktop WebViews', () {
     final String patch = File(
       'tool/patch_harness_runtime.mjs',

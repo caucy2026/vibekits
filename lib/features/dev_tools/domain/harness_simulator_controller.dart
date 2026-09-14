@@ -133,12 +133,17 @@ final class _LoopbackHarnessSimulatorMcpClient
   }) async {
     late final Map<String, Object?> response;
     try {
-      response = await _post(port, <String, Object?>{
-        'jsonrpc': '2.0',
-        'id': id,
-        'method': method,
-        'params': params,
-      }, callerId: callerId, timeout: timeout);
+      response = await _post(
+        port,
+        <String, Object?>{
+          'jsonrpc': '2.0',
+          'id': id,
+          'method': method,
+          'params': params,
+        },
+        callerId: callerId,
+        timeout: timeout,
+      );
     } on HarnessSimulatorControllerException catch (error) {
       throw HarnessSimulatorControllerException(
         error.code,
@@ -559,6 +564,114 @@ final class HarnessSimulatorController {
       'remotePath': remotePath,
       'bytes': stat.size,
       'sha256': remoteSha,
+    };
+  }
+
+  Future<Map<String, Object?>> downloadFile(
+    String routingId,
+    String remotePath,
+  ) async {
+    final session = _requireSession(routingId);
+    final ssh = session.ssh;
+    if (ssh == null) {
+      throw const HarnessSimulatorControllerException(
+        'ssh_not_ready',
+        '该仿真连接尚未完成 SSH 公钥验证',
+      );
+    }
+    final source = remotePath.trim();
+    if (!source.startsWith('/') ||
+        source.length > 4096 ||
+        source.codeUnits.any((unit) => unit == 0 || unit == 10 || unit == 13)) {
+      throw const FormatException('下载源必须是有效的绝对文件路径');
+    }
+    final originalName = Uri.file(source).pathSegments.last;
+    final safeName = originalName.replaceAll(RegExp(r'[^A-Za-z0-9._+-]'), '_');
+    if (safeName.isEmpty || safeName == '.' || safeName == '..') {
+      throw const FormatException('下载文件名无效');
+    }
+    final directory = Directory(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'vibekits-simulator-downloads${Platform.pathSeparator}${routingId.trim()}',
+    );
+    await directory.create(recursive: true);
+    final target = File(
+      '${directory.path}${Platform.pathSeparator}'
+      '${DateTime.now().millisecondsSinceEpoch}-$safeName',
+    );
+    final copied = await _processRunner(_scpExecutable(), <String>[
+      ..._scpOptions(ssh),
+      '${ssh.username}@127.0.0.1:$source',
+      target.path,
+    ]).timeout(const Duration(minutes: 15));
+    if (copied.exitCode != 0 || !await target.exists()) {
+      if (await target.exists()) await target.delete();
+      throw HarnessSimulatorControllerException(
+        'sftp_download_failed',
+        '目标机文件下载失败：${copied.stderr}',
+      );
+    }
+    final stat = await target.stat();
+    if (stat.size <= 0 || stat.size > 2 * 1024 * 1024 * 1024) {
+      await target.delete();
+      throw const FormatException('下载文件大小超出 2 GiB 限制');
+    }
+    return <String, Object?>{
+      'downloaded': true,
+      'routingId': routingId.trim(),
+      'hostname': ssh.hostname,
+      'remotePath': source,
+      'localPath': target.path,
+      'bytes': stat.size,
+      'sha256': (await sha256.bind(target.openRead()).first).toString(),
+    };
+  }
+
+  Future<Map<String, Object?>> captureScreenshot(String routingId) async {
+    final raw = await call(
+      routingId,
+      'vibekits.device.screenshot',
+      const <String, Object?>{},
+    );
+    final structuredRaw = raw['structuredContent'];
+    if (structuredRaw is! Map) {
+      throw const HarnessSimulatorControllerException(
+        'invalid_screenshot_response',
+        '目标机截图响应格式错误',
+      );
+    }
+    final structured = Map<String, Object?>.from(structuredRaw);
+    final dataRaw = structured['data'];
+    if (structured['ok'] != true || dataRaw is! Map) {
+      throw HarnessSimulatorControllerException(
+        'remote_screenshot_failed',
+        '${structured['error'] ?? '目标机截图失败'}',
+      );
+    }
+    final data = Map<String, Object?>.from(dataRaw);
+    final remotePath = '${data['path'] ?? ''}';
+    final downloaded = await downloadFile(routingId, remotePath);
+    final expectedSha = '${data['sha256'] ?? ''}'.toLowerCase();
+    if (expectedSha.isEmpty ||
+        '${downloaded['sha256']}'.toLowerCase() != expectedSha) {
+      final localPath = '${downloaded['localPath'] ?? ''}';
+      if (localPath.isNotEmpty) {
+        final file = File(localPath);
+        if (await file.exists()) await file.delete();
+      }
+      throw const HarnessSimulatorControllerException(
+        'screenshot_checksum_mismatch',
+        '远程截图下载后 SHA-256 不一致',
+      );
+    }
+    return <String, Object?>{
+      ...downloaded,
+      'captured': true,
+      'platform': data['platform'],
+      'width': data['width'],
+      'height': data['height'],
+      'targetSha256': expectedSha,
+      'singleFrame': true,
     };
   }
 

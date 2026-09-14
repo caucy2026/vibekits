@@ -197,6 +197,8 @@ void main() {
     final upload = File('${temporary.path}/Demo.zip');
     await upload.writeAsString('signed-test-candidate');
     final expectedSha = (await sha256.bind(upload.openRead()).first).toString();
+    final screenshotBytes = utf8.encode('simulated-screen-png');
+    final screenshotSha = sha256.convert(screenshotBytes).toString();
     final mcpTunnelProcess = _FakeManagedProcess();
     final sshTunnelProcess = _FakeManagedProcess();
     final mcp = _SshBootstrapMcpClient();
@@ -251,6 +253,10 @@ void main() {
       }
       if (executablePath.endsWith('scp') ||
           executablePath.endsWith('scp.exe')) {
+        final sourceArgument = arguments[arguments.length - 2];
+        if (sourceArgument.contains('@127.0.0.1:')) {
+          await File(arguments.last).writeAsBytes(screenshotBytes);
+        }
         return ProcessResult(1, 0, '', '');
       }
       final command = arguments.isEmpty ? '' : arguments.last;
@@ -333,6 +339,15 @@ void main() {
             line.contains('UserKnownHostsFile='),
       ),
       isTrue,
+    );
+    mcp.screenshotSha256 = screenshotSha;
+    final screenshot = await controller.captureScreenshot('4456560334');
+    expect(screenshot['captured'], isTrue);
+    expect(screenshot['sha256'], screenshotSha);
+    expect(screenshot['targetSha256'], screenshotSha);
+    expect(
+      await File('${screenshot['localPath']}').readAsBytes(),
+      screenshotBytes,
     );
     await controller.disconnect('4456560334');
     expect(mcpTunnelProcess.terminated, isTrue);
@@ -424,6 +439,7 @@ final class _SshBootstrapMcpClient implements HarnessSimulatorMcpClient {
   String? authorizedPeerId;
   String? authorizedPublicKey;
   final List<String> callerIds = <String>[];
+  String screenshotSha256 = '';
 
   @override
   Future<List<Map<String, Object?>>> initializeAndList(
@@ -436,6 +452,7 @@ final class _SshBootstrapMcpClient implements HarnessSimulatorMcpClient {
       <String, Object?>{'name': 'vibekits.device.ssh_key_status'},
       <String, Object?>{'name': 'vibekits.device.ssh_authorize'},
       <String, Object?>{'name': 'vibekits.device.processes'},
+      <String, Object?>{'name': 'vibekits.device.screenshot'},
     ];
   }
 
@@ -457,6 +474,13 @@ final class _SshBootstrapMcpClient implements HarnessSimulatorMcpClient {
         'authorized': false,
       },
       'vibekits.device.ssh_authorize' => <String, Object?>{'authorized': true},
+      'vibekits.device.screenshot' => <String, Object?>{
+        'path': '/tmp/vibekits-screen.png',
+        'platform': 'macos',
+        'width': 1920,
+        'height': 1080,
+        'sha256': screenshotSha256,
+      },
       _ => <String, Object?>{},
     };
     if (toolId == 'vibekits.device.ssh_authorize') {

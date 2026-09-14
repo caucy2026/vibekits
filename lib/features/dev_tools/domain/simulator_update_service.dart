@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
@@ -342,29 +343,28 @@ final class SimulatorUpdateService {
       throw StateError('候选 App Developer ID 团队不匹配');
     }
     final String executable = await plist(replacement, 'CFBundleExecutable');
-    final ProcessResult universal = await _processRunner(
-      '/usr/bin/lipo',
-      <String>[
-        '-verify_arch',
-        'x86_64',
-        'arm64',
-        '$replacement/Contents/MacOS/$executable',
-      ],
-    );
-    if (universal.exitCode != 0) {
+    final String executablePath = '$replacement/Contents/MacOS/$executable';
+    final File executableFile = File(executablePath);
+    final RandomAccessFile reader = await executableFile.open();
+    late final Uint8List machOHeader;
+    try {
+      machOHeader = await reader.read(
+        (await executableFile.length()).clamp(0, 4096),
+      );
+    } finally {
+      await reader.close();
+    }
+    final Set<int> cpuTypes = parseUniversalMachOCpuTypes(machOHeader);
+    if (!cpuTypes.contains(0x01000007) || !cpuTypes.contains(0x0100000c)) {
       throw StateError('候选 App 不是 Intel/Apple Silicon Universal');
     }
-    final ProcessResult deployment = await _processRunner(
-      '/usr/bin/otool',
-      <String>['-l', '$replacement/Contents/MacOS/$executable'],
-    );
-    if (deployment.exitCode != 0) throw StateError('无法读取候选最低系统版本');
-    final Match? minos = RegExp(
-      r'\bminos\s+(\d+)\.(\d+)',
-    ).firstMatch('${deployment.stdout}');
-    if (minos == null ||
-        int.parse(minos.group(1)!) > 12 ||
-        (int.parse(minos.group(1)!) == 12 && int.parse(minos.group(2)!) > 0)) {
+    final Match? minimumSystem = RegExp(
+      r'^(\d+)\.(\d+)',
+    ).firstMatch(await plist(replacement, 'LSMinimumSystemVersion'));
+    if (minimumSystem == null ||
+        int.parse(minimumSystem.group(1)!) > 12 ||
+        (int.parse(minimumSystem.group(1)!) == 12 &&
+            int.parse(minimumSystem.group(2)!) > 0)) {
       throw StateError('候选 App 不满足 macOS 12+ 兼容门禁');
     }
     return <String, Object?>{
@@ -372,6 +372,40 @@ final class SimulatorUpdateService {
       'newBuild': newBuild,
       'teamIdentifier': newTeam,
     };
+  }
+
+  /// Reads CPU types from a Mach-O fat header without requiring Xcode command
+  /// line tools. Clean user Macs expose `/usr/bin/lipo` as an installer shim.
+  static Set<int> parseUniversalMachOCpuTypes(Uint8List bytes) {
+    if (bytes.length < 8) return const <int>{};
+    final ByteData data = ByteData.sublistView(bytes);
+    final int bigMagic = data.getUint32(0, Endian.big);
+    final bool bigEndian;
+    final int entrySize;
+    if (bigMagic == 0xcafebabe) {
+      bigEndian = true;
+      entrySize = 20;
+    } else if (bigMagic == 0xcafebabf) {
+      bigEndian = true;
+      entrySize = 32;
+    } else if (bigMagic == 0xbebafeca) {
+      bigEndian = false;
+      entrySize = 20;
+    } else if (bigMagic == 0xbfbafeca) {
+      bigEndian = false;
+      entrySize = 32;
+    } else {
+      return const <int>{};
+    }
+    final Endian endian = bigEndian ? Endian.big : Endian.little;
+    final int count = data.getUint32(4, endian);
+    if (count == 0 || count > 64 || 8 + count * entrySize > bytes.length) {
+      return const <int>{};
+    }
+    return Set<int>.unmodifiable(<int>{
+      for (int index = 0; index < count; index++)
+        data.getUint32(8 + index * entrySize, endian),
+    });
   }
 
   Future<void> _validateArchiveEntries(

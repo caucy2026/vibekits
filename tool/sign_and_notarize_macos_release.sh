@@ -24,7 +24,7 @@ VIBEKITS_DEVELOPER_ID_APPLICATION="$IDENTITY" \
 
 BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
   "$APP_BUNDLE/Contents/Info.plist")"
-BRIDGE_FILE="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/mcp/tool-bridge.json"
+BRIDGE_FILE="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/Mcp/tool-bridge.json"
 SMOKE_PID=""
 cleanup_smoke() {
   if [ -n "$SMOKE_PID" ] && kill -0 "$SMOKE_PID" 2>/dev/null; then

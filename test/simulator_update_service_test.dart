@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,26 @@ import 'package:vibekits/features/dev_tools/domain/lan_mcp_tool_server.dart';
 import 'package:vibekits/features/dev_tools/domain/simulator_update_service.dart';
 
 void main() {
+  test('Universal 候选校验不依赖目标机安装 Xcode 工具', () {
+    final ByteData header = ByteData(48)
+      ..setUint32(0, 0xcafebabe, Endian.big)
+      ..setUint32(4, 2, Endian.big)
+      ..setUint32(8, 0x01000007, Endian.big)
+      ..setUint32(28, 0x0100000c, Endian.big);
+    expect(
+      SimulatorUpdateService.parseUniversalMachOCpuTypes(
+        header.buffer.asUint8List(),
+      ),
+      <int>{0x01000007, 0x0100000c},
+    );
+    expect(
+      SimulatorUpdateService.parseUniversalMachOCpuTypes(
+        Uint8List.fromList(<int>[0xcf, 0xfa, 0xed, 0xfe]),
+      ),
+      isEmpty,
+    );
+  });
+
   test('上传令牌单次使用且绑定 ZIP 大小和 SHA-256', () async {
     final Directory root = await Directory.systemTemp.createTemp(
       'vibekits_update_test_',

@@ -69,7 +69,9 @@ String buildHarnessCapabilityCatalog() {
     ..writeln()
     ..writeln('## 数量口径')
     ..writeln()
-    ..writeln('- 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。')
+    ..writeln(
+      '- 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。',
+    )
     ..writeln('- 开发工具业务能力条目：${allDevToolRegistry.length}。')
     ..writeln('- 开发工具独立工作区入口：${devToolRegistry.length}。')
     ..writeln('- Harness 定义接口：${bridge.fullCatalog.length}。')

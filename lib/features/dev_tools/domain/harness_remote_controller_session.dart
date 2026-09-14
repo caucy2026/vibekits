@@ -66,6 +66,15 @@ final class HarnessRemoteControllerSession {
     );
     HarnessRemoteConnection? connection;
     try {
+      if (Platform.isAndroid) {
+        // Android's in-process native API returns after creating the local
+        // listener, before RustDesk has completed rendezvous and the target's
+        // remembered-peer authorization poll. Pairing naturally waits for a
+        // person, but an immediate mTLS ClientHello can otherwise be sent into
+        // a not-yet-authorized carrier and be closed. Keep the loading state
+        // visible while giving the native handshake one bounded poll cycle.
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
       final deadline = DateTime.now().add(timeout);
       Object? lastError;
       HarnessRemoteChannel? channel;

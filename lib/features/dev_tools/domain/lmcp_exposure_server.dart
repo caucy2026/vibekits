@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
 
+import '../../../app/app_version.dart';
 import 'harness_tool_bridge.dart';
 import 'lan_peer_discovery_service.dart';
 import 'lmcp_caller_auth.dart';
@@ -212,7 +213,7 @@ class VibekitsLmcpProtocol {
   // The monotonic application build number changes together with the
   // executable catalog. The complete schema is independently protected by
   // [capabilityDigest].
-  static const String currentCatalogRevision = '2203';
+  static const String currentCatalogRevision = '${AppVersion.build}';
 
   final String instanceId;
   final String serverVersion;
@@ -646,7 +647,7 @@ class VibekitsLmcpExposureServer {
   static final VibekitsLmcpExposureServer instance = VibekitsLmcpExposureServer(
     discovery: LanPeerDiscoveryService.instance,
   );
-  static const String currentAppVersion = '1.9.0-dev.203';
+  static const String currentAppVersion = AppVersion.semantic;
 
   final LanPeerDiscoveryService discovery;
   final LmcpCertificateStore certificateStore;

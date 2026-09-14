@@ -121,6 +121,8 @@
 114. [dev.183 统一 ID 仿真传输修复验收](acceptance/V1_9_0_DEV183_SIMULATOR_TRANSPORT_FIX_2026-09-11.md)——桌面 IPC/登录响应顺序修复、双架构签名候选、直连/强制中继本机闭环及未完成双机门禁
 115. [dev.186 整机仿真诊断与安全升级阶段验收](acceptance/V1_9_0_DEV186_SIMULATOR_DEBUG_AND_SAFE_UPDATE_2026-09-11.md)——目标 ID 直连/强制中继真业务、任意 App 诊断、专用回环签名升级、Mac 候选门禁和明确剩余项
 116. [dev.187 PAD 协同会话与 KEMI 商场发布验收](acceptance/V1_9_0_DEV187_PAD_REMOTE_SESSION_MARKET_RELEASE_2026-09-11.md)——进程级会话生命周期、PAD 75 到 Mac 命令反馈、Apple 公证、商场公网回读及 Windows 阻断门禁
+117. [dev.205 Windows/PAD 双控制端远程仿真验收](acceptance/V1_9_0_DEV205_DUAL_CONTROLLER_REMOTE_SIMULATION_2026-09-14.md)——Windows 58、PAD 63 仅凭统一 ID 连接、MCP/SSH/文件传输和双架构 Mac 候选证据
+118. [dev.209 远程故障取证与配对载体修复验收](acceptance/V1_9_0_DEV209_REMOTE_DIAGNOSTIC_CAPTURE_2026-09-14.md)——配对断线自动撤销、受管隧道不再误走桌面延时、一次性截图/下载、119 项共用回归和真实目标版本阻断证据
 
 ## 完成定义
 

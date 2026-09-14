@@ -1,3 +1,8 @@
+import 'harness_remote_execution.dart';
+import 'harness_remote_pairing.dart';
+import 'harness_remote_pairing_service.dart';
+import 'rustdesk_harness_share_service.dart';
+
 /// App-level bridge between the Advanced settings page and the currently
 /// running Harness backend.
 ///
@@ -57,4 +62,53 @@ class HarnessRemoteManagementBridge {
 
   static Set<String> localWorkspaceIds() =>
       _localWorkspaceIds?.call() ?? const <String>{};
+
+  /// Completes the application-level half of first pairing after the native
+  /// RustDesk carrier has already authenticated and authorized the caller.
+  ///
+  /// Keeping this here lets the app shell present an incoming certificate
+  /// prompt even when Settings is closed. It does not make the Harness WebView
+  /// or model startup own the prompt lifecycle.
+  static Future<String> approvePendingPairing(
+    HarnessRemotePendingPairing pending, {
+    String configuredExecutable = '',
+  }) async {
+    final RustDeskHostInfo host =
+        await RustDeskHarnessShareService.ensureHostAvailable(
+          configuredExecutable: configuredExecutable,
+        );
+    final List<RustDeskHarnessIncomingConnection> nativeConnections =
+        await RustDeskHarnessShareService.connections(host.executable);
+    final bool nativeAuthorized = nativeConnections.any(
+      (RustDeskHarnessIncomingConnection connection) =>
+          connection.peerId == pending.request.routingId &&
+          connection.authorized &&
+          !connection.disconnected &&
+          connection.portForward.endsWith(':32145'),
+    );
+    if (!nativeAuthorized) {
+      throw StateError('PAIRING_NATIVE_CALLER_NOT_AUTHORIZED');
+    }
+    Set<String> grantedWorkspaceIds = pending.request.requestedWorkspaceIds;
+    if (grantedWorkspaceIds.contains(
+      HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
+    )) {
+      grantedWorkspaceIds = localWorkspaceIds();
+      if (grantedWorkspaceIds.isEmpty) {
+        throw StateError('PAIRING_LOCAL_WORKSPACE_UNAVAILABLE');
+      }
+    }
+    final HarnessRemotePairingApproval approval = await HarnessRemotePairingHost
+        .instance
+        .approve(
+          nonce: pending.request.nonce,
+          hostRoutingId: host.id,
+          grantedWorkspaceIds: grantedWorkspaceIds,
+          grantedOperations: pending.request.requestedOperations.intersection(
+            HarnessRemoteExecution.sessionOperations,
+          ),
+          beforeReply: startHost,
+        );
+    return approval.comparisonCode;
+  }
 }

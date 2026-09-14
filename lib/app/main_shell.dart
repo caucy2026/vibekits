@@ -13,6 +13,7 @@ import '../features/documents/presentation/documents_tab.dart';
 import '../features/documents/domain/format_router.dart';
 import '../features/dev_tools/presentation/dev_tools_tab.dart';
 import '../features/dev_tools/domain/harness_remote_management_bridge.dart';
+import '../features/dev_tools/domain/harness_remote_pairing_service.dart';
 import '../features/dev_tools/domain/remote_session.dart';
 import '../features/local_models/presentation/local_models_tab.dart';
 import '../features/local_models/presentation/official_harness_workspace.dart';
@@ -121,6 +122,9 @@ class _MainShellState extends State<MainShell> {
   int _dropGeneration = 0;
   List<DroppedFileRoute> _dropBatch = const <DroppedFileRoute>[];
   StreamSubscription<List<String>>? _dropSubscription;
+  StreamSubscription<List<HarnessRemotePendingPairing>>?
+  _pendingPairingSubscription;
+  String _presentedPairingNonce = '';
 
   @override
   void initState() {
@@ -186,6 +190,112 @@ class _MainShellState extends State<MainShell> {
         (_) => _handleDroppedFiles(widget.initialFilePaths),
       );
     }
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      _pendingPairingSubscription = HarnessRemotePairingHost.instance.changes
+          .listen(_handlePendingPairings);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _handlePendingPairings(HarnessRemotePairingHost.instance.pending);
+        }
+      });
+    }
+  }
+
+  void _handlePendingPairings(List<HarnessRemotePendingPairing> rows) {
+    if (!mounted || rows.isEmpty || _presentedPairingNonce.isNotEmpty) return;
+    final HarnessRemotePendingPairing pending = rows.first;
+    _presentedPairingNonce = pending.request.nonce;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_showIncomingPairing(pending));
+    });
+  }
+
+  Future<void> _showIncomingPairing(HarnessRemotePendingPairing pending) async {
+    String? failure;
+    BuildContext? activeDialogContext;
+    bool dialogResolved = false;
+    late final StreamSubscription<List<HarnessRemotePendingPairing>>
+    withdrawalSubscription;
+    withdrawalSubscription = HarnessRemotePairingHost.instance.changes.listen((
+      rows,
+    ) {
+      if (dialogResolved ||
+          rows.any((row) => row.request.nonce == pending.request.nonce)) {
+        return;
+      }
+      final BuildContext? dialogContext = activeDialogContext;
+      if (dialogContext == null || !dialogContext.mounted) return;
+      dialogResolved = true;
+      Navigator.of(dialogContext).pop(null);
+    });
+    try {
+      final bool? approve = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
+          activeDialogContext = dialogContext;
+          return AlertDialog(
+            key: const Key('incoming-harness-pairing-dialog'),
+            title: const Text('允许远程协助？'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Text(
+                '设备 ${pending.request.routingId} 请求查看当前 Harness 项目并操作会话。\n\n'
+                '证书指纹：${pending.request.certificateSha256.substring(0, 16)}…\n'
+                '确认后会记住此设备，除非撤销授权或设备身份发生变化。',
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                key: const Key('reject-incoming-harness-pairing'),
+                onPressed: () {
+                  dialogResolved = true;
+                  Navigator.of(dialogContext).pop(false);
+                },
+                child: const Text('拒绝'),
+              ),
+              FilledButton(
+                key: const Key('approve-incoming-harness-pairing'),
+                onPressed: () {
+                  dialogResolved = true;
+                  Navigator.of(dialogContext).pop(true);
+                },
+                child: const Text('确认并记住'),
+              ),
+            ],
+          );
+        },
+      );
+      dialogResolved = true;
+      if (approve == true) {
+        final String code =
+            await HarnessRemoteManagementBridge.approvePendingPairing(pending);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('远程协助已授权，双方核对码 $code')));
+        }
+      } else if (approve == false) {
+        await HarnessRemotePairingHost.instance.reject(pending.request.nonce);
+      }
+    } on Object catch (error) {
+      failure = '$error';
+    } finally {
+      await withdrawalSubscription.cancel();
+      if (_presentedPairingNonce == pending.request.nonce) {
+        _presentedPairingNonce = '';
+      }
+      if (mounted) {
+        final List<HarnessRemotePendingPairing> remaining =
+            HarnessRemotePairingHost.instance.pending;
+        if (remaining.isNotEmpty) _handlePendingPairings(remaining);
+      }
+    }
+    if (failure != null && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('远程协助授权失败：$failure')));
+    }
   }
 
   Future<void> _resolveAndroidDisplayContext() async {
@@ -222,9 +332,7 @@ class _MainShellState extends State<MainShell> {
           _loadedTabs.add(restoredIndex);
         }
       });
-      unawaited(
-        HarnessWebViewInputGate.setWorkspaceActive(restoredIndex == 0),
-      );
+      unawaited(HarnessWebViewInputGate.setWorkspaceActive(restoredIndex == 0));
     }
   }
 
@@ -242,6 +350,7 @@ class _MainShellState extends State<MainShell> {
     _findRequest.dispose();
     _saveRequest.dispose();
     _dropSubscription?.cancel();
+    _pendingPairingSubscription?.cancel();
     super.dispose();
   }
 

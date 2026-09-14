@@ -7,6 +7,7 @@ import 'harness_remote_identity.dart';
 import 'harness_remote_ledger.dart';
 import 'harness_remote_peer_store.dart';
 import 'harness_official_remote_adapter.dart';
+import 'harness_runtime_log_store.dart';
 
 /// Production owner for the execution-side loopback service.
 ///
@@ -60,6 +61,21 @@ final class HarnessRemoteHostRuntime {
     );
     final host = HarnessRemoteHost(adapter: adapter, ledger: ledger);
     try {
+      final HarnessRemoteWorkspaceProvisioner? workspaceProvisioner =
+          adapter is HarnessRemoteWorkspaceProvisioner
+          ? adapter as HarnessRemoteWorkspaceProvisioner
+          : null;
+      if (workspaceProvisioner != null) {
+        final approvedPaths = <String>{
+          for (final peer in peers)
+            for (final scope in peer.workspaceIds)
+              if (Directory(scope).isAbsolute) scope,
+        };
+        for (final path in approvedPaths) {
+          await workspaceProvisioner.ensureWorkspacePath(path);
+        }
+      }
+      var approvedPeerCount = 0;
       for (final peer in peers) {
         final workspaceIds = await host.inventory.resolveWorkspaceScopes(
           peer.workspaceIds,
@@ -73,6 +89,16 @@ final class HarnessRemoteHostRuntime {
             operations: peer.operations,
           ),
         );
+        approvedPeerCount++;
+      }
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'kind': 'harness-remote-host-grants-loaded',
+        'rememberedPeerCount': peers.length,
+        'approvedPeerCount': approvedPeerCount,
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+      if (approvedPeerCount == 0) {
+        throw StateError('REMOTE_PAIRING_SCOPE_NOT_RESOLVED');
       }
       await host.start(
         bindAddress: InternetAddress.loopbackIPv4,

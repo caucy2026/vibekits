@@ -7,11 +7,13 @@ if [ "$#" -ne 1 ] || [ ! -d "$1/Contents" ]; then
 fi
 
 APP_BUNDLE="$(cd "$1" && pwd)"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+  "$APP_BUNDLE/Contents/Info.plist")"
 RUNTIME="$APP_BUNDLE/Contents/Resources/tools/harness"
 NODE="$RUNTIME/bin/node"
 DSH="$RUNTIME/node_modules/@deepseek-ai/dsh/lib/bin.js"
-BRIDGE_FILE="$HOME/Library/Application Support/Vibekits/Mcp/tool-bridge.json"
-HARNESS_HOME="$HOME/Library/Application Support/Vibekits/Harness"
+BRIDGE_FILE="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/Mcp/tool-bridge.json"
+HARNESS_HOME="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/Harness"
 DEBUG_ROOT="$(mktemp -d /private/tmp/vibekits-harness-live-smoke.XXXXXX)"
 
 if [ ! -f "$BRIDGE_FILE" ]; then

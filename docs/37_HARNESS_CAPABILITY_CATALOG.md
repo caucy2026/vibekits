@@ -4,12 +4,12 @@
 
 ## 数量口径
 
-- 产品一级页面：5（智能体、解压缩、系统清理、文档阅读、开发工具）。
+- 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：227。
-- Harness 当前可执行接口：204。
-- 当前不可公开接口：23。
+- Harness 定义接口：233。
+- Harness 当前可执行接口：207。
+- 当前不可公开接口：26。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 75 |
+| 系统诊断 | 81 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,7 +108,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 75）
+## 系统诊断（定义 81）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -131,6 +131,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.device.crash_reports` | `device__crash_reports` | 读取本机应用崩溃报告 | 是 | 按 App 名读取本机真实崩溃报告或 dump 元数据，结果来自被调试设备。 | `readOnly` | `appName`* (string), `limit` (integer；最小=1；最大=20) |
 | `vibekits.device.logs` | `device__logs` | 读取本机应用日志 | 是 | 按进程名读取本机真实系统日志；macOS 使用 Unified Log，Windows 使用 Application Event Log。 | `readOnly` | `processName`* (string), `seconds` (integer；最小=1；最大=3600), `maxLines` (integer；最小=1；最大=2000) |
 | `vibekits.device.processes` | `device__processes` | 检查本机应用进程 | 是 | 读取本机操作系统的真实进程，可按其他 App 或进程名筛选，不限于 VibeKits 自身。 | `readOnly` | `query` (string), `limit` (integer；最小=1；最大=200) |
+| `vibekits.device.screenshot` | `device__screenshot` | 截取被仿真机当前屏幕 | 是 | 在远程仿真开关已打开时截取单帧屏幕，返回目标机临时图片路径、尺寸、大小和 SHA-256。 | `controlsDevice` | `{}` |
 | `vibekits.device.ssh_authorize` | `device__ssh_authorize` | 批准仿真设备 SSH 公钥 | 是 | 首次连接时由目标机用户明确批准，把控制端设备专用 Ed25519 公钥写入当前用户 authorized_keys；密钥仅允许来自回环隧道，不开放公网 SSH。 | `controlsDevice` | `peerId`* (string), `publicKey`* (string) |
 | `vibekits.device.ssh_identity` | `device__ssh_identity` | 读取被仿真机 SSH 身份 | 是 | 只读返回目标机 SSH 用户、固定端口和 Ed25519 主机指纹；控制端必须在登录前核对该指纹。 | `readOnly` | `{}` |
 | `vibekits.device.ssh_key_status` | `device__ssh_key_status` | 检查仿真设备 SSH 公钥 | 是 | 只读检查当前控制端设备专用公钥是否已在目标机授权，不返回任何私钥或其他密钥内容。 | `readOnly` | `peerId`* (string), `publicKey`* (string) |
@@ -171,7 +172,9 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.simulator.connect` | `simulator__connect` | 按 ID 连接远程仿真机 | 是 | 只需提供对方 VibeKits ID；自动建立加密 P2P 通道并在直连失败时使用中继，不需要 IP、端口、SSH 账号、密码或密钥。 | `controlsDevice` | `routingId`* (string), `forceRelay` (boolean) |
 | `vibekits.simulator.connection_status` | `simulator__connection_status` | 查看远程仿真连接 | 是 | 只读返回当前按 ID 建立的仿真连接；不会暴露内部端口。 | `readOnly` | `routingId` (string) |
 | `vibekits.simulator.disconnect` | `simulator__disconnect` | 断开远程仿真机 | 是 | 关闭指定 ID 的隧道并回收本地监听，不在后台遗留连接。 | `controlsDevice` | `routingId`* (string) |
+| `vibekits.simulator.download_file` | `simulator__download_file` | 从远程仿真机下载文件 | 是 | 通过已验证的 SSH 隧道下载目标机上的单个文件到本机受控临时目录，返回字节数和 SHA-256。 | `writesData` | `routingId`* (string), `remotePath`* (string) |
 | `vibekits.simulator.install_candidate` | `simulator__install_candidate` | 安装远程仿真机 VibeKits 候选 | 是 | 通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。 | `controlsDevice` | `routingId`* (string), `packagePath`* (string), `apply` (boolean) |
+| `vibekits.simulator.screenshot` | `simulator__screenshot` | 查看远程仿真机当前屏幕 | 是 | 只需设备 ID；在目标 VibeKits 内截取一帧，再通过已验证通道下载到本机。不启动远程桌面，不持续录屏。 | `controlsDevice` | `routingId`* (string) |
 | `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关远程仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
 | `vibekits.simulator.ssh_exec` | `simulator__ssh_exec` | 在远程仿真机执行命令 | 是 | 通过已经完成主机指纹校验和首次公钥授权的 SSH 隧道，在指定设备 ID 上执行调试命令；返回有界标准输出、错误输出和退出码。 | `controlsDevice` | `routingId`* (string), `command`* (string) |
 | `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为远程仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
@@ -187,6 +190,9 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.workflow.prepare_replay` | `workflow__prepare_replay` | 准备智能回放 | 是 | 绑定本次变化的输入并返回语义 Skill。Harness 必须实时刷新三层 MCP 目录、按意图重新规划、逐步验证，禁止照搬坐标。 | `readOnly` | `workflowId`* (string), `inputs` (object) |
 | `vibekits.workflow.record_start` | `workflow__record_start` | 开始语义示教 | 是 | 开始学习一次真实工作流。记录目标、可变输入、后续 MCP 工具意图、结构化参数、结果证据和成功标准；不录制鼠标坐标。 | `writesData` | `name`* (string), `goal`* (string), `successCriteria`* (array), `variables` (array) |
 | `vibekits.workflow.record_stop` | `workflow__record_stop` | 完成语义示教 | 是 | 停止当前示教，把捕获的工具调用编译为可参数化语义 Skill，包含逐步验证和环境变化恢复策略。 | `writesData` | `notes` (string) |
+| `vibekits.workspace.list_files` | `workspace__list_files` | 列出当前工作区文件 | 否（环境/接线门禁） | 只读列出当前 Harness 工作区内的文件和目录。路径只能相对工作区，不能访问工作区外部。编写或修改项目前先调用此工具了解现状。 | `readOnly` | `path` (string), `maxDepth` (integer；最小=1；最大=5), `maxEntries` (integer；最小=1；最大=500) |
+| `vibekits.workspace.read_text` | `workspace__read_text` | 读取当前工作区文本 | 否（环境/接线门禁） | 读取当前 Harness 工作区内的 UTF-8 文本文件。路径只能相对工作区，不能跟随符号链接访问外部。 | `readOnly` | `path`* (string), `maxBytes` (integer；最小=1；最大=262144) |
+| `vibekits.workspace.write_text` | `workspace__write_text` | 写入当前工作区文本 | 否（环境/接线门禁） | 在当前 Harness 工作区内创建或更新 UTF-8 文本文件，并自动创建父目录。只允许相对路径；覆盖已有文件必须明确设置 overwrite=true。 | `writesData` | `path`* (string), `content`* (string), `overwrite` (boolean) |
 
 ## 网络开发（定义 29）
 

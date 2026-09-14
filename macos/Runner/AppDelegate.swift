@@ -8,6 +8,7 @@ class AppDelegate: FlutterAppDelegate {
   private var harnessInputChannel: FlutterMethodChannel?
   private var simulatorHostChannel: FlutterMethodChannel?
   private var storeHostChannel: FlutterMethodChannel?
+  private var deviceDebugChannel: FlutterMethodChannel?
   private var pendingFiles: [String] = []
   private var dartReady = false
   private var webViewMouseMonitor: Any?
@@ -91,8 +92,81 @@ class AppDelegate: FlutterAppDelegate {
           result(FlutterMethodNotImplemented)
         }
       }
+      deviceDebugChannel = FlutterMethodChannel(
+        name: "vibekits/device_debug",
+        binaryMessenger: controller.engine.binaryMessenger
+      )
+      deviceDebugChannel?.setMethodCallHandler { [weak self] call, result in
+        switch call.method {
+        case "screenCapturePermissionStatus":
+          result(CGPreflightScreenCaptureAccess())
+        case "requestScreenCapturePermission":
+          result(CGRequestScreenCaptureAccess())
+        case "captureScreen":
+          self?.captureScreen(result: result)
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
     }
     installWebViewMouseRouting()
+  }
+
+  /// Capture one current-screen frame inside the signed VibeKits process.
+  /// This is invoked only by the explicitly authorized simulator MCP tool; it
+  /// does not start a desktop session or share a continuous screen stream.
+  private func captureScreen(result: @escaping FlutterResult) {
+    guard CGPreflightScreenCaptureAccess() else {
+      CGRequestScreenCaptureAccess()
+      result(FlutterError(
+        code: "SCREEN_CAPTURE_PERMISSION_REQUIRED",
+        message: "请在系统设置中允许 VibeKits 录制屏幕后重试",
+        details: nil
+      ))
+      return
+    }
+    guard let image = CGWindowListCreateImage(
+      .infinite,
+      .optionOnScreenOnly,
+      kCGNullWindowID,
+      [.bestResolution, .boundsIgnoreFraming]
+    ) else {
+      result(FlutterError(
+        code: "SCREEN_CAPTURE_FAILED",
+        message: "无法读取当前屏幕",
+        details: nil
+      ))
+      return
+    }
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("vibekits-simulator-screenshots", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+      )
+      let path = directory.appendingPathComponent(
+        "screen-\(Int(Date().timeIntervalSince1970 * 1000)).png"
+      )
+      let representation = NSBitmapImageRep(cgImage: image)
+      guard let png = representation.representation(using: .png, properties: [:]) else {
+        throw NSError(domain: "VibeKitsScreenCapture", code: 1)
+      }
+      try png.write(to: path, options: .atomic)
+      result([
+        "ok": true,
+        "path": path.path,
+        "width": image.width,
+        "height": image.height,
+        "bytes": png.count,
+      ])
+    } catch {
+      result(FlutterError(
+        code: "SCREEN_CAPTURE_WRITE_FAILED",
+        message: error.localizedDescription,
+        details: nil
+      ))
+    }
   }
 
   private func isSafeStorePackageName(_ value: String) -> Bool {

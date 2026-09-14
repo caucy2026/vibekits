@@ -13,6 +13,8 @@ Future<String> _readBoundedLine(
   Socket socket, {
   int maxBytes = 256 * 1024,
   Duration timeout = const Duration(minutes: 2),
+  bool keepListeningAfterLine = false,
+  void Function()? onPeerClosed,
 }) {
   final done = Completer<String>();
   final bytes = <int>[];
@@ -31,14 +33,18 @@ Future<String> _readBoundedLine(
         } on Object catch (error, stack) {
           done.completeError(error, stack);
         }
-        unawaited(subscription.cancel());
+        if (!keepListeningAfterLine) unawaited(subscription.cancel());
       }
     },
-    onError: done.completeError,
+    onError: (Object error, StackTrace stackTrace) {
+      if (!done.isCompleted) done.completeError(error, stackTrace);
+      onPeerClosed?.call();
+    },
     onDone: () {
       if (!done.isCompleted) {
         done.completeError(StateError('PAIRING_CHANNEL_CLOSED'));
       }
+      onPeerClosed?.call();
     },
   );
   return done.future.timeout(
@@ -126,8 +132,33 @@ final class HarnessRemotePairingHost {
   void _accept(Socket socket) {
     socket.setOption(SocketOption.tcpNoDelay, true);
     unawaited(() async {
+      var peerClosed = false;
+      void withdrawClosedSocket() {
+        peerClosed = true;
+        String? nonce;
+        HarnessRemotePendingPairing? removed;
+        for (final entry in _pending.entries) {
+          if (identical(entry.value._socket, socket)) {
+            nonce = entry.key;
+            removed = entry.value;
+            break;
+          }
+        }
+        if (nonce != null && removed != null) {
+          _pending.remove(nonce);
+          removed._timer.cancel();
+          _publish();
+        }
+      }
+
       try {
-        final decoded = jsonDecode(await _readBoundedLine(socket));
+        final decoded = jsonDecode(
+          await _readBoundedLine(
+            socket,
+            keepListeningAfterLine: true,
+            onPeerClosed: withdrawClosedSocket,
+          ),
+        );
         if (decoded is! Map<String, dynamic> ||
             decoded['kind'] != 'pair-request' ||
             decoded['version'] != 1 ||
@@ -147,6 +178,7 @@ final class HarnessRemotePairingHost {
             _pending.containsKey(request.nonce)) {
           throw const FormatException('Harness pairing request was modified');
         }
+        if (peerClosed) throw StateError('PAIRING_CHANNEL_CLOSED');
         late final Timer timer;
         timer = Timer(const Duration(minutes: 2), () {
           final removed = _pending.remove(request.nonce);
@@ -187,6 +219,7 @@ final class HarnessRemotePairingHost {
     required Set<String> grantedWorkspaceIds,
     required Set<String> grantedOperations,
     bool remember = true,
+    Future<void> Function()? beforeReply,
   }) async {
     final pending = _pending.remove(nonce);
     if (pending == null) throw StateError('PAIRING_REQUEST_NOT_FOUND');
@@ -203,6 +236,11 @@ final class HarnessRemotePairingHost {
         approvedAt: DateTime.now().toUtc(),
       );
       await _peerStore.save(approval.hostRecord(remembered: remember));
+      // The controller opens the mTLS session as soon as it receives this
+      // approval. Make the execution endpoint reload the newly pinned client
+      // certificate before replying, otherwise the first real session races
+      // the old listener and is disconnected during its restart.
+      await beforeReply?.call();
       await _reply(pending._socket, approval.toJson());
       return approval;
     } finally {
@@ -271,6 +309,7 @@ final class HarnessRemotePairingClient {
     bool forceRelay = false,
     String password = HarnessRemoteAccessSettings.defaultPassword,
     Duration timeout = const Duration(minutes: 2),
+    Future<void>? cancellation,
   }) async {
     final identity = await _identityStore.loadOrCreate();
     final request = HarnessRemotePairingRequest.create(
@@ -307,9 +346,15 @@ final class HarnessRemotePairingClient {
       await tunnel.waitUntilConnected(timeout: timeout);
       socket.add(utf8.encode('${jsonEncode(request.toJson())}\n'));
       await socket.flush();
-      final decoded = jsonDecode(
-        await _readBoundedLine(socket, timeout: timeout),
-      );
+      final responseLine = cancellation == null
+          ? await _readBoundedLine(socket, timeout: timeout)
+          : await Future.any<String>(<Future<String>>[
+              _readBoundedLine(socket, timeout: timeout),
+              cancellation.then<String>(
+                (_) => throw StateError('PAIRING_CANCELLED'),
+              ),
+            ]);
+      final decoded = jsonDecode(responseLine);
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('Invalid Harness pairing response');
       }

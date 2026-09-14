@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 
 import '../../cleaner/domain/installed_application_service.dart';
 import 'harness_simulator_access_settings.dart';
@@ -14,6 +15,89 @@ typedef NativeDebugProcessRunner =
 /// endpoint while its explicit target-side switch is enabled.
 abstract final class NativeAppDebugService {
   static const String protectedBundleId = 'com.caucy.vibekits';
+  static const MethodChannel _deviceDebugChannel = MethodChannel(
+    'vibekits/device_debug',
+  );
+
+  static Future<bool> screenCaptureAuthorized() async {
+    if (Platform.isWindows) return true;
+    if (!Platform.isMacOS) return false;
+    try {
+      return await _deviceDebugChannel.invokeMethod<bool>(
+            'screenCapturePermissionStatus',
+          ) ??
+          false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  static Future<bool> requestScreenCaptureAuthorization() async {
+    if (Platform.isWindows) return true;
+    if (!Platform.isMacOS) return false;
+    return await _deviceDebugChannel.invokeMethod<bool>(
+          'requestScreenCapturePermission',
+        ) ??
+        false;
+  }
+
+  static Future<Map<String, Object?>> captureScreenshot({
+    NativeDebugProcessRunner? runner,
+  }) async {
+    _requireSoftwareManagementAuthorization();
+    if (Platform.isMacOS) {
+      final response = await _deviceDebugChannel
+          .invokeMapMethod<Object?, Object?>('captureScreen');
+      if (response?['ok'] != true || response?['path'] is! String) {
+        throw StateError('目标 Mac 截图失败');
+      }
+      final file = File('${response!['path']}');
+      if (!await file.exists()) throw StateError('目标 Mac 截图文件不存在');
+      final digest = (await sha256.bind(file.openRead()).first).toString();
+      return <String, Object?>{
+        'ok': true,
+        'platform': 'macos',
+        'path': file.path,
+        'width': response['width'],
+        'height': response['height'],
+        'bytes': await file.length(),
+        'sha256': digest,
+        'singleFrame': true,
+      };
+    }
+    if (Platform.isWindows) {
+      final directory = Directory(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}'
+        'vibekits-simulator-screenshots',
+      );
+      await directory.create(recursive: true);
+      final path =
+          '${directory.path}${Platform.pathSeparator}'
+          'screen-${DateTime.now().millisecondsSinceEpoch}.png';
+      final script =
+          r'''Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size); $i.Save($args[0],[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $i.Dispose()''';
+      final result = await (runner ?? Process.run)('powershell.exe', <String>[
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+        path,
+      ]).timeout(const Duration(seconds: 20));
+      final file = File(path);
+      if (result.exitCode != 0 || !await file.exists()) {
+        throw StateError('目标 Windows 截图失败');
+      }
+      return <String, Object?>{
+        'ok': true,
+        'platform': 'windows',
+        'path': file.path,
+        'bytes': await file.length(),
+        'sha256': (await sha256.bind(file.openRead()).first).toString(),
+        'singleFrame': true,
+      };
+    }
+    throw UnsupportedError('当前平台不支持远程仿真截图');
+  }
 
   static Future<Map<String, Object?>> listApplications({
     String query = '',

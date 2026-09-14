@@ -305,7 +305,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Harness 模型设置'), findsOneWidget);
-    expect(find.text(DeepSeekHarnessService.defaultModel), findsWidgets);
+    expect(DeepSeekHarnessService.defaultModel, 'deepseek-flash');
+    expect(find.byKey(const Key('agent-model-deepseek-flash')), findsOneWidget);
+    expect(find.text('DeepSeek V4.1 Flash（deepseek-flash）'), findsOneWidget);
     expect(find.byKey(const Key('agent-load-models')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
@@ -580,6 +582,66 @@ void main() {
     expect(find.text('调用工具 47'), findsOneWidget);
     expect(find.textContaining(longValue), findsNothing);
     expect(find.textContaining('结果：已保存完整输出，点击这一步查看'), findsNWidgets(48));
+  });
+
+  testWidgets('旧移动端工具 JSON 恢复时自动移出聊天正文', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_legacy_mobile_trace_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final DateTime now = DateTime(2026, 9, 14, 11);
+    final HarnessConversationProject project = HarnessConversationProject(
+      workspace: workspace.path,
+      sessions: <HarnessConversationSession>[
+        HarnessConversationSession(
+          id: 'legacy-mobile',
+          title: '小游戏',
+          messages: const <HarnessConversationMessage>[
+            HarnessConversationMessage(text: '写小游戏', user: true),
+            HarnessConversationMessage(
+              text:
+                  '\n[Harness 工具调用]\n'
+                  '工具: vibekits.workspace.write_text\n'
+                  '参数: {"path":"game.html"}\n'
+                  '[Harness 工具结果]\n'
+                  '工具: vibekits.workspace.write_text\n'
+                  '状态: 成功\n'
+                  '结果: {"ok":true,"data":{"bytes":123}}\n'
+                  '最终结论：小游戏已创建。',
+              user: false,
+            ),
+          ],
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+      activeSessionId: 'legacy-mobile',
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => null,
+            credentialWriter: (_, _) async {},
+            loadConversation: (_) async => project,
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'mobile',
+              npxVersion: null,
+              message: '已就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('[Harness 工具调用]'), findsNothing);
+    expect(find.textContaining('[Harness 工具结果]'), findsNothing);
+    expect(find.text('最终结论：小游戏已创建。'), findsOneWidget);
   });
 
   testWidgets('Harness 调试目录可选择保存并创建真实分类目录', (WidgetTester tester) async {

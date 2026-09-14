@@ -233,7 +233,11 @@ abstract final class DeepSeekHarnessService {
 完整目录位于项目 `docs/37_HARNESS_CAPABILITY_CATALOG.md`；运行时以本轮 `capability_check` 和 MCP Schema 为准。
 <!-- VIBEKITS_CAPABILITIES_END -->''';
   static const String defaultBaseUrl = 'https://api.deepseek.com';
-  static const String defaultModel = 'deepseek-v4-flash';
+
+  /// Stable API alias for the current DeepSeek V4.1 Flash generation.
+  /// Legacy `deepseek-v4-flash` remains accepted by the service, but the
+  /// official launch contract asks new clients to select `deepseek-flash`.
+  static const String defaultModel = 'deepseek-flash';
   static const String _deepSeekCredentialRef = 'DEEPSEEK_API_KEY';
   static Future<_HarnessRuntime>? _runtimeFuture;
 
@@ -1345,6 +1349,7 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
   Future<void> _run() async {
     int code = 0;
     try {
+      _client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
       final VibekitsHarnessToolBridge bridge =
           _request.toolBridge ?? VibekitsHarnessToolBridge();
       final List<Map<String, Object?>> tools = bridge.executableCatalog
@@ -1400,9 +1405,6 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
           final Map<String, Object?> arguments = _decodeArguments(
             function['arguments'],
           );
-          _emit(
-            '\n[Harness 工具调用]\n工具: $toolId\n参数: ${jsonEncode(arguments)}\n',
-          );
           final HarnessToolCallResult result = await bridge.invoke(
             toolId: toolId,
             arguments: arguments,
@@ -1410,11 +1412,11 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
                 _request.approveTool ??
                 (HarnessToolApprovalRequest _) async => false,
           );
-          _emit(
-            '[Harness 工具结果]\n工具: $toolId\n'
-            '状态: ${result.ok ? '成功' : '失败'}\n'
-            '结果: ${jsonEncode(result.toJson())}\n',
-          );
+          // Tool activity is rendered by the shared execution timeline through
+          // the bridge activity recorder. Streaming the complete request/result
+          // envelope into the assistant reply duplicates large JSON payloads in
+          // Markdown and can exhaust a PAD's UI memory. Keep the model evidence
+          // below, but expose only the final assistant response in the transcript.
           messages.add(<String, Object?>{
             'role': 'tool',
             'tool_call_id': '${call['id'] ?? toolId}',
@@ -1442,12 +1444,11 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
                 ? DeepSeekHarnessService.defaultBaseUrl
                 : _request.baseUrl.trim())
             .replaceFirst(RegExp(r'/+$'), '');
-    final HttpClient client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 12);
-    _client = client;
+    final HttpClient client = _client ??= HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30);
     final HttpClientRequest http = await client
         .postUrl(Uri.parse('$base/chat/completions'))
-        .timeout(const Duration(seconds: 12));
+        .timeout(const Duration(seconds: 30));
     http.headers.set(
       HttpHeaders.authorizationHeader,
       'Bearer ${_request.apiKey.trim()}',

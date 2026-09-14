@@ -235,6 +235,7 @@ class LanMcpToolServer {
   }
 
   static bool _requiresTargetApproval(String toolId) =>
+      toolId == VibekitsHarnessToolBridge.deviceScreenshotId ||
       toolId == VibekitsHarnessToolBridge.deviceAppInstallId ||
       toolId == VibekitsHarnessToolBridge.deviceAppUninstallId ||
       toolId == VibekitsHarnessToolBridge.deviceSshAuthorizeId ||

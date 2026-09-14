@@ -40,6 +40,7 @@ import '../../dev_tools/domain/mcp_capability_directory.dart';
 import '../../dev_tools/domain/mcp_capability_models.dart';
 import '../../dev_tools/domain/mcp_device_identity.dart';
 import '../../dev_tools/domain/mcp_tool_reputation_store.dart';
+import '../../dev_tools/domain/native_app_debug_service.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
@@ -2203,7 +2204,8 @@ window.__vibekitsHarnessQueueBridge?.submit(
 
   Widget _buildRemoteAssistanceBar() {
     final controllerSession = HarnessRemoteControllerRuntime.instance.session;
-    final simulatorControllerStatus = HarnessSimulatorController.shared.status();
+    final simulatorControllerStatus = HarnessSimulatorController.shared
+        .status();
     final simulatorControllerConnected =
         simulatorControllerStatus['connected'] == true;
     final showInboundAssistance =
@@ -3229,7 +3231,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   Timer? _incomingTimer;
   bool _incomingRefreshInFlight = false;
   final TextEditingController _remoteId = TextEditingController();
-  final TextEditingController _remoteWorkspaceId = TextEditingController();
   final TextEditingController _localPassword = TextEditingController(
     text: HarnessRemoteAccessSettings.defaultPassword,
   );
@@ -3248,6 +3249,7 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
   String? _simulatorRoutingId;
   int _simulatorToolCount = 0;
   int _connectGeneration = 0;
+  Completer<void>? _connectCancellation;
   DateTime? _remoteSessionConnectedAt;
   DateTime? _lastAutomaticReconnectAt;
   String _message = '';
@@ -3255,8 +3257,21 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       HarnessRemoteControllerRuntime.instance.session;
   VoidCallback? _remoteModelListener;
   bool _reportedRemoteLive = false;
+  late Future<bool> _screenCapturePermission =
+      NativeAppDebugService.screenCaptureAuthorized();
 
   bool get _controllerOnly => widget.controllerOnly ?? Platform.isAndroid;
+
+  Future<void> _requestScreenCapturePermission() async {
+    final granted =
+        await NativeAppDebugService.requestScreenCaptureAuthorization();
+    if (!mounted) return;
+    setState(() {
+      _screenCapturePermission =
+          NativeAppDebugService.screenCaptureAuthorized();
+      _message = granted ? '屏幕读取已授权' : '屏幕读取未授权，可在 macOS 系统设置中允许 VibeKits';
+    });
+  }
 
   @override
   void initState() {
@@ -3280,7 +3295,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     _incomingTimer?.cancel();
     _detachRemoteModelListener();
     _remoteId.dispose();
-    _remoteWorkspaceId.dispose();
     _localPassword.dispose();
     _remotePassword.dispose();
     super.dispose();
@@ -3586,6 +3600,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       return;
     }
     final int generation = ++_connectGeneration;
+    _connectCancellation?.complete();
+    final cancellation = Completer<void>();
+    _connectCancellation = cancellation;
     setState(() {
       _connecting = true;
       _message = automatic
@@ -3612,7 +3629,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       HarnessRemotePeer peer;
       var reconnectingRememberedPeer = false;
       if (matching.isEmpty || !matching.first.connectionReady) {
-        final workspaceId = _remoteWorkspaceId.text.trim();
         if (!host.callable || host.id.isEmpty) {
           throw StateError('本机 Harness ID 尚未完成中继注册，不能发起配对');
         }
@@ -3621,13 +3637,12 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
           localRoutingId: host.id,
           remoteRoutingId: routingId,
           requestedWorkspaceIds: <String>{
-            workspaceId.isEmpty
-                ? HarnessRemotePairingRequest.currentWorkspaceCatalogScope
-                : workspaceId,
+            HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
           },
           requestedOperations: HarnessRemoteExecution.sessionOperations,
           forceRelay: _forceRelay,
           password: _remotePassword.text,
+          cancellation: cancellation.future,
         );
         peer = approval.controllerRecord(remembered: true);
         _message = '首次配对完成，核对码 ${approval.comparisonCode}；正在建立正式通道';
@@ -3663,12 +3678,15 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
           executable: host.executable,
           localRoutingId: host.id,
           remoteRoutingId: routingId,
-          requestedWorkspaceIds: peer.workspaceIds,
+          requestedWorkspaceIds: const <String>{
+            HarnessRemotePairingRequest.currentWorkspaceCatalogScope,
+          },
           requestedOperations: peer.operations.intersection(
             HarnessRemoteExecution.sessionOperations,
           ),
           forceRelay: _forceRelay,
           password: _remotePassword.text,
+          cancellation: cancellation.future,
         );
         peer = approval.controllerRecord(remembered: true);
         session = await HarnessRemoteControllerSession.connect(
@@ -3708,12 +3726,17 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
       if (mounted && generation == _connectGeneration) {
         setState(() => _connecting = false);
       }
+      if (identical(_connectCancellation, cancellation)) {
+        _connectCancellation = null;
+      }
     }
   }
 
   void _cancelConnect() {
     if (!_connecting) return;
     _connectGeneration++;
+    _connectCancellation?.complete();
+    _connectCancellation = null;
     setState(() {
       _connecting = false;
       _message = '已取消连接；迟到的通道会被自动关闭';
@@ -3850,8 +3873,8 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
         grantedOperations: pending.request.requestedOperations.intersection(
           HarnessRemoteExecution.sessionOperations,
         ),
+        beforeReply: widget.onPaired,
       );
-      await widget.onPaired();
       final peers = HarnessRemotePeerStore().load();
       if (mounted) {
         setState(() {
@@ -4105,21 +4128,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    key: const Key('harness-coordination-workspace-id'),
-                    controller: _remoteWorkspaceId,
-                    enabled:
-                        _remoteEnabled &&
-                        !_connecting &&
-                        _remoteSession == null,
-                    decoration: const InputDecoration(
-                      labelText: '首次授权工作区 ID',
-                      helperText: '可选；留空时由执行端确认其当前项目列表',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
                   CheckboxListTile(
                     key: const Key('harness-coordination-force-relay'),
                     contentPadding: EdgeInsets.zero,
@@ -4283,23 +4291,55 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                             '${simulator.sshUsername.isEmpty ? '' : '\n用户：${simulator.sshUsername}'}'
                             '\n通过本机 ID 建立 P2P 或中继仿真通道。'
                       : '开启后 macOS 会请求管理员授权，并启动系统 SSH 服务。',
-                  child: SwitchListTile(
-                    key: const Key('advanced-simulator-access-enabled'),
-                    contentPadding: EdgeInsets.zero,
-                    secondary: const Icon(Icons.developer_mode_rounded),
-                    value:
-                        simulator.enabled &&
-                        simulator.phase != HarnessSimulatorTargetPhase.error,
-                    onChanged: host.available && !changing
-                        ? (bool value) => unawaited(
-                            value
-                                ? HarnessSimulatorTargetRuntime.shared.enable()
-                                : HarnessSimulatorTargetRuntime.shared
-                                      .disable(),
-                          )
-                        : null,
-                    title: const Text('远程仿真'),
-                    subtitle: Text(status),
+                  child: Column(
+                    children: <Widget>[
+                      SwitchListTile(
+                        key: const Key('advanced-simulator-access-enabled'),
+                        contentPadding: EdgeInsets.zero,
+                        secondary: const Icon(Icons.developer_mode_rounded),
+                        value:
+                            simulator.enabled &&
+                            simulator.phase !=
+                                HarnessSimulatorTargetPhase.error,
+                        onChanged: host.available && !changing
+                            ? (bool value) => unawaited(
+                                value
+                                    ? HarnessSimulatorTargetRuntime.shared
+                                          .enable()
+                                    : HarnessSimulatorTargetRuntime.shared
+                                          .disable(),
+                              )
+                            : null,
+                        title: const Text('远程仿真'),
+                        subtitle: Text(status),
+                      ),
+                      if (simulator.enabled && Platform.isMacOS)
+                        FutureBuilder<bool>(
+                          future: _screenCapturePermission,
+                          builder: (context, permissionSnapshot) => ListTile(
+                            key: const Key('advanced-simulator-permissions'),
+                            contentPadding: const EdgeInsets.only(left: 40),
+                            leading: const Icon(Icons.verified_user_outlined),
+                            title: const Text('仿真授权'),
+                            subtitle: Text(
+                              '系统 SSH：${simulator.ready ? '已就绪' : '未就绪'} · '
+                              '屏幕读取：${permissionSnapshot.data == true ? '已授权' : '需要时再授权'}',
+                            ),
+                            trailing: permissionSnapshot.data == true
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                  )
+                                : OutlinedButton(
+                                    key: const Key(
+                                      'advanced-authorize-screen-capture',
+                                    ),
+                                    onPressed: _requestScreenCapturePermission,
+                                    child: const Text('授权'),
+                                  ),
+                          ),
+                        ),
+                    ],
                   ),
                 );
               },
@@ -4954,18 +4994,6 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
                                       : Icons.visibility_off_outlined,
                                 ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            key: const Key('harness-remote-workspace-id'),
-                            controller: _remoteWorkspaceId,
-                            enabled: _remoteEnabled && !_connecting,
-                            decoration: const InputDecoration(
-                              labelText: '首次配对的远端工作区 ID',
-                              helperText: '仅首次连接需要；执行端将再次显示并确认这个最小授权范围',
-                              border: OutlineInputBorder(),
-                              isDense: true,
                             ),
                           ),
                           CheckboxListTile(

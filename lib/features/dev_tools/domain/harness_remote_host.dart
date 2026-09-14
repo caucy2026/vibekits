@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 
@@ -112,6 +113,12 @@ class HarnessRemoteHost {
           }
           try {
             final channel = HarnessRemoteTlsChannel.accept(socket, _approved);
+            unawaited(
+              HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+                'kind': 'harness-remote-tls-accepted',
+                'at': DateTime.now().toUtc().toIso8601String(),
+              }),
+            );
             final connection = HarnessRemoteServerConnection(
               channel: channel,
               execution: execution,
@@ -130,12 +137,39 @@ class HarnessRemoteHost {
                 }
               }),
             );
-          } catch (_) {
+          } catch (error, stackTrace) {
+            unawaited(
+              HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+                'kind': 'harness-remote-tls-rejected',
+                'errorType': error.runtimeType.toString(),
+                'approvedCertificateCount': _approved.length,
+                'peerCertificatePresent': socket.peerCertificate != null,
+                'at': DateTime.now().toUtc().toIso8601String(),
+              }),
+            );
+            developer.log(
+              'Rejected authenticated Harness channel: ${error.runtimeType}',
+              name: 'vibekits.harness.remote',
+              error: error,
+              stackTrace: stackTrace,
+            );
             socket.destroy();
           }
         },
         onError: (Object error) {
+          unawaited(
+            HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+              'kind': 'harness-remote-tls-handshake-failure',
+              'errorType': error.runtimeType.toString(),
+              'at': DateTime.now().toUtc().toIso8601String(),
+            }),
+          );
           // Individual failed TLS handshakes do not disable other controllers.
+          developer.log(
+            'Harness TLS handshake failed: ${error.runtimeType}',
+            name: 'vibekits.harness.remote',
+            error: error,
+          );
         },
       );
       unawaited(_pumpEvents());

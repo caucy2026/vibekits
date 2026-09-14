@@ -73,6 +73,10 @@ void main() {
       find.byKey(const Key('harness-coordination-force-relay')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const Key('harness-coordination-workspace-id')),
+      findsNothing,
+    );
     expect(find.text('允许别人协助本机'), findsNothing);
     expect(find.text('本机 Harness ID'), findsNothing);
     expect(
@@ -137,6 +141,7 @@ void main() {
       find.byKey(const Key('harness-remote-peer-password')),
       Platform.isMacOS ? findsOneWidget : findsNothing,
     );
+    expect(find.byKey(const Key('harness-remote-workspace-id')), findsNothing);
     final scrollable = find.descendant(
       of: find.byType(AlertDialog),
       matching: find.byType(SingleChildScrollView),

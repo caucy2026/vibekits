@@ -219,6 +219,54 @@ void main() {
     },
   );
 
+  test(
+    'approved workspace is registered before remote grants resolve',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'vibekits-approved-workspace-',
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final adapter = HarnessOfficialRemoteAdapter(
+        Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      server.listen((request) async {
+        expect(request.uri.path, '/api/workspace/create');
+        final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
+        expect(body['type'], 'client-request');
+        expect(body['method'], 'workspace/create');
+        expect(
+          ((((body['payload'] as Map)['args'] as Map)['request']
+              as Map)['path']),
+          directory.absolute.path,
+        );
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'type': 'server-response',
+            'rpcId': body['rpcId'],
+            'result': {
+              'ok': true,
+              'value': {
+                'workspace': {'workspaceId': 'workspace-approved'},
+              },
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      try {
+        expect(
+          await adapter.ensureWorkspacePath(directory.path),
+          'workspace-approved',
+        );
+      } finally {
+        await adapter.close();
+        await server.close(force: true);
+        await directory.delete(recursive: true);
+      }
+    },
+  );
+
   test('rejects remote or credential-bearing execution endpoints', () {
     for (final url in [
       'https://127.0.0.1:1234',

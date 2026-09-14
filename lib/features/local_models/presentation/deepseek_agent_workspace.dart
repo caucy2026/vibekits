@@ -124,6 +124,7 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
 class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
   static const List<String> _builtinModels = <String>[
+    'deepseek-flash',
     'deepseek-v4-flash',
     'deepseek-v4-pro',
   ];
@@ -334,6 +335,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               toolName: toolName,
               rating: rating,
             ),
+    workspaceRoot: run?.workspace,
     agentOrchestrated: agentOrchestrated,
     agentActive: agentOrchestrated && run != null
         ? () =>
@@ -900,18 +902,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ..clear()
         ..addAll(
           activeRun?.messages ??
-              active?.messages.map(
-                (HarnessConversationMessage message) => _AgentMessage._(
-                  text: message.text,
-                  user: message.user,
-                  elapsed: message.elapsedMs == null
-                      ? null
-                      : Duration(milliseconds: message.elapsedMs!),
-                  exitCode: message.exitCode,
-                  stopped: message.stopped,
-                  executionTrace: message.executionTrace,
-                ),
-              ) ??
+              active?.messages.map(_AgentMessage.persisted) ??
               const <_AgentMessage>[],
         );
     });
@@ -1722,19 +1713,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       _messages
         ..clear()
         ..addAll(
-          run?.messages ??
-              session.messages.map(
-                (HarnessConversationMessage message) => _AgentMessage._(
-                  text: message.text,
-                  user: message.user,
-                  elapsed: message.elapsedMs == null
-                      ? null
-                      : Duration(milliseconds: message.elapsedMs!),
-                  exitCode: message.exitCode,
-                  stopped: message.stopped,
-                  executionTrace: message.executionTrace,
-                ),
-              ),
+          run?.messages ?? session.messages.map(_AgentMessage.persisted),
         );
       if (run == null) _idleProgressSteps.clear();
     });
@@ -1881,20 +1860,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         _activeSessionId = session.id;
         _messages
           ..clear()
-          ..addAll(
-            session.messages.map(
-              (HarnessConversationMessage message) => _AgentMessage._(
-                text: message.text,
-                user: message.user,
-                elapsed: message.elapsedMs == null
-                    ? null
-                    : Duration(milliseconds: message.elapsedMs!),
-                exitCode: message.exitCode,
-                stopped: message.stopped,
-                executionTrace: message.executionTrace,
-              ),
-            ),
-          );
+          ..addAll(session.messages.map(_AgentMessage.persisted));
       });
     } else {
       await _adoptWorkspace(targetWorkspace);
@@ -1998,18 +1964,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           ..clear()
           ..addAll(
             nextRun?.messages ??
-                next?.messages.map(
-                  (HarnessConversationMessage message) => _AgentMessage._(
-                    text: message.text,
-                    user: message.user,
-                    elapsed: message.elapsedMs == null
-                        ? null
-                        : Duration(milliseconds: message.elapsedMs!),
-                    exitCode: message.exitCode,
-                    stopped: message.stopped,
-                    executionTrace: message.executionTrace,
-                  ),
-                ) ??
+                next?.messages.map(_AgentMessage.persisted) ??
                 const <_AgentMessage>[],
           );
         if (nextRun == null) _idleProgressSteps.clear();
@@ -2311,7 +2266,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                         child: Text(
                           loadedFromEndpoint
                               ? '来自当前 API 的 /models 实时结果'
-                              : 'DeepSeek 官方 V4 模型 · 验证后以 /models 返回为准',
+                              : 'DeepSeek 官方模型 · DeepSeek V4.1 Flash 优先',
                           style: TextStyle(
                             color: context.vibe.muted,
                             fontSize: 12,
@@ -2332,7 +2287,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                             for (final String model in availableModels)
                               _ModelChoiceTile(
                                 key: Key('agent-model-$model'),
-                                label: model,
+                                label: model == 'deepseek-flash'
+                                    ? 'DeepSeek V4.1 Flash（deepseek-flash）'
+                                    : model,
                                 selected: modelChoice == model,
                                 onTap: () => setStateDialog(() {
                                   modelChoice = model;
@@ -2489,7 +2446,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Widget _buildCoordinationModeBar() {
     final controllerSession = HarnessRemoteControllerRuntime.instance.session;
-    final simulatorControllerStatus = HarnessSimulatorController.shared.status();
+    final simulatorControllerStatus = HarnessSimulatorController.shared
+        .status();
     final simulatorControllerConnected =
         simulatorControllerStatus['connected'] == true;
     final showInboundAssistance =
@@ -4625,6 +4583,20 @@ class _AgentMessage {
   const _AgentMessage.user(String text) : this._(text: text, user: true);
   const _AgentMessage.assistant(String text) : this._(text: text, user: false);
 
+  factory _AgentMessage.persisted(HarnessConversationMessage message) =>
+      _AgentMessage._(
+        text: message.user
+            ? message.text
+            : _stripLegacyMobileToolEnvelopes(message.text),
+        user: message.user,
+        elapsed: message.elapsedMs == null
+            ? null
+            : Duration(milliseconds: message.elapsedMs!),
+        exitCode: message.exitCode,
+        stopped: message.stopped,
+        executionTrace: message.executionTrace,
+      );
+
   final String text;
   final bool user;
   final Duration? elapsed;
@@ -4646,6 +4618,32 @@ class _AgentMessage {
     stopped: stopped ?? this.stopped,
     executionTrace: executionTrace ?? this.executionTrace,
   );
+}
+
+String _stripLegacyMobileToolEnvelopes(String text) {
+  if (!text.contains('[Harness 工具调用]') && !text.contains('[Harness 工具结果]')) {
+    return text;
+  }
+  final List<String> retained = <String>[];
+  bool inEnvelope = false;
+  for (final String line in text.split('\n')) {
+    final String trimmed = line.trimLeft();
+    if (trimmed == '[Harness 工具调用]' || trimmed == '[Harness 工具结果]') {
+      inEnvelope = true;
+      continue;
+    }
+    if (inEnvelope &&
+        (trimmed.startsWith('工具:') ||
+            trimmed.startsWith('参数:') ||
+            trimmed.startsWith('状态:') ||
+            trimmed.startsWith('结果:') ||
+            trimmed.isEmpty)) {
+      continue;
+    }
+    inEnvelope = false;
+    retained.add(line);
+  }
+  return retained.join('\n').trim();
 }
 
 class _MessageBubble extends StatelessWidget {

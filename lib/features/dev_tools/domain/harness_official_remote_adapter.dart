@@ -20,10 +20,18 @@ abstract interface class HarnessRemoteApiAdapter {
   Future<void> close();
 }
 
+/// Optional execution-side capability used to register an explicitly approved
+/// local workspace with the official Harness catalog before remote grants are
+/// resolved. It is never exposed as a controller command.
+abstract interface class HarnessRemoteWorkspaceProvisioner {
+  Future<String> ensureWorkspacePath(String path);
+}
+
 /// Execution-side carrier for the official DSH API. Never expose this object
 /// directly to a network listener: authenticated, scoped dispatch owns access.
 /// Remote URLs are deliberately rejected to prevent SSRF and credential leaks.
-class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
+class HarnessOfficialRemoteAdapter
+    implements HarnessRemoteApiAdapter, HarnessRemoteWorkspaceProvisioner {
   // Official Harness may append a browser-only token to its announced URL.
   // Validate the socket origin and keep that token private. It is forwarded
   // only to the same loopback API; the public endpoint stays canonical so the
@@ -224,6 +232,36 @@ class HarnessOfficialRemoteAdapter implements HarnessRemoteApiAdapter {
 
   static String _randomId() =>
       '${DateTime.now().microsecondsSinceEpoch}-remote';
+
+  @override
+  Future<String> ensureWorkspacePath(String path) async {
+    final directory = Directory(path);
+    if (!directory.isAbsolute || !await directory.exists()) {
+      throw ArgumentError.value(path, 'path', 'Approved workspace is invalid');
+    }
+    final rpcId = _randomId();
+    final response = await _post('/api/workspace/create', <String, dynamic>{
+      'type': 'client-request',
+      'rpcId': rpcId,
+      'method': 'workspace/create',
+      'payload': <String, Object?>{
+        'args': <String, Object?>{
+          'request': <String, Object?>{'path': directory.absolute.path},
+        },
+      },
+    }, rpcId: rpcId);
+    final result = response['result'];
+    final value = result is Map ? result['value'] : null;
+    final workspace = value is Map ? value['workspace'] : null;
+    final workspaceId = workspace is Map ? workspace['workspaceId'] : null;
+    if (result is! Map ||
+        result['ok'] != true ||
+        workspaceId is! String ||
+        workspaceId.isEmpty) {
+      throw const FormatException('Invalid official Workspace create result');
+    }
+    return workspaceId;
+  }
 
   /// Approval replies retain their original server request identity. The
   /// dispatch layer must verify ownership and scope before forwarding them.
