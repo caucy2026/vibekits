@@ -23,6 +23,9 @@ void main() {
           Platform.environment['VIBEKITS_REAL_REMOTE_MAC_APP_NAME'] ?? '';
       final expectedVersion =
           Platform.environment['VIBEKITS_REAL_REMOTE_MAC_VERSION'] ?? '';
+      final verifyUninstallRestore =
+          Platform.environment['VIBEKITS_REAL_REMOTE_UNINSTALL_RESTORE'] ==
+          '1';
       expect(File(executable).existsSync(), isTrue);
       expect(File(packagePath).existsSync(), isTrue);
       expect(routingId, isNotEmpty);
@@ -103,6 +106,49 @@ void main() {
       final screenshotFile = File('${screenshot['localPath']}');
       expect(await screenshotFile.exists(), isTrue);
 
+      if (verifyUninstallRestore) {
+        final uninstalled = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.device.app_uninstall',
+            <String, Object?>{'identity': expectedIdentity},
+          ),
+        );
+        expect(uninstalled['ok'], isTrue);
+        expect(uninstalled['state'], 'moved_to_trash');
+
+        final afterUninstall = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.device.applications',
+            <String, Object?>{'query': expectedIdentity, 'limit': 20},
+          ),
+        );
+        expect(afterUninstall['applications'], isEmpty);
+
+        final restored = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.device.app_install',
+            <String, Object?>{
+              'packagePath': remotePackage,
+              'sha256': '${upload['sha256']}',
+              'expectedIdentity': expectedIdentity,
+            },
+          ),
+        );
+        expect(restored['ok'], isTrue);
+        expect(restored['identity'], expectedIdentity);
+        final relaunched = _toolData(
+          await controller.call(
+            routingId,
+            'vibekits.device.app_control',
+            <String, Object?>{'action': 'launch', 'target': appName},
+          ),
+        );
+        expect(relaunched['ok'], isTrue);
+      }
+
       // Keep the application installed and running for the user's hands-on
       // acceptance. The screenshot is also kept so it can be visually reviewed.
       // ignore: avoid_print
@@ -110,7 +156,8 @@ void main() {
         'HARNESS_REAL_APP_DEPLOY identity=$expectedIdentity '
         'version=${installed['version']} running=true '
         'screenshot=${screenshotFile.path} sha=${screenshot['sha256']} '
-        'rollback=${installed['rollbackPath']}',
+        'rollback=${installed['rollbackPath']} '
+        'uninstallRestore=$verifyUninstallRestore',
       );
     },
     skip: enabled ? false : 'set VIBEKITS_REAL_REMOTE_APP_DEPLOY=1',

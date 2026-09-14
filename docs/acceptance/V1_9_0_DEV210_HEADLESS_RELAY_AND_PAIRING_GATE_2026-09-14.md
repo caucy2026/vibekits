@@ -10,6 +10,7 @@
 2. 受管隧道关闭先发 `SIGTERM`；超时后必须 `SIGKILL` 并确认进程退出，禁止断开后遗留后台端口和连接。
 3. 桌面端启动器新增 `HARNESS_HEADLESS_RELAY_REQUIRED` 硬门禁。即使旧配置或调用方显式传入 RustDesk/KEMI 远程办公主程序，也会在启动进程前拒绝；macOS/Linux 只接受 `vibekits-harness-relay`，Windows 只接受 `vibekits-harness-relay.exe`。
 4. 清理本机遗留的 dev.205 测试候选、relay 和 KEMI 远程办公前台进程。新回归只使用假进程，不建立真机连接或桌面会话。
+5. 真实远程应用验收新增可选的完整生命周期门禁：上传签名包、覆盖升级、启动、进程/日志/截图检查、按唯一身份卸载、确认应用消失、使用同一校验包恢复安装并重新启动。只有设置 `VIBEKITS_REAL_REMOTE_UNINSTALL_RESTORE=1` 才执行卸载，最终保持应用已安装、可运行。
 
 ## 已通过证据
 
@@ -22,6 +23,7 @@
 - 签名候选：`dist/candidates/Vibekits-1.9.0-dev.210+2210-macos-universal-developer-id-signed.zip`
 - SHA-256：`6174d54633a195df49d1c0de4e91c273fed0d0a053b9e53c0279ebc0f7f7aa41`
 - ZIP 结构：单一顶层 `Vibekits.app`，无 `__MACOSX`。
+- 远程应用生命周期验收脚本已通过编译和静态分析；当前未连接目标机，实际更新—卸载—恢复结果仍属于下方未通过门禁。
 
 ## 仍未通过的发布门禁
 
