@@ -52,11 +52,19 @@ try {
   for ($pass = 0; $pass -lt 6; $pass++) {
     $peerJson = & (Join-Path $NodeDirectory 'node.exe') (Join-Path $projectRoot 'tool\list_harness_required_peers.mjs') (Join-Path $staging 'node_modules')
     if ($LASTEXITCODE -ne 0) { throw 'Harness peer dependency scan failed' }
-    $peerSpecs = @($peerJson | ConvertFrom-Json)
+    $decodedPeerSpecs = ConvertFrom-Json -InputObject $peerJson
+    $peerSpecs = @($decodedPeerSpecs)
     if ($peerSpecs.Count -eq 0) { break }
     & (Join-Path $NodeDirectory 'npm.cmd') install --omit=dev --ignore-scripts --legacy-peer-deps --no-audit --no-fund @peerSpecs --registry=https://registry.npmjs.org --cache=$npmCache --fetch-timeout=30000 --fetch-retries=1 --loglevel=warn
     if ($LASTEXITCODE -ne 0) { throw 'Harness required peer install failed' }
   }
+  # The final install can satisfy the last missing peer set. Re-scan once
+  # after the bounded loop instead of treating the pre-install list from the
+  # final pass as proof that dependency resolution did not converge.
+  $peerJson = & (Join-Path $NodeDirectory 'node.exe') (Join-Path $projectRoot 'tool\list_harness_required_peers.mjs') (Join-Path $staging 'node_modules')
+  if ($LASTEXITCODE -ne 0) { throw 'Harness final peer dependency scan failed' }
+  $decodedPeerSpecs = ConvertFrom-Json -InputObject $peerJson
+  $peerSpecs = @($decodedPeerSpecs)
   if ($peerSpecs.Count -ne 0) {
     throw 'Harness required peer installation did not converge'
   }
