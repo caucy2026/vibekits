@@ -144,7 +144,35 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Rust tests failed' }
   & $cargo build --locked --release --target x86_64-pc-windows-msvc --features flutter --bin vibekits-harness-relay
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Release build failed' }
-  $sourceCommit = (& git rev-parse HEAD).Trim()
+  $sourceCommitOutput = @(& git rev-parse HEAD 2>$null)
+  if ($LASTEXITCODE -eq 0 -and $sourceCommitOutput.Count -gt 0) {
+    $sourceCommit = $sourceCommitOutput[0].Trim()
+  } else {
+    # Windows acceptance sources are sometimes transferred as an exported
+    # snapshot without .git metadata. Keep the packaged relay traceable by
+    # hashing the locked dependency graph and the two relay implementation
+    # files instead of failing after a successful multi-minute build.
+    $sourceFingerprintInputs = @(
+      (Join-Path $RustDeskSource 'Cargo.lock'),
+      (Join-Path $RustDeskSource 'src\vibekits_harness_cli.rs'),
+      (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs')
+    )
+    $fingerprintStream = [IO.MemoryStream]::new()
+    try {
+      foreach ($fingerprintInput in $sourceFingerprintInputs) {
+        $fingerprintBytes = [IO.File]::ReadAllBytes($fingerprintInput)
+        $fingerprintStream.Write($fingerprintBytes, 0, $fingerprintBytes.Length)
+      }
+      $sourceFingerprint = [Security.Cryptography.SHA256]::HashData(
+        $fingerprintStream.ToArray()
+      )
+      $sourceCommit = 'snapshot-sha256:' + [Convert]::ToHexString(
+        $sourceFingerprint
+      ).ToLowerInvariant()
+    } finally {
+      $fingerprintStream.Dispose()
+    }
+  }
 } finally {
   Pop-Location
 }

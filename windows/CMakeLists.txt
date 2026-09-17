@@ -40,6 +40,34 @@ add_definitions(
   -D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 )
 
+# Several Flutter Windows plugins invoke NuGet, but older webview_windows and
+# newer audioplayers_windows disagree about which downloaded nuget.exe may
+# occupy CMAKE_BINARY_DIR. Resolve one verified executable up front and expose
+# it through CMAKE_PROGRAM_PATH so both plugins use the same tool instead of
+# overwriting and then rejecting each other's cache file.
+find_program(VIBEKITS_NUGET_EXECUTABLE nuget)
+if(NOT VIBEKITS_NUGET_EXECUTABLE)
+  set(VIBEKITS_NUGET_DIRECTORY "${CMAKE_BINARY_DIR}/vibekits_tooling/nuget")
+  set(VIBEKITS_NUGET_EXECUTABLE "${VIBEKITS_NUGET_DIRECTORY}/nuget.exe")
+  file(MAKE_DIRECTORY "${VIBEKITS_NUGET_DIRECTORY}")
+  file(DOWNLOAD
+    "https://dist.nuget.org/win-x86-commandline/v6.5.0/nuget.exe"
+    "${VIBEKITS_NUGET_EXECUTABLE}"
+    EXPECTED_HASH SHA256=d5fce5185de92b7356ea9264b997a620e35c6f6c3c061e471e0dc3a84b3d74fd
+    TLS_VERIFY ON
+    TIMEOUT 300
+    INACTIVITY_TIMEOUT 30
+    STATUS VIBEKITS_NUGET_DOWNLOAD_STATUS)
+  list(GET VIBEKITS_NUGET_DOWNLOAD_STATUS 0 VIBEKITS_NUGET_DOWNLOAD_CODE)
+  if(NOT VIBEKITS_NUGET_DOWNLOAD_CODE EQUAL 0)
+    list(GET VIBEKITS_NUGET_DOWNLOAD_STATUS 1 VIBEKITS_NUGET_DOWNLOAD_MESSAGE)
+    message(FATAL_ERROR "Unable to download verified NuGet 6.5.0: ${VIBEKITS_NUGET_DOWNLOAD_MESSAGE}")
+  endif()
+endif()
+get_filename_component(VIBEKITS_NUGET_DIRECTORY
+  "${VIBEKITS_NUGET_EXECUTABLE}" DIRECTORY)
+list(PREPEND CMAKE_PROGRAM_PATH "${VIBEKITS_NUGET_DIRECTORY}")
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

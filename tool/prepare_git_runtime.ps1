@@ -18,7 +18,11 @@ if (Test-Path -LiteralPath $staging) {
 New-Item -ItemType Directory -Path $staging | Out-Null
 
 try {
-  Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+  $archiveIsValid = (Test-Path -LiteralPath $archive -PathType Leaf) -and
+    ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -eq $sha256)
+  if (-not $archiveIsValid) {
+    Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+  }
   $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actualHash -ne $sha256) {
     throw "MinGit SHA-256 mismatch. Expected $sha256, got $actualHash"
