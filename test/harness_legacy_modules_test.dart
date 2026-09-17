@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:path/path.dart' as p;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_legacy_modules.dart';
 
@@ -46,10 +47,7 @@ void main() {
         '${bundle.path}/dsh/lib/bin.js',
       );
       expect(moved, hasLength(1));
-      expect(
-        (await Link(moved.single).target()).replaceAll('\\', '/'),
-        bundle.path.replaceAll('\\', '/'),
-      );
+      expect(p.equals(await Link(moved.single).target(), bundle.path), isTrue);
       expect(await marker.readAsString(), 'signed');
       expect(
         await FileSystemEntity.type(

@@ -33,14 +33,18 @@ Future<void> main(List<String> args) async {
       workingDirectory: root.path,
       environment: {
         'DSH_HOME': home.path,
-        'PATH': '${File(args[0]).parent.path}:/usr/bin:/bin',
+        'PATH': Platform.isWindows
+            ? '${File(args[0]).parent.path};${Platform.environment['SystemRoot'] ?? r'C:\Windows'}\\System32'
+            : '${File(args[0]).parent.path}:/usr/bin:/bin',
       },
-      includeParentEnvironment: false,
+      includeParentEnvironment: true,
     );
     var conflict = false;
+    final diagnostic = StringBuffer();
     final ready = Completer<Uri?>();
     final expected = Uri.parse('http://127.0.0.1:$port');
     void line(String value) {
+      diagnostic.writeln(value);
       if (value.contains('not a symlink or dsh-managed module proxy')) {
         conflict = true;
       }
@@ -67,7 +71,9 @@ Future<void> main(List<String> args) async {
         await process.exitCode;
         // Drain delivered diagnostic lines before asserting the reason.
         await Future<void>.delayed(const Duration(milliseconds: 100));
-        return uri == null && conflict;
+        final reproduced = uri == null && conflict;
+        if (!reproduced) stderr.write(diagnostic);
+        return reproduced;
       }
       if (uri == null) return false;
       final client = HttpClient()..findProxy = (_) => 'DIRECT';
