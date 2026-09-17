@@ -159,6 +159,7 @@ abstract final class HarnessSystemSshService {
     }
     return <String, Object?>{
       'enabled': true,
+      'platform': Platform.operatingSystem,
       'username': snapshot.username,
       'hostKeyFingerprint': fingerprint,
       'remotePort': 22,
@@ -190,11 +191,13 @@ abstract final class HarnessSystemSshService {
     }
     final snapshot = await (inspector ?? inspect)();
     if (!snapshot.enabled) throw StateError('系统 SSH 端口 22 尚未就绪');
-    final home = homeDirectory?.absolute.path ?? _userHome();
-    if (home.isEmpty) throw StateError('无法定位当前用户目录');
-    final sshDirectory = Directory('$home/.ssh');
+    final authorizedKeys = await _resolveAuthorizedKeysFile(
+      homeDirectory: homeDirectory,
+      runner: runner,
+      username: snapshot.username,
+    );
+    final sshDirectory = authorizedKeys.parent;
     await sshDirectory.create(recursive: true);
-    final authorizedKeys = File('${sshDirectory.path}/authorized_keys');
     final markerDigest = sha256.convert(keyBytes).toString().substring(0, 16);
     final marker = 'vibekits-simulator-${peerId.trim()}-$markerDigest';
     final existing = await authorizedKeys.exists()
@@ -261,9 +264,9 @@ abstract final class HarnessSystemSshService {
     }
     final markerDigest = sha256.convert(keyBytes).toString().substring(0, 16);
     final marker = 'vibekits-simulator-${peerId.trim()}-$markerDigest';
-    final home = homeDirectory?.absolute.path ?? _userHome();
-    if (home.isEmpty) throw StateError('无法定位当前用户目录');
-    final authorizedKeys = File('$home/.ssh/authorized_keys');
+    final authorizedKeys = await _resolveAuthorizedKeysFile(
+      homeDirectory: homeDirectory,
+    );
     final authorized =
         await authorizedKeys.exists() &&
         (await authorizedKeys.readAsString()).contains(marker);
@@ -288,9 +291,14 @@ abstract final class HarnessSystemSshService {
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(normalizedPeerId)) {
       return false;
     }
-    final String home = homeDirectory?.absolute.path ?? _userHome();
-    if (home.isEmpty) return false;
-    final File authorizedKeys = File('$home/.ssh/authorized_keys');
+    final File authorizedKeys;
+    try {
+      authorizedKeys = await _resolveAuthorizedKeysFile(
+        homeDirectory: homeDirectory,
+      );
+    } on Object {
+      return false;
+    }
     if (!await authorizedKeys.exists()) return false;
     final String markerPrefix = 'vibekits-simulator-$normalizedPeerId-';
     return (await authorizedKeys.readAsLines()).any((String line) {
@@ -307,9 +315,9 @@ abstract final class HarnessSystemSshService {
     if (!RegExp(r'^[1-9][0-9]{5,15}$').hasMatch(peerId.trim())) {
       throw const FormatException('控制端设备 ID 无效');
     }
-    final home = homeDirectory?.absolute.path ?? _userHome();
-    if (home.isEmpty) throw StateError('无法定位当前用户目录');
-    final authorizedKeys = File('$home/.ssh/authorized_keys');
+    final authorizedKeys = await _resolveAuthorizedKeysFile(
+      homeDirectory: homeDirectory,
+    );
     if (!await authorizedKeys.exists()) {
       return <String, Object?>{'revoked': true, 'removed': 0};
     }
@@ -332,9 +340,9 @@ abstract final class HarnessSystemSshService {
   static Future<Map<String, Object?>> revokeAllManagedPublicKeys({
     Directory? homeDirectory,
   }) async {
-    final home = homeDirectory?.absolute.path ?? _userHome();
-    if (home.isEmpty) throw StateError('无法定位当前用户目录');
-    final authorizedKeys = File('$home/.ssh/authorized_keys');
+    final authorizedKeys = await _resolveAuthorizedKeysFile(
+      homeDirectory: homeDirectory,
+    );
     if (!await authorizedKeys.exists()) {
       return <String, Object?>{'revoked': true, 'removed': 0};
     }
@@ -415,6 +423,131 @@ abstract final class HarnessSystemSshService {
   static String _hostPublicKeyPath() => Platform.isWindows
       ? '${Platform.environment['ProgramData']?.trim().isNotEmpty == true ? Platform.environment['ProgramData']!.trim() : r'C:\ProgramData'}\\ssh\\ssh_host_ed25519_key.pub'
       : '/etc/ssh/ssh_host_ed25519_key.pub';
+
+  static Future<File> _resolveAuthorizedKeysFile({
+    Directory? homeDirectory,
+    HarnessSystemSshProcessRunner? runner,
+    String? username,
+  }) async {
+    final overrideHome = homeDirectory?.absolute.path;
+    if (overrideHome != null && overrideHome.isNotEmpty) {
+      return File('$overrideHome/.ssh/authorized_keys');
+    }
+    final home = _userHome();
+    if (!Platform.isWindows) {
+      if (home.isEmpty) throw StateError('无法定位当前用户目录');
+      return File('$home/.ssh/authorized_keys');
+    }
+
+    final account = (username ?? _currentUsername()).trim();
+    if (account.isEmpty) throw StateError('无法定位当前 Windows SSH 用户');
+    final sshd = '${_windowsDirectory()}\\System32\\OpenSSH\\sshd.exe';
+    final run = runner ?? Process.run;
+    ProcessResult? effective;
+    try {
+      effective = await run(sshd, <String>[
+        '-T',
+        '-C',
+        'user=$account,host=localhost,addr=127.0.0.1',
+      ]).timeout(const Duration(seconds: 3));
+    } on Object {
+      // Some Windows OpenSSH builds cannot evaluate `sshd -T` from an
+      // unelevated desktop process. Fall through to the readable config.
+    }
+    if (effective?.exitCode == 0) {
+      for (final line in const LineSplitter().convert('${effective!.stdout}')) {
+        final trimmed = line.trim();
+        if (!trimmed.toLowerCase().startsWith('authorizedkeysfile ')) continue;
+        final candidates = trimmed
+            .substring('authorizedkeysfile '.length)
+            .trim()
+            .split(RegExp(r'\s+'));
+        for (var candidate in candidates) {
+          candidate = candidate
+              .replaceAll('__PROGRAMDATA__', _programDataDirectory())
+              .replaceAll('%h', home)
+              .replaceAll('%%', '%');
+          if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(candidate)) {
+            return File(candidate.replaceAll('/', '\\'));
+          }
+          if (home.isNotEmpty) {
+            return File('$home/${candidate.replaceAll('\\', '/')}');
+          }
+        }
+      }
+    }
+    final configured = await _authorizedKeysFileFromWindowsConfig(
+      account: account,
+      home: home,
+    );
+    if (configured != null) return configured;
+    if (home.isEmpty) throw StateError('无法定位当前用户目录');
+    return File('$home/.ssh/authorized_keys');
+  }
+
+  static Future<File?> _authorizedKeysFileFromWindowsConfig({
+    required String account,
+    required String home,
+  }) async {
+    final config = File('${_programDataDirectory()}\\ssh\\sshd_config');
+    if (!await config.exists()) return null;
+    String? globalValue;
+    String? exactUserValue;
+    bool inExactUserBlock = false;
+    for (final rawLine in await config.readAsLines()) {
+      final line = rawLine.trim();
+      if (line.isEmpty || line.startsWith('#')) continue;
+      final match = RegExp(
+        r'^Match\s+(.+)$',
+        caseSensitive: false,
+      ).firstMatch(line);
+      if (match != null) {
+        final expression = match.group(1)!.trim();
+        if (expression.toLowerCase() == 'all') {
+          inExactUserBlock = false;
+          continue;
+        }
+        final userMatch = RegExp(
+          r'(?:^|\s)User\s+([^\s]+)',
+          caseSensitive: false,
+        ).firstMatch(expression);
+        final users = userMatch
+            ?.group(1)
+            ?.split(',')
+            .map((value) => value.trim().toLowerCase())
+            .toSet();
+        inExactUserBlock = users?.contains(account.toLowerCase()) ?? false;
+        continue;
+      }
+      final directive = RegExp(
+        r'^AuthorizedKeysFile\s+(.+)$',
+        caseSensitive: false,
+      ).firstMatch(line);
+      if (directive == null) continue;
+      final value = directive.group(1)!.trim().split(RegExp(r'\s+')).first;
+      if (inExactUserBlock) {
+        exactUserValue = value;
+      } else {
+        globalValue ??= value;
+      }
+    }
+    final value = exactUserValue ?? globalValue;
+    if (value == null || value.isEmpty) return null;
+    final expanded = value
+        .replaceAll('__PROGRAMDATA__', _programDataDirectory())
+        .replaceAll('%h', home)
+        .replaceAll('%%', '%');
+    if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(expanded)) {
+      return File(expanded.replaceAll('/', '\\'));
+    }
+    if (home.isEmpty) return null;
+    return File('$home/${expanded.replaceAll('\\', '/')}');
+  }
+
+  static String _programDataDirectory() =>
+      Platform.environment['ProgramData']?.trim().isNotEmpty == true
+      ? Platform.environment['ProgramData']!.trim()
+      : r'C:\ProgramData';
 
   static Future<void> _setWindowsSshEnabled(bool enabled) async {
     final String powerShell =

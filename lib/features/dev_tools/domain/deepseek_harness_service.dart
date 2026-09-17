@@ -33,7 +33,7 @@ class HarnessEnvironmentReport {
 
 class HarnessLaunchSpec {
   const HarnessLaunchSpec({required this.workspace, this.port = 3080});
-  static const String packageSpec = '@deepseek-ai/dsh@0.1.2-rc.1';
+  static const String packageSpec = '@deepseek-ai/dsh@0.1.5-rc.2';
   final String workspace;
   final int port;
   Uri get url => Uri.parse('http://127.0.0.1:$port');
@@ -215,6 +215,8 @@ abstract final class DeepSeekHarnessService {
 # VibeKits Harness 工具使用准则
 
 你运行在 VibeKits 内部。询问 APP 功能、特殊能力或高级功能时，先调用只读工具 `vibekits.advanced.capabilities`，按远程协助、远程仿真机、集群任务中心的顺序优先报告真实开关、状态和平台角色；远程仿真机还要报告统一 ID 与系统 SSH 端点/用户名，不得把未授权状态说成可用；再调用 `vibekits.system.capability_check`，分别报告产品一级页面、业务功能模块、`definedTools` 定义接口数和 `executableTools` 可执行接口数，不得混为一个数字。打开或关闭高级能力必须使用对应 `set_enabled` 工具，不得用 shell、修改配置文件或猜测服务地址绕过权限。
+
+用户给出设备 ID，要求调试远程电脑、查看远端 App/日志/系统、安装测试软件或进行远程仿真时，即使没有说出技能名，也要读取随 App 安装的 `vibekits-remote-simulator` 技能，直接调用内置 `vibekits.simulator.*` MCP 在后台连接、核验、执行任务并断开；不要依赖开发机的 Codex 技能目录、外部 SSH 客户端或远程桌面界面。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
 
@@ -844,9 +846,9 @@ abstract final class DeepSeekHarnessService {
 
   /// Shared user-agent root used by the official Harness skill filesystem.
   ///
-  /// DSH scans `<DSH_AGENTS_HOME>/skills`. Pointing that root at `.codex`
-  /// lets Harness and Codex consume the same global skill bundles without
-  /// copying them into the app-owned Harness profile.
+  /// DSH scans `<DSH_AGENTS_HOME>/skills` for user-added skills. App-required
+  /// skills are scanned directly from the bundled runtime through
+  /// `DSH_BUNDLED_SKILL_DIR`, so a clean install needs no Codex profile.
   static Directory sharedAgentHomeDirectory({
     Map<String, String>? environment,
   }) {
@@ -1153,6 +1155,9 @@ Map<String, String> _nodeAppLifetimeEnvironment(_HarnessRuntime runtime) =>
       'NODE_OPTIONS': '--import=${Uri.file(runtime.parentWatchdogPath)}',
       'VIBEKITS_PARENT_PID': '$pid',
       'DSH_AGENTS_HOME': DeepSeekHarnessService.sharedAgentHomeDirectory().path,
+      // Official DSH scans this App-owned catalog directly on every launch;
+      // no pre-existing Codex profile or copied user skill is required.
+      'DSH_BUNDLED_SKILL_DIR': runtime.builtInSkillsDirectory.path,
       'VIBEKITS_DATA_HOME': PlatformStorageLayout.current().dataHomeDirectory,
       'VIBEKITS_TOOL_BRIDGE_FILE':
           PlatformStorageLayout.current().mcpConnectionFile,
@@ -1260,6 +1265,10 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
       '${builtInSkills.path}${Platform.pathSeparator}kemi-s1-hardware-debug'
       '${Platform.pathSeparator}SKILL.md',
     );
+    final File simulatorSkill = File(
+      '${builtInSkills.path}${Platform.pathSeparator}vibekits-remote-simulator'
+      '${Platform.pathSeparator}SKILL.md',
+    );
     final File? mcpServer = mcpCandidates
         .where((File file) => file.existsSync())
         .firstOrNull;
@@ -1281,7 +1290,8 @@ Future<_HarnessRuntime> _resolveBundledRuntime() async {
         approvalPlugin == null ||
         parentWatchdog == null ||
         !sessionRebind.existsSync() ||
-        !kemiSkill.existsSync()) {
+        !kemiSkill.existsSync() ||
+        !simulatorSkill.existsSync()) {
       continue;
     }
     return _HarnessRuntime(

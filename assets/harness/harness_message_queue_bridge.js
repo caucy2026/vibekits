@@ -50,6 +50,13 @@
     /send|submit|发送|提交/i.test(label(button))
   ) || buttonsNearComposer().find((button) => button.type === 'submit') || null;
 
+  const busySession = () => {
+    if (stopButton()) return true;
+    const button = sendButton();
+    return Boolean(button &&
+      /queue|steer|排队|插话|补充并纠正/i.test(label(button)));
+  };
+
   const approvalWaiting = () => [...document.querySelectorAll(
     '[role="dialog"], [role="alertdialog"], [data-testid*="approval"]',
   )].filter(visible).some((element) =>
@@ -130,7 +137,7 @@
         fixedProfileMatches && input && (sendButton() || stopButton()),
       ),
       compatibilityProfile: COMPATIBILITY_PROFILE,
-      busy: Boolean(stopButton()),
+      busy: busySession(),
       approvalWaiting: approvalWaiting(),
       ...context(),
     };
@@ -184,7 +191,8 @@
       control = document.createElement('button');
       control.id = 'vibekits-harness-queue-control';
       control.type = 'button';
-      control.textContent = '待执行 0';
+      control.textContent = '外部待执行 0';
+      control.hidden = true;
       control.title = '查看、编辑或调整待执行消息';
       control.setAttribute('aria-label', '待执行消息');
       control.addEventListener('click', () => hostPost({
@@ -223,7 +231,11 @@
     setQueueCount(count) {
       ensureQueueControl();
       const control = document.getElementById('vibekits-harness-queue-control');
-      if (control) control.textContent = `待执行 ${Math.max(0, Number(count) || 0)}`;
+      if (control) {
+        const normalized = Math.max(0, Number(count) || 0);
+        control.hidden = normalized === 0;
+        control.textContent = `外部待执行 ${normalized}`;
+      }
     },
     composerText() { return inputText(); },
     clearComposer() { return setInput(''); },

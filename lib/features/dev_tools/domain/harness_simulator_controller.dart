@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'remote_simulation_activity.dart';
 import 'simulator_update_service.dart';
 
 import 'rustdesk_harness_share_service.dart';
@@ -31,6 +32,94 @@ abstract interface class HarnessSimulatorMcpClient {
     Map<String, Object?> arguments, {
     String callerId = '',
   });
+}
+
+abstract interface class HarnessSimulatorControlClient {
+  Future<Map<String, Object?>> bootstrapSsh(
+    int localPort, {
+    required String callerId,
+    required String publicKey,
+    Duration timeout,
+  });
+}
+
+final class _LoopbackHarnessSimulatorControlClient
+    implements HarnessSimulatorControlClient {
+  const _LoopbackHarnessSimulatorControlClient();
+
+  @override
+  Future<Map<String, Object?>> bootstrapSsh(
+    int localPort, {
+    required String callerId,
+    required String publicKey,
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      try {
+        final request = await client
+            .postUrl(
+              Uri.parse(
+                'http://127.0.0.1:$localPort'
+                '/simulator/ssh-bootstrap',
+              ),
+            )
+            .timeout(timeout);
+        request.persistentConnection = false;
+        request.headers.contentType = ContentType.json;
+        request.headers.set('x-vibekits-caller-id', callerId);
+        final bytes = utf8.encode(
+          jsonEncode(<String, Object?>{
+            'callerId': callerId,
+            'publicKey': publicKey,
+          }),
+        );
+        request.contentLength = bytes.length;
+        request.add(bytes);
+        final response = await request.close().timeout(timeout);
+        final body = await utf8.decoder.bind(response).join().timeout(timeout);
+        final decoded = body.isEmpty ? null : jsonDecode(body);
+        if (response.statusCode == HttpStatus.forbidden && attempt < 2) {
+          lastError = decoded is Map
+              ? decoded['error'] ?? 'simulator_peer_not_authenticated'
+              : 'simulator_peer_not_authenticated';
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          continue;
+        }
+        if (response.statusCode != HttpStatus.ok || decoded is! Map) {
+          throw HarnessSimulatorControllerException(
+            response.statusCode == HttpStatus.forbidden
+                ? 'remote_disabled'
+                : 'ssh_bootstrap_failed',
+            '远程仿真 SSH 引导失败：HTTP ${response.statusCode}',
+          );
+        }
+        final result = Map<String, Object?>.from(decoded);
+        if (result['ok'] != true || result['data'] is! Map) {
+          throw HarnessSimulatorControllerException(
+            'ssh_bootstrap_failed',
+            '${result['error'] ?? '远端没有返回 SSH 身份'}',
+          );
+        }
+        return Map<String, Object?>.from(result['data']! as Map);
+      } on HarnessSimulatorControllerException {
+        rethrow;
+      } on Object catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+      } finally {
+        client.close(force: true);
+      }
+    }
+    throw HarnessSimulatorControllerException(
+      'ssh_bootstrap_unreachable',
+      '远程仿真 SSH 引导通道不可达：$lastError',
+    );
+  }
 }
 
 final class _LoopbackHarnessSimulatorMcpClient
@@ -264,6 +353,7 @@ typedef HarnessSimulatorTunnelOpener =
       int localPort,
       bool forceRelay,
     );
+typedef HarnessSimulatorMcpTunnelOpener = HarnessSimulatorTunnelOpener;
 typedef HarnessSimulatorPortAllocator = Future<int> Function();
 typedef HarnessSimulatorSshTunnelOpener =
     Future<RustDeskHarnessTunnelLease> Function(
@@ -284,8 +374,10 @@ final class HarnessSimulatorController {
   HarnessSimulatorController({
     HarnessSimulatorHostResolver? resolveHost,
     HarnessSimulatorTunnelOpener? openTunnel,
+    HarnessSimulatorMcpTunnelOpener? openMcpTunnel,
     HarnessSimulatorPortAllocator? allocatePort,
     HarnessSimulatorMcpClient? mcpClient,
+    HarnessSimulatorControlClient? controlClient,
     HarnessSimulatorSshTunnelOpener? openSshTunnel,
     HarnessSimulatorProcessRunner? processRunner,
     Directory? sshKeyRoot,
@@ -293,25 +385,40 @@ final class HarnessSimulatorController {
   }) : _resolveHost =
            resolveHost ?? RustDeskHarnessShareService.ensureHostAvailable,
        _openTunnel = openTunnel ?? _defaultOpenTunnel,
+       _openMcpTunnel = openMcpTunnel ?? _defaultOpenMcpTunnel,
        _allocatePort =
            allocatePort ?? RustDeskHarnessShareService.allocateTunnelPort,
        _mcpClient = mcpClient ?? const _LoopbackHarnessSimulatorMcpClient(),
+       _controlClient =
+           controlClient ?? const _LoopbackHarnessSimulatorControlClient(),
        _openSshTunnel = openSshTunnel ?? _defaultOpenSshTunnel,
-       _processRunner = processRunner ?? Process.run,
+       _processRunner = processRunner ?? _defaultProcessRunner,
        _sshKeyRootOverride = sshKeyRoot;
 
   static final HarnessSimulatorController shared = HarnessSimulatorController();
 
   final HarnessSimulatorHostResolver _resolveHost;
   final HarnessSimulatorTunnelOpener _openTunnel;
+  final HarnessSimulatorMcpTunnelOpener _openMcpTunnel;
   final HarnessSimulatorPortAllocator _allocatePort;
   final HarnessSimulatorMcpClient _mcpClient;
+  final HarnessSimulatorControlClient _controlClient;
   final HarnessSimulatorSshTunnelOpener _openSshTunnel;
   final HarnessSimulatorProcessRunner _processRunner;
   final Directory? _sshKeyRootOverride;
   final bool enableSshBootstrap;
   final Map<String, _HarnessSimulatorSession> _sessions =
       <String, _HarnessSimulatorSession>{};
+
+  static Future<ProcessResult> _defaultProcessRunner(
+    String executable,
+    List<String> arguments,
+  ) => Process.run(
+    executable,
+    arguments,
+    stdoutEncoding: const Utf8Codec(allowMalformed: true),
+    stderrEncoding: const Utf8Codec(allowMalformed: true),
+  );
   final StreamController<Map<String, Object?>> _changes =
       StreamController<Map<String, Object?>>.broadcast(sync: true);
 
@@ -324,12 +431,19 @@ final class HarnessSimulatorController {
     String routingId,
     int localPort,
     bool forceRelay,
-  ) => RustDeskHarnessShareService.openSimulatorTunnel(
-    executable,
-    routingId: routingId,
-    localPort: localPort,
-    forceRelay: forceRelay,
-  );
+  ) => Platform.isAndroid || Platform.isIOS
+      ? RustDeskHarnessShareService.openSimulatorTunnel(
+          executable,
+          routingId: routingId,
+          localPort: localPort,
+          forceRelay: forceRelay,
+        )
+      : RustDeskHarnessShareService.openSimulatorControlTunnel(
+          executable,
+          routingId: routingId,
+          localPort: localPort,
+          forceRelay: forceRelay,
+        );
 
   static Future<RustDeskHarnessTunnelLease> _defaultOpenSshTunnel(
     String executable,
@@ -337,6 +451,18 @@ final class HarnessSimulatorController {
     int localPort,
     bool forceRelay,
   ) => RustDeskHarnessShareService.openSimulatorSshTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    forceRelay: forceRelay,
+  );
+
+  static Future<RustDeskHarnessTunnelLease> _defaultOpenMcpTunnel(
+    String executable,
+    String routingId,
+    int localPort,
+    bool forceRelay,
+  ) => RustDeskHarnessShareService.openSimulatorTunnel(
     executable,
     routingId: routingId,
     localPort: localPort,
@@ -353,12 +479,27 @@ final class HarnessSimulatorController {
     final existing = _sessions[id];
     if (existing != null) return _snapshot(existing);
 
-    final host = await _resolveHost();
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: id,
+      action: '连接远程仿真机',
+      detail: forceRelay ? '正在通过中继建立静默通道' : '正在通过 P2P/中继建立静默通道',
+    );
+
+    late final RustDeskHostInfo host;
+    try {
+      host = await _resolveHost();
+    } on Object catch (error) {
+      activity.fail(error);
+      rethrow;
+    }
     if (!host.available || !host.callable || host.executable.isEmpty) {
-      throw HarnessSimulatorControllerException(
+      final error = HarnessSimulatorControllerException(
         'controller_unavailable',
         host.message.isEmpty ? '本机 ID 通信引擎未就绪' : host.message,
       );
+      activity.fail(error);
+      throw error;
     }
     final localPort = await _allocatePort();
     final tunnel = await _openTunnel(
@@ -367,19 +508,84 @@ final class HarnessSimulatorController {
       localPort,
       forceRelay,
     );
+    RustDeskHarnessTunnelLease? mcpTunnel;
+    _HarnessSimulatorSshSession? ssh;
     try {
-      // The first MCP request is also the demand signal for RustDesk's local
-      // port forward. Sending a disposable trigger connection first creates a
-      // second handshake and can race the listener; buffer this real request
-      // until the single transport is authenticated instead.
+      final bool sshSupported =
+          enableSshBootstrap && !Platform.isAndroid && !Platform.isIOS;
+      var mcpLocalPort = localPort;
+      if (sshSupported) {
+        // The native carrier is demand-driven: it does not start the remote
+        // transport until a client connects to the local forwarded port.
+        // Start the real control request before waiting for the carrier's
+        // connected signal, otherwise both sides wait for each other until
+        // the 45-second timeout expires.
+        final sshFuture = _prepareSshSession(
+          host: host,
+          routingId: id,
+          controlPort: localPort,
+          forceRelay: forceRelay,
+          timeout: timeout,
+        );
+        unawaited(
+          sshFuture.then<void>(
+            (_) {},
+            onError: (Object error, StackTrace stackTrace) {},
+          ),
+        );
+        await tunnel.waitUntilConnected(timeout: timeout);
+        ssh = await sshFuture;
+        mcpLocalPort = await _allocatePort();
+        mcpTunnel = await _openMcpTunnel(
+          host.executable,
+          id,
+          mcpLocalPort,
+          forceRelay,
+        );
+        final toolsFuture = _mcpClient
+            .initializeAndList(mcpLocalPort, callerId: host.id)
+            .timeout(timeout);
+        unawaited(
+          toolsFuture.then<void>(
+            (_) {},
+            onError: (Object error, StackTrace stackTrace) {},
+          ),
+        );
+        await mcpTunnel.waitUntilConnected(timeout: timeout);
+        final tools = await toolsFuture;
+        if (tools.isEmpty) {
+          throw const HarnessSimulatorControllerException(
+            'empty_catalog',
+            '远端仿真机没有公开任何调试工具',
+          );
+        }
+        final session = _HarnessSimulatorSession(
+          routingId: id,
+          controllerRoutingId: host.id,
+          localPort: localPort,
+          mcpLocalPort: mcpLocalPort,
+          forceRelay: forceRelay,
+          tunnel: tunnel,
+          mcpTunnel: mcpTunnel,
+          tools: tools,
+          mcpReady: true,
+          mcpError: '',
+          ssh: ssh,
+          connectedAt: DateTime.now().toUtc(),
+        );
+        _sessions[id] = session;
+        _publishStatus();
+        activity.succeed(
+          '已连接 ${ssh.hostname} · ${tools.length} 项工具'
+          ' · SSH 已就绪 · 工具通道已就绪',
+        );
+        return _snapshot(session);
+      }
+      // Mobile controllers use the first tunnel as the MCP tunnel. It is also
+      // demand-driven, so issue the MCP initialize request before waiting.
       final toolsFuture = _mcpClient
-          .initializeAndList(localPort, callerId: host.id)
+          .initializeAndList(mcpLocalPort, callerId: host.id)
           .timeout(timeout);
-      // Attach an error observer immediately because the target may close the
-      // demand TCP request while the native carrier is still reporting the
-      // more useful login failure (for example, access explicitly disabled).
-      // The original future remains authoritative and is awaited below once
-      // transport authentication succeeds.
       unawaited(
         toolsFuture.then<void>(
           (_) {},
@@ -388,31 +594,39 @@ final class HarnessSimulatorController {
       );
       await tunnel.waitUntilConnected(timeout: timeout);
       final tools = await toolsFuture;
-      final ssh = !enableSshBootstrap || Platform.isAndroid || Platform.isIOS
-          ? null
-          : await _prepareSshSession(
-              host: host,
-              routingId: id,
-              mcpPort: localPort,
-              forceRelay: forceRelay,
-              tools: tools,
-              timeout: timeout,
-            );
+      if (tools.isEmpty) {
+        throw const HarnessSimulatorControllerException(
+          'empty_catalog',
+          '远端仿真机没有公开任何调试工具',
+        );
+      }
       final session = _HarnessSimulatorSession(
         routingId: id,
         controllerRoutingId: host.id,
         localPort: localPort,
+        mcpLocalPort: mcpLocalPort,
         forceRelay: forceRelay,
         tunnel: tunnel,
+        mcpTunnel: mcpTunnel,
         tools: tools,
+        mcpReady: true,
+        mcpError: '',
         ssh: ssh,
         connectedAt: DateTime.now().toUtc(),
       );
       _sessions[id] = session;
       _publishStatus();
+      activity.succeed(
+        '已连接 ${ssh?.hostname ?? id} · ${tools.length} 项工具'
+        '${ssh == null ? '' : ' · SSH 已就绪'}'
+        ' · 工具通道已就绪',
+      );
       return _snapshot(session);
     } on Object catch (error) {
+      await mcpTunnel?.close();
+      await ssh?.tunnel.close();
       await tunnel.close();
+      activity.fail(error);
       if (error is HarnessSimulatorControllerException) rethrow;
       final message = '$error';
       final code = message.contains('disabled') || message.contains('forbidden')
@@ -458,12 +672,25 @@ final class HarnessSimulatorController {
         '远端仿真机没有公开这个工具',
       );
     }
-    return _mcpClient.call(
-      session.localPort,
-      name,
-      arguments,
-      callerId: session.controllerRoutingId,
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: session.routingId,
+      action: _activityName(name),
+      arguments: arguments,
     );
+    try {
+      final result = await _mcpClient.call(
+        session.mcpLocalPort,
+        name,
+        arguments,
+        callerId: session.controllerRoutingId,
+      );
+      activity.succeed('远端工具调用完成');
+      return result;
+    } on Object catch (error) {
+      activity.fail(error);
+      rethrow;
+    }
   }
 
   Future<Map<String, Object?>> runSshCommand(
@@ -485,22 +712,61 @@ final class HarnessSimulatorController {
         source.codeUnits.any((unit) => unit == 0)) {
       throw const FormatException('远程命令为空、过长或包含非法字符');
     }
-    final result = await _processRunner(_sshExecutable(), <String>[
-      ..._sshOptions(ssh),
-      '${ssh.username}@127.0.0.1',
-      source,
-    ]).timeout(timeout);
-    return <String, Object?>{
-      'routingId': routingId.trim(),
-      'hostname': ssh.hostname,
-      'exitCode': result.exitCode,
-      'stdout': _boundedOutput('${result.stdout}'),
-      'stderr': _boundedOutput('${result.stderr}'),
-      'ok': result.exitCode == 0,
-    };
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: session.routingId,
+      action: '执行远程调试命令',
+      arguments: <String, Object?>{'command': source},
+    );
+    try {
+      final result = await _processRunner(_sshExecutable(), <String>[
+        ..._sshOptions(ssh),
+        '${ssh.username}@127.0.0.1',
+        source,
+      ]).timeout(timeout);
+      final response = <String, Object?>{
+        'routingId': routingId.trim(),
+        'hostname': ssh.hostname,
+        'exitCode': result.exitCode,
+        'stdout': _boundedOutput('${result.stdout}'),
+        'stderr': _boundedOutput('${result.stderr}'),
+        'ok': result.exitCode == 0,
+      };
+      if (result.exitCode == 0) {
+        activity.succeed('命令执行完成 · exit 0');
+      } else {
+        activity.fail('命令执行失败 · exit ${result.exitCode}');
+      }
+      return response;
+    } on Object catch (error) {
+      activity.fail(error);
+      rethrow;
+    }
   }
 
   Future<Map<String, Object?>> uploadFile(
+    String routingId,
+    String localPath,
+  ) async {
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: routingId.trim(),
+      action: '上传文件到远程仿真机',
+      arguments: <String, Object?>{'localPath': localPath},
+    );
+    try {
+      final result = await _uploadFile(routingId, localPath);
+      activity.succeed(
+        '上传完成 · ${result['bytes'] ?? 0} 字节 · ${result['remotePath'] ?? ''}',
+      );
+      return result;
+    } on Object catch (error) {
+      activity.fail(error);
+      rethrow;
+    }
+  }
+
+  Future<Map<String, Object?>> _uploadFile(
     String routingId,
     String localPath,
   ) async {
@@ -525,17 +791,22 @@ final class HarnessSimulatorController {
     if (safeName.isEmpty || safeName == '.' || safeName == '..') {
       throw const FormatException('上传文件名无效');
     }
-    final remoteDirectory = '/tmp/vibekits-simulator-${routingId.trim()}';
+    final bool windows = ssh.platform == 'windows';
+    final remoteDirectory = windows
+        ? '.vibekits-simulator\\${routingId.trim()}'
+        : '/tmp/vibekits-simulator-${routingId.trim()}';
     final remotePath = '$remoteDirectory/$safeName';
     final prepared = await runSshCommand(
       routingId,
-      "mkdir -p '$remoteDirectory' && chmod 700 '$remoteDirectory'",
+      windows
+          ? 'if not exist "$remoteDirectory" mkdir "$remoteDirectory"'
+          : "mkdir -p '$remoteDirectory' && chmod 700 '$remoteDirectory'",
     );
     if (prepared['ok'] != true) throw StateError('目标机暂存目录准备失败');
     final copied = await _processRunner(_scpExecutable(), <String>[
       ..._scpOptions(ssh),
       source.path,
-      '${ssh.username}@127.0.0.1:$remotePath',
+      '${ssh.username}@127.0.0.1:${remotePath.replaceAll('\\', '/')}',
     ]).timeout(const Duration(minutes: 15));
     if (copied.exitCode != 0) {
       throw HarnessSimulatorControllerException(
@@ -546,7 +817,9 @@ final class HarnessSimulatorController {
     final localSha = (await sha256.bind(source.openRead()).first).toString();
     final verified = await runSshCommand(
       routingId,
-      "shasum -a 256 '$remotePath'",
+      windows
+          ? 'certutil.exe -hashfile "$remotePath" SHA256'
+          : "shasum -a 256 '$remotePath'",
     );
     final remoteSha = RegExp(
       r'\b[0-9a-fA-F]{64}\b',
@@ -571,6 +844,28 @@ final class HarnessSimulatorController {
     String routingId,
     String remotePath,
   ) async {
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: routingId.trim(),
+      action: '从远程仿真机下载文件',
+      arguments: <String, Object?>{'remotePath': remotePath},
+    );
+    try {
+      final result = await _downloadFile(routingId, remotePath);
+      activity.succeed(
+        '下载完成 · ${result['bytes'] ?? 0} 字节 · ${result['localPath'] ?? ''}',
+      );
+      return result;
+    } on Object catch (error) {
+      activity.fail(error);
+      rethrow;
+    }
+  }
+
+  Future<Map<String, Object?>> _downloadFile(
+    String routingId,
+    String remotePath,
+  ) async {
     final session = _requireSession(routingId);
     final ssh = session.ssh;
     if (ssh == null) {
@@ -580,12 +875,13 @@ final class HarnessSimulatorController {
       );
     }
     final source = remotePath.trim();
-    if (!source.startsWith('/') ||
+    final bool windowsPath = RegExp(r'^[A-Za-z]:[\\/]').hasMatch(source);
+    if ((!source.startsWith('/') && !windowsPath) ||
         source.length > 4096 ||
         source.codeUnits.any((unit) => unit == 0 || unit == 10 || unit == 13)) {
       throw const FormatException('下载源必须是有效的绝对文件路径');
     }
-    final originalName = Uri.file(source).pathSegments.last;
+    final originalName = source.split(RegExp(r'[\\/]')).last;
     final safeName = originalName.replaceAll(RegExp(r'[^A-Za-z0-9._+-]'), '_');
     if (safeName.isEmpty || safeName == '.' || safeName == '..') {
       throw const FormatException('下载文件名无效');
@@ -601,7 +897,7 @@ final class HarnessSimulatorController {
     );
     final copied = await _processRunner(_scpExecutable(), <String>[
       ..._scpOptions(ssh),
-      '${ssh.username}@127.0.0.1:$source',
+      '${ssh.username}@127.0.0.1:${source.replaceAll('\\', '/')}',
       target.path,
     ]).timeout(const Duration(minutes: 15));
     if (copied.exitCode != 0 || !await target.exists()) {
@@ -628,32 +924,43 @@ final class HarnessSimulatorController {
   }
 
   Future<Map<String, Object?>> captureScreenshot(String routingId) async {
-    final raw = await call(
-      routingId,
-      'vibekits.device.screenshot',
-      const <String, Object?>{},
-    );
-    final structuredRaw = raw['structuredContent'];
-    if (structuredRaw is! Map) {
+    final session = _requireSession(routingId);
+    final ssh = session.ssh;
+    if (ssh == null) {
       throw const HarnessSimulatorControllerException(
-        'invalid_screenshot_response',
-        '目标机截图响应格式错误',
+        'ssh_not_ready',
+        '该仿真连接尚未完成 SSH 公钥验证',
       );
     }
-    final structured = Map<String, Object?>.from(structuredRaw);
-    final dataRaw = structured['data'];
-    if (structured['ok'] != true || dataRaw is! Map) {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final remotePath = ssh.platform == 'windows'
+        ? 'C:\\Windows\\Temp\\vibekits-simulator-${routingId.trim()}-$stamp.png'
+        : '/tmp/vibekits-simulator-${routingId.trim()}/screenshot-$stamp.png';
+    final command = ssh.platform == 'windows'
+        ? "powershell.exe -NoProfile -NonInteractive -Command \"Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; \$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \$i=New-Object System.Drawing.Bitmap \$b.Width,\$b.Height; \$g=[System.Drawing.Graphics]::FromImage(\$i); \$g.CopyFromScreen(\$b.Location,[System.Drawing.Point]::Empty,\$b.Size); \$i.Save('$remotePath',[System.Drawing.Imaging.ImageFormat]::Png); \$g.Dispose(); \$i.Dispose(); (Get-FileHash -Algorithm SHA256 '$remotePath').Hash\""
+        : "mkdir -p '/tmp/vibekits-simulator-${routingId.trim()}' && screencapture -x '$remotePath' && shasum -a 256 '$remotePath'";
+    final captured = await runSshCommand(
+      routingId,
+      command,
+      timeout: const Duration(seconds: 30),
+    );
+    if (captured['ok'] != true) {
       throw HarnessSimulatorControllerException(
         'remote_screenshot_failed',
-        '${structured['error'] ?? '目标机截图失败'}',
+        '${captured['stderr'] ?? '目标机截图失败'}',
       );
     }
-    final data = Map<String, Object?>.from(dataRaw);
-    final remotePath = '${data['path'] ?? ''}';
+    final expectedSha = RegExp(
+      r'\b[0-9a-fA-F]{64}\b',
+    ).firstMatch('${captured['stdout'] ?? ''}')?.group(0)?.toLowerCase();
+    if (expectedSha == null) {
+      throw const HarnessSimulatorControllerException(
+        'invalid_screenshot_response',
+        '目标机截图校验值缺失',
+      );
+    }
     final downloaded = await downloadFile(routingId, remotePath);
-    final expectedSha = '${data['sha256'] ?? ''}'.toLowerCase();
-    if (expectedSha.isEmpty ||
-        '${downloaded['sha256']}'.toLowerCase() != expectedSha) {
+    if ('${downloaded['sha256']}'.toLowerCase() != expectedSha) {
       final localPath = '${downloaded['localPath'] ?? ''}';
       if (localPath.isNotEmpty) {
         final file = File(localPath);
@@ -667,9 +974,7 @@ final class HarnessSimulatorController {
     return <String, Object?>{
       ...downloaded,
       'captured': true,
-      'platform': data['platform'],
-      'width': data['width'],
-      'height': data['height'],
+      'platform': ssh.platform,
       'targetSha256': expectedSha,
       'singleFrame': true,
     };
@@ -725,39 +1030,10 @@ final class HarnessSimulatorController {
   Future<_HarnessSimulatorSshSession> _prepareSshSession({
     required RustDeskHostInfo host,
     required String routingId,
-    required int mcpPort,
+    required int controlPort,
     required bool forceRelay,
-    required List<Map<String, Object?>> tools,
     required Duration timeout,
   }) async {
-    const requiredTools = <String>{
-      'vibekits.device.ssh_identity',
-      'vibekits.device.ssh_key_status',
-      'vibekits.device.ssh_authorize',
-    };
-    final names = tools.map((tool) => '${tool['name'] ?? ''}').toSet();
-    if (!names.containsAll(requiredTools)) {
-      throw const HarnessSimulatorControllerException(
-        'ssh_bootstrap_unavailable',
-        '远端版本不支持自动 SSH 公钥交换，需要先升级目标机 VibeKits',
-      );
-    }
-    final identity = _toolData(
-      await _mcpClient.call(
-        mcpPort,
-        'vibekits.device.ssh_identity',
-        const <String, Object?>{},
-        callerId: host.id,
-      ),
-    );
-    final username = '${identity['username'] ?? ''}'.trim();
-    final fingerprint = '${identity['hostKeyFingerprint'] ?? ''}'.trim();
-    if (username.isEmpty || !fingerprint.startsWith('SHA256:')) {
-      throw const HarnessSimulatorControllerException(
-        'ssh_identity_invalid',
-        '远端 SSH 用户或主机指纹无效',
-      );
-    }
     final keyRoot = await _resolveSshKeyRoot(routingId);
     final privateKey = File('${keyRoot.path}/id_ed25519');
     final publicKey = File('${privateKey.path}.pub');
@@ -781,22 +1057,22 @@ final class HarnessSimulatorController {
       }
     }
     final publicKeyText = (await publicKey.readAsString()).trim();
-    final keyStatus = _toolData(
-      await _mcpClient.call(
-        mcpPort,
-        'vibekits.device.ssh_key_status',
-        <String, Object?>{'peerId': host.id, 'publicKey': publicKeyText},
-        callerId: host.id,
-      ),
+    final identity = await _controlClient.bootstrapSsh(
+      controlPort,
+      callerId: host.id,
+      publicKey: publicKeyText,
+      timeout: timeout,
     );
-    if (keyStatus['authorized'] != true) {
-      _toolData(
-        await _mcpClient.call(
-          mcpPort,
-          'vibekits.device.ssh_authorize',
-          <String, Object?>{'peerId': host.id, 'publicKey': publicKeyText},
-          callerId: host.id,
-        ),
+    final username = '${identity['username'] ?? ''}'.trim();
+    final platform = '${identity['platform'] ?? ''}'.trim().toLowerCase();
+    final fingerprint = '${identity['hostKeyFingerprint'] ?? ''}'.trim();
+    if (identity['authorized'] != true ||
+        username.isEmpty ||
+        !<String>{'macos', 'windows', 'linux'}.contains(platform) ||
+        !fingerprint.startsWith('SHA256:')) {
+      throw const HarnessSimulatorControllerException(
+        'ssh_identity_invalid',
+        '远程仿真控制通道返回的 SSH 身份无效',
       );
     }
     final localPort = await _allocatePort();
@@ -883,6 +1159,7 @@ final class HarnessSimulatorController {
       return _HarnessSimulatorSshSession(
         tunnel: tunnel,
         localPort: localPort,
+        platform: platform,
         username: username,
         privateKeyPath: privateKey.path,
         knownHostsPath: knownHosts.path,
@@ -1030,10 +1307,17 @@ final class HarnessSimulatorController {
   Future<Map<String, Object?>> disconnect(String routingId) async {
     final id = routingId.trim();
     _validateId(id);
+    final activity = RemoteSimulationActivityHub.instance.begin(
+      direction: RemoteSimulationActivityDirection.outgoing,
+      peerId: id,
+      action: '断开远程仿真',
+    );
     final session = _sessions.remove(id);
     await session?.ssh?.tunnel.close();
+    await session?.mcpTunnel?.close();
     await session?.tunnel.close();
     _publishStatus();
+    activity.succeed(session == null ? '连接已关闭' : '仿真通道已安全关闭');
     return <String, Object?>{'connected': false, 'routingId': id};
   }
 
@@ -1042,6 +1326,7 @@ final class HarnessSimulatorController {
     _sessions.clear();
     for (final session in sessions) {
       await session.ssh?.tunnel.close();
+      await session.mcpTunnel?.close();
       await session.tunnel.close();
     }
     _publishStatus();
@@ -1073,14 +1358,38 @@ final class HarnessSimulatorController {
     }
   }
 
+  static String _activityName(String toolId) => switch (toolId) {
+    'vibekits.device.processes' => '查看远程进程',
+    'vibekits.device.applications' => '查看远程应用',
+    'vibekits.device.logs' => '读取远程应用日志',
+    'vibekits.device.crash_reports' => '读取远程崩溃报告',
+    'vibekits.device.screenshot' => '获取远程诊断截图',
+    'vibekits.device.ui_inspect' => '读取远程应用控件',
+    'vibekits.device.ui_action' => '操作远程应用控件',
+    'vibekits.device.app_control' => '控制远程应用',
+    'vibekits.device.app_install' => '安装远程应用',
+    'vibekits.device.app_uninstall' => '卸载远程应用',
+    'vibekits.device.ssh_authorize' => '授权远程调试密钥',
+    'vibekits.device.ssh_revoke' => '撤销远程调试密钥',
+    _ => '调用远程工具 · $toolId',
+  };
+
   static Map<String, Object?> _snapshot(_HarnessSimulatorSession session) =>
       <String, Object?>{
-        'connected': !session.tunnel.closed,
+        'connected':
+            !session.tunnel.closed &&
+            (session.mcpTunnel == null || !session.mcpTunnel!.closed) &&
+            session.mcpReady,
+        'transportReady':
+            !session.tunnel.closed &&
+            (session.mcpTunnel == null || !session.mcpTunnel!.closed),
         'routingId': session.routingId,
         'transport': session.forceRelay ? 'relay' : 'p2p_or_relay',
         'connectedAt': session.connectedAt.toIso8601String(),
         'toolCount': session.tools.length,
         'sshReady': session.ssh != null,
+        'mcpReady': session.mcpReady,
+        if (session.mcpError.isNotEmpty) 'mcpError': session.mcpError,
         if (session.ssh case final ssh?) ...<String, Object?>{
           'sshUsername': ssh.username,
           'sshHostKeyFingerprint': ssh.hostKeyFingerprint,
@@ -1094,9 +1403,13 @@ final class _HarnessSimulatorSession {
     required this.routingId,
     required this.controllerRoutingId,
     required this.localPort,
+    required this.mcpLocalPort,
     required this.forceRelay,
     required this.tunnel,
+    required this.mcpTunnel,
     required this.tools,
+    required this.mcpReady,
+    required this.mcpError,
     required this.ssh,
     required this.connectedAt,
   });
@@ -1104,9 +1417,13 @@ final class _HarnessSimulatorSession {
   final String routingId;
   final String controllerRoutingId;
   final int localPort;
+  final int mcpLocalPort;
   final bool forceRelay;
   final RustDeskHarnessTunnelLease tunnel;
+  final RustDeskHarnessTunnelLease? mcpTunnel;
   final List<Map<String, Object?>> tools;
+  final bool mcpReady;
+  final String mcpError;
   final _HarnessSimulatorSshSession? ssh;
   final DateTime connectedAt;
 }
@@ -1115,6 +1432,7 @@ final class _HarnessSimulatorSshSession {
   const _HarnessSimulatorSshSession({
     required this.tunnel,
     required this.localPort,
+    required this.platform,
     required this.username,
     required this.privateKeyPath,
     required this.knownHostsPath,
@@ -1124,6 +1442,7 @@ final class _HarnessSimulatorSshSession {
 
   final RustDeskHarnessTunnelLease tunnel;
   final int localPort;
+  final String platform;
   final String username;
   final String privateKeyPath;
   final String knownHostsPath;

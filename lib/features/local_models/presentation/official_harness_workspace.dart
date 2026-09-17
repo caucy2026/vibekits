@@ -45,6 +45,7 @@ import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/domain/rustdesk_harness_share_service.dart';
 import '../../dev_tools/presentation/harness_remote_read_only_panel.dart';
+import '../../dev_tools/presentation/remote_simulation_activity_dialog.dart';
 import 'mcp_exposure_consent_dialog.dart';
 import 'mcp_reputation_badge.dart';
 import 'harness_webview_bridge.dart';
@@ -2251,29 +2252,12 @@ window.__vibekitsHarnessQueueBridge?.submit(
                 }
                 final first = Map<String, Object?>.from(sessions.first as Map);
                 final routingId = '${first['routingId'] ?? ''}'.trim();
-                return Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: Row(
-                    key: const Key(
-                      'official-harness-controller-simulator-status',
-                    ),
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
+                return RemoteSimulationStatusChip(
+                  semanticKey: const Key(
+                    'official-harness-controller-simulator-status',
                   ),
+                  color: Colors.green,
+                  label: routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
                 );
               },
             ),
@@ -2298,24 +2282,10 @@ window.__vibekitsHarnessQueueBridge?.submit(
                   ),
                   HarnessSimulatorTargetPhase.error => (Colors.red, '远程仿真异常'),
                 };
-                return Padding(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: Row(
-                    key: const Key('official-harness-simulator-status'),
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(label, style: const TextStyle(fontSize: 12)),
-                    ],
-                  ),
+                return RemoteSimulationStatusChip(
+                  semanticKey: const Key('official-harness-simulator-status'),
+                  color: color,
+                  label: label,
                 );
               },
             ),

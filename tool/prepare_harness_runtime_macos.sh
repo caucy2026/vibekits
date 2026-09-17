@@ -7,11 +7,12 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # full-function macOS 12+ application. The release verifier rejects any bundled
 # Mach-O that requires a system newer than macOS 12.
 NODE_VERSION="${NODE_VERSION:-22.19.0}"
-DSH_VERSION="${DSH_VERSION:-0.1.2-rc.1}"
+DSH_VERSION="${DSH_VERSION:-0.1.5-rc.2}"
 TARGET="${1:-$PROJECT_ROOT/native/harness/macos/runtime}"
-DOWNLOADS="$PROJECT_ROOT/.tmp/harness-runtime-macos-downloads"
-STAGING="$PROJECT_ROOT/.tmp/harness-runtime-macos-staging"
-NPM_CACHE="$PROJECT_ROOT/.tmp/npm-cache-harness-macos"
+PREP_CACHE_ROOT="${VIBEKITS_HARNESS_PREP_CACHE_ROOT:-$PROJECT_ROOT/.tmp}"
+DOWNLOADS="$PREP_CACHE_ROOT/harness-runtime-macos-downloads"
+STAGING="$PREP_CACHE_ROOT/harness-runtime-macos-staging"
+NPM_CACHE="$PREP_CACHE_ROOT/npm-cache-harness-macos"
 NODE_DIST="$STAGING/node-universal"
 PACKAGE_ROOT="$STAGING/package"
 
@@ -161,6 +162,8 @@ ditto "$WEB_FRONTEND/dist" "$WEB_FRONTEND/dist-macos12"
   "$WEB_FRONTEND/dist-macos12" \
   "$PACKAGE_ROOT/node_modules/esbuild/lib/main.js" \
   "$PACKAGE_ROOT/node_modules/@deepseek-ai"
+"$NODE" "$PROJECT_ROOT/tool/test_harness_macos12_polyfills.mjs" \
+  "$WEB_FRONTEND/dist-macos12/index.html"
 rm -rf \
   "$PACKAGE_ROOT/node_modules/esbuild" \
   "$PACKAGE_ROOT/node_modules/@esbuild" \
@@ -198,8 +201,12 @@ mkdir -p "$TARGET/builtin-skills"
 ditto \
   "$PROJECT_ROOT/native/harness/builtin-skills/kemi-s1-hardware-debug" \
   "$TARGET/builtin-skills/kemi-s1-hardware-debug"
+ditto \
+  "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator" \
+  "$TARGET/builtin-skills/vibekits-remote-simulator"
 
 "$TARGET/bin/node" "$PROJECT_ROOT/tool/patch_harness_runtime.mjs" "$TARGET"
+"$TARGET/bin/node" "$PROJECT_ROOT/tool/test_harness_bundled_skill.mjs" "$TARGET"
 
 cat > "$TARGET/harness-runtime.json" <<EOF
 {
@@ -207,7 +214,7 @@ cat > "$TARGET/harness-runtime.json" <<EOF
   "nodeVersion": "v$NODE_VERSION",
   "architectures": ["arm64", "x86_64"],
   "nodeArguments": ["--expose-internals"],
-  "builtInSkills": ["kemi-s1-hardware-debug"],
+  "builtInSkills": ["kemi-s1-hardware-debug", "vibekits-remote-simulator"],
   "cli": "$CLI_RELATIVE"
 }
 EOF

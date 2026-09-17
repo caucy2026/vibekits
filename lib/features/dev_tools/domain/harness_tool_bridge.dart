@@ -458,6 +458,8 @@ class VibekitsHarnessToolBridge {
   static const String simulatorScreenshotId = 'vibekits.simulator.screenshot';
   static const String deviceProcessesId = 'vibekits.device.processes';
   static const String deviceScreenshotId = 'vibekits.device.screenshot';
+  static const String deviceUiInspectId = 'vibekits.device.ui_inspect';
+  static const String deviceUiActionId = 'vibekits.device.ui_action';
   static const String deviceLogsId = 'vibekits.device.logs';
   static const String deviceCrashReportsId = 'vibekits.device.crash_reports';
   static const String deviceApplicationsId = 'vibekits.device.applications';
@@ -811,6 +813,65 @@ class VibekitsHarnessToolBridge {
       description: '在远程仿真开关已打开时截取单帧屏幕，返回目标机临时图片路径、尺寸、大小和 SHA-256。',
       risk: HarnessToolRisk.controlsDevice,
       properties: const <String, Object?>{},
+    ),
+    deviceUiInspectId: _definition(
+      id: deviceUiInspectId,
+      name: '读取被仿真机应用控件',
+      description:
+          '读取目标 macOS App 当前窗口的辅助功能控件树，用于按控件标题、角色或标识精确操作；首次使用会由 macOS 请求一次辅助功能授权，不启动远程桌面。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'bundleId': _string('目标 App 的精确 Bundle ID；与 appName 至少提供一个'),
+        'appName': _string('目标 App 的精确进程显示名；优先使用 bundleId'),
+        'promptPermission': const <String, Object?>{
+          'type': 'boolean',
+          'description': '未授权时是否请求 macOS 显示一次系统授权入口，默认 false',
+        },
+        'maxDepth': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 12,
+          'description': '控件树最大深度，默认 8',
+        },
+        'maxNodes': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 1000,
+          'description': '最多返回控件数，默认 400',
+        },
+      },
+    ),
+    deviceUiActionId: _definition(
+      id: deviceUiActionId,
+      name: '操作被仿真机应用控件',
+      description:
+          '在已授权目标 macOS App 上按辅助功能控件标题、角色或标识执行点击、赋值或键盘输入；只有控件树无法表达目标时才允许使用目标窗口内坐标点击。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'bundleId': _string('目标 App 的精确 Bundle ID；与 appName 至少提供一个'),
+        'appName': _string('目标 App 的精确进程显示名；优先使用 bundleId'),
+        'action': <String, Object?>{
+          'type': 'string',
+          'enum': const <String>[
+            'activate',
+            'press',
+            'setValue',
+            'typeText',
+            'key',
+            'click',
+          ],
+        },
+        'identifier': _string('控件辅助功能标识；press/setValue 可用'),
+        'title': _string('控件可见标题；press/setValue 可用'),
+        'role': _string('控件辅助功能角色，例如 AXButton'),
+        'value': _string('setValue 的新值或 typeText 的文本'),
+        'key': _string(
+          'key 动作：enter/escape/tab/backspace/delete/up/down/left/right',
+        ),
+        'x': const <String, Object?>{'type': 'number'},
+        'y': const <String, Object?>{'type': 'number'},
+      },
+      required: const <String>['action'],
     ),
     deviceProcessesId: _definition(
       id: deviceProcessesId,
@@ -2970,6 +3031,8 @@ class VibekitsHarnessToolBridge {
     if (toolId == simulatorDownloadFileId) return _downloadSimulatorFile;
     if (toolId == simulatorScreenshotId) return _captureSimulatorScreenshot;
     if (toolId == deviceScreenshotId) return _captureDeviceScreenshot;
+    if (toolId == deviceUiInspectId) return _inspectDeviceUi;
+    if (toolId == deviceUiActionId) return _performDeviceUiAction;
     if (toolId == deviceProcessesId) return _inspectDeviceProcesses;
     if (toolId == deviceLogsId) return _readDeviceLogs;
     if (toolId == deviceCrashReportsId) return _readDeviceCrashReports;
@@ -3647,6 +3710,31 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _captureDeviceScreenshot(
     Map<String, Object?> arguments,
   ) => NativeAppDebugService.captureScreenshot();
+
+  Future<Map<String, Object?>> _inspectDeviceUi(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.inspectApplicationUi(
+    bundleId: '${arguments['bundleId'] ?? ''}',
+    appName: '${arguments['appName'] ?? ''}',
+    promptPermission: arguments['promptPermission'] == true,
+    maxDepth: _integer(arguments['maxDepth'], 8),
+    maxNodes: _integer(arguments['maxNodes'], 400),
+  );
+
+  Future<Map<String, Object?>> _performDeviceUiAction(
+    Map<String, Object?> arguments,
+  ) => NativeAppDebugService.performApplicationUiAction(
+    bundleId: '${arguments['bundleId'] ?? ''}',
+    appName: '${arguments['appName'] ?? ''}',
+    action: '${arguments['action'] ?? ''}',
+    identifier: '${arguments['identifier'] ?? ''}',
+    title: '${arguments['title'] ?? ''}',
+    role: '${arguments['role'] ?? ''}',
+    value: '${arguments['value'] ?? ''}',
+    key: '${arguments['key'] ?? ''}',
+    x: arguments['x'] is num ? (arguments['x'] as num).toDouble() : null,
+    y: arguments['y'] is num ? (arguments['y'] as num).toDouble() : null,
+  );
 
   Future<Map<String, Object?>> _inspectDeviceProcesses(
     Map<String, Object?> arguments,

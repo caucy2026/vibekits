@@ -164,6 +164,27 @@ open class MainActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, appInstallerChannelName)
             .setMethodCallHandler { call, result ->
+                if (call.method == "getStoreApplicationVersion") {
+                    val queriedPackage = call.argument<String>("packageName") ?: ""
+                    if (!Regex("^[A-Za-z0-9._-]+$").matches(queriedPackage)) {
+                        result.success(mapOf("installed" to null))
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val installed = packageManager.getPackageInfo(queriedPackage, 0)
+                        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            installed.longVersionCode
+                        } else {
+                            @Suppress("DEPRECATION") installed.versionCode.toLong()
+                        }
+                        result.success(mapOf("installed" to true, "versionCode" to code))
+                    } catch (_: PackageManager.NameNotFoundException) {
+                        result.success(mapOf("installed" to false))
+                    } catch (_: Exception) {
+                        result.success(mapOf("installed" to null))
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method != "openApkInstaller") {
                     result.notImplemented()
                     return@setMethodCallHandler

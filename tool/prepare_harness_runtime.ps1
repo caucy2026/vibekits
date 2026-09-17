@@ -1,7 +1,7 @@
 param(
   [string]$NodeDirectory = "C:\Program Files\nodejs",
   [string]$OutputDirectory = "native\harness\windows\runtime",
-  [string]$PackageVersion = "0.1.2-rc.1"
+  [string]$PackageVersion = "0.1.5-rc.2"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,9 +86,12 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-session-
 $builtInSkills = Join-Path $target 'builtin-skills'
 New-Item -ItemType Directory -Path $builtInSkills | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\vibekits-remote-simulator') -Destination $builtInSkills -Recurse
 
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
 if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }
+& (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\test_harness_bundled_skill.mjs') $target
+if ($LASTEXITCODE -ne 0) { throw 'Harness bundled remote simulator discovery failed' }
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\test_harness_session_rebind.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Harness cross-project session rebind test failed' }
 
@@ -157,7 +160,7 @@ Get-ChildItem -LiteralPath $profile -Force | Where-Object {
 @{
   version = "@deepseek-ai/dsh@$packageVersion"
   cli = $cliRelative
-  builtInSkills = @('kemi-s1-hardware-debug')
+  builtInSkills = @('kemi-s1-hardware-debug', 'vibekits-remote-simulator')
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $target 'harness-runtime.json') -Encoding utf8
 
 Write-Host "Prepared Harness runtime: $target"

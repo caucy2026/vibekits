@@ -125,6 +125,8 @@
 116. [dev.187 PAD 协同会话与 KEMI 商场发布验收](acceptance/V1_9_0_DEV187_PAD_REMOTE_SESSION_MARKET_RELEASE_2026-09-11.md)——进程级会话生命周期、PAD 75 到 Mac 命令反馈、Apple 公证、商场公网回读及 Windows 阻断门禁
 117. [dev.205 Windows/PAD 双控制端远程仿真验收](acceptance/V1_9_0_DEV205_DUAL_CONTROLLER_REMOTE_SIMULATION_2026-09-14.md)——Windows 58、PAD 63 仅凭统一 ID 连接、MCP/SSH/文件传输和双架构 Mac 候选证据
 118. [dev.209 远程故障取证与配对载体修复验收](acceptance/V1_9_0_DEV209_REMOTE_DIAGNOSTIC_CAPTURE_2026-09-14.md)——配对断线自动撤销、受管隧道不再误走桌面延时、一次性截图/下载、119 项共用回归和真实目标版本阻断证据
+119. [远程仿真失败复盘与唯一实验手册](67_REMOTE_SIMULATION_FAILURE_RETROSPECTIVE_AND_EXPERIMENT_PLAYBOOK.md)——dev.164～dev.216 的 20 类失败根因、对应修复、防回归规则和禁止死循环的唯一实验流程
+120. [dev.216 按需隧道触发修复验收](acceptance/V1_9_0_DEV216_REMOTE_SIMULATOR_DEMAND_TRIGGER_2026-09-16.md)——真实客户端请求触发、5 项回归及设备 5298938227 的 SSH/MCP 实机闭环
 
 ## 完成定义
 

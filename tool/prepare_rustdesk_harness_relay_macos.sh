@@ -31,6 +31,7 @@ for MARKER in \
   transport_connected \
   transport_connect_timeout \
   stdin_eof_v1 \
+  127.0.0.1:32148 \
   vibekits-harness-remote-assistance-access; do
   if ! strings "$SOURCE" | grep -F "$MARKER" >/dev/null; then
     echo "Harness relay is stale; missing marker: $MARKER" >&2

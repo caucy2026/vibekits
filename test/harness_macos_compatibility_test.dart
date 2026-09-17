@@ -106,6 +106,8 @@ void main() {
     expect(official, isNot(contains('Promise.withResolvers')));
     expect(official, isNot(contains('macos12RegExp')));
     expect(compatibility, contains('data-vibekits-macos12-polyfill'));
+    expect(compatibility, contains('typeof globalThis.Iterator'));
+    expect(compatibility, contains('LegacyIterator.prototype = iteratorPrototype'));
     expect(compatibility, contains('typeof Promise.withResolvers'));
     expect(compatibility, contains('const NativeRegExp = RegExp'));
     expect(compatibility, contains('function macos12RegExp'));

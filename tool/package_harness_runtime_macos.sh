@@ -28,6 +28,7 @@ for RELAY_MARKER in \
   transport_connected \
   transport_connect_timeout \
   stdin_eof_v1 \
+  127.0.0.1:32148 \
   vibekits-harness-remote-assistance-access; do
   if ! strings "$RELAY_SOURCE" | grep -F "$RELAY_MARKER" >/dev/null; then
     echo "Harness RustDesk transport is stale; missing marker: $RELAY_MARKER" >&2
@@ -69,6 +70,10 @@ if [ ! -f "$SOURCE/harness-runtime.json" ] || \
   [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-web-frontend/dist-macos12/index.html" ] || \
   [ ! -f "$SOURCE/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.macos12.js" ] || \
    [ ! -f "$SOURCE/builtin-skills/kemi-s1-hardware-debug/SKILL.md" ] || \
+   [ ! -f "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator/SKILL.md" ] || \
+   [ ! -f "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator/agents/openai.yaml" ] || \
+   [ ! -f "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator/references/tool-contract.md" ] || \
+   [ ! -f "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator/scripts/invoke.rb" ] || \
    [ ! -f "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" ]; then
   echo "Bundled macOS Harness runtime is missing or incomplete." >&2
   echo "Run tool/prepare_harness_runtime_macos.sh before Release packaging." >&2
@@ -90,6 +95,10 @@ fi
 rm -rf "$DESTINATION" "$LEGACY_DESTINATION"
 mkdir -p "$(dirname "$DESTINATION")"
 ditto "$SOURCE" "$DESTINATION"
+ditto \
+  "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator" \
+  "$DESTINATION/builtin-skills/vibekits-remote-simulator"
+"$DESTINATION/bin/node" "$PROJECT_ROOT/tool/test_harness_bundled_skill.mjs" "$DESTINATION"
 cp "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" "$DESTINATION/vibekits-session-rebind.mjs"
 chmod 755 "$DESTINATION/bin/node"
 codesign --force --options runtime --sign - \

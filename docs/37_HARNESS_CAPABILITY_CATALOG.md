@@ -7,8 +7,8 @@
 - 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：233。
-- Harness 当前可执行接口：207。
+- Harness 定义接口：235。
+- Harness 当前可执行接口：209。
 - 当前不可公开接口：26。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 81 |
+| 系统诊断 | 83 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,7 +108,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 81）
+## 系统诊断（定义 83）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -136,6 +136,8 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.device.ssh_identity` | `device__ssh_identity` | 读取被仿真机 SSH 身份 | 是 | 只读返回目标机 SSH 用户、固定端口和 Ed25519 主机指纹；控制端必须在登录前核对该指纹。 | `readOnly` | `{}` |
 | `vibekits.device.ssh_key_status` | `device__ssh_key_status` | 检查仿真设备 SSH 公钥 | 是 | 只读检查当前控制端设备专用公钥是否已在目标机授权，不返回任何私钥或其他密钥内容。 | `readOnly` | `peerId`* (string), `publicKey`* (string) |
 | `vibekits.device.ssh_revoke` | `device__ssh_revoke` | 撤销仿真设备 SSH 公钥 | 是 | 按控制端设备 ID 只移除 VibeKits 管理的 authorized_keys 条目，不改变用户自己的 SSH 密钥。 | `destructive` | `peerId`* (string) |
+| `vibekits.device.ui_action` | `device__ui_action` | 操作被仿真机应用控件 | 是 | 在已授权目标 macOS App 上按辅助功能控件标题、角色或标识执行点击、赋值或键盘输入；只有控件树无法表达目标时才允许使用目标窗口内坐标点击。 | `controlsDevice` | `bundleId` (string), `appName` (string), `action`* (string；枚举=activate/press/setValue/typeText/key/click), `identifier` (string), `title` (string), `role` (string), `value` (string), `key` (string), `x` (number), `y` (number) |
+| `vibekits.device.ui_inspect` | `device__ui_inspect` | 读取被仿真机应用控件 | 是 | 读取目标 macOS App 当前窗口的辅助功能控件树，用于按控件标题、角色或标识精确操作；首次使用会由 macOS 请求一次辅助功能授权，不启动远程桌面。 | `controlsDevice` | `bundleId` (string), `appName` (string), `promptPermission` (boolean), `maxDepth` (integer；最小=1；最大=12), `maxNodes` (integer；最小=1；最大=1000) |
 | `vibekits.device.update_apply` | `device__update_apply` | 应用 VibeKits 签名候选 | 是 | 严格验证包名、递增版本、Developer ID 团队与 Universal 架构后，保留回滚副本并后台替换、重启。 | `controlsDevice` | `token`* (string) |
 | `vibekits.device.update_begin` | `device__update_begin` | 准备接收 VibeKits 候选 | 是 | 生成五分钟有效、单次使用且绑定文件名/字节数/SHA-256 的上传令牌；只在仿真开关打开的回环端点可用。 | `writesData` | `fileName`* (string), `fileSize`* (integer；最小=1；最大=1610612736), `sha256`* (string) |
 | `vibekits.device.update_status` | `device__update_status` | 查看 VibeKits 候选状态 | 是 | 只读返回目标机当前是否正在接收、校验或应用签名候选。 | `readOnly` | `{}` |

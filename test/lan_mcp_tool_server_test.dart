@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
 import 'package:vibekits/features/dev_tools/domain/lan_mcp_tool_server.dart';
+import 'package:vibekits/features/dev_tools/domain/simulator_control_server.dart';
 
 void main() {
   test('LAN MCP exposes standard tool catalog and executes a tool', () async {
@@ -111,6 +112,67 @@ void main() {
 
     expect(invoked, isTrue);
     expect((response['result'] as Map)['isError'], isFalse);
+  });
+
+  test('独立 SSH 引导不进入 MCP 且拒绝伪造的当前 peer', () async {
+    var authorizations = 0;
+    var authorized = false;
+    final server = await SimulatorControlServer.start(
+      port: 0,
+      bindAddress: InternetAddress.loopbackIPv4,
+      authorizeCaller: (callerId) async => callerId == '8296293831',
+      loadIdentity: () async => <String, Object?>{
+        'enabled': true,
+        'platform': 'macos',
+        'username': 'target-user',
+        'hostKeyFingerprint': 'SHA256:target',
+        'remotePort': 22,
+      },
+      loadKeyStatus: ({required peerId, required publicKey}) async =>
+          <String, Object?>{'authorized': authorized},
+      authorizeKey: ({required peerId, required publicKey}) async {
+        authorizations++;
+        authorized = true;
+        return <String, Object?>{'authorized': true};
+      },
+    );
+    addTearDown(server.close);
+    final endpoint = Uri.parse(
+      'http://127.0.0.1:${server.port}${SimulatorControlServer.sshBootstrapPath}',
+    );
+
+    Future<(int, Map<String, Object?>)> bootstrap(String callerId) async {
+      final client = HttpClient();
+      try {
+        final request = await client.postUrl(endpoint);
+        request.headers.contentType = ContentType.json;
+        request.headers.set('x-vibekits-caller-id', callerId);
+        request.write(
+          jsonEncode(<String, Object?>{
+            'callerId': callerId,
+            'publicKey': 'ssh-ed25519 AAAATEST',
+          }),
+        );
+        final response = await request.close();
+        final body = await utf8.decoder.bind(response).join();
+        return (
+          response.statusCode,
+          Map<String, Object?>.from(jsonDecode(body) as Map),
+        );
+      } finally {
+        client.close(force: true);
+      }
+    }
+
+    final forged = await bootstrap('1111111111');
+    expect(forged.$1, HttpStatus.forbidden);
+    expect(authorizations, 0);
+
+    final accepted = await bootstrap('8296293831');
+    expect(accepted.$1, HttpStatus.ok);
+    expect(accepted.$2['ok'], isTrue);
+    expect(((accepted.$2['data'] as Map)['username']), 'target-user');
+    expect(authorizations, 1);
   });
 
   test('远程仿真开关授权一次后同一控制端安装卸载不再逐次批准', () async {

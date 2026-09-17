@@ -2,6 +2,8 @@ package com.vibekits.vibekits
 
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -13,6 +15,7 @@ import androidx.annotation.Keep
 import ffi.FFI
 import org.json.JSONObject
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * VibeKits-owned rendezvous/P2P/HBBR transport process.
@@ -34,8 +37,32 @@ class HarnessRelayService : Service() {
         super.onCreate()
         FFI.init(this)
         val configDir = File(filesDir, "harness-transport").apply { mkdirs() }
-        FFI.startHarnessServer(configDir.absolutePath)
+        FFI.startHarnessServer(configDir.absolutePath, isTrustedKemiPad())
         Log.i(TAG, "VibeKits embedded Harness transport started")
+    }
+
+    private fun isTrustedKemiPad(): Boolean {
+        if (!Build.MODEL.equals("huanglong", ignoreCase = true) ||
+            !Build.MANUFACTURER.equals("HL2.0", ignoreCase = true)
+        ) return false
+        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+        }
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures.orEmpty()
+        }
+        val trustedDigest = "c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8"
+        return signatures.any { signature ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(signature.toByteArray())
+                .joinToString("") { byte -> "%02x".format(byte) } == trustedDigest
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder = messenger.binder

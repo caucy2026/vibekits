@@ -38,7 +38,12 @@ void main() {
       final controller = HarnessSimulatorController(
         resolveHost: () async => host,
       );
-      addTearDown(controller.closeAll);
+      addTearDown(() async {
+        await controller.closeAll();
+        await RustDeskHarnessShareService.stopHost(
+          configuredExecutable: executable,
+        );
+      });
       final connected = await controller.connect(
         routingId,
         forceRelay: Platform.environment['VIBEKITS_REMOTE_FORCE_RELAY'] == '1',
@@ -95,10 +100,24 @@ void main() {
         await controller.call(
           routingId,
           'vibekits.device.processes',
-          const <String, Object?>{'query': 'KEMI', 'limit': 20},
+          <String, Object?>{'query': appName, 'limit': 20},
         ),
       );
       expect((processes['processes']! as List), isNotEmpty);
+
+      final logs = _toolData(
+        await controller.call(
+          routingId,
+          'vibekits.device.logs',
+          <String, Object?>{
+            'processName': appName,
+            'seconds': 120,
+            'maxLines': 100,
+          },
+        ),
+      );
+      expect(logs['source'], 'macOS Unified Log');
+      expect(logs['lines'], isA<List>());
 
       final screenshot = await controller.captureScreenshot(routingId);
       expect(screenshot['captured'], isTrue);
@@ -155,6 +174,7 @@ void main() {
       print(
         'HARNESS_REAL_APP_DEPLOY identity=$expectedIdentity '
         'version=${installed['version']} running=true '
+        'logs=${(logs['lines'] as List).length} '
         'screenshot=${screenshotFile.path} sha=${screenshot['sha256']} '
         'rollback=${installed['rollbackPath']} '
         'uninstallRestore=$verifyUninstallRestore',

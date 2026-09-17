@@ -90,7 +90,7 @@ void main() {
     await runtime.enable();
     expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
     expect(runtime.latest.routingId, _host.id);
-    expect(runtime.latest.endpoint, '127.0.0.1:32147');
+    expect(runtime.latest.endpoint, '127.0.0.1:32148');
     expect(runtime.latest.sshEndpoint, '192.168.3.10:22');
     expect(runtime.latest.sshUsername, 'newlink');
     expect(runtime.latest.message, contains('本机 ID'));
@@ -109,6 +109,8 @@ void main() {
 
   test('固定回环端点就绪后才开放原生仿真隧道', () async {
     final order = <String>[];
+    var controlClosed = false;
+    var mcpClosed = false;
     final runtime = HarnessSimulatorTargetRuntime(
       settings: HarnessSimulatorAccessSettings(
         read: (_) async => null,
@@ -120,7 +122,14 @@ void main() {
         order.add('endpoint-listening');
         return HarnessSimulatorEndpointLease(
           port: HarnessSimulatorTargetRuntime.remotePort,
-          close: () async {},
+          close: () async => controlClosed = true,
+        );
+      },
+      startMcpEndpoint: () async {
+        order.add('mcp-listening');
+        return HarnessSimulatorEndpointLease(
+          port: RustDeskHarnessShareService.simulatorRemotePort,
+          close: () async => mcpClosed = true,
         );
       },
       stopHost: () async {},
@@ -134,8 +143,14 @@ void main() {
 
     await runtime.enable();
 
-    expect(order, <String>['endpoint-listening', 'native-gate-open']);
+    expect(order, <String>[
+      'endpoint-listening',
+      'mcp-listening',
+      'native-gate-open',
+    ]);
     await runtime.disable();
+    expect(controlClosed, isTrue);
+    expect(mcpClosed, isTrue);
   });
 
   test('普通远程协助仍打开时关闭仿真机不会误停共享网络进程', () async {
@@ -164,7 +179,7 @@ void main() {
     expect(hostStopped, isFalse);
   });
 
-  test('只把固定 32147 端点的真实连接显示为仿真机已连接', () async {
+  test('只把固定 32148 控制端点的真实连接显示为仿真机已连接', () async {
     var connected = false;
     final runtime = HarnessSimulatorTargetRuntime(
       settings: HarnessSimulatorAccessSettings(
@@ -187,7 +202,7 @@ void main() {
                 peerName: 'Windows 58',
                 authorized: true,
                 disconnected: false,
-                portForward: '127.0.0.1:32147',
+                portForward: '127.0.0.1:32148',
               ),
             ]
           : const <RustDeskHarnessIncomingConnection>[],
@@ -325,5 +340,49 @@ void main() {
       File(_host.executable).absolute.path,
     );
     await runtime.disable();
+  });
+
+  test('升级后首次中继启动失败仍保留授权并自动重试恢复', () async {
+    final values = <String, String>{
+      'harness-simulator-v1-enabled': 'true',
+      'harness-simulator-v1-relay-fingerprint': 'sha256:current',
+      'harness-simulator-v1-relay-executable': File(_host.executable).absolute.path,
+    };
+    var inspections = 0;
+    final nativeGateValues = <bool>[];
+    final runtime = HarnessSimulatorTargetRuntime(
+      settings: HarnessSimulatorAccessSettings(
+        read: (key) async => values[key],
+        write: (key, value) async => values[key] = value,
+      ),
+      inspectHost: () async {
+        inspections++;
+        if (inspections == 1) throw StateError('旧中继尚未退出');
+        return _host;
+      },
+      startHost: () async => _host,
+      startEndpoint: () async => HarnessSimulatorEndpointLease(
+        port: HarnessSimulatorTargetRuntime.remotePort,
+        close: () async {},
+      ),
+      stopHost: () async {},
+      setNativeGate: (_, enabled) async => nativeGateValues.add(enabled),
+      relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
+      restoreRetryDelay: const Duration(milliseconds: 5),
+    );
+
+    await runtime.restore();
+    expect(runtime.latest.phase, HarnessSimulatorTargetPhase.error);
+    expect(values['harness-simulator-v1-enabled'], 'true');
+    expect(HarnessSimulatorAccessSettings.enabled, isTrue);
+
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    expect(inspections, greaterThanOrEqualTo(2));
+    expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
+    expect(nativeGateValues, contains(true));
+    await runtime.disable();
+    expect(values['harness-simulator-v1-enabled'], 'false');
   });
 }

@@ -5,6 +5,8 @@
 #include <tlhelp32.h>
 
 #include <cwctype>
+#include <cstdint>
+#include <cstring>
 #include <optional>
 #include <unordered_set>
 #include <variant>
@@ -138,6 +140,67 @@ std::optional<std::wstring> ResolveStoreExecutable(
     if (auto executable = ReadRegisteredStoreExecutable(
             location.root, location.view, package_name)) {
       return executable;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<int64_t> ReadStoreVersionCode(HKEY root, REGSAM view,
+                                            const std::wstring& package_name) {
+  HKEY key = nullptr;
+  const std::wstring key_path = L"Software\\KEMI\\AppMarket\\" + package_name;
+  if (::RegOpenKeyExW(root, key_path.c_str(), 0, KEY_QUERY_VALUE | view,
+                      &key) != ERROR_SUCCESS) return std::nullopt;
+  DWORD type = 0;
+  BYTE data[128] = {};
+  DWORD bytes = sizeof(data);
+  const LONG status = ::RegQueryValueExW(key, L"VersionCode", nullptr,
+                                          &type, data, &bytes);
+  ::RegCloseKey(key);
+  if (status != ERROR_SUCCESS) return std::nullopt;
+  int64_t value = 0;
+  if (type == REG_DWORD && bytes == sizeof(DWORD)) {
+    DWORD code = 0;
+    memcpy(&code, data, sizeof(code));
+    value = code;
+  } else if (type == REG_QWORD && bytes == sizeof(uint64_t)) {
+    uint64_t code = 0;
+    memcpy(&code, data, sizeof(code));
+    if (code > INT64_MAX) return std::nullopt;
+    value = static_cast<int64_t>(code);
+  } else if (type == REG_SZ && bytes >= sizeof(wchar_t) &&
+             bytes <= sizeof(data) && bytes % sizeof(wchar_t) == 0) {
+    const std::wstring text(reinterpret_cast<const wchar_t*>(data),
+                            bytes / sizeof(wchar_t));
+    try {
+      size_t parsed = 0;
+      value = std::stoll(text, &parsed, 10);
+      const size_t end = text.find(L'\0');
+      if (parsed != (end == std::wstring::npos ? text.size() : end))
+        return std::nullopt;
+    } catch (...) { return std::nullopt; }
+  }
+  return value > 0 ? std::optional<int64_t>(value) : std::nullopt;
+}
+
+std::optional<int64_t> ResolveStoreVersionCode(
+    const std::wstring& package_name, const std::wstring& executable) {
+  if (_wcsicmp(package_name.c_str(), kCurrentStorePackageName) == 0) {
+    if (auto current = CurrentExecutablePath(); current &&
+        _wcsicmp(current->c_str(), executable.c_str()) == 0) {
+      return FLUTTER_VERSION_BUILD > 0
+          ? std::optional<int64_t>(FLUTTER_VERSION_BUILD) : std::nullopt;
+    }
+  }
+  const struct { HKEY root; REGSAM view; } locations[] = {
+      {HKEY_CURRENT_USER, 0}, {HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY},
+      {HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY},
+  };
+  for (const auto& location : locations) {
+    if (auto registered = ReadRegisteredStoreExecutable(
+            location.root, location.view, package_name);
+        registered && _wcsicmp(registered->c_str(), executable.c_str()) == 0) {
+      return ReadStoreVersionCode(location.root, location.view, package_name);
     }
   }
   return std::nullopt;
@@ -362,7 +425,26 @@ bool FlutterWindow::OnCreate() {
         const auto executable =
             ResolveStoreExecutable(Utf16FromUtf8(*package_utf8));
         if (!executable) {
+          if (call.method_name() == "getStoreApplicationVersion") {
+            flutter::EncodableMap state;
+            state[flutter::EncodableValue("installed")] =
+                flutter::EncodableValue(false);
+            result->Success(flutter::EncodableValue(state));
+            return;
+          }
           result->Success(flutter::EncodableValue(false));
+          return;
+        }
+        if (call.method_name() == "getStoreApplicationVersion") {
+          flutter::EncodableMap state;
+          state[flutter::EncodableValue("installed")] =
+              flutter::EncodableValue(true);
+          if (auto code = ResolveStoreVersionCode(
+                  Utf16FromUtf8(*package_utf8), *executable)) {
+            state[flutter::EncodableValue("versionCode")] =
+                flutter::EncodableValue(*code);
+          }
+          result->Success(flutter::EncodableValue(state));
           return;
         }
         if (call.method_name() == "isStoreApplicationInstalled") {

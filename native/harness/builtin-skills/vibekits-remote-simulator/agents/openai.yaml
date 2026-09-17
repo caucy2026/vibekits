@@ -1,0 +1,6 @@
+interface:
+  display_name: "VibeKits 远程仿真"
+  short_description: "只凭设备 ID 静默连接并调试已授权设备"
+  default_prompt: "使用 $vibekits-remote-simulator：帮我调试远程设备 ID，静默连接并核验结果，完成后断开连接。"
+policy:
+  allow_implicit_invocation: true

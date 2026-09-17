@@ -41,29 +41,189 @@ abstract final class NativeAppDebugService {
         false;
   }
 
+  /// Returns the bounded accessibility tree for one exact running app.
+  /// The native implementation runs inside the signed VibeKits process so the
+  /// one-time macOS Accessibility grant belongs to VibeKits itself.
+  static Future<Map<String, Object?>> inspectApplicationUi({
+    String bundleId = '',
+    String appName = '',
+    bool promptPermission = false,
+    int maxDepth = 8,
+    int maxNodes = 400,
+  }) async {
+    _requireSoftwareManagementAuthorization();
+    if (!Platform.isMacOS) {
+      throw UnsupportedError('当前平台尚不支持应用控件树仿真');
+    }
+    final target = _validatedUiTarget(bundleId: bundleId, appName: appName);
+    final response = await _deviceDebugChannel
+        .invokeMapMethod<Object?, Object?>(
+          'inspectApplicationUI',
+          <String, Object?>{
+            ...target,
+            'promptPermission': promptPermission,
+            'maxDepth': maxDepth.clamp(1, 12),
+            'maxNodes': maxNodes.clamp(1, 1000),
+          },
+        );
+    return _nativeMap(response, '目标 Mac 控件树读取失败');
+  }
+
+  /// Performs one narrowly scoped UI operation on one exact running app.
+  /// Semantic selectors are required for press/setValue. Coordinate click is
+  /// retained only as a bounded last resort and must stay inside its window.
+  static Future<Map<String, Object?>> performApplicationUiAction({
+    String bundleId = '',
+    String appName = '',
+    required String action,
+    String identifier = '',
+    String title = '',
+    String role = '',
+    String value = '',
+    String key = '',
+    double? x,
+    double? y,
+  }) async {
+    _requireSoftwareManagementAuthorization();
+    if (!Platform.isMacOS) {
+      throw UnsupportedError('当前平台尚不支持应用控件操作');
+    }
+    final target = _validatedUiTarget(bundleId: bundleId, appName: appName);
+    final operation = action.trim();
+    const supported = <String>{
+      'activate',
+      'press',
+      'setValue',
+      'typeText',
+      'key',
+      'click',
+    };
+    if (!supported.contains(operation)) {
+      throw const FormatException('不支持的应用控件动作');
+    }
+    final safeIdentifier = _safeUiValue(identifier, maxLength: 256);
+    final safeTitle = _safeUiValue(title, maxLength: 256);
+    final safeRole = _safeUiValue(role, maxLength: 80);
+    final safeValue = _safeUiValue(value, maxLength: 4096, allowNewlines: true);
+    final safeKey = _safeUiValue(key, maxLength: 32).toLowerCase();
+    if ((operation == 'press' || operation == 'setValue') &&
+        safeIdentifier.isEmpty &&
+        safeTitle.isEmpty &&
+        safeRole.isEmpty) {
+      throw const FormatException('控件操作必须提供 identifier、title 或 role');
+    }
+    if (operation == 'key' &&
+        !const <String>{
+          'enter',
+          'escape',
+          'tab',
+          'backspace',
+          'delete',
+          'up',
+          'down',
+          'left',
+          'right',
+        }.contains(safeKey)) {
+      throw const FormatException('不支持的按键');
+    }
+    if (operation == 'click' && (x == null || y == null)) {
+      throw const FormatException('坐标点击必须同时提供 x 和 y');
+    }
+    final response = await _deviceDebugChannel
+        .invokeMapMethod<Object?, Object?>(
+          'performApplicationUIAction',
+          <String, Object?>{
+            ...target,
+            'action': operation,
+            if (safeIdentifier.isNotEmpty) 'identifier': safeIdentifier,
+            if (safeTitle.isNotEmpty) 'title': safeTitle,
+            if (safeRole.isNotEmpty) 'role': safeRole,
+            if (operation == 'setValue' || operation == 'typeText')
+              'value': safeValue,
+            if (operation == 'key') 'key': safeKey,
+            'x': ?x,
+            'y': ?y,
+          },
+        );
+    return _nativeMap(response, '目标 Mac 控件操作失败');
+  }
+
+  static Map<String, Object?> _validatedUiTarget({
+    required String bundleId,
+    required String appName,
+  }) {
+    final safeBundleId = _safeUiValue(bundleId, maxLength: 256);
+    final safeAppName = _safeUiValue(appName, maxLength: 256);
+    if (safeBundleId.isEmpty && safeAppName.isEmpty) {
+      throw const FormatException('必须提供目标 App 的 bundleId 或 appName');
+    }
+    if (safeBundleId.isNotEmpty &&
+        !RegExp(r'^[A-Za-z0-9][A-Za-z0-9.-]+$').hasMatch(safeBundleId)) {
+      throw const FormatException('bundleId 格式无效');
+    }
+    return <String, Object?>{
+      if (safeBundleId.isNotEmpty) 'bundleId': safeBundleId,
+      if (safeAppName.isNotEmpty) 'appName': safeAppName,
+    };
+  }
+
+  static String _safeUiValue(
+    String value, {
+    required int maxLength,
+    bool allowNewlines = false,
+  }) {
+    final result = value.trim();
+    if (result.length > maxLength || result.contains('\u0000')) {
+      throw const FormatException('控件参数包含非法字符或过长');
+    }
+    if (!allowNewlines && result.contains(RegExp(r'[\r\n]'))) {
+      throw const FormatException('控件参数不能包含换行');
+    }
+    return result;
+  }
+
+  static Map<String, Object?> _nativeMap(
+    Map<Object?, Object?>? value,
+    String failure,
+  ) {
+    if (value == null) throw StateError(failure);
+    return Map<String, Object?>.from(value);
+  }
+
   static Future<Map<String, Object?>> captureScreenshot({
     NativeDebugProcessRunner? runner,
   }) async {
     _requireSoftwareManagementAuthorization();
     if (Platform.isMacOS) {
-      final response = await _deviceDebugChannel
-          .invokeMapMethod<Object?, Object?>('captureScreen');
-      if (response?['ok'] != true || response?['path'] is! String) {
-        throw StateError('目标 Mac 截图失败');
+      try {
+        final response = await _deviceDebugChannel
+            .invokeMapMethod<Object?, Object?>('captureScreen');
+        if (response?['ok'] != true || response?['path'] is! String) {
+          throw StateError('目标 Mac 截图失败');
+        }
+        final file = File('${response!['path']}');
+        if (!await file.exists()) throw StateError('目标 Mac 截图文件不存在');
+        final digest = (await sha256.bind(file.openRead()).first).toString();
+        return <String, Object?>{
+          'ok': true,
+          'platform': 'macos',
+          'path': file.path,
+          'width': response['width'],
+          'height': response['height'],
+          'bytes': await file.length(),
+          'sha256': digest,
+          'singleFrame': true,
+        };
+      } on MissingPluginException {
+        return _captureMacScreenshotWithCli(runner ?? Process.run);
+      } on Object catch (error) {
+        if (!error.toString().contains(
+          'Binding has not yet been initialized',
+        )) {
+          rethrow;
+        }
+        return _captureMacScreenshotWithCli(runner ?? Process.run);
       }
-      final file = File('${response!['path']}');
-      if (!await file.exists()) throw StateError('目标 Mac 截图文件不存在');
-      final digest = (await sha256.bind(file.openRead()).first).toString();
-      return <String, Object?>{
-        'ok': true,
-        'platform': 'macos',
-        'path': file.path,
-        'width': response['width'],
-        'height': response['height'],
-        'bytes': await file.length(),
-        'sha256': digest,
-        'singleFrame': true,
-      };
     }
     if (Platform.isWindows) {
       final directory = Directory(
@@ -75,14 +235,12 @@ abstract final class NativeAppDebugService {
           '${directory.path}${Platform.pathSeparator}'
           'screen-${DateTime.now().millisecondsSinceEpoch}.png';
       final script =
-          r'''Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size); $i.Save($args[0],[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $i.Dispose()''';
-      final result = await (runner ?? Process.run)('powershell.exe', <String>[
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script,
-        path,
-      ]).timeout(const Duration(seconds: 20));
+          '\$path=${_powerShellLiteral(path)}; '
+          r'''Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size); $i.Save($path,[System.Drawing.Imaging.ImageFormat]::Png); $g.Dispose(); $i.Dispose()''';
+      final result = await (runner ?? Process.run)(
+        'powershell.exe',
+        _windowsPowerShellArguments(script),
+      ).timeout(const Duration(seconds: 20));
       final file = File(path);
       if (result.exitCode != 0 || !await file.exists()) {
         throw StateError('目标 Windows 截图失败');
@@ -97,6 +255,38 @@ abstract final class NativeAppDebugService {
       };
     }
     throw UnsupportedError('当前平台不支持远程仿真截图');
+  }
+
+  static Future<Map<String, Object?>> _captureMacScreenshotWithCli(
+    NativeDebugProcessRunner run,
+  ) async {
+    final home = Platform.environment['HOME']?.trim() ?? '';
+    if (home.isEmpty) throw StateError('无法定位当前用户目录');
+    final directory = Directory(
+      '$home/Library/Application Support/Vibekits/simulator-screenshots',
+    );
+    await directory.create(recursive: true);
+    final file = File(
+      '${directory.path}/screen-${DateTime.now().microsecondsSinceEpoch}.png',
+    );
+    final result = await run('/usr/sbin/screencapture', <String>[
+      '-x',
+      '-t',
+      'png',
+      file.path,
+    ]).timeout(const Duration(seconds: 20));
+    if (result.exitCode != 0 || !await file.exists()) {
+      throw StateError('目标 Mac 后台截图失败：${result.stderr}');
+    }
+    return <String, Object?>{
+      'ok': true,
+      'platform': 'macos',
+      'path': file.path,
+      'bytes': await file.length(),
+      'sha256': (await sha256.bind(file.openRead()).first).toString(),
+      'singleFrame': true,
+      'captureBackend': 'screencapture',
+    };
   }
 
   static Future<Map<String, Object?>> listApplications({
@@ -139,7 +329,14 @@ abstract final class NativeAppDebugService {
       if (!await root.exists()) continue;
       await for (final entity in root.list(followLinks: false)) {
         if (entity is! Directory || !entity.path.endsWith('.app')) continue;
-        final identity = await _readMacBundleIdentity(entity.path, run);
+        Map<String, Object?> identity;
+        try {
+          identity = await _readMacBundleIdentity(entity.path, run);
+        } on Object {
+          // One damaged or partially installed bundle must not hide every
+          // healthy application or block an unrelated signed deployment.
+          continue;
+        }
         final searchable = '${identity['name']} ${identity['bundleId']}'
             .toLowerCase();
         if (needle.isNotEmpty && !searchable.contains(needle)) continue;
@@ -165,6 +362,7 @@ abstract final class NativeAppDebugService {
     required String expectedIdentity,
     NativeDebugProcessRunner? runner,
     Directory? stagingRoot,
+    Directory? destinationRoot,
   }) async {
     _requireSoftwareManagementAuthorization();
     final package = File(packagePath).absolute;
@@ -191,19 +389,20 @@ abstract final class NativeAppDebugService {
         checksum: actual,
         run: run,
         stagingRoot: stagingRoot,
+        destinationRoot: destinationRoot,
       );
     }
     if (Platform.isWindows) {
       if (!package.path.toLowerCase().endsWith('.msi')) {
         throw const FormatException('Windows 软件安装只接受已签名 MSI');
       }
-      final signature = await run('powershell.exe', <String>[
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        r'''$s=Get-AuthenticodeSignature -LiteralPath $args[0]; "$($s.Status)|$($s.SignerCertificate.Subject)"''',
-        package.path,
-      ]).timeout(const Duration(seconds: 20));
+      final signatureScript =
+          '\$path=${_powerShellLiteral(package.path)}; '
+          r'''$s=Get-AuthenticodeSignature -LiteralPath $path; "$($s.Status)|$($s.SignerCertificate.Subject)"''';
+      final signature = await run(
+        'powershell.exe',
+        _windowsPowerShellArguments(signatureScript),
+      ).timeout(const Duration(seconds: 20));
       final signatureText = '${signature.stdout}'.trim();
       if (signature.exitCode != 0 || !signatureText.startsWith('Valid|')) {
         throw StateError('Windows 安装包签名无效');
@@ -337,31 +536,34 @@ abstract final class NativeAppDebugService {
       };
     }
     if (Platform.isWindows) {
-      final result = await run('tasklist.exe', const <String>[
-        '/FO',
-        'CSV',
-        '/NH',
-      ]).timeout(const Duration(seconds: 8));
+      final processNeedle = needle.toLowerCase().endsWith('.exe')
+          ? needle.substring(0, needle.length - 4)
+          : needle;
+      final script =
+          '\$q=${_powerShellLiteral(processNeedle)}; \$m=$boundedLimit; '
+          r'''Get-Process -ErrorAction SilentlyContinue | Where-Object { [string]::IsNullOrEmpty($q) -or $_.ProcessName.IndexOf($q,[System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First $m ProcessName,Id,Path,CPU,WorkingSet64 | ConvertTo-Json -Compress''';
+      final result = await run(
+        'powershell.exe',
+        _windowsPowerShellArguments(script),
+      ).timeout(const Duration(seconds: 12));
       if (result.exitCode != 0) {
         throw StateError('进程读取失败：${result.stderr}');
       }
       final rows = <Map<String, Object?>>[];
-      final csv = RegExp(r'^"([^"]+)","(\d+)","([^"]*)","([^"]*)","([^"]*)"');
-      for (final line in '${result.stdout}'.split('\n')) {
-        final match = csv.firstMatch(line.trim());
-        if (match == null) continue;
-        final name = match.group(1)!;
-        if (needle.isNotEmpty &&
-            !name.toLowerCase().contains(needle.toLowerCase())) {
-          continue;
+      final output = '${result.stdout}'.trim();
+      if (output.isNotEmpty) {
+        final decoded = jsonDecode(output);
+        final values = decoded is List ? decoded : <Object?>[decoded];
+        for (final value in values.whereType<Map>()) {
+          final item = Map<String, Object?>.from(value);
+          rows.add(<String, Object?>{
+            'name': item['ProcessName'],
+            'pid': item['Id'],
+            'path': item['Path'],
+            'cpuSeconds': item['CPU'],
+            'workingSetBytes': item['WorkingSet64'],
+          });
         }
-        rows.add(<String, Object?>{
-          'name': name,
-          'pid': int.parse(match.group(2)!),
-          'session': match.group(3),
-          'memory': match.group(5),
-        });
-        if (rows.length >= boundedLimit) break;
       }
       return <String, Object?>{
         'platform': 'windows',
@@ -412,16 +614,12 @@ abstract final class NativeAppDebugService {
     }
     if (Platform.isWindows) {
       final script =
-          r'''$n=$args[0]; $s=[int]$args[1]; $m=[int]$args[2]; Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddSeconds(-$s)} -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -like "*$n*" -or $_.Message -like "*$n*" } | Select-Object -First $m TimeCreated,LevelDisplayName,ProviderName,Id,Message | ConvertTo-Json -Compress''';
-      final result = await run('powershell.exe', <String>[
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script,
-        name,
-        '$duration',
-        '$lineLimit',
-      ]).timeout(const Duration(seconds: 20));
+          '\$n=${_powerShellLiteral(name)}; \$s=$duration; \$m=$lineLimit; '
+          r'''$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='SilentlyContinue'; $events=@(Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddSeconds(-$s)} -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -like "*$n*" -or $_.Message -like "*$n*" } | Select-Object -First $m TimeCreated,LevelDisplayName,ProviderName,Id,Message); if($events.Count -eq 0){'[]'}else{$events | ConvertTo-Json -Compress}; exit 0''';
+      final result = await run(
+        'powershell.exe',
+        _windowsPowerShellArguments(script),
+      ).timeout(const Duration(seconds: 20));
       if (result.exitCode != 0) {
         throw StateError('日志读取失败：${result.stderr}');
       }
@@ -465,7 +663,13 @@ abstract final class NativeAppDebugService {
           'pid': process.pid,
         };
       }
-      result = await run('taskkill.exe', <String>['/IM', value, '/T']);
+      final processName = value.toLowerCase().endsWith('.exe')
+          ? value.substring(0, value.length - 4)
+          : value;
+      final script =
+          '\$name=${_powerShellLiteral(processName)}; '
+          r'''Get-Process -Name $name -ErrorAction Stop | Stop-Process -Force -ErrorAction Stop''';
+      result = await run('powershell.exe', _windowsPowerShellArguments(script));
     } else {
       throw UnsupportedError('当前平台不支持应用启停仿真');
     }
@@ -575,6 +779,7 @@ abstract final class NativeAppDebugService {
     required String checksum,
     required NativeDebugProcessRunner run,
     Directory? stagingRoot,
+    Directory? destinationRoot,
   }) async {
     final Directory root =
         stagingRoot ??
@@ -601,12 +806,21 @@ abstract final class NativeAppDebugService {
         )) {
       throw StateError('macOS 安装包包含不安全路径');
     }
-    final topLevelApps = entries
+    // Finder/ditto ZIPs include AppleDouble metadata under __MACOSX. It is
+    // not another application payload; keep rejecting every other extra root.
+    final payloadEntries = entries
+        .where(
+          (entry) => entry != '__MACOSX/' && !entry.startsWith('__MACOSX/'),
+        )
+        .toList(growable: false);
+    final topLevelApps = payloadEntries
         .map((entry) => entry.split('/').first)
         .where((entry) => entry.endsWith('.app'))
         .toSet();
     if (topLevelApps.length != 1 ||
-        entries.any((entry) => !entry.startsWith('${topLevelApps.single}/'))) {
+        payloadEntries.any(
+          (entry) => !entry.startsWith('${topLevelApps.single}/'),
+        )) {
       throw StateError('macOS 安装包必须只包含一个顶层 .app');
     }
     final extracted = await run('/usr/bin/ditto', <String>[
@@ -616,8 +830,11 @@ abstract final class NativeAppDebugService {
       extractRoot.path,
     ]);
     if (extracted.exitCode != 0) throw StateError('macOS 安装包解压失败');
-    final replacement = Directory('${extractRoot.path}/${topLevelApps.single}');
-    if (!await replacement.exists()) throw StateError('macOS 安装包缺少 App');
+    // `unzip -Z1` 会按本地字符集转写非 ASCII 条目名（中文被写成 '?'），而 ditto
+    // 还原的是归档里的原始 UTF-8 字节，两者对同一个 App 并不一致：拿列表名拼路径
+    // 必然找不到已解压目录，中文 App 因此被误判为“缺少 App”。以磁盘真实解压结果为准。
+    final replacement = await _resolveExtractedMacBundle(extractRoot);
+    final bundleName = replacement.path.split('/').last;
     final replacementIdentity = await _readMacBundleIdentity(
       replacement.path,
       run,
@@ -656,13 +873,15 @@ abstract final class NativeAppDebugService {
     final String home = Platform.environment['HOME'] ?? '';
     if (home.isEmpty) throw StateError('无法定位当前用户目录');
     final destination = existing.isEmpty
-        ? Directory('$home/Applications/${topLevelApps.single}')
+        ? Directory(
+            '${destinationRoot?.path ?? '$home/Applications'}/$bundleName',
+          )
         : Directory('${existing.single['path']}');
     await destination.parent.create(recursive: true);
     Directory? backup;
     if (await destination.exists()) {
       backup = Directory('${root.path}/$transaction-rollback.app');
-      await destination.rename(backup.path);
+      await _moveVerifiedMacBundle(destination, backup, run);
     }
     try {
       final copied = await run('/usr/bin/ditto', <String>[
@@ -684,7 +903,7 @@ abstract final class NativeAppDebugService {
         await destination.delete(recursive: true);
       }
       if (backup != null && await backup.exists()) {
-        await backup.rename(destination.path);
+        await _moveVerifiedMacBundle(backup, destination, run);
       }
       rethrow;
     }
@@ -701,15 +920,98 @@ abstract final class NativeAppDebugService {
     };
   }
 
+  /// 解析 ditto 真正解压出来的顶层 .app 目录。
+  ///
+  /// Info-ZIP（`unzip -Z1`）会按本地字符集转写非 ASCII 条目名，中文 App 名会被
+  /// 写成 '?'，而 ditto 还原的是归档里的原始 UTF-8 字节，两者对同一个 App 并不
+  /// 一致。因此列表名只用于结构校验，绝不能当作磁盘路径使用；这里只认实际解压
+  /// 结果，并继续要求顶层恰好存在一个 .app。
+  static Future<Directory> _resolveExtractedMacBundle(
+    Directory extractRoot,
+  ) async {
+    final bundles = <Directory>[];
+    await for (final entity in extractRoot.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      if (!entity.path.split('/').last.endsWith('.app')) continue;
+      bundles.add(entity);
+    }
+    if (bundles.length != 1) throw StateError('macOS 安装包缺少 App');
+    return bundles.single;
+  }
+
+  static Future<void> _moveVerifiedMacBundle(
+    Directory source,
+    Directory destination,
+    NativeDebugProcessRunner run,
+  ) async {
+    try {
+      await source.rename(destination.path);
+      return;
+    } on FileSystemException catch (error) {
+      if (error.osError?.errorCode != 18) rethrow;
+    }
+
+    final copied = await run('/usr/bin/ditto', <String>[
+      source.path,
+      destination.path,
+    ]);
+    if (copied.exitCode != 0) {
+      if (await destination.exists()) await destination.delete(recursive: true);
+      throw StateError('跨磁盘 App 备份失败');
+    }
+    final verified = await run('/usr/bin/codesign', <String>[
+      '--verify',
+      '--deep',
+      '--strict',
+      destination.path,
+    ]);
+    if (verified.exitCode != 0) {
+      await destination.delete(recursive: true);
+      throw StateError('跨磁盘 App 备份签名复验失败');
+    }
+    await source.delete(recursive: true);
+  }
+
   static Future<Map<String, Object?>> _readMacBundleIdentity(
     String bundlePath,
     NativeDebugProcessRunner run,
   ) async {
+    final plistPath = '$bundlePath/Contents/Info.plist';
+    final plist = await run('/usr/bin/plutil', <String>[
+      '-convert',
+      'json',
+      '-o',
+      '-',
+      plistPath,
+    ]);
+    if (plist.exitCode == 0) {
+      try {
+        final decoded = jsonDecode('${plist.stdout}');
+        if (decoded is Map) {
+          final values = Map<String, Object?>.from(decoded);
+          final bundleId = '${values['CFBundleIdentifier'] ?? ''}'.trim();
+          if (bundleId.isNotEmpty) {
+            final displayName = '${values['CFBundleDisplayName'] ?? ''}'.trim();
+            return <String, Object?>{
+              'bundleId': bundleId,
+              'name': displayName.isNotEmpty
+                  ? displayName
+                  : '${values['CFBundleName'] ?? ''}'.trim(),
+              'version': '${values['CFBundleShortVersionString'] ?? ''}'.trim(),
+              'build': '${values['CFBundleVersion'] ?? ''}'.trim(),
+            };
+          }
+        }
+      } on FormatException {
+        // Fall back to PlistBuddy for legacy or malformed command output.
+      }
+    }
+
     Future<String> read(String key) async {
       final result = await run('/usr/libexec/PlistBuddy', <String>[
         '-c',
         'Print :$key',
-        '$bundlePath/Contents/Info.plist',
+        plistPath,
       ]);
       return result.exitCode == 0 ? '${result.stdout}'.trim() : '';
     }
@@ -740,6 +1042,18 @@ abstract final class NativeAppDebugService {
     }
     return result;
   }
+
+  static String _powerShellLiteral(String value) =>
+      "'${value.replaceAll("'", "''")}'";
+
+  static List<String> _windowsPowerShellArguments(String script) => <String>[
+    '-NoProfile',
+    '-NonInteractive',
+    '-EncodedCommand',
+    base64Encode(<int>[
+      for (final unit in script.codeUnits) ...<int>[unit & 0xff, unit >> 8],
+    ]),
+  ];
 
   static String _bounded(String value) =>
       value.length <= 8192 ? value : value.substring(value.length - 8192);

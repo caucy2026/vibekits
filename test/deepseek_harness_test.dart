@@ -89,6 +89,23 @@ void main() {
       '${source.path}${Platform.pathSeparator}references'
       '${Platform.pathSeparator}s1-profile.md',
     ).writeAsString('115200 / 8-N-1');
+    final Directory simulatorSource = Directory(
+      '${fixture.path}${Platform.pathSeparator}vibekits-remote-simulator',
+    );
+    await simulatorSource.create(recursive: true);
+    await File(
+      '${simulatorSource.path}${Platform.pathSeparator}SKILL.md',
+    ).writeAsString(
+      '---\nname: vibekits-remote-simulator\n'
+      'description: Remote simulation by ID.\n---\n',
+    );
+    await Directory(
+      '${simulatorSource.path}${Platform.pathSeparator}references',
+    ).create();
+    await File(
+      '${simulatorSource.path}${Platform.pathSeparator}references'
+      '${Platform.pathSeparator}tool-contract.md',
+    ).writeAsString('vibekits.simulator.connect');
 
     final List<Directory> installed =
         await DeepSeekHarnessService.installBundledHarnessSkills(
@@ -96,7 +113,7 @@ void main() {
           agentHome: agentHome,
         );
 
-    expect(installed, hasLength(1));
+    expect(installed, hasLength(2));
     final Directory target = Directory(
       '${agentHome.path}${Platform.pathSeparator}skills'
       '${Platform.pathSeparator}kemi-s1-hardware-debug',
@@ -111,6 +128,55 @@ void main() {
         '${Platform.pathSeparator}s1-profile.md',
       ).readAsString(),
       '115200 / 8-N-1',
+    );
+    final Directory simulatorTarget = Directory(
+      '${agentHome.path}${Platform.pathSeparator}skills'
+      '${Platform.pathSeparator}vibekits-remote-simulator',
+    );
+    expect(
+      await File(
+        '${simulatorTarget.path}${Platform.pathSeparator}SKILL.md',
+      ).exists(),
+      isTrue,
+    );
+    expect(
+      await File(
+        '${simulatorTarget.path}${Platform.pathSeparator}references'
+        '${Platform.pathSeparator}tool-contract.md',
+      ).readAsString(),
+      'vibekits.simulator.connect',
+    );
+  });
+
+  test('远程仿真技能随包安装后可由空白 Harness 技能目录独立发现', () async {
+    final Directory bundled = Directory('native/harness/builtin-skills');
+    final Directory agentHome = await Directory.systemTemp.createTemp(
+      'vibekits_remote_skill_home_',
+    );
+    addTearDown(() async {
+      if (await agentHome.exists()) await agentHome.delete(recursive: true);
+    });
+
+    await DeepSeekHarnessService.installBundledHarnessSkills(
+      bundledSkillsDirectory: bundled,
+      agentHome: agentHome,
+    );
+
+    final Directory skill = Directory(
+      '${agentHome.path}${Platform.pathSeparator}skills'
+      '${Platform.pathSeparator}vibekits-remote-simulator',
+    );
+    final String instructions = await File(
+      '${skill.path}${Platform.pathSeparator}SKILL.md',
+    ).readAsString();
+    expect(instructions, contains('vibekits.simulator.connect'));
+    expect(instructions, contains('vibekits.simulator.disconnect'));
+    expect(
+      await File(
+        '${skill.path}${Platform.pathSeparator}references'
+        '${Platform.pathSeparator}tool-contract.md',
+      ).exists(),
+      isTrue,
     );
   });
 
@@ -199,7 +265,7 @@ void main() {
     web.validate();
     agent.validate();
     officialWeb.validate();
-    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.2-rc.1');
+    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.5-rc.2');
     expect(
       DeepSeekHarnessService.sharedAgentHomeDirectory(
         environment: <String, String>{
@@ -561,7 +627,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v22.19.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),
@@ -765,7 +831,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),
@@ -829,7 +895,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),
@@ -909,7 +975,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),
@@ -1038,7 +1104,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
             runAgent: (_) async => handles[launchedCount++],
@@ -1195,7 +1261,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v24.20.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),
@@ -1379,7 +1445,7 @@ void main() {
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
               nodeVersion: 'v22.19.0',
-              npxVersion: '@deepseek-ai/dsh@0.1.2-rc.1',
+              npxVersion: '@deepseek-ai/dsh@0.1.5-rc.2',
               message: 'Harness 已就绪',
             ),
           ),

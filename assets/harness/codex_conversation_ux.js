@@ -75,28 +75,27 @@
     style.id = styleId;
     style.textContent = `
       [data-conversation-scroll] {
+        --dsh-content-font-size: 14px;
+        --dsh-content-font-size-secondary: 13px;
         overscroll-behavior: contain;
         touch-action: pan-y;
       }
 
-      /* Match Codex's compact reading density without shrinking navigation. */
-      [data-conversation-scroll] .Sxvs8a_root,
-      [data-conversation-scroll] .gdEzaW_bubble {
-        font-size: 12px !important;
-        line-height: 18px !important;
+      /* Match the native text-field affordance over the whole editable area.
+         Buttons in the composer keep their own pointer cursor. */
+      [data-composer-card] [data-input-scroll],
+      [data-composer-card] [data-input-scroll] [contenteditable="true"] {
+        cursor: text !important;
       }
 
-      [data-conversation-scroll] .uV2eYG_card {
-        font-size: 14px !important;
-        line-height: 21px !important;
-      }
-
+      /* Keep the primary answer comfortably readable. Process details remain
+         secondary and folded by the official Harness disclosure widgets. */
       [data-conversation-scroll] [data-chat-flow] [data-chat-anchor-key],
       [data-conversation-scroll] [data-chat-flow] p,
       [data-conversation-scroll] [data-chat-flow] li,
       [data-conversation-scroll] [data-chat-flow] blockquote {
-        font-size: 12px !important;
-        line-height: 18px !important;
+        font-size: var(--dsh-content-font-size) !important;
+        line-height: 22px !important;
       }
 
       [data-conversation-scroll] [data-chat-flow] h1 {
@@ -114,22 +113,16 @@
         line-height: 20px !important;
       }
 
-      [data-conversation-scroll] .CY-8Ka_title,
-      [data-conversation-scroll] .CY-8Ka_summary,
-      [data-conversation-scroll] .pC0e7a_source,
-      [data-conversation-scroll] .pC0e7a_summary,
-      [data-conversation-scroll] ._Xvjua_summary,
-      [data-conversation-scroll] .gdEzaW_compactionTitle,
-      [data-conversation-scroll] .gdEzaW_compactionSummary,
-      [data-conversation-scroll] .gdEzaW_compactionBody {
-        font-size: 12px !important;
-        line-height: 18px !important;
+      [data-conversation-scroll] [data-chat-flow] summary,
+      [data-conversation-scroll] [data-chat-flow] details > div {
+        font-size: var(--dsh-content-font-size-secondary) !important;
+        line-height: 20px !important;
       }
 
-      [data-conversation-scroll] .Sxvs8a_root pre,
-      [data-conversation-scroll] .Sxvs8a_root code {
-        font-size: 12px !important;
-        line-height: 18px !important;
+      [data-conversation-scroll] [data-chat-flow] pre,
+      [data-conversation-scroll] [data-chat-flow] code {
+        font-size: 12.5px !important;
+        line-height: 19px !important;
       }
 
       #vibekits-scroll-to-latest {

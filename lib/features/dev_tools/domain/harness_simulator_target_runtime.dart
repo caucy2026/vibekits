@@ -7,6 +7,7 @@ import 'harness_remote_access_settings.dart';
 import 'harness_simulator_access_settings.dart';
 import 'harness_system_ssh_service.dart';
 import 'lan_mcp_tool_server.dart';
+import 'simulator_control_server.dart';
 import 'rustdesk_harness_share_service.dart';
 
 enum HarnessSimulatorTargetPhase { disabled, starting, ready, connected, error }
@@ -64,20 +65,19 @@ typedef HarnessSimulatorSshInspector =
 typedef HarnessSimulatorSshSetter =
     Future<HarnessSystemSshSnapshot> Function(bool enabled);
 typedef HarnessSimulatorSshKeyRevoker = Future<void> Function();
-typedef HarnessSimulatorPeerAuthorizationChecker =
-    Future<bool> Function(String peerId);
 
 /// Owns the explicit "use this device as a simulator" authorization gate.
 ///
-/// The MCP endpoint is loopback-only. A caller reaches it through the existing
-/// VibeKits RustDesk ID and managed P2P/HBBR port-forward carrier, never by
-/// exposing an SSH or HTTP listener to the LAN.
+/// The independent simulator control endpoint is loopback-only. A caller
+/// reaches it through the built-in P2P/HBBR byte-forward carrier, never by
+/// opening remote-desktop UI or exposing SSH/HTTP directly to the network.
 final class HarnessSimulatorTargetRuntime {
   HarnessSimulatorTargetRuntime({
     HarnessSimulatorAccessSettings? settings,
     HarnessSimulatorHostInspector? inspectHost,
     HarnessSimulatorHostStarter? startHost,
     HarnessSimulatorEndpointStarter? startEndpoint,
+    HarnessSimulatorEndpointStarter? startMcpEndpoint,
     HarnessSimulatorHostStopper? stopHost,
     HarnessSimulatorNativeGateSetter? setNativeGate,
     HarnessSimulatorConnectionLister? listConnections,
@@ -85,9 +85,9 @@ final class HarnessSimulatorTargetRuntime {
     HarnessSimulatorSshInspector? inspectSsh,
     HarnessSimulatorSshSetter? setSsh,
     HarnessSimulatorSshKeyRevoker? revokeSshKeys,
-    HarnessSimulatorPeerAuthorizationChecker? isPeerAuthorized,
     Duration connectionPollInterval = const Duration(seconds: 1),
     Duration hostRestartTimeout = const Duration(seconds: 5),
+    Duration restoreRetryDelay = const Duration(seconds: 5),
   }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
        _inspectHost =
            inspectHost ?? (() => RustDeskHarnessShareService.inspect()),
@@ -95,6 +95,7 @@ final class HarnessSimulatorTargetRuntime {
            startHost ??
            (() => RustDeskHarnessShareService.ensureHostAvailable()),
        _startEndpoint = startEndpoint,
+       _startMcpEndpoint = startMcpEndpoint,
        _stopHost = stopHost ?? RustDeskHarnessShareService.stopHost,
        _setNativeGate =
            setNativeGate ??
@@ -115,14 +116,11 @@ final class HarnessSimulatorTargetRuntime {
            (() async {
              await HarnessSystemSshService.revokeAllManagedPublicKeys();
            }),
-       _isPeerAuthorized =
-           isPeerAuthorized ??
-           ((String peerId) =>
-               HarnessSystemSshService.hasAuthorizedPeer(peerId: peerId)),
        _connectionPollInterval = connectionPollInterval,
-       _hostRestartTimeout = hostRestartTimeout;
+       _hostRestartTimeout = hostRestartTimeout,
+       _restoreRetryDelay = restoreRetryDelay;
 
-  static const int remotePort = 32147;
+  static const int remotePort = SimulatorControlServer.portNumber;
   static final HarnessSimulatorTargetRuntime shared =
       HarnessSimulatorTargetRuntime();
 
@@ -130,6 +128,7 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorHostInspector _inspectHost;
   final HarnessSimulatorHostStarter _startHost;
   final HarnessSimulatorEndpointStarter? _startEndpoint;
+  final HarnessSimulatorEndpointStarter? _startMcpEndpoint;
   final HarnessSimulatorHostStopper _stopHost;
   final HarnessSimulatorNativeGateSetter _setNativeGate;
   final HarnessSimulatorConnectionLister _listConnections;
@@ -137,14 +136,17 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorSshInspector _inspectSsh;
   final HarnessSimulatorSshSetter _setSsh;
   final HarnessSimulatorSshKeyRevoker _revokeSshKeys;
-  final HarnessSimulatorPeerAuthorizationChecker _isPeerAuthorized;
   final Duration _connectionPollInterval;
   final Duration _hostRestartTimeout;
+  final Duration _restoreRetryDelay;
   final StreamController<HarnessSimulatorTargetSnapshot> _changes =
       StreamController<HarnessSimulatorTargetSnapshot>.broadcast();
 
   HarnessSimulatorEndpointLease? _endpoint;
+  HarnessSimulatorEndpointLease? _mcpEndpoint;
   Timer? _connectionPoller;
+  Timer? _restoreRetry;
+  int _restoreRetryCount = 0;
   String _hostExecutable = '';
   bool _pollingConnections = false;
   int _generation = 0;
@@ -161,14 +163,24 @@ final class HarnessSimulatorTargetRuntime {
   static Future<HarnessSimulatorEndpointLease> _startDefaultEndpoint(
     SimulatorCallerAuthorizer authorizeSimulatorCaller,
   ) async {
-    final server = await LanMcpToolServer.start(
+    final server = await SimulatorControlServer.start(
       bindAddress: InternetAddress.loopbackIPv4,
       port: remotePort,
+      authorizeCaller: authorizeSimulatorCaller,
+    );
+    return HarnessSimulatorEndpointLease(
+      port: server.port,
+      close: server.close,
+    );
+  }
+
+  static Future<HarnessSimulatorEndpointLease> _startDefaultMcpEndpoint(
+    SimulatorCallerAuthorizer authorizeSimulatorCaller,
+  ) async {
+    final server = await LanMcpToolServer.start(
+      bindAddress: InternetAddress.loopbackIPv4,
+      port: RustDeskHarnessShareService.simulatorRemotePort,
       allowSimulatorUpdateUpload: true,
-      // Enabling the simulator switch is the target owner's durable grant.
-      // The fixed loopback endpoint is reachable only through the isolated
-      // VibeKits carrier, so the same controller ID must not prompt again for
-      // every install, uninstall or managed SSH operation.
       trustSimulatorCallerAfterEnable: true,
       authorizeSimulatorCaller: authorizeSimulatorCaller,
     );
@@ -186,10 +198,34 @@ final class HarnessSimulatorTargetRuntime {
   Future<void> restore() async {
     if (!await _settings.loadEnabled()) return;
     await _enable(persist: false, reconcileRelayVersion: true);
+    if (!_latest.ready && HarnessSimulatorAccessSettings.enabled) {
+      _scheduleRestoreRetry();
+    }
   }
 
-  Future<void> enable({bool persist = true}) =>
-      _enable(persist: persist, reconcileRelayVersion: false);
+  Future<void> enable({bool persist = true}) async {
+    await _enable(persist: persist, reconcileRelayVersion: false);
+    if (!_latest.ready && HarnessSimulatorAccessSettings.enabled) {
+      _scheduleRestoreRetry();
+    }
+  }
+
+  void _scheduleRestoreRetry() {
+    if (_restoreRetry != null) return;
+    final int multiplier = 1 << _restoreRetryCount.clamp(0, 4);
+    _restoreRetryCount++;
+    final Duration delay = _restoreRetryDelay * multiplier;
+    _restoreRetry = Timer(delay, () {
+      _restoreRetry = null;
+      unawaited(restore());
+    });
+  }
+
+  void _clearRestoreRetry() {
+    _restoreRetry?.cancel();
+    _restoreRetry = null;
+    _restoreRetryCount = 0;
+  }
 
   Future<void> _enable({
     required bool persist,
@@ -207,7 +243,11 @@ final class HarnessSimulatorTargetRuntime {
     RustDeskHostInfo? host;
     HarnessSystemSshSnapshot? ssh;
     try {
-      if (persist) await _settings.saveEnabled(true);
+      if (persist) {
+        await _settings.saveEnabled(true);
+      } else {
+        HarnessSimulatorAccessSettings.setEnabled(true);
+      }
       host = await _inspectHost();
       if (!host.available) throw StateError(host.message);
       final relayExecutable = File(host.executable).absolute.path;
@@ -246,11 +286,25 @@ final class HarnessSimulatorTargetRuntime {
               (callerId) =>
                   _isActiveSimulatorCaller(host!.executable, callerId),
             );
+      final customMcpEndpoint = _startMcpEndpoint;
+      // A custom control endpoint is treated as a complete test double unless
+      // the test explicitly supplies the MCP endpoint as well. Production
+      // always starts both fixed loopback endpoints before opening the gate.
+      final mcpEndpoint = customMcpEndpoint != null
+          ? await customMcpEndpoint()
+          : customEndpoint == null
+          ? await _startDefaultMcpEndpoint(
+              (callerId) =>
+                  _isActiveSimulatorCaller(host!.executable, callerId),
+            )
+          : null;
       if (generation != _generation) {
         await endpoint.close();
+        await mcpEndpoint?.close();
         return;
       }
       _endpoint = endpoint;
+      _mcpEndpoint = mcpEndpoint;
       // Do not advertise the native RustDesk tunnel gate until the fixed
       // loopback endpoint is actually listening. Otherwise a controller that
       // connects during startup receives an immediate connection refusal even
@@ -268,12 +322,16 @@ final class HarnessSimulatorTargetRuntime {
           message: '仿真机可连接 · 告知对方本机 ID 即可调试',
         ),
       );
+      _clearRestoreRetry();
       _startConnectionPolling(generation, host.executable);
     } on Object catch (error) {
       _stopConnectionPolling();
       final endpoint = _endpoint;
       _endpoint = null;
+      final mcpEndpoint = _mcpEndpoint;
+      _mcpEndpoint = null;
       await endpoint?.close();
+      await mcpEndpoint?.close();
       if (_sshChangedByRuntime) {
         try {
           await _setSsh(false);
@@ -290,7 +348,8 @@ final class HarnessSimulatorTargetRuntime {
           // and resets to closed if the carrier exits.
         }
       }
-      await _settings.saveEnabled(false);
+      // A transient relay/SSH/startup failure must not revoke the user's
+      // persistent simulator consent. Keep the native gate closed and retry.
       _publish(
         HarnessSimulatorTargetSnapshot(
           phase: HarnessSimulatorTargetPhase.error,
@@ -304,13 +363,21 @@ final class HarnessSimulatorTargetRuntime {
 
   Future<void> disable({bool persist = true}) async {
     if (_changing) return;
+    _clearRestoreRetry();
     _changing = true;
     ++_generation;
     try {
-      if (persist) await _settings.saveEnabled(false);
+      if (persist) {
+        await _settings.saveEnabled(false);
+      } else {
+        HarnessSimulatorAccessSettings.setEnabled(false);
+      }
       final endpoint = _endpoint;
       _endpoint = null;
+      final mcpEndpoint = _mcpEndpoint;
+      _mcpEndpoint = null;
       await endpoint?.close();
+      await mcpEndpoint?.close();
       _stopConnectionPolling();
       await _revokeSshKeys();
       final host = await _inspectHost();
@@ -405,10 +472,13 @@ final class HarnessSimulatorTargetRuntime {
           connection.authorized &&
           !connection.disconnected &&
           (connection.portForward == '127.0.0.1:$remotePort' ||
-              connection.portForward == 'localhost:$remotePort'),
+              connection.portForward == 'localhost:$remotePort' ||
+              connection.portForward ==
+                  '127.0.0.1:${RustDeskHarnessShareService.simulatorRemotePort}' ||
+              connection.portForward ==
+                  'localhost:${RustDeskHarnessShareService.simulatorRemotePort}'),
     );
-    if (active) return true;
-    return _isPeerAuthorized(callerId);
+    return active;
   }
 
   Future<void> _pollConnections(int generation) async {
@@ -428,6 +498,10 @@ final class HarnessSimulatorTargetRuntime {
             !connection.disconnected &&
             (connection.portForward == '127.0.0.1:$remotePort' ||
                 connection.portForward == 'localhost:$remotePort' ||
+                connection.portForward ==
+                    '127.0.0.1:${RustDeskHarnessShareService.simulatorRemotePort}' ||
+                connection.portForward ==
+                    'localhost:${RustDeskHarnessShareService.simulatorRemotePort}' ||
                 connection.portForward == '127.0.0.1:22' ||
                 connection.portForward == 'localhost:22'),
       );

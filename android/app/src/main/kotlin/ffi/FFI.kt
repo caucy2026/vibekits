@@ -9,7 +9,7 @@ object FFI {
     }
 
     external fun init(context: Context)
-    external fun startHarnessServer(appDir: String)
+    external fun startHarnessServer(appDir: String, trustedKemiPad: Boolean)
     external fun harnessStatus(): String
     external fun harnessConnections(): String
     external fun harnessAuthorize(connectionId: Int): Boolean

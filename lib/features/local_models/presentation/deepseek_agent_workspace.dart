@@ -37,6 +37,7 @@ import 'mcp_reputation_badge.dart';
 import '../../dev_tools/domain/platform_credential_store.dart';
 import '../../dev_tools/domain/rustdesk_harness_link_status.dart';
 import '../../dev_tools/presentation/harness_remote_read_only_panel.dart';
+import '../../dev_tools/presentation/remote_simulation_activity_dialog.dart';
 
 typedef AgentDirectoryPicker = Future<String?> Function();
 typedef AgentCredentialReader = Future<String?> Function(String key);
@@ -2494,9 +2495,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 final routingId = '${first['routingId'] ?? ''}'.trim();
                 return KeyedSubtree(
                   key: const Key('agent-controller-simulator-status'),
-                  child: _remoteStatusChip(
-                    Colors.green,
-                    routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
+                  child: RemoteSimulationStatusChip(
+                    color: Colors.green,
+                    label: routingId.isEmpty ? '远程仿真中' : '远程仿真中 · $routingId',
                   ),
                 );
               },
@@ -2522,7 +2523,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                   ),
                   HarnessSimulatorTargetPhase.error => (Colors.red, '远程仿真异常'),
                 };
-                return _remoteStatusChip(status.$1, status.$2);
+                return RemoteSimulationStatusChip(
+                  semanticKey: const Key('agent-target-simulator-status'),
+                  color: status.$1,
+                  label: status.$2,
+                );
               },
             ),
             StreamBuilder<RustDeskHarnessLinkSnapshot>(

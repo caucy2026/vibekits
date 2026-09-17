@@ -27,7 +27,12 @@ void main() {
         resolveHost: () async => host,
         enableSshBootstrap: false,
       );
-      addTearDown(controller.closeAll);
+      addTearDown(() async {
+        await controller.closeAll();
+        await RustDeskHarnessShareService.stopHost(
+          configuredExecutable: executable,
+        );
+      });
 
       final Map<String, Object?> connected = await controller.connect(
         routingId,
@@ -55,5 +60,6 @@ void main() {
       );
     },
     skip: enabled ? false : 'set VIBEKITS_REAL_REMOTE_SIMULATOR=1',
+    timeout: const Timeout(Duration(minutes: 2)),
   );
 }

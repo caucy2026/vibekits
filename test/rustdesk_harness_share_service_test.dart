@@ -480,6 +480,59 @@ void main() {
     expect(host.id, '1554650784');
   });
 
+  test('不可调用的旧单实例会被精确停止并由当前包内载体接管', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_takeover_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    var launches = 0;
+    var stopped = false;
+
+    final host = await RustDeskHarnessShareService.ensureHostAvailable(
+      configuredExecutable: executable.path,
+      timeout: const Duration(milliseconds: 1),
+      runner: (_, arguments) async {
+        if (arguments.single == '--vibekits-harness-get-id') {
+          return ProcessResult(1, 0, '1554650784\n', '');
+        }
+        if (arguments.single == '--vibekits-harness-stop') {
+          stopped = true;
+          return ProcessResult(
+            1,
+            0,
+            '{"ok":true,"state":"stopped","connections":[]}',
+            '',
+          );
+        }
+        expect(arguments, const <String>['--vibekits-harness-status']);
+        return ProcessResult(
+          1,
+          0,
+          stopped && launches >= 2
+              ? '{"routingId":"1554650784","callable":true,'
+                    '"rendezvousOnline":true,'
+                    '"registrationKeyConfirmed":true,"state":"registered"}'
+              : '{"routingId":"1554650784","callable":false,'
+                    '"rendezvousOnline":false,'
+                    '"registrationKeyConfirmed":false,"state":"offline"}',
+          '',
+        );
+      },
+      launcher: (_, arguments) async {
+        expect(arguments, const <String>['--vibekits-harness-service']);
+        launches += 1;
+      },
+    );
+
+    expect(stopped, isTrue);
+    expect(launches, 2);
+    expect(host.callable, isTrue);
+  });
+
   test('Harness 隧道使用独立数字 ID 和固定回环目标', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_harness_tunnel_',
@@ -540,6 +593,36 @@ void main() {
     expect(lease.closed, isTrue);
     expect(process.terminated, isTrue);
     expect(await lease.exitCode, 0);
+  });
+
+  test('远程仿真控制面固定使用 32148 且不占用 MCP 32147', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_simulator_control_tunnel_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    final process = _FakeManagedProcess();
+    final lease = await RustDeskHarnessShareService.openSimulatorControlTunnel(
+      executable.path,
+      routingId: '1554650784',
+      localPort: 43218,
+      launcher: (_, arguments) async {
+        expect(arguments, const <String>[
+          '--vibekits-harness-tunnel',
+          '1554650784',
+          '43218',
+          '127.0.0.1',
+          '32148',
+        ]);
+        expect(RustDeskHarnessShareService.simulatorRemotePort, 32147);
+        return process;
+      },
+    );
+    expect(lease.remotePort, 32148);
+    await lease.close();
   });
 
   test('受管 Harness 隧道在正常终止超时后必须强制回收', () async {

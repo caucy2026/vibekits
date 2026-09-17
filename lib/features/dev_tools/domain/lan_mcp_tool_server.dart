@@ -3,9 +3,9 @@ import 'dart:io';
 
 import 'harness_tool_bridge.dart';
 import 'lmcp_inbound_call_hub.dart';
+import 'remote_simulation_activity.dart';
+import 'simulator_control_server.dart';
 import 'simulator_update_service.dart';
-
-typedef SimulatorCallerAuthorizer = Future<bool> Function(String callerId);
 
 /// MCP JSON-RPC endpoint exposed only while the user enables LAN MCP.
 ///
@@ -154,6 +154,14 @@ class LanMcpToolServer {
           final HarnessToolDefinition? definition = _bridge.executableCatalog
               .where((tool) => tool.id == name)
               .firstOrNull;
+          final String callerId =
+              request.headers.value('x-vibekits-caller-id') ?? '';
+          final activity = RemoteSimulationActivityHub.instance.begin(
+            direction: RemoteSimulationActivityDirection.incoming,
+            peerId: callerId,
+            action: definition?.name ?? name,
+            arguments: arguments,
+          );
           final bool requiresTargetApproval =
               definition != null && _requiresTargetApproval(name);
           final bool rememberedSimulatorAuthorization = requiresTargetApproval
@@ -169,8 +177,7 @@ class LanMcpToolServer {
             approvalCall = LmcpInboundCallHub.instance.begin(
               traceId: traceId,
               callerAppId: 'VibeKits 远程仿真',
-              callerInstanceId:
-                  request.headers.value('x-vibekits-caller-id') ?? '',
+              callerInstanceId: callerId,
               callerAddress: remoteAddress,
               toolId: name,
               toolName: definition.name,
@@ -184,6 +191,7 @@ class LanMcpToolServer {
             );
             if (!allowed) {
               approvalCall.fail('目标机未批准操作');
+              activity.fail('目标机未批准操作');
               final denied = const HarnessToolCallResult.cancelled();
               await _rpcResult(request.response, id, <String, Object?>{
                 'content': <Map<String, Object?>>[
@@ -209,11 +217,14 @@ class LanMcpToolServer {
             );
             if (result.ok) {
               approvalCall?.succeed();
+              activity.succeed('远程操作已完成');
             } else {
               approvalCall?.fail(result.error);
+              activity.fail(result.error ?? '远程操作失败');
             }
           } on Object catch (error) {
             approvalCall?.fail('$error');
+            activity.fail(error);
             rethrow;
           }
           final Map<String, Object?> structured = result.toJson();

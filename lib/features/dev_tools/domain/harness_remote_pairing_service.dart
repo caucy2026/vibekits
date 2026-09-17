@@ -133,6 +133,7 @@ final class HarnessRemotePairingHost {
     socket.setOption(SocketOption.tcpNoDelay, true);
     unawaited(() async {
       var peerClosed = false;
+      var failureStage = 'FRAME';
       void withdrawClosedSocket() {
         peerClosed = true;
         String? nonce;
@@ -159,14 +160,18 @@ final class HarnessRemotePairingHost {
             onPeerClosed: withdrawClosedSocket,
           ),
         );
+        failureStage = 'ENVELOPE';
         if (decoded is! Map<String, dynamic> ||
             decoded['kind'] != 'pair-request' ||
             decoded['version'] != 1 ||
             _pending.length >= 8) {
           throw const FormatException('Invalid Harness pairing request');
         }
+        failureStage = 'REQUEST';
         final request = HarnessRemotePairingRequest.fromJson(decoded);
-        if (!request.verifiesPassword(await _passwordReader())) {
+        failureStage = 'PASSWORD';
+        final password = await _passwordReader();
+        if (!request.verifiesPassword(password)) {
           await _reply(socket, const {
             'kind': 'pair-rejected',
             'version': 1,
@@ -174,10 +179,12 @@ final class HarnessRemotePairingHost {
           });
           return;
         }
+        failureStage = 'INTEGRITY';
         if (decoded['certificateSha256'] != request.certificateSha256 ||
             _pending.containsKey(request.nonce)) {
           throw const FormatException('Harness pairing request was modified');
         }
+        failureStage = 'PENDING';
         if (peerClosed) throw StateError('PAIRING_CHANNEL_CLOSED');
         late final Timer timer;
         timer = Timer(const Duration(minutes: 2), () {
@@ -204,10 +211,10 @@ final class HarnessRemotePairingHost {
           error: error,
           stackTrace: stackTrace,
         );
-        await _reply(socket, const {
+        await _reply(socket, {
           'kind': 'pair-rejected',
           'version': 1,
-          'code': 'PAIRING_BAD_REQUEST',
+          'code': 'PAIRING_BAD_REQUEST_$failureStage',
         });
       }
     }());

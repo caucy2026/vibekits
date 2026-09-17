@@ -23,6 +23,7 @@ class _AppCenterTabState extends State<AppCenterTab> {
   String? _error;
   bool _loading = true;
   int _requestSerial = 0;
+  Map<String, AppCenterLocalVersion> _versions = <String, AppCenterLocalVersion>{};
 
   @override
   void initState() {
@@ -49,7 +50,13 @@ class _AppCenterTabState extends State<AppCenterTab> {
         keyword: _search.text,
       );
       if (!mounted || serial != _requestSerial) return;
-      setState(() => _catalog = catalog);
+      setState(() {
+        _catalog = catalog;
+        _versions = <String, AppCenterLocalVersion>{};
+      });
+      for (final AppCenterItem item in catalog.apps) {
+        unawaited(_loadVersion(item, serial));
+      }
     } on Object catch (error) {
       if (!mounted || serial != _requestSerial) return;
       setState(() => _error = '$error');
@@ -58,6 +65,12 @@ class _AppCenterTabState extends State<AppCenterTab> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<void> _loadVersion(AppCenterItem item, int serial) async {
+    final AppCenterLocalVersion version = await _service.localVersion(item);
+    if (!mounted || serial != _requestSerial) return;
+    setState(() => _versions[item.packageName] = version);
   }
 
   @override
@@ -206,6 +219,10 @@ class _AppCenterTabState extends State<AppCenterTab> {
               itemCount: apps.length,
               itemBuilder: (_, index) => _AppCard(
                 item: apps[index],
+                status: _versions[apps[index].packageName] == null
+                    ? AppCenterUpdateStatus.checking
+                    : _service.updateStatus(
+                        apps[index], _versions[apps[index].packageName]!),
                 onTap: () => _showDetails(apps[index]),
               ),
             );
@@ -231,9 +248,10 @@ class _AppCenterTabState extends State<AppCenterTab> {
 }
 
 class _AppCard extends StatelessWidget {
-  const _AppCard({required this.item, required this.onTap});
+  const _AppCard({required this.item, required this.status, required this.onTap});
 
   final AppCenterItem item;
+  final AppCenterUpdateStatus status;
   final VoidCallback onTap;
 
   @override
@@ -273,6 +291,16 @@ class _AppCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (status == AppCenterUpdateStatus.update ||
+                status == AppCenterUpdateStatus.current ||
+                status == AppCenterUpdateStatus.unknown) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(switch (status) {
+                AppCenterUpdateStatus.update => '有更新',
+                AppCenterUpdateStatus.current => '已是最新版',
+                _ => '版本待确认',
+              }, style: Theme.of(context).textTheme.labelSmall),
+            ],
             const SizedBox(height: 14),
             Expanded(
               child: Text(
@@ -347,6 +375,8 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   bool _checkingInstalled = false;
   bool _installed = false;
   bool _opening = false;
+  AppCenterLocalVersion _localVersion = const AppCenterLocalVersion.unknown();
+  bool _checkingVersion = true;
 
   @override
   void initState() {
@@ -355,6 +385,19 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
       _checkingInstalled = true;
       unawaited(_refreshInstalledState());
     }
+    unawaited(_refreshVersion());
+  }
+
+  Future<void> _refreshVersion() async {
+    setState(() => _checkingVersion = true);
+    final AppCenterLocalVersion version = await widget.service.localVersion(
+      widget.item,
+    );
+    if (!mounted) return;
+    setState(() {
+      _localVersion = version;
+      _checkingVersion = false;
+    });
   }
 
   Future<void> _refreshInstalledState() async {
@@ -384,6 +427,10 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   }
 
   Future<void> _install() async {
+    if (_checkingVersion ||
+        !widget.service.canDownload(widget.item, _localVersion)) {
+      return;
+    }
     setState(() {
       _progress = 0;
       _message = '正在下载并验证安装包…';
@@ -409,8 +456,11 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
   @override
   Widget build(BuildContext context) {
     final AppCenterItem item = widget.item;
-    final bool isCurrentVersion = widget.service.isCurrentVersion(item);
-    final bool canDownload = widget.service.canDownload(item);
+    final AppCenterUpdateStatus status = _checkingVersion
+        ? AppCenterUpdateStatus.checking
+        : widget.service.updateStatus(item, _localVersion);
+    final bool canDownload =
+        !_checkingVersion && widget.service.canDownload(item, _localVersion);
     return AlertDialog(
       key: const Key('app-center-details'),
       title: Row(
@@ -433,7 +483,9 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 runSpacing: 6,
                 children: <Widget>[
                   Chip(label: Text(item.category)),
-                  Chip(label: Text('版本 ${item.versionName}')),
+                  Chip(
+                    label: Text('版本 ${item.versionName} (${item.versionCode})'),
+                  ),
                   Chip(label: Text('评分 ${item.rating.toStringAsFixed(1)}')),
                 ],
               ),
@@ -458,9 +510,29 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 const SizedBox(height: 12),
                 const Text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'),
               ],
-              if (isCurrentVersion) ...<Widget>[
+              if (status == AppCenterUpdateStatus.current ||
+                  status == AppCenterUpdateStatus.downgrade) ...<Widget>[
                 const SizedBox(height: 12),
-                const Text('当前已是最新版本，无需重复下载。'),
+                Text(
+                  status == AppCenterUpdateStatus.current
+                      ? '当前已是最新版本，无需重复下载。'
+                      : '本机版本高于市场版本，已禁止降级。',
+                ),
+              ],
+              if (status == AppCenterUpdateStatus.unknown ||
+                  status == AppCenterUpdateStatus.checking) ...<Widget>[
+                const SizedBox(height: 12),
+                Text(
+                  status == AppCenterUpdateStatus.checking
+                      ? '正在读取本机安装版本…'
+                      : '无法确认本机安装版本，已暂停下载。',
+                ),
+                if (status == AppCenterUpdateStatus.unknown) ...<Widget>[
+                  TextButton(
+                    onPressed: _refreshVersion,
+                    child: const Text('重试版本检测'),
+                  ),
+                ],
               ],
               if (_progress != null) ...<Widget>[
                 const SizedBox(height: 16),
@@ -501,11 +573,18 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
           key: const Key('app-center-install'),
           onPressed: canDownload && _progress == null ? _install : null,
           icon: Icon(
-            isCurrentVersion
+            status == AppCenterUpdateStatus.current
                 ? Icons.check_circle_outline
                 : Icons.download_rounded,
           ),
-          label: Text(isCurrentVersion ? '已是最新版' : '下载并安装'),
+          label: Text(switch (status) {
+            AppCenterUpdateStatus.current => '已是最新版',
+            AppCenterUpdateStatus.downgrade => '不可降级',
+            AppCenterUpdateStatus.checking => '检测中',
+            AppCenterUpdateStatus.unknown => '版本未知',
+            AppCenterUpdateStatus.update => '下载更新',
+            AppCenterUpdateStatus.install => '下载并安装',
+          }),
         ),
       ],
     );

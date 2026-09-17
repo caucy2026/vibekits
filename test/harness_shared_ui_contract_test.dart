@@ -56,6 +56,8 @@ void main() {
     expect(fallback, contains("'远程状态'"));
     expect(official, contains("'远程仿真中'"));
     expect(fallback, contains("'远程仿真中'"));
+    expect(official, contains('RemoteSimulationStatusChip('));
+    expect(fallback, contains('RemoteSimulationStatusChip('));
     expect(
       official,
       contains('if (!simulator.enabled) return const SizedBox.shrink();'),

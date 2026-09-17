@@ -101,6 +101,9 @@ void main() {
 
     expect(item.packageName, 'com.caucy.vibekits');
     expect(item.androidPackageName, 'com.vibekits.vibekits');
+    expect(item.androidInstallPackageName, 'com.vibekits.vibekits');
+    final AppCenterItem legacy = AppCenterItem.fromJson(_itemJson(os: 'android'));
+    expect(legacy.androidInstallPackageName, 'com.vibekits.vibekits');
   });
 
   test('Android 兼容市场的 all 与 PAD2 平台标识', () {
@@ -125,10 +128,24 @@ void main() {
     expect(windows.supportsPlatform('android'), isFalse);
   });
 
-  test('Android 当前包使用真实 applicationId 并禁止重复下载', () {
+  test('平台字段冲突的商品不展示也不能下载', () {
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'macos'),
+      'platforms': <String>['windows'],
+    });
+    final AppCenterService service = AppCenterService(platformOverride: 'macos');
+    addTearDown(service.dispose);
+    expect(item.supportsPlatform('macos'), isFalse);
+    expect(service.canDownload(item, const AppCenterLocalVersion.uninstalled()), isFalse);
+  });
+
+  test('Android 当前包使用真实 applicationId 并禁止重复下载', () async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'android',
-      currentVersionCode: 2169,
+      versionLookup: (packageName) async {
+        expect(packageName, 'com.vibekits.vibekits');
+        return const AppCenterLocalVersion.installed(2169);
+      },
     );
     addTearDown(service.dispose);
     final AppCenterItem current = AppCenterItem.fromJson(<String, Object?>{
@@ -137,8 +154,9 @@ void main() {
       'version_code': 2169,
     });
 
-    expect(service.isCurrentVersion(current), isTrue);
-    expect(service.canDownload(current), isFalse);
+    final AppCenterLocalVersion local = await service.localVersion(current);
+    expect(service.updateStatus(current, local), AppCenterUpdateStatus.current);
+    expect(service.canDownload(current, local), isFalse);
   });
 
   test('服务端即使返回错误平台条目，客户端仍会按 platforms 二次过滤', () async {
@@ -169,7 +187,7 @@ void main() {
   testWidgets('应用中心显示平台、分类、应用详情和安全安装状态', (tester) async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
-      currentVersionCode: 1,
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
       installedLookup: (_) async => false,
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[
@@ -209,7 +227,7 @@ void main() {
     String? openedPackage;
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
-      currentVersionCode: 1,
+      versionLookup: (_) async => const AppCenterLocalVersion.installed(1),
       installedLookup: (String packageName) async =>
           packageName == 'com.caucy.vibekits',
       applicationOpener: (String packageName) async {
@@ -246,6 +264,7 @@ void main() {
     final AppCenterService windowsService = AppCenterService(
       platformOverride: 'windows',
       installedLookup: (_) async => false,
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[],
         apps: <AppCenterItem>[AppCenterItem.fromJson(_itemJson(os: 'windows'))],
@@ -272,6 +291,7 @@ void main() {
   testWidgets('Android 不显示桌面打开操作', (tester) async {
     final AppCenterService androidService = AppCenterService(
       platformOverride: 'android',
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[],
         apps: <AppCenterItem>[AppCenterItem.fromJson(_itemJson(os: 'android'))],
@@ -318,7 +338,7 @@ void main() {
     testWidgets('$os 当前版本显示最新版且下载按钮不可点击', (tester) async {
       final AppCenterService service = AppCenterService(
         platformOverride: os,
-        currentVersionCode: 2159,
+        versionLookup: (_) async => const AppCenterLocalVersion.installed(2159),
         installedLookup: (_) async => false,
         loader: ({category, keyword = ''}) async => AppCenterCatalog(
           categories: const <AppCenterCategory>[],
@@ -343,7 +363,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('当前已是最新版本，无需重复下载。'), findsOneWidget);
-      expect(find.text('已是最新版'), findsOneWidget);
+      expect(find.text('已是最新版'), findsWidgets);
       expect(
         tester
             .widget<FilledButton>(find.byKey(const Key('app-center-install')))
@@ -356,7 +376,7 @@ void main() {
   test('服务层拒绝重复下载当前版本', () async {
     final AppCenterService service = AppCenterService(
       platformOverride: 'macos',
-      currentVersionCode: 2159,
+      versionLookup: (_) async => const AppCenterLocalVersion.installed(2159),
     );
     addTearDown(service.dispose);
     final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
@@ -368,6 +388,88 @@ void main() {
       service.downloadAndOpen(item),
       throwsA(isA<StateError>()),
     );
+  });
+
+  test('其他已安装应用逐包比较版本，同版和降级在下载前被阻止', () async {
+    final List<String> queried = <String>[];
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+      versionLookup: (packageName) async {
+        queried.add(packageName);
+        return const AppCenterLocalVersion.installed(300);
+      },
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem same = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'macos'),
+      'package_name': 'com.kemi.other',
+      'version_code': 300,
+    });
+    final AppCenterItem older = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'macos'),
+      'package_name': 'com.kemi.other',
+      'version_code': 299,
+    });
+    final AppCenterItem newer = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'macos'),
+      'package_name': 'com.kemi.other',
+      'version_code': 301,
+    });
+    expect(service.updateStatus(same, await service.localVersion(same)), AppCenterUpdateStatus.current);
+    expect(service.updateStatus(older, await service.localVersion(older)), AppCenterUpdateStatus.downgrade);
+    expect(service.canDownload(newer, await service.localVersion(newer)), isTrue);
+    await expectLater(service.downloadAndOpen(same), throwsA(isA<StateError>()));
+    await expectLater(service.downloadAndOpen(older), throwsA(isA<StateError>()));
+    expect(queried, everyElement('com.kemi.other'));
+  });
+
+  test('无法读取版本、已安装但码未知和云端码缺失均禁止下载', () async {
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'windows'),
+      'package_name': 'com.kemi.other',
+    });
+    for (final AppCenterLocalVersion local in <AppCenterLocalVersion>[
+      const AppCenterLocalVersion.unknown(),
+      const AppCenterLocalVersion.installed(null),
+      const AppCenterLocalVersion.installed(0),
+    ]) {
+      final AppCenterService service = AppCenterService(
+        platformOverride: 'windows', versionLookup: (_) async => local,
+      );
+      expect(service.canDownload(item, await service.localVersion(item)), isFalse);
+      await expectLater(service.downloadAndOpen(item), throwsA(isA<StateError>()));
+      service.dispose();
+    }
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'windows',
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem missing = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'windows'), 'version_code': 0,
+    });
+    expect(service.canDownload(missing, await service.localVersion(missing)), isFalse);
+  });
+
+  testWidgets('其他应用同版时详情按钮禁用并显示最新版', (tester) async {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+      installedLookup: (_) async => true,
+      versionLookup: (_) async => const AppCenterLocalVersion.installed(2153),
+      loader: ({category, keyword = ''}) async => AppCenterCatalog(
+        categories: const <AppCenterCategory>[],
+        apps: <AppCenterItem>[AppCenterItem.fromJson(<String, Object?>{
+          ..._itemJson(os: 'macos'), 'package_name': 'com.kemi.other',
+        })], total: 1,
+      ),
+    );
+    addTearDown(service.dispose);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AppCenterTab(service: service))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('app-center-item-53')));
+    await tester.pumpAndSettle();
+    expect(find.text('已是最新版'), findsWidgets);
+    expect(tester.widget<FilledButton>(find.byKey(const Key('app-center-install'))).onPressed, isNull);
   });
 }
 

@@ -214,6 +214,7 @@ final class RustDeskHarnessTunnelLease {
 /// separately installed RustDesk/KEMI app or plugin is a runtime dependency.
 abstract final class RustDeskHarnessShareService {
   static const int simulatorRemotePort = 32147;
+  static const int simulatorControlRemotePort = 32148;
   static const int simulatorSshRemotePort = 22;
   static const MethodChannel _androidRelay = MethodChannel(
     'vibekits/harness-relay',
@@ -437,8 +438,37 @@ abstract final class RustDeskHarnessShareService {
       );
       if (host.callable) return host;
     } while (DateTime.now().isBefore(deadline));
+
+    // A detached service from an older App can still own the isolated IPC
+    // namespace while reporting offline. Launching another single-instance
+    // helper then has no effect. Stop only that VibeKits-owned service through
+    // its scoped control command and relaunch the current package's helper.
+    final stopped = await _runControlCommand(
+      host.executable,
+      const <String>['--vibekits-harness-stop'],
+      timeout: const Duration(seconds: 5),
+      runner: runner,
+    );
+    final stopPayload = _decodeControl(stopped);
+    if (stopPayload['ok'] != true) {
+      throw TimeoutException(
+        'HARNESS_RELAY_NOT_CALLABLE: ${host.state}; '
+        'takeover=${stopPayload['code'] ?? 'failed'}',
+        timeout,
+      );
+    }
+    await launchHost(host.executable, launcher: launcher);
+    final takeoverDeadline = DateTime.now().add(timeout);
+    do {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      host = await inspect(
+        configuredExecutable: configuredExecutable,
+        runner: runner,
+      );
+      if (host.callable) return host;
+    } while (DateTime.now().isBefore(takeoverDeadline));
     throw TimeoutException(
-      'HARNESS_RELAY_NOT_CALLABLE: ${host.state}',
+      'HARNESS_RELAY_NOT_CALLABLE_AFTER_TAKEOVER: ${host.state}',
       timeout,
     );
   }
@@ -823,6 +853,21 @@ abstract final class RustDeskHarnessShareService {
     routingId: routingId,
     localPort: localPort,
     remotePort: simulatorRemotePort,
+    forceRelay: forceRelay,
+    launcher: launcher,
+  );
+
+  static Future<RustDeskHarnessTunnelLease> openSimulatorControlTunnel(
+    String executable, {
+    required String routingId,
+    required int localPort,
+    bool forceRelay = false,
+    RustDeskManagedProcessLauncher? launcher,
+  }) => openTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    remotePort: simulatorControlRemotePort,
     forceRelay: forceRelay,
     launcher: launcher,
   );

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_simulator_target_runtime.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_simulator_access_settings.dart';
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
 void main() {
@@ -15,12 +16,20 @@ void main() {
           Platform.environment['VIBEKITS_HARNESS_RELAY_EXECUTABLE'] ?? '';
       final String stopFile =
           Platform.environment['VIBEKITS_REAL_TARGET_STOP_FILE'] ?? '';
+      final bool volatileAuthorization =
+          Platform.environment['VIBEKITS_REAL_SIMULATOR_VOLATILE_AUTH'] == '1';
       expect(File(executable).existsSync(), isTrue);
       expect(stopFile, isNotEmpty);
       await File(stopFile).delete().catchError((_) => File(stopFile));
 
       final HarnessSimulatorTargetRuntime runtime =
           HarnessSimulatorTargetRuntime(
+            settings: volatileAuthorization
+                ? HarnessSimulatorAccessSettings(
+                    read: (_) async => null,
+                    write: (_, _) async {},
+                  )
+                : null,
             inspectHost: () => RustDeskHarnessShareService.inspect(
               configuredExecutable: executable,
             ),
@@ -35,7 +44,10 @@ void main() {
         await RustDeskHarnessShareService.stopHost(
           configuredExecutable: executable,
         );
-        await runtime.enable(persist: false);
+        // Real deployment gates must exercise the product's explicit,
+        // one-time persistent authorization. Sensitive app-management calls
+        // intentionally reject process-local or implicit enablement.
+        await runtime.enable(persist: !volatileAuthorization);
         expect(runtime.latest.ready, isTrue, reason: runtime.latest.message);
         expect(runtime.latest.routingId, isNotEmpty);
         expect(runtime.latest.sshEndpoint, isNotEmpty);
@@ -54,7 +66,7 @@ void main() {
         expect(File(stopFile).existsSync(), isTrue);
         expect(await File(stopFile).readAsString(), contains('PASS'));
       } finally {
-        await runtime.disable(persist: false);
+        await runtime.disable(persist: !volatileAuthorization);
         await File(stopFile).delete().catchError((_) => File(stopFile));
       }
     },

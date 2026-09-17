@@ -8,13 +8,35 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../app/app_update_service.dart';
-import '../../../app/app_version.dart';
 
 typedef AppCenterCatalogLoader =
     Future<AppCenterCatalog> Function({String? category, String keyword});
 typedef AppCenterEnvelopeLoader = Future<Object?> Function(Uri uri);
 typedef AppCenterInstalledLookup = Future<bool> Function(String packageName);
+typedef AppCenterVersionLookup =
+    Future<AppCenterLocalVersion> Function(String packageName);
 typedef AppCenterApplicationOpener = Future<bool> Function(String packageName);
+
+@immutable
+class AppCenterLocalVersion {
+  const AppCenterLocalVersion.uninstalled()
+    : installed = false,
+      versionCode = null;
+  const AppCenterLocalVersion.installed(this.versionCode) : installed = true;
+  const AppCenterLocalVersion.unknown() : installed = null, versionCode = null;
+
+  final bool? installed;
+  final int? versionCode;
+}
+
+enum AppCenterUpdateStatus {
+  checking,
+  install,
+  update,
+  current,
+  downgrade,
+  unknown,
+}
 
 @immutable
 class AppCenterCategory {
@@ -81,6 +103,11 @@ class AppCenterItem {
 
   /// Android 原生 applicationId。`packageName` 是跨平台商品标识，二者不能混用。
   final String androidPackageName;
+  String get androidInstallPackageName => androidPackageName.isNotEmpty
+      ? androidPackageName
+      : packageName == AppUpdateService.packageName
+          ? 'com.vibekits.vibekits'
+          : packageName;
   final String versionName;
   final int versionCode;
   final String category;
@@ -97,7 +124,7 @@ class AppCenterItem {
 
   bool supportsPlatform(String platform) {
     final String normalized = platform.trim().toLowerCase();
-    if (osType.isNotEmpty) return osType == normalized;
+    if (osType.isNotEmpty && osType != normalized) return false;
     final Set<String> compatible = switch (normalized) {
       // The KEMI Android storefront currently returns PAD packages as `pad2`
       // even when the request is scoped with `os=android`. `all` is the
@@ -107,7 +134,8 @@ class AppCenterItem {
       'windows' => const <String>{'windows', 'all'},
       _ => <String>{normalized},
     };
-    return platforms.any(compatible.contains);
+    if (platforms.isNotEmpty && !platforms.any(compatible.contains)) return false;
+    return osType == normalized || platforms.any(compatible.contains);
   }
 
   bool get hasVerifiedInstaller {
@@ -149,19 +177,16 @@ class AppCenterService {
     AppCenterCatalogLoader? loader,
     AppCenterEnvelopeLoader? envelopeLoader,
     AppCenterInstalledLookup? installedLookup,
+    AppCenterVersionLookup? versionLookup,
     AppCenterApplicationOpener? applicationOpener,
-    String? currentPackageName,
-    int currentVersionCode = AppVersion.build,
   }) : _client = client ?? HttpClient(),
        _apiRoot = apiRoot,
        _platformOverride = platformOverride,
        _loader = loader,
        _envelopeLoader = envelopeLoader,
        _installedLookup = installedLookup,
-       _applicationOpener = applicationOpener,
-       _currentPackageName =
-           currentPackageName ?? _defaultCurrentPackageName(platformOverride),
-       _currentVersionCode = currentVersionCode;
+       _versionLookup = versionLookup,
+       _applicationOpener = applicationOpener;
 
   static const String _defaultApiRoot = 'https://kemi.newlinksz.com/kd-api';
   static const MethodChannel _desktopHostChannel = MethodChannel(
@@ -177,31 +202,76 @@ class AppCenterService {
   final AppCenterCatalogLoader? _loader;
   final AppCenterEnvelopeLoader? _envelopeLoader;
   final AppCenterInstalledLookup? _installedLookup;
+  final AppCenterVersionLookup? _versionLookup;
   final AppCenterApplicationOpener? _applicationOpener;
-  final String _currentPackageName;
-  final int _currentVersionCode;
 
-  static String _defaultCurrentPackageName(String? platformOverride) {
-    final String? platform =
-        platformOverride ??
-        (Platform.isAndroid
-            ? 'android'
-            : Platform.isMacOS
-            ? 'macos'
-            : Platform.isWindows
-            ? 'windows'
-            : null);
-    return platform == 'android'
-        ? 'com.vibekits.vibekits'
-        : AppUpdateService.packageName;
+  Future<AppCenterLocalVersion> localVersion(AppCenterItem item) async {
+    final String? os = platformName;
+    if (os == null || !item.supportsPlatform(os)) {
+      return const AppCenterLocalVersion.unknown();
+    }
+    final String packageName = os == 'android'
+        ? item.androidInstallPackageName : item.packageName;
+    if (!_isSafePackageName(packageName)) {
+      return const AppCenterLocalVersion.unknown();
+    }
+    try {
+      if (_versionLookup != null) {
+        return await _versionLookup(packageName).timeout(_desktopHostTimeout);
+      }
+      final String channel = os == 'android'
+          ? 'vibekits/app-installer'
+          : 'org.rustdesk.rustdesk/host';
+      final Map<Object?, Object?>? value = await MethodChannel(channel)
+          .invokeMapMethod<Object?, Object?>(
+            'getStoreApplicationVersion',
+            <String, Object?>{'packageName': packageName},
+          )
+          .timeout(_desktopHostTimeout);
+      if (value == null || value['installed'] is! bool) {
+        return const AppCenterLocalVersion.unknown();
+      }
+      if (value['installed'] == false) {
+        return const AppCenterLocalVersion.uninstalled();
+      }
+      final Object? rawCode = value['versionCode'];
+      final int? code = rawCode is int ? rawCode : int.tryParse('$rawCode');
+      return AppCenterLocalVersion.installed(code);
+    } on Object {
+      return const AppCenterLocalVersion.unknown();
+    }
   }
 
-  bool isCurrentVersion(AppCenterItem item) =>
-      item.packageName == _currentPackageName &&
-      item.versionCode <= _currentVersionCode;
+  AppCenterUpdateStatus updateStatus(
+    AppCenterItem item,
+    AppCenterLocalVersion local,
+  ) {
+    if (item.versionCode <= 0 || local.installed == null) {
+      return AppCenterUpdateStatus.unknown;
+    }
+    if (local.installed == false) return AppCenterUpdateStatus.install;
+    final int? code = local.versionCode;
+    if (code == null || code <= 0) return AppCenterUpdateStatus.unknown;
+    if (item.versionCode > code) return AppCenterUpdateStatus.update;
+    return item.versionCode == code
+        ? AppCenterUpdateStatus.current
+        : AppCenterUpdateStatus.downgrade;
+  }
 
-  bool canDownload(AppCenterItem item) =>
-      item.hasVerifiedInstaller && !isCurrentVersion(item);
+  bool canDownload(AppCenterItem item, AppCenterLocalVersion local) {
+    final String? os = platformName;
+    if (os == null || !item.supportsPlatform(os) || !item.hasVerifiedInstaller) {
+      return false;
+    }
+    try {
+      _allowedExtension(Uri.parse(item.downloadUrl).path, os);
+    } on FormatException {
+      return false;
+    }
+    final AppCenterUpdateStatus status = updateStatus(item, local);
+    return status == AppCenterUpdateStatus.install ||
+        status == AppCenterUpdateStatus.update;
+  }
 
   bool get supportsOpeningInstalledApplications =>
       platformName == 'windows' || platformName == 'macos';
@@ -333,9 +403,8 @@ class AppCenterService {
     ValueChanged<double>? onProgress,
   }) async {
     final String? os = platformName;
-    if (isCurrentVersion(item)) {
-      throw StateError('当前已是最新版本');
-    }
+    final AppCenterLocalVersion local = await localVersion(item);
+    if (!canDownload(item, local)) throw StateError('本机版本未确认或市场版本未高于已安装版本');
     if (os == null ||
         !item.supportsPlatform(os) ||
         !item.hasVerifiedInstaller) {
@@ -451,7 +520,7 @@ class AppCenterService {
         'vibekits/app-installer',
       ).invokeMethod<void>('openApkInstaller', <String, Object?>{
         'path': path,
-        'packageName': item.androidPackageName,
+        'packageName': item.androidInstallPackageName,
         'versionCode': item.versionCode,
       });
     } else if (os == 'macos') {

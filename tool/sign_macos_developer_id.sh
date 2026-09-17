@@ -36,9 +36,9 @@ while IFS= read -r -d '' ITEM; do
       ;;
   esac
 done < <(find \
-  "$APP_BUNDLE/Contents/MacOS" \
-  "$APP_BUNDLE/Contents/Resources/tools" \
   "$APP_BUNDLE/Contents/Frameworks" \
+  "$APP_BUNDLE/Contents/Resources/tools" \
+  "$APP_BUNDLE/Contents/MacOS" \
   -type f \( -perm -111 -o -name '*.dylib' -o -name '*.node' \) -print0)
 
 while IFS= read -r -d '' FRAMEWORK; do

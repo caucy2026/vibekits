@@ -13,6 +13,22 @@ if (!process.argv[2] || !process.argv[3]) {
 const { transform } = await import(pathToFileURL(esbuildModule));
 
 const promiseWithResolversPolyfill = `<script data-vibekits-macos12-polyfill>
+// PDF preview evaluates Iterator.prototype during module startup. Safari 15
+// has iterator objects but no global Iterator constructor.
+if (typeof globalThis.Iterator !== "function") {
+  const iteratorPrototype = Object.getPrototypeOf(
+    Object.getPrototypeOf([][Symbol.iterator]())
+  );
+  function LegacyIterator() {
+    throw new TypeError("Iterator cannot be constructed directly");
+  }
+  LegacyIterator.prototype = iteratorPrototype;
+  Object.defineProperty(globalThis, "Iterator", {
+    configurable: true,
+    writable: true,
+    value: LegacyIterator
+  });
+}
 if (typeof Promise.withResolvers !== "function") {
   Object.defineProperty(Promise, "withResolvers", {
     configurable: true,

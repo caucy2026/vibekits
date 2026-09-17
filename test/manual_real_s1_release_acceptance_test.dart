@@ -227,8 +227,8 @@ void main() {
 
       final installedMetadataText = '${installedMetadata['stdout'] ?? ''}';
       final alreadyExact =
-          installedMetadataText.contains('versionName=1.9.0-dev.210') &&
-          installedMetadataText.contains('versionCode=2210');
+          installedMetadataText.contains('versionName=1.9.0-dev.211') &&
+          installedMetadataText.contains('versionCode=2211');
       if (!alreadyExact) {
         await invoke(
           VibekitsHarnessToolBridge.adbInstallApkId,
@@ -254,8 +254,8 @@ void main() {
           ],
         },
       );
-      expect('${version['stdout']}', contains('versionName=1.9.0-dev.210'));
-      expect('${version['stdout']}', contains('versionCode=2210'));
+      expect('${version['stdout']}', contains('versionName=1.9.0-dev.211'));
+      expect('${version['stdout']}', contains('versionCode=2211'));
 
       await invoke(VibekitsHarnessToolBridge.adbCommandId, <String, Object?>{
         'serial': target,

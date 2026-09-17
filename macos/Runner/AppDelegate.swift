@@ -1,4 +1,5 @@
 import Cocoa
+import ApplicationServices
 import FlutterMacOS
 import WebKit
 
@@ -70,16 +71,28 @@ class AppDelegate: FlutterAppDelegate {
           result(false)
           return
         }
-        guard let applicationURL = NSWorkspace.shared.urlForApplication(
-          withBundleIdentifier: packageName
-        ) else {
-          result(false)
-          return
-        }
+        let applicationURL = self.storeApplicationURL(packageName)
         switch call.method {
+        case "getStoreApplicationVersion":
+          guard let applicationURL else {
+            result(["installed": false])
+            return
+          }
+          guard let bundle = Bundle(url: applicationURL),
+                bundle.bundleIdentifier == packageName else {
+            result(["installed": true])
+            return
+          }
+          let rawCode = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+          let code = rawCode.flatMap { Int($0) }
+          result(["installed": true, "versionCode": (code ?? 0) > 0 ? code! : 0])
         case "isStoreApplicationInstalled":
-          result(true)
+          result(applicationURL != nil)
         case "openStoreApplication":
+          guard let applicationURL else {
+            result(false)
+            return
+          }
           let configuration = NSWorkspace.OpenConfiguration()
           configuration.activates = true
           NSWorkspace.shared.openApplication(
@@ -104,12 +117,361 @@ class AppDelegate: FlutterAppDelegate {
           result(CGRequestScreenCaptureAccess())
         case "captureScreen":
           self?.captureScreen(result: result)
+        case "inspectApplicationUI":
+          self?.inspectApplicationUI(call.arguments, result: result)
+        case "performApplicationUIAction":
+          self?.performApplicationUIAction(call.arguments, result: result)
         default:
           result(FlutterMethodNotImplemented)
         }
       }
     }
     installWebViewMouseRouting()
+  }
+
+  private func storeApplicationURL(_ packageName: String) -> URL? {
+    if let indexed = NSWorkspace.shared.urlForApplication(
+      withBundleIdentifier: packageName
+    ), Bundle(url: indexed)?.bundleIdentifier == packageName {
+      return indexed
+    }
+    let folders = [URL(fileURLWithPath: "/Applications", isDirectory: true),
+                   FileManager.default.homeDirectoryForCurrentUser
+                     .appendingPathComponent("Applications", isDirectory: true)]
+    for folder in folders {
+      guard let entries = try? FileManager.default.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+      ) else { continue }
+      for entry in entries where entry.pathExtension.lowercased() == "app" {
+        if Bundle(url: entry)?.bundleIdentifier == packageName {
+          return entry
+        }
+      }
+    }
+    return nil
+  }
+
+  private func accessibilityAuthorized(prompt: Bool) -> Bool {
+    let options = [
+      kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt
+    ] as CFDictionary
+    return AXIsProcessTrustedWithOptions(options)
+  }
+
+  private func targetApplication(
+    _ arguments: [String: Any]
+  ) throws -> NSRunningApplication {
+    let bundleId = (arguments["bundleId"] as? String ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let appName = (arguments["appName"] as? String ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let matches: [NSRunningApplication]
+    if !bundleId.isEmpty {
+      matches = NSRunningApplication.runningApplications(
+        withBundleIdentifier: bundleId
+      )
+    } else {
+      matches = NSWorkspace.shared.runningApplications.filter {
+        ($0.localizedName ?? "").caseInsensitiveCompare(appName) == .orderedSame
+      }
+    }
+    guard matches.count == 1, let app = matches.first else {
+      throw NSError(
+        domain: "VibeKitsDeviceUI",
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey:
+          matches.isEmpty ? "目标 App 未运行" : "目标 App 不唯一，请使用精确 Bundle ID"]
+      )
+    }
+    return app
+  }
+
+  private func axAttribute(
+    _ element: AXUIElement,
+    _ attribute: String
+  ) -> CFTypeRef? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+      element,
+      attribute as CFString,
+      &value
+    ) == .success else { return nil }
+    return value
+  }
+
+  private func axString(_ element: AXUIElement, _ attribute: String) -> String? {
+    guard let value = axAttribute(element, attribute) else { return nil }
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber { return number.stringValue }
+    return nil
+  }
+
+  private func axBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
+    (axAttribute(element, attribute) as? NSNumber)?.boolValue
+  }
+
+  private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    axAttribute(element, kAXChildrenAttribute as String) as? [AXUIElement] ?? []
+  }
+
+  private func axFrame(_ element: AXUIElement) -> CGRect? {
+    guard let positionRef = axAttribute(element, kAXPositionAttribute as String),
+          let sizeRef = axAttribute(element, kAXSizeAttribute as String),
+          CFGetTypeID(positionRef) == AXValueGetTypeID(),
+          CFGetTypeID(sizeRef) == AXValueGetTypeID() else { return nil }
+    var point = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &point),
+          AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return nil }
+    return CGRect(origin: point, size: size)
+  }
+
+  private func axSummary(
+    _ element: AXUIElement,
+    index: Int,
+    depth: Int,
+    parent: Int?
+  ) -> [String: Any] {
+    let role = axString(element, kAXRoleAttribute as String) ?? ""
+    var item: [String: Any] = [
+      "index": index,
+      "depth": depth,
+      "role": role,
+    ]
+    if let parent { item["parent"] = parent }
+    let scalarAttributes: [(String, String)] = [
+      ("subrole", kAXSubroleAttribute as String),
+      ("title", kAXTitleAttribute as String),
+      ("description", kAXDescriptionAttribute as String),
+      ("identifier", kAXIdentifierAttribute as String),
+    ]
+    for (name, attribute) in scalarAttributes {
+      if let value = axString(element, attribute), !value.isEmpty {
+        item[name] = String(value.prefix(512))
+      }
+    }
+    if role != "AXSecureTextField",
+       let value = axString(element, kAXValueAttribute as String),
+       !value.isEmpty {
+      item["value"] = String(value.prefix(512))
+    }
+    if let enabled = axBool(element, kAXEnabledAttribute as String) {
+      item["enabled"] = enabled
+    }
+    if let focused = axBool(element, kAXFocusedAttribute as String) {
+      item["focused"] = focused
+    }
+    if let frame = axFrame(element) {
+      item["frame"] = [
+        "x": frame.origin.x,
+        "y": frame.origin.y,
+        "width": frame.size.width,
+        "height": frame.size.height,
+      ]
+    }
+    var actions: CFArray?
+    if AXUIElementCopyActionNames(element, &actions) == .success,
+       let names = actions as? [String], !names.isEmpty {
+      item["actions"] = names
+    }
+    return item
+  }
+
+  private func collectAXTree(
+    root: AXUIElement,
+    maxDepth: Int,
+    maxNodes: Int
+  ) -> (nodes: [[String: Any]], elements: [AXUIElement], truncated: Bool) {
+    var nodes: [[String: Any]] = []
+    var elements: [AXUIElement] = []
+    var truncated = false
+    func walk(_ element: AXUIElement, depth: Int, parent: Int?) {
+      guard nodes.count < maxNodes else { truncated = true; return }
+      let index = nodes.count
+      nodes.append(axSummary(element, index: index, depth: depth, parent: parent))
+      elements.append(element)
+      guard depth < maxDepth else {
+        if !axChildren(element).isEmpty { truncated = true }
+        return
+      }
+      for child in axChildren(element) {
+        guard nodes.count < maxNodes else { truncated = true; break }
+        walk(child, depth: depth + 1, parent: index)
+      }
+    }
+    walk(root, depth: 0, parent: nil)
+    return (nodes, elements, truncated)
+  }
+
+  private func inspectApplicationUI(
+    _ rawArguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard let arguments = rawArguments as? [String: Any] else {
+      result(FlutterError(code: "INVALID_ARGUMENTS", message: "缺少目标 App", details: nil))
+      return
+    }
+    let prompt = arguments["promptPermission"] as? Bool ?? false
+    guard accessibilityAuthorized(prompt: prompt) else {
+      result([
+        "ok": false,
+        "authorized": false,
+        "requiresUserApproval": true,
+        "permission": "macOS Accessibility",
+        "message": "请在系统设置的隐私与安全性 > 辅助功能中允许 VibeKits",
+      ])
+      return
+    }
+    do {
+      let app = try targetApplication(arguments)
+      let root = AXUIElementCreateApplication(app.processIdentifier)
+      let maxDepth = min(max(arguments["maxDepth"] as? Int ?? 8, 1), 12)
+      let maxNodes = min(max(arguments["maxNodes"] as? Int ?? 400, 1), 1000)
+      let tree = collectAXTree(root: root, maxDepth: maxDepth, maxNodes: maxNodes)
+      result([
+        "ok": true,
+        "authorized": true,
+        "bundleId": app.bundleIdentifier ?? "",
+        "appName": app.localizedName ?? "",
+        "pid": app.processIdentifier,
+        "nodes": tree.nodes,
+        "nodeCount": tree.nodes.count,
+        "truncated": tree.truncated,
+      ])
+    } catch {
+      result(FlutterError(code: "UI_INSPECT_FAILED", message: error.localizedDescription, details: nil))
+    }
+  }
+
+  private func performApplicationUIAction(
+    _ rawArguments: Any?,
+    result: @escaping FlutterResult
+  ) {
+    guard accessibilityAuthorized(prompt: false) else {
+      result(FlutterError(
+        code: "ACCESSIBILITY_PERMISSION_REQUIRED",
+        message: "VibeKits 尚未获得 macOS 辅助功能权限",
+        details: ["requiresUserApproval": true]
+      ))
+      return
+    }
+    guard let arguments = rawArguments as? [String: Any],
+          let action = arguments["action"] as? String else {
+      result(FlutterError(code: "INVALID_ARGUMENTS", message: "缺少控件动作", details: nil))
+      return
+    }
+    do {
+      let app = try targetApplication(arguments)
+      let root = AXUIElementCreateApplication(app.processIdentifier)
+      _ = app.activate(options: [.activateIgnoringOtherApps])
+      if action == "activate" {
+        result(["ok": true, "action": action, "pid": app.processIdentifier])
+        return
+      }
+      if action == "typeText" {
+        let text = arguments["value"] as? String ?? ""
+        guard text.count <= 4096,
+              let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+          throw NSError(domain: "VibeKitsDeviceUI", code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "无法创建键盘事件"])
+        }
+        let units = Array(text.utf16)
+        down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+        up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        result(["ok": true, "action": action, "characters": text.count])
+        return
+      }
+      if action == "key" {
+        let key = arguments["key"] as? String ?? ""
+        let codes: [String: CGKeyCode] = [
+          "enter": 36, "escape": 53, "tab": 48, "backspace": 51,
+          "delete": 117, "left": 123, "right": 124, "down": 125, "up": 126,
+        ]
+        guard let code = codes[key],
+              let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
+          throw NSError(domain: "VibeKitsDeviceUI", code: 4,
+                        userInfo: [NSLocalizedDescriptionKey: "不支持的按键"])
+        }
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        result(["ok": true, "action": action, "key": key])
+        return
+      }
+      if action == "click" {
+        guard let x = arguments["x"] as? Double,
+              let y = arguments["y"] as? Double else {
+          throw NSError(domain: "VibeKitsDeviceUI", code: 5,
+                        userInfo: [NSLocalizedDescriptionKey: "坐标不完整"])
+        }
+        let tree = collectAXTree(root: root, maxDepth: 2, maxNodes: 40)
+        let point = CGPoint(x: x, y: y)
+        let appFrames = tree.elements.compactMap { element -> CGRect? in
+          guard axString(element, kAXRoleAttribute as String) == (kAXWindowRole as String)
+          else { return nil }
+          return axFrame(element)
+        }
+        guard appFrames.contains(where: { $0.contains(point) }) else {
+          throw NSError(domain: "VibeKitsDeviceUI", code: 6,
+                        userInfo: [NSLocalizedDescriptionKey: "坐标不在目标 App 窗口内"])
+        }
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+        result(["ok": true, "action": action, "x": x, "y": y, "boundedToTargetWindow": true])
+        return
+      }
+
+      let identifier = arguments["identifier"] as? String ?? ""
+      let title = arguments["title"] as? String ?? ""
+      let role = arguments["role"] as? String ?? ""
+      let tree = collectAXTree(root: root, maxDepth: 12, maxNodes: 1000)
+      let matches = tree.elements.enumerated().filter { index, element in
+        let node = tree.nodes[index]
+        if !identifier.isEmpty && (node["identifier"] as? String ?? "") != identifier { return false }
+        if !title.isEmpty && (node["title"] as? String ?? "").caseInsensitiveCompare(title) != .orderedSame { return false }
+        if !role.isEmpty && (node["role"] as? String ?? "") != role { return false }
+        return true
+      }
+      guard matches.count == 1, let match = matches.first else {
+        throw NSError(
+          domain: "VibeKitsDeviceUI",
+          code: 7,
+          userInfo: [NSLocalizedDescriptionKey:
+            matches.isEmpty ? "未找到匹配控件" : "匹配到多个控件，请增加 identifier/title/role 限定"]
+        )
+      }
+      let error: AXError
+      if action == "press" {
+        error = AXUIElementPerformAction(match.element, kAXPressAction as CFString)
+      } else if action == "setValue" {
+        error = AXUIElementSetAttributeValue(
+          match.element,
+          kAXValueAttribute as CFString,
+          (arguments["value"] as? String ?? "") as CFTypeRef
+        )
+      } else {
+        throw NSError(domain: "VibeKitsDeviceUI", code: 8,
+                      userInfo: [NSLocalizedDescriptionKey: "不支持的控件动作"])
+      }
+      guard error == .success else {
+        throw NSError(domain: "VibeKitsDeviceUI", code: Int(error.rawValue),
+                      userInfo: [NSLocalizedDescriptionKey: "系统控件操作失败：\(error.rawValue)"])
+      }
+      result([
+        "ok": true,
+        "action": action,
+        "matched": tree.nodes[match.offset],
+        "pid": app.processIdentifier,
+      ])
+    } catch {
+      result(FlutterError(code: "UI_ACTION_FAILED", message: error.localizedDescription, details: nil))
+    }
   }
 
   /// Capture one current-screen frame inside the signed VibeKits process.
@@ -275,8 +637,8 @@ class AppDelegate: FlutterAppDelegate {
       switch event.type {
       case .leftMouseDown:
         self.capturedWebViewResponder = responder
-        window.makeFirstResponder(responder)
         responder.mouseDown(with: event)
+        self.restoreWebViewTextResponder(responder, in: window)
       case .leftMouseUp:
         responder.mouseUp(with: event)
         self.capturedWebViewResponder = nil
@@ -284,8 +646,8 @@ class AppDelegate: FlutterAppDelegate {
         responder.mouseDragged(with: event)
       case .rightMouseDown:
         self.capturedWebViewResponder = responder
-        window.makeFirstResponder(responder)
         responder.rightMouseDown(with: event)
+        self.restoreWebViewTextResponder(responder, in: window)
       case .rightMouseUp:
         responder.rightMouseUp(with: event)
         self.capturedWebViewResponder = nil
@@ -293,8 +655,8 @@ class AppDelegate: FlutterAppDelegate {
         responder.rightMouseDragged(with: event)
       case .otherMouseDown:
         self.capturedWebViewResponder = responder
-        window.makeFirstResponder(responder)
         responder.otherMouseDown(with: event)
+        self.restoreWebViewTextResponder(responder, in: window)
       case .otherMouseUp:
         responder.otherMouseUp(with: event)
         self.capturedWebViewResponder = nil
@@ -309,6 +671,33 @@ class AppDelegate: FlutterAppDelegate {
       }
       return nil
     }
+  }
+
+  /// WebKit may choose its internal text client while handling mouseDown.
+  /// Keep that choice: forcing the outer WKWebView to be first responder before
+  /// the click leaves macOS IME without the editor caret rectangle, so marked
+  /// Chinese text and its candidate window can appear at the window origin.
+  private func restoreWebViewTextResponder(_ hitView: NSView, in window: NSWindow) {
+    var ancestor: NSView? = hitView
+    while ancestor != nil && !(ancestor is WKWebView) {
+      ancestor = ancestor?.superview
+    }
+    guard let webView = ancestor else { return }
+    if let current = window.firstResponder as? NSView,
+       current is NSTextInputClient,
+       current.isDescendant(of: webView) { return }
+    if let client = webViewTextClient(in: webView) {
+      window.makeFirstResponder(client)
+    } else {
+      window.makeFirstResponder(hitView)
+    }
+  }
+
+  private func webViewTextClient(in view: NSView) -> NSView? {
+    for child in view.subviews.reversed() {
+      if let client = webViewTextClient(in: child) { return client }
+    }
+    return view is NSTextInputClient ? view : nil
   }
 
   private func webViewResponder(

@@ -82,6 +82,10 @@ await replaceOneOf(
 \t\t\t\t\tif (focused instanceof Node && rootRef.current?.contains(focused)) return;
 \t\t\t\t\tclose();
 \t\t\t\t});
+\t\t\t};`,
+  `\t\t\tconst onBlur = (event) => {
+\t\t\t\tif (event.relatedTarget instanceof Node && (rootRef.current?.contains(event.relatedTarget) === true || menuRef.current?.contains(event.relatedTarget) === true)) return;
+\t\t\t\tclose();
 \t\t\t};`],
   `\t\t\tconst onBlur = (event) => {
 \t\t\t\tif (event.relatedTarget === null) return;
@@ -142,6 +146,138 @@ await replaceOnce(
     `"danger-full-access": "完全访问"`,
   ],
 );
+
+// VibeKits treats a message entered while the current turn is running as a
+// correction to that same turn. Harness still keeps "queue" available in its
+// setting, but a fresh profile defaults to steering at the next safe agent
+// step so the latest user instruction can change the active plan immediately.
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  'const DEFAULT_BUSY_ENTER_BEHAVIOR = "queue";',
+  'const DEFAULT_BUSY_ENTER_BEHAVIOR = "steer";',
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"input.send.steer": "插话发送",',
+  '"input.send.steer": "补充并纠正",',
+);
+
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"settings.enter.steer": "插话发送",',
+  '"settings.enter.steer": "补充并纠正",',
+);
+
+// Keep queued-message actions discoverable above the composer, while the
+// composer itself stays free of a keyboard-shortcut instruction.
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"placeholder.steerQueue": "Cmd/Ctrl+Enter 插话发送全部排队消息",',
+  '"placeholder.steerQueue": "",',
+);
+{
+  const filename = join(runtime, 'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js');
+  const source = await readFile(filename, 'utf8');
+  const before = '"placeholder.steerQueue": "Cmd/Ctrl+Enter steers all queued messages",';
+  if (source.includes(before)) {
+    await writeFile(filename, source.replace(before, '"placeholder.steerQueue": "",'), 'utf8');
+  } else if ((source.match(/"placeholder\.steerQueue": ""/g) ?? []).length !== 2) {
+    throw new Error('Harness English queue placeholder target missing');
+  }
+}
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"queue.edit": "编辑排队消息",',
+  '"queue.edit": "编辑这条补充",',
+);
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"queue.remove": "删除排队消息",',
+  '"queue.remove": "删除这条补充",',
+);
+await replaceOnce(
+  'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
+  '"queue.steer": "插话发送",',
+  '"queue.steer": "立即补充当前任务",',
+);
+{
+  const relativePath = 'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js';
+  const filename = join(runtime, relativePath);
+  const source = await readFile(filename, 'utf8');
+  const start = source.indexOf('function QueueDock(');
+  const end = source.indexOf('const queueDockEntry =', start);
+  if (start < 0 || end < 0) throw new Error(`Harness queue tooltip target missing: ${relativePath}`);
+  const before = source.slice(start, end);
+  const after = before.replaceAll('side: "bottom",', 'side: "top",');
+  if (before !== after) await writeFile(filename, source.slice(0, start) + after + source.slice(end), 'utf8');
+}
+
+// The upstream UI only grants once. Remember only an exact request within the
+// same session, so a new operation or a new session must still be reviewed.
+{
+  const relativePath = 'node_modules/@deepseek-ai/dsh-client-ui-approval/lib/client.js';
+  const filename = join(runtime, relativePath);
+  let source = await readFile(filename, 'utf8');
+  const replaceUnique = (before, after) => {
+    const first = source.indexOf(before);
+    if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
+      throw new Error(`Harness approval patch target missing or ambiguous: ${before.slice(0, 60)}`);
+    }
+    source = source.slice(0, first) + after + source.slice(first + before.length);
+  };
+  const approvalHelpers = `const vibekitsRememberedApprovals = new Set();
+\t\tfunction vibekitsApprovalKey(sessionId, toolName, reason) {
+\t\t\treturn "vibekits.approval.v1:" + JSON.stringify([sessionId, toolName, reason ?? ""]);
+\t\t}
+\t\tfunction vibekitsApprovalRemembered(key) {
+\t\t\tif (vibekitsRememberedApprovals.has(key)) return true;
+\t\t\ttry { return localStorage.getItem(key) === "allowed"; } catch { return false; }
+\t\t}
+\t\tfunction vibekitsRememberApproval(key) {
+\t\t\tvibekitsRememberedApprovals.add(key);
+\t\t\ttry { localStorage.setItem(key, "allowed"); } catch {}
+\t\t}
+\t\tfunction ApprovalFlow({ pending, detail, t }) {`;
+  if (!source.includes('function vibekitsApprovalRemembered(key)')) {
+    if (source.includes('const vibekitsRememberedApprovals = new Set();')) {
+      replaceUnique(`const vibekitsRememberedApprovals = new Set();
+\t\tfunction vibekitsApprovalKey(sessionId, toolName, reason) {
+\t\t\treturn JSON.stringify([sessionId, toolName, reason ?? ""]);
+\t\t}
+\t\tfunction ApprovalFlow({ pending, detail, t }) {`, approvalHelpers);
+    } else {
+      replaceUnique('function ApprovalFlow({ pending, detail, t }) {', approvalHelpers);
+    }
+  }
+  if (!source.includes('children: t("allowSameTask")')) {
+    replaceUnique(`children: t("allowOnce")
+\t\t\t\t\t\t\t})]`, `children: t("allowOnce")
+\t\t\t\t\t\t\t}), (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+\t\t\t\t\t\t\t\tvariant: "outline",
+\t\t\t\t\t\t\t\tdisabled: answered,
+\t\t\t\t\t\t\t\tonClick: () => {
+\t\t\t\t\t\t\t\t\tvibekitsRememberApproval(vibekitsApprovalKey(pending.sessionId, pending.toolName, pending.reason));
+\t\t\t\t\t\t\t\t\tanswer("allowed-once");
+\t\t\t\t\t\t\t\t},
+\t\t\t\t\t\t\t\tchildren: t("allowSameTask")
+\t\t\t\t\t\t\t})]`);
+  } else if (source.includes('vibekitsRememberedApprovals.add(vibekitsApprovalKey(')) {
+    replaceUnique('vibekitsRememberedApprovals.add(vibekitsApprovalKey(pending.sessionId, pending.toolName, pending.reason));', 'vibekitsRememberApproval(vibekitsApprovalKey(pending.sessionId, pending.toolName, pending.reason));');
+  }
+  if (!source.includes('allowSameTask: "本任务同类操作不再询问"')) {
+    replaceUnique('allowOnce: "允许一次"', 'allowOnce: "允许一次",\n\t\t\tallowSameTask: "本任务同类操作不再询问"');
+  }
+  if (!source.includes('allowSameTask: "Allow same request in this task"')) {
+    replaceUnique('allowOnce: "Allow once"', 'allowOnce: "Allow once",\n\t\t\tallowSameTask: "Allow same request in this task"');
+  }
+  if (source.includes('vibekitsRememberedApprovals.has(vibekitsApprovalKey(sessionId,')) {
+    replaceUnique('vibekitsRememberedApprovals.has(vibekitsApprovalKey(sessionId,', 'vibekitsApprovalRemembered(vibekitsApprovalKey(sessionId,');
+  } else if (!source.includes('vibekitsApprovalRemembered(vibekitsApprovalKey(sessionId,')) {
+    replaceUnique('const pending = new PendingApproval(sessionId, {', 'if (vibekitsApprovalRemembered(vibekitsApprovalKey(sessionId, request.toolName, request.reason))) return "allowed-once";\n\t\t\tconst pending = new PendingApproval(sessionId, {');
+  }
+  await writeFile(filename, source, 'utf8');
+}
 
 await replaceOneOf(
   'node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js',
