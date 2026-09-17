@@ -533,6 +533,57 @@ void main() {
     expect(host.callable, isTrue);
   });
 
+  test('旧单实例控制命令超时后会终止残留 relay 并接管', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_forced_takeover_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    var launches = 0;
+    var terminated = false;
+
+    final host = await RustDeskHarnessShareService.ensureHostAvailable(
+      configuredExecutable: executable.path,
+      timeout: const Duration(milliseconds: 1),
+      runner: (_, arguments) async {
+        if (arguments.single == '--vibekits-harness-get-id') {
+          return ProcessResult(1, 0, '1554650784\n', '');
+        }
+        if (arguments.single == '--vibekits-harness-stop') {
+          throw TimeoutException('stale relay did not answer');
+        }
+        expect(arguments, const <String>['--vibekits-harness-status']);
+        return ProcessResult(
+          1,
+          0,
+          terminated && launches >= 2
+              ? '{"routingId":"1554650784","callable":true,'
+                    '"rendezvousOnline":true,'
+                    '"registrationKeyConfirmed":true,"state":"registered"}'
+              : '{"routingId":"1554650784","callable":false,'
+                    '"rendezvousOnline":false,'
+                    '"registrationKeyConfirmed":false,"state":"offline"}',
+          '',
+        );
+      },
+      launcher: (_, arguments) async {
+        expect(arguments, const <String>['--vibekits-harness-service']);
+        launches += 1;
+      },
+      staleRelayTerminator: (path) async {
+        expect(path, executable.path);
+        terminated = true;
+      },
+    );
+
+    expect(terminated, isTrue);
+    expect(launches, 2);
+    expect(host.callable, isTrue);
+  });
+
   test('Harness 隧道使用独立数字 ID 和固定回环目标', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_harness_tunnel_',

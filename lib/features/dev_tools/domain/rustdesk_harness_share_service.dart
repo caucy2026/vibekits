@@ -49,6 +49,7 @@ typedef RustDeskProcessRunner =
     Future<ProcessResult> Function(String executable, List<String> arguments);
 typedef RustDeskProcessLauncher =
     Future<void> Function(String executable, List<String> arguments);
+typedef RustDeskStaleRelayTerminator = Future<void> Function(String executable);
 typedef RustDeskManagedProcessLauncher =
     Future<RustDeskManagedProcess> Function(
       String executable,
@@ -418,6 +419,7 @@ abstract final class RustDeskHarnessShareService {
     String configuredExecutable = '',
     RustDeskProcessRunner? runner,
     RustDeskProcessLauncher? launcher,
+    RustDeskStaleRelayTerminator? staleRelayTerminator,
     Duration timeout = const Duration(seconds: 8),
   }) async {
     RustDeskHostInfo host = await inspect(
@@ -443,19 +445,30 @@ abstract final class RustDeskHarnessShareService {
     // namespace while reporting offline. Launching another single-instance
     // helper then has no effect. Stop only that VibeKits-owned service through
     // its scoped control command and relaunch the current package's helper.
-    final stopped = await _runControlCommand(
-      host.executable,
-      const <String>['--vibekits-harness-stop'],
-      timeout: const Duration(seconds: 5),
-      runner: runner,
-    );
-    final stopPayload = _decodeControl(stopped);
-    if (stopPayload['ok'] != true) {
-      throw TimeoutException(
-        'HARNESS_RELAY_NOT_CALLABLE: ${host.state}; '
-        'takeover=${stopPayload['code'] ?? 'failed'}',
-        timeout,
+    Object? gracefulStopError;
+    try {
+      final stopped = await _runControlCommand(
+        host.executable,
+        const <String>['--vibekits-harness-stop'],
+        timeout: const Duration(seconds: 5),
+        runner: runner,
       );
+      final stopPayload = _decodeControl(stopped);
+      if (stopPayload['ok'] != true) {
+        throw StateError(stopPayload['code']?.toString() ?? 'failed');
+      }
+    } on Object catch (error) {
+      gracefulStopError = error;
+      final terminate =
+          staleRelayTerminator ??
+          (Platform.isWindows ? _terminateStaleWindowsRelay : null);
+      if (terminate == null) {
+        throw TimeoutException(
+          'HARNESS_RELAY_NOT_CALLABLE: ${host.state}; takeover=$error',
+          timeout,
+        );
+      }
+      await terminate(host.executable);
     }
     await launchHost(host.executable, launcher: launcher);
     final takeoverDeadline = DateTime.now().add(timeout);
@@ -468,9 +481,29 @@ abstract final class RustDeskHarnessShareService {
       if (host.callable) return host;
     } while (DateTime.now().isBefore(takeoverDeadline));
     throw TimeoutException(
-      'HARNESS_RELAY_NOT_CALLABLE_AFTER_TAKEOVER: ${host.state}',
+      'HARNESS_RELAY_NOT_CALLABLE_AFTER_TAKEOVER: ${host.state}; '
+      'gracefulStop=${gracefulStopError ?? 'ok'}',
       timeout,
     );
+  }
+
+  static Future<void> _terminateStaleWindowsRelay(String executable) async {
+    _validateRelayExecutable(executable);
+    final result = await Process.run('taskkill.exe', const <String>[
+      '/F',
+      '/IM',
+      'vibekits-harness-relay.exe',
+    ], runInShell: false).timeout(const Duration(seconds: 5));
+    if (result.exitCode != 0) {
+      final output = '${result.stdout}\n${result.stderr}'.trim();
+      throw StateError(
+        'HARNESS_STALE_RELAY_TERMINATION_FAILED: '
+        '${output.isEmpty ? result.exitCode : output}',
+      );
+    }
+    // Give Windows enough time to release the relay's single-instance IPC
+    // namespace before launching the current package's executable.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
   }
 
   /// Stops the Android-only independent Harness relay process. Desktop hosts
