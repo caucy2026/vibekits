@@ -248,6 +248,54 @@
   markSelectedSessionActions();
   publishInferenceErrors();
 
+  const postHostMessage = (payload) => {
+    const message = JSON.stringify(payload);
+    if (window.chrome?.webview?.postMessage) {
+      window.chrome.webview.postMessage(message);
+    } else if (window.VibekitsHost?.postMessage) {
+      window.VibekitsHost.postMessage(message);
+    }
+  };
+
+  const visibleSessionRows = () =>
+    [...document.querySelectorAll(
+      '[role="treeitem"]:not([aria-expanded])',
+    )].filter((row) => row instanceof HTMLElement &&
+      row.offsetParent !== null && row.getClientRects().length > 0 &&
+      row.getAttribute('aria-hidden') !== 'true');
+
+  const focusVisibleComposer = () => {
+    const composer = [...document.querySelectorAll(
+      '[data-composer-card] textarea, [data-composer-card] [contenteditable="true"]',
+    )].find((element) => element instanceof HTMLElement &&
+      element.offsetParent !== null);
+    composer?.focus();
+  };
+
+  if (!window.__vibekitsSessionFunctionKeysInstalled) {
+    window.__vibekitsSessionFunctionKeysInstalled = true;
+    window.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.altKey || event.ctrlKey ||
+          event.metaKey || event.shiftKey) return;
+      const match = event.key.match(/^F([1-9]|1[0-2])$/);
+      if (!match) return;
+      const index = Number(match[1]) - 1;
+      const visibleSessions = visibleSessionRows();
+      const target = visibleSessions[index];
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!(target instanceof HTMLElement)) {
+        postHostMessage({
+          type: 'vibekits.sessionShortcutMissing',
+          position: index + 1,
+        });
+        return;
+      }
+      target.click();
+      requestAnimationFrame(() => requestAnimationFrame(focusVisibleComposer));
+    }, true);
+  }
+
   const findConversationHost = () =>
     [...document.querySelectorAll('[data-conversation-scroll]')]
       .find((element) => element instanceof HTMLElement &&

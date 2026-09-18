@@ -220,6 +220,51 @@ void main() {
   );
 
   test(
+    'creates an empty official session in the requested workspace',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final adapter = HarnessOfficialRemoteAdapter(
+        Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      server.listen((request) async {
+        expect(request.uri.path, '/api/session/create');
+        final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
+        expect(body['method'], 'session/create');
+        expect((((body['payload'] as Map)['args'] as Map)['request'] as Map), {
+          'workspaceId': 'workspace-1',
+        });
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'type': 'server-response',
+            'rpcId': body['rpcId'],
+            'result': {
+              'ok': true,
+              'value': {'sessionId': 'session-empty'},
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      try {
+        final response = await adapter.request({
+          'type': 'client-request',
+          'rpcId': 'create-one',
+          'method': 'session.create',
+          'payload': {'workspaceId': 'workspace-1'},
+        });
+        expect(
+          ((response['result'] as Map)['value'] as Map)['sessionId'],
+          'session-empty',
+        );
+      } finally {
+        await adapter.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
     'approved workspace is registered before remote grants resolve',
     () async {
       final directory = await Directory.systemTemp.createTemp(

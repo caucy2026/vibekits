@@ -186,6 +186,17 @@ class HarnessOfficialRemoteAdapter
   _OfficialInvocation _officialInvocation(String method, Map payload) {
     final request = Map<String, dynamic>.from(payload);
     switch (method) {
+      case 'session.create':
+        final String workspaceId = (request['workspaceId'] as String? ?? '')
+            .trim();
+        if (workspaceId.isEmpty) {
+          throw const FormatException('Invalid official Harness workspace');
+        }
+        return _OfficialInvocation('session/create', {
+          'args': {
+            'request': {'workspaceId': workspaceId},
+          },
+        });
       case 'session.models':
         return const _OfficialInvocation('session/modelCatalog', {
           'args': <String, Object?>{},

@@ -1521,6 +1521,20 @@ window.__vibekitsHarnessQueueBridge?.submit(
         );
       return;
     }
+    if (payload?['type'] == 'vibekits.sessionShortcutMissing') {
+      final int position = payload?['position'] is int
+          ? payload!['position'] as int
+          : 0;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('当前列表没有第 $position 个可见会话'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      return;
+    }
     if (_pointerDiagnostics && payload?['type'] == 'vibekits.pointerProbe') {
       _appendPointerDiagnostic(
         'dom ${payload?['event']} x=${payload?['x']} y=${payload?['y']} '

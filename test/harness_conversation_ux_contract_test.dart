@@ -38,6 +38,23 @@ void main() {
     },
   );
 
+  test('F1 through F12 switch visible sessions and focus the composer', () {
+    final String script = File(
+      'assets/harness/codex_conversation_ux.js',
+    ).readAsStringSync();
+
+    expect(script, contains("window.addEventListener('keydown'"));
+    expect(script, contains('event.isComposing'));
+    expect(script, contains(r'event.key.match(/^F([1-9]|1[0-2])$/)'));
+    expect(script, contains('[role="treeitem"]:not([aria-expanded])'));
+    expect(script, contains('row.offsetParent !== null'));
+    expect(script, contains('row.getClientRects().length > 0'));
+    expect(script, contains('visibleSessions[index]'));
+    expect(script, contains('target.click()'));
+    expect(script, contains('[data-composer-card]'));
+    expect(script, contains("type: 'vibekits.sessionShortcutMissing'"));
+  });
+
   test('Official Harness behavior bundles remain byte-for-byte unpatched', () {
     final String macos = File(
       'tool/prepare_harness_runtime_macos.sh',
