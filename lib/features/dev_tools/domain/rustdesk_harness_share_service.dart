@@ -217,6 +217,8 @@ abstract final class RustDeskHarnessShareService {
   static const int simulatorRemotePort = 32147;
   static const int simulatorControlRemotePort = 32148;
   static const int simulatorSshRemotePort = 22;
+  static const String _currentProtocolCommand = '--vibekits-harness-protocol';
+  static const String _currentProtocolCode = 'protocol_v2';
   static const MethodChannel _androidRelay = MethodChannel(
     'vibekits/harness-relay',
   );
@@ -421,25 +423,37 @@ abstract final class RustDeskHarnessShareService {
     RustDeskProcessLauncher? launcher,
     RustDeskStaleRelayTerminator? staleRelayTerminator,
     Duration timeout = const Duration(seconds: 8),
+    bool? enforceCurrentProtocol,
   }) async {
+    final bool shouldEnforceCurrentProtocol =
+        enforceCurrentProtocol ?? Platform.isWindows;
+    Future<bool> usable(RustDeskHostInfo candidate) async {
+      if (!candidate.callable) return false;
+      if (!shouldEnforceCurrentProtocol) return true;
+      return _supportsCurrentProtocol(candidate.executable, runner: runner);
+    }
+
     RustDeskHostInfo host = await inspect(
       configuredExecutable: configuredExecutable,
       runner: runner,
     );
-    if (host.callable) return host;
+    if (await usable(host)) return host;
     if (!host.available || host.executable.isEmpty) {
       throw StateError(host.message);
     }
-    await launchHost(host.executable, launcher: launcher);
-    final deadline = DateTime.now().add(timeout);
-    do {
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-      host = await inspect(
-        configuredExecutable: configuredExecutable,
-        runner: runner,
-      );
-      if (host.callable) return host;
-    } while (DateTime.now().isBefore(deadline));
+    final bool staleCallable = host.callable;
+    if (!staleCallable) {
+      await launchHost(host.executable, launcher: launcher);
+      final deadline = DateTime.now().add(timeout);
+      do {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        host = await inspect(
+          configuredExecutable: configuredExecutable,
+          runner: runner,
+        );
+        if (await usable(host)) return host;
+      } while (DateTime.now().isBefore(deadline));
+    }
 
     // A detached service from an older App can still own the isolated IPC
     // namespace while reporting offline. Launching another single-instance
@@ -478,13 +492,32 @@ abstract final class RustDeskHarnessShareService {
         configuredExecutable: configuredExecutable,
         runner: runner,
       );
-      if (host.callable) return host;
+      if (await usable(host)) return host;
     } while (DateTime.now().isBefore(takeoverDeadline));
     throw TimeoutException(
       'HARNESS_RELAY_NOT_CALLABLE_AFTER_TAKEOVER: ${host.state}; '
       'gracefulStop=${gracefulStopError ?? 'ok'}',
       timeout,
     );
+  }
+
+  static Future<bool> _supportsCurrentProtocol(
+    String executable, {
+    RustDeskProcessRunner? runner,
+  }) async {
+    try {
+      final ProcessResult result = await _runControlCommand(
+        executable,
+        const <String>[_currentProtocolCommand],
+        timeout: const Duration(seconds: 5),
+        runner: runner,
+      );
+      final Map<String, Object?> payload = _decodeControl(result);
+      return payload['ok'] == true &&
+          payload['code']?.toString() == _currentProtocolCode;
+    } on Object {
+      return false;
+    }
   }
 
   static Future<void> _terminateStaleWindowsRelay(String executable) async {

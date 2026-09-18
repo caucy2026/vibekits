@@ -616,11 +616,7 @@ final class HarnessSimulatorController {
       );
       _sessions[id] = session;
       _publishStatus();
-      activity.succeed(
-        '已连接 ${ssh?.hostname ?? id} · ${tools.length} 项工具'
-        '${ssh == null ? '' : ' · SSH 已就绪'}'
-        ' · 工具通道已就绪',
-      );
+      activity.succeed('已连接 $id · ${tools.length} 项工具 · 工具通道已就绪');
       return _snapshot(session);
     } on Object catch (error) {
       await mcpTunnel?.close();
@@ -944,22 +940,61 @@ final class HarnessSimulatorController {
       command,
       timeout: const Duration(seconds: 30),
     );
+    var downloadedPath = remotePath;
+    var captureMethod = 'ssh';
+    String? expectedSha;
     if (captured['ok'] != true) {
-      throw HarnessSimulatorControllerException(
-        'remote_screenshot_failed',
-        '${captured['stderr'] ?? '目标机截图失败'}',
-      );
+      if (ssh.platform != 'macos' ||
+          !session.tools.any(
+            (tool) => tool['name'] == 'vibekits.device.screenshot',
+          )) {
+        throw HarnessSimulatorControllerException(
+          'remote_screenshot_failed',
+          '${captured['stderr'] ?? '目标机截图失败'}',
+        );
+      }
+      // screencapture can fail when the remote display is sleeping even while
+      // the signed app's capture channel is available. Keep the fallback on
+      // the same verified peer and validate its downloaded frame as usual.
+      try {
+        final response = await call(
+          routingId,
+          'vibekits.device.screenshot',
+          const <String, Object?>{},
+        );
+        final structured = response['structuredContent'];
+        if (structured is! Map ||
+            structured['ok'] != true ||
+            structured['data'] is! Map) {
+          throw const FormatException('远端 APP 截图响应无效');
+        }
+        final data = Map<String, Object?>.from(structured['data'] as Map);
+        downloadedPath = '${data['path'] ?? ''}';
+        expectedSha = '${data['sha256'] ?? ''}'.toLowerCase();
+        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(expectedSha) ||
+            !downloadedPath.startsWith('/')) {
+          throw const FormatException('远端 APP 截图路径或校验值无效');
+        }
+        captureMethod = 'app';
+      } on Object catch (error) {
+        throw HarnessSimulatorControllerException(
+          'remote_screenshot_failed',
+          '系统截图失败：${captured['stderr'] ?? '未知错误'}；'
+              'APP 截图回退失败：$error',
+        );
+      }
+    } else {
+      expectedSha = RegExp(
+        r'\b[0-9a-fA-F]{64}\b',
+      ).firstMatch('${captured['stdout'] ?? ''}')?.group(0)?.toLowerCase();
     }
-    final expectedSha = RegExp(
-      r'\b[0-9a-fA-F]{64}\b',
-    ).firstMatch('${captured['stdout'] ?? ''}')?.group(0)?.toLowerCase();
     if (expectedSha == null) {
       throw const HarnessSimulatorControllerException(
         'invalid_screenshot_response',
         '目标机截图校验值缺失',
       );
     }
-    final downloaded = await downloadFile(routingId, remotePath);
+    final downloaded = await downloadFile(routingId, downloadedPath);
     if ('${downloaded['sha256']}'.toLowerCase() != expectedSha) {
       final localPath = '${downloaded['localPath'] ?? ''}';
       if (localPath.isNotEmpty) {
@@ -977,6 +1012,7 @@ final class HarnessSimulatorController {
       'platform': ssh.platform,
       'targetSha256': expectedSha,
       'singleFrame': true,
+      'captureMethod': captureMethod,
     };
   }
 

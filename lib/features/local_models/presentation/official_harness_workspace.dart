@@ -136,7 +136,6 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   );
   static const String _credentialKey = 'deepseek-api-key';
   static Future<String>? _conversationUxScript;
-  static Future<String>? _messageQueueBridgeScript;
   final HarnessWebViewBridge _webview = HarnessWebViewBridge();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
@@ -713,10 +712,6 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       final String script = await (_conversationUxScript ??= rootBundle
           .loadString('assets/harness/codex_conversation_ux.js'));
       await _webview.executeScriptVoid(script);
-      final String queueScript = await (_messageQueueBridgeScript ??= rootBundle
-          .loadString('assets/harness/harness_message_queue_bridge.js'));
-      await _webview.executeScriptVoid(queueScript);
-      await _publishQueueCountToWeb();
       if (_pointerDiagnostics) {
         await _webview.executeScriptVoid('''
           (() => {

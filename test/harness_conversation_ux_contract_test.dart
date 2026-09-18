@@ -38,42 +38,45 @@ void main() {
     },
   );
 
-  test(
-    'Harness queue bridge keeps official composer and exposes one protocol',
-    () async {
-      final String script = await File(
-        'assets/harness/harness_message_queue_bridge.js',
-      ).readAsString();
+  test('Official Harness behavior bundles remain byte-for-byte unpatched', () {
+    final String macos = File(
+      'tool/prepare_harness_runtime_macos.sh',
+    ).readAsStringSync();
+    final String windows = File(
+      'tool/prepare_harness_runtime.ps1',
+    ).readAsStringSync();
+    final String workspace = File(
+      'lib/features/local_models/presentation/official_harness_workspace.dart',
+    ).readAsStringSync();
 
-      expect(script, contains('vibekits.harnessEvent'));
-      expect(script, contains("event: 'message.accepted'"));
-      expect(script, contains("'turn.completed'"));
-      expect(script, contains("'turn.failed'"));
-      expect(script, contains('cancellationRequested'));
-      expect(script, contains("event: 'approval.waiting'"));
-      expect(script, contains('__vibekitsHarnessQueueBridge'));
-      expect(script, contains('补充并纠正'));
-      expect(script, contains('busySession'));
-      expect(script, contains('外部待执行'));
-      expect(script, contains('control.hidden = normalized === 0'));
-      expect(script, isNot(contains('outerHTML =')));
+    expect(macos, isNot(contains('patch_harness_runtime.mjs')));
+    expect(windows, isNot(contains('patch_harness_runtime.mjs')));
+    expect(workspace, isNot(contains('harness_message_queue_bridge.js')));
+    expect(workspace, isNot(contains('_messageQueueBridgeScript')));
+  });
+
+  test(
+    'macOS runtime keeps the official native builtin loader on both architectures',
+    () {
+      final String prepare = File(
+        'tool/prepare_harness_runtime_macos.sh',
+      ).readAsStringSync();
+
+      expect(prepare, contains('node-addon-require-builtin-darwin-arm64'));
+      expect(prepare, contains('node-addon-require-builtin-darwin-x64'));
+      expect(
+        prepare,
+        isNot(
+          contains(
+            r'"$TARGET/node_modules/node-addon-require-builtin-darwin-arm64"',
+          ),
+        ),
+      );
+      expect(prepare, contains("'@modelcontextprotocol/sdk@1.30.0'"));
+      final String windowsPrepare = File(
+        'tool/prepare_harness_runtime.ps1',
+      ).readAsStringSync();
+      expect(windowsPrepare, contains("'@modelcontextprotocol/sdk@1.30.0'"));
     },
   );
-
-  test('Harness runtime defaults busy input to same-turn correction', () async {
-    final String patch = await File(
-      'tool/patch_harness_runtime.mjs',
-    ).readAsString();
-    final String instructions = await File(
-      'assets/harness/AGENTS.md',
-    ).readAsString();
-
-    expect(
-      patch,
-      contains('const DEFAULT_BUSY_ENTER_BEHAVIOR = "steer";'),
-    );
-    expect(patch, contains('补充并纠正'));
-    expect(instructions, contains('运行中的补充与纠正'));
-    expect(instructions, contains('以最新的明确输入为准'));
-  });
 }

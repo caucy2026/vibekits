@@ -86,7 +86,6 @@ final class HarnessSimulatorTargetRuntime {
     HarnessSimulatorSshSetter? setSsh,
     HarnessSimulatorSshKeyRevoker? revokeSshKeys,
     Duration connectionPollInterval = const Duration(seconds: 1),
-    Duration hostRestartTimeout = const Duration(seconds: 5),
     Duration restoreRetryDelay = const Duration(seconds: 5),
   }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
        _inspectHost =
@@ -117,7 +116,6 @@ final class HarnessSimulatorTargetRuntime {
              await HarnessSystemSshService.revokeAllManagedPublicKeys();
            }),
        _connectionPollInterval = connectionPollInterval,
-       _hostRestartTimeout = hostRestartTimeout,
        _restoreRetryDelay = restoreRetryDelay;
 
   static const int remotePort = SimulatorControlServer.portNumber;
@@ -137,7 +135,6 @@ final class HarnessSimulatorTargetRuntime {
   final HarnessSimulatorSshSetter _setSsh;
   final HarnessSimulatorSshKeyRevoker _revokeSshKeys;
   final Duration _connectionPollInterval;
-  final Duration _hostRestartTimeout;
   final Duration _restoreRetryDelay;
   final StreamController<HarnessSimulatorTargetSnapshot> _changes =
       StreamController<HarnessSimulatorTargetSnapshot>.broadcast();
@@ -197,14 +194,14 @@ final class HarnessSimulatorTargetRuntime {
 
   Future<void> restore() async {
     if (!await _settings.loadEnabled()) return;
-    await _enable(persist: false, reconcileRelayVersion: true);
+    await _enable(persist: false);
     if (!_latest.ready && HarnessSimulatorAccessSettings.enabled) {
       _scheduleRestoreRetry();
     }
   }
 
   Future<void> enable({bool persist = true}) async {
-    await _enable(persist: persist, reconcileRelayVersion: false);
+    await _enable(persist: persist);
     if (!_latest.ready && HarnessSimulatorAccessSettings.enabled) {
       _scheduleRestoreRetry();
     }
@@ -227,10 +224,7 @@ final class HarnessSimulatorTargetRuntime {
     _restoreRetryCount = 0;
   }
 
-  Future<void> _enable({
-    required bool persist,
-    required bool reconcileRelayVersion,
-  }) async {
+  Future<void> _enable({required bool persist}) async {
     if (_changing || _latest.ready) return;
     _changing = true;
     final generation = ++_generation;
@@ -252,24 +246,11 @@ final class HarnessSimulatorTargetRuntime {
       if (!host.available) throw StateError(host.message);
       final relayExecutable = File(host.executable).absolute.path;
       final relayFingerprint = await _relayFingerprint(host.executable);
-      final savedRelayFingerprint = await _settings.loadRelayFingerprint();
-      final savedRelayExecutable = await _settings.loadRelayExecutable();
-      if (reconcileRelayVersion &&
-          host.callable &&
-          (savedRelayFingerprint != relayFingerprint ||
-              savedRelayExecutable != relayExecutable)) {
-        await _stopHost();
-        final deadline = DateTime.now().add(_hostRestartTimeout);
-        do {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          host = await _inspectHost();
-          if (!host.callable) break;
-        } while (DateTime.now().isBefore(deadline));
-        if (host.callable) {
-          throw TimeoutException('旧版仿真中继未能退出', _hostRestartTimeout);
-        }
-      }
-      if (!host.callable) host = await _startHost();
+      // A stale relay can truthfully report itself callable while lacking the
+      // current simulator protocol. Always pass the live process through the
+      // carrier's protocol gate; it is idempotent for current relays and
+      // performs a scoped takeover for old single-instance processes.
+      host = await _startHost();
       if (Platform.isMacOS || Platform.isWindows) {
         ssh = await _inspectSsh();
         if (!ssh.supported) throw UnsupportedError(ssh.message);

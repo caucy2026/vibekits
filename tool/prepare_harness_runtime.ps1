@@ -1,7 +1,7 @@
 param(
   [string]$NodeDirectory = "C:\Program Files\nodejs",
   [string]$OutputDirectory = "native\harness\windows\runtime",
-  [string]$PackageVersion = "0.1.5-rc.2"
+  [string]$PackageVersion = "0.1.6-alpha.2"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +41,7 @@ try {
   # contains peer metadata that makes npm's strict resolver spend minutes
   # backtracking. The runtime is pinned as one tested wave, so legacy peer
   # resolution is deterministic and avoids that startup-independent stall.
-  & (Join-Path $NodeDirectory 'npm.cmd') install --omit=dev --ignore-scripts --legacy-peer-deps --no-audit --no-fund "@deepseek-ai/dsh@$packageVersion" --registry=https://registry.npmjs.org --cache=$npmCache --fetch-timeout=30000 --fetch-retries=1 --loglevel=warn
+  & (Join-Path $NodeDirectory 'npm.cmd') install --omit=dev --ignore-scripts --legacy-peer-deps --no-audit --no-fund "@deepseek-ai/dsh@$packageVersion" '@modelcontextprotocol/sdk@1.30.0' --registry=https://registry.npmjs.org --cache=$npmCache --fetch-timeout=30000 --fetch-retries=1 --loglevel=warn
   if ($LASTEXITCODE -ne 0) { throw 'Harness npm install failed' }
 
   # npm's legacy resolver avoids pathological backtracking in the rc package
@@ -96,8 +96,6 @@ New-Item -ItemType Directory -Path $builtInSkills | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\vibekits-remote-simulator') -Destination $builtInSkills -Recurse
 
-& (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_runtime.mjs') $target
-if ($LASTEXITCODE -ne 0) { throw 'Harness Web compatibility patch failed' }
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\test_harness_bundled_skill.mjs') $target
 if ($LASTEXITCODE -ne 0) { throw 'Harness bundled remote simulator discovery failed' }
 & (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\test_harness_session_rebind.mjs')

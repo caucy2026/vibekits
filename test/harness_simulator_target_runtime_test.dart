@@ -281,7 +281,37 @@ void main() {
     await runtime.disable();
   });
 
-  test('升级后恢复会替换仍在运行的旧中继再开放端点', () async {
+  test('显示可调用的旧中继仍必须交给协议门禁确认并接管', () async {
+    var startCount = 0;
+    final runtime = HarnessSimulatorTargetRuntime(
+      settings: HarnessSimulatorAccessSettings(
+        read: (_) async => null,
+        write: (_, _) async {},
+      ),
+      inspectHost: () async => _host,
+      startHost: () async {
+        startCount++;
+        return _host;
+      },
+      startEndpoint: () async => HarnessSimulatorEndpointLease(
+        port: HarnessSimulatorTargetRuntime.remotePort,
+        close: () async {},
+      ),
+      stopHost: () async {},
+      setNativeGate: (_, _) async {},
+      relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
+    );
+
+    await runtime.enable();
+
+    expect(startCount, 1);
+    expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
+    await runtime.disable();
+  });
+
+  test('升级后恢复会把仍在线的中继交给协议门禁再开放端点', () async {
     final values = <String, String>{
       'harness-simulator-v1-enabled': 'true',
       'harness-simulator-v1-relay-fingerprint': 'sha256:new-relay',
@@ -323,12 +353,11 @@ void main() {
       relayFingerprint: (_) async => 'sha256:new-relay',
       inspectSsh: () async => _sshEnabled,
       revokeSshKeys: () async {},
-      hostRestartTimeout: const Duration(milliseconds: 200),
     );
 
     await runtime.restore();
 
-    expect(stopCount, 1);
+    expect(stopCount, 0);
     expect(startCount, 1);
     expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
     expect(
@@ -340,13 +369,16 @@ void main() {
       File(_host.executable).absolute.path,
     );
     await runtime.disable();
+    expect(stopCount, 1);
   });
 
   test('升级后首次中继启动失败仍保留授权并自动重试恢复', () async {
     final values = <String, String>{
       'harness-simulator-v1-enabled': 'true',
       'harness-simulator-v1-relay-fingerprint': 'sha256:current',
-      'harness-simulator-v1-relay-executable': File(_host.executable).absolute.path,
+      'harness-simulator-v1-relay-executable': File(
+        _host.executable,
+      ).absolute.path,
     };
     var inspections = 0;
     final nativeGateValues = <bool>[];

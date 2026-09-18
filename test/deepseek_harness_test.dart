@@ -265,7 +265,7 @@ void main() {
     web.validate();
     agent.validate();
     officialWeb.validate();
-    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.5-rc.2');
+    expect(HarnessLaunchSpec.packageSpec, '@deepseek-ai/dsh@0.1.6-alpha.2');
     expect(
       DeepSeekHarnessService.sharedAgentHomeDirectory(
         environment: <String, String>{
@@ -373,12 +373,23 @@ void main() {
     expect(find.text('Harness 模型设置'), findsOneWidget);
     expect(DeepSeekHarnessService.defaultModel, 'deepseek-flash');
     expect(find.byKey(const Key('agent-model-deepseek-flash')), findsOneWidget);
-    expect(find.text('DeepSeek V4.1 Flash（deepseek-flash）'), findsOneWidget);
+    expect(find.text('随当前 Harness 版本提供的模型候选'), findsOneWidget);
+    expect(find.text('DeepSeek-V41-Flash'), findsOneWidget);
+    expect(
+      find.byKey(const Key('agent-model-deepseek-v4-pro')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('agent-model-deepseek-v4-flash-vision-exp')),
+      findsNothing,
+    );
     expect(find.byKey(const Key('agent-load-models')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
     await tester.pumpAndSettle();
     expect(find.text('来自当前 API 的 /models 实时结果'), findsOneWidget);
+    expect(find.text('deepseek-chat'), findsOneWidget);
+    expect(find.text('DeepSeek-V41-Flash'), findsNothing);
     await tester.ensureVisible(
       find.byKey(const Key('agent-model-deepseek-special')),
     );

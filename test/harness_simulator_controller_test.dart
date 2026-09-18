@@ -82,6 +82,59 @@ void main() {
     expect(statusChanges.last['connected'], isFalse);
   });
 
+  test('两台设备并发连接按 ID 隔离，断开一台不影响另一台', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'vibekits_simulator_parallel_',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final executable = File('${temporary.path}/vibekits-harness-relay');
+    await executable.writeAsBytes(const <int>[0]);
+    var nextPort = 43220;
+    final processes = <String, _FakeManagedProcess>{};
+    final controller = HarnessSimulatorController(
+      resolveHost: () async => RustDeskHostInfo(
+        executable: executable.path,
+        id: '1554650784',
+        available: true,
+        callable: true,
+        message: 'ready',
+      ),
+      allocatePort: () async => nextPort++,
+      openTunnel: (path, routingId, localPort, forceRelay) {
+        final process = _FakeManagedProcess();
+        processes[routingId] = process;
+        return RustDeskHarnessShareService.openSimulatorTunnel(
+          path,
+          routingId: routingId,
+          localPort: localPort,
+          forceRelay: forceRelay,
+          launcher: (_, _) async => process,
+        );
+      },
+      mcpClient: _FakeMcpClient(),
+      enableSshBootstrap: false,
+    );
+    addTearDown(controller.closeAll);
+
+    final results = await Future.wait(<Future<Map<String, Object?>>>[
+      controller.connect('1321656264'),
+      controller.connect('4456560334'),
+    ]);
+    expect(
+      results.map((result) => result['routingId']),
+      containsAll(<String>['1321656264', '4456560334']),
+    );
+    expect(results.every((result) => result['connected'] == true), isTrue);
+    expect(controller.status()['sessions'], hasLength(2));
+
+    await controller.disconnect('4456560334');
+    expect(processes['4456560334']!.terminated, isTrue);
+    expect(processes['1321656264']!.terminated, isFalse);
+    expect(controller.status('1321656264')['connected'], isTrue);
+    expect(controller.catalog('1321656264'), isNotEmpty);
+    expect(controller.status('4456560334')['connected'], isFalse);
+  });
+
   test('强制中继只改变内部传输且不要求用户提供端口或凭据', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'vibekits_simulator_relay_',
@@ -213,9 +266,10 @@ void main() {
     final mcp = _SshBootstrapMcpClient(
       onBootstrap: mcpTunnelProcess.notifyDemand,
       onInitialize: toolTunnelProcess.notifyDemand,
-    );
+    )..screenshotSha256 = screenshotSha;
     final ports = <int>[43213, 43214, 43215];
     final executed = <String>[];
+    var failCliScreenshot = false;
     Future<ProcessResult> processRunner(
       String executablePath,
       List<String> arguments,
@@ -280,6 +334,9 @@ void main() {
         return ProcessResult(1, 0, '$expectedSha  Demo.zip\n', '');
       }
       if (command.contains('screencapture -x')) {
+        if (failCliScreenshot) {
+          return ProcessResult(1, 1, '', 'could not create image from display');
+        }
         return ProcessResult(1, 0, '$screenshotSha  screenshot.png\n', '');
       }
       if (command == 'uname -a') {
@@ -377,6 +434,12 @@ void main() {
       await File('${screenshot['localPath']}').readAsBytes(),
       screenshotBytes,
     );
+    failCliScreenshot = true;
+    final fallbackScreenshot = await controller.captureScreenshot('4456560334');
+    expect(fallbackScreenshot['captured'], isTrue);
+    expect(fallbackScreenshot['captureMethod'], 'app');
+    expect(fallbackScreenshot['sha256'], screenshotSha);
+    expect(fallbackScreenshot['targetSha256'], screenshotSha);
     await controller.disconnect('4456560334');
     expect(mcpTunnelProcess.terminated, isTrue);
     expect(toolTunnelProcess.terminated, isTrue);

@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # full-function macOS 12+ application. The release verifier rejects any bundled
 # Mach-O that requires a system newer than macOS 12.
 NODE_VERSION="${NODE_VERSION:-22.19.0}"
-DSH_VERSION="${DSH_VERSION:-0.1.5-rc.2}"
+DSH_VERSION="${DSH_VERSION:-0.1.6-alpha.2}"
 TARGET="${1:-$PROJECT_ROOT/native/harness/macos/runtime}"
 PREP_CACHE_ROOT="${VIBEKITS_HARNESS_PREP_CACHE_ROOT:-$PROJECT_ROOT/.tmp}"
 DOWNLOADS="$PREP_CACHE_ROOT/harness-runtime-macos-downloads"
@@ -85,6 +85,7 @@ NODE="$NODE_DIST/bin/node"
   "$NPM" install --omit=dev --ignore-scripts --legacy-peer-deps \
     --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION" \
     'esbuild@0.25.9' \
+    '@modelcontextprotocol/sdk@1.30.0' \
     --registry=https://registry.npmjs.org --cache="$NPM_CACHE" \
     --fetch-timeout=30000 --fetch-retries=1 --loglevel=warn
 
@@ -132,6 +133,11 @@ NODE="$NODE_DIST/bin/node"
     if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) process.exit(2);
     process.stdout.write(pkg.version);
   ' "$PACKAGE_ROOT/node_modules/koffi/package.json")"
+  REQUIRE_BUILTIN_VERSION="$("$NODE" -e '
+    const pkg = require(process.argv[1]);
+    if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) process.exit(2);
+    process.stdout.write(pkg.version);
+  ' "$PACKAGE_ROOT/node_modules/node-addon-require-builtin/package.json")"
 
   # npm selects optional native packages for the build host. GitHub macos-14
   # currently runs on Intel, while local release machines may be Apple Silicon.
@@ -146,6 +152,25 @@ NODE="$NODE_DIST/bin/node"
   install_native_package '@img/sharp-libvips-darwin-x64@1.3.3' '@img/sharp-libvips-darwin-x64'
   install_native_package "@koromix/koffi-darwin-x64@$KOFFI_VERSION" '@koromix/koffi-darwin-x64'
   install_native_package '@vscode/ripgrep-darwin-x64@1.18.0' '@vscode/ripgrep-darwin-x64'
+  install_native_package \
+    "node-addon-require-builtin-darwin-arm64@$REQUIRE_BUILTIN_VERSION" \
+    'node-addon-require-builtin-darwin-arm64'
+  install_native_package \
+    "node-addon-require-builtin-darwin-x64@$REQUIRE_BUILTIN_VERSION" \
+    'node-addon-require-builtin-darwin-x64'
+
+  # The official 0.1.6 addon was linked with a macOS 15 deployment marker even
+  # though it only links system libraries available on macOS 12. Keep the
+  # official code bytes and lower only LC_BUILD_VERSION so the app's established
+  # macOS 12 minimum remains enforceable by the release compatibility gate.
+  for ADDON in \
+    "$PACKAGE_ROOT/node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node" \
+    "$PACKAGE_ROOT/node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node"; do
+    TEMP_ADDON="$ADDON.macos12"
+    xcrun vtool -set-build-version macos 12.0 15.5 -replace \
+      -output "$TEMP_ADDON" "$ADDON"
+    mv "$TEMP_ADDON" "$ADDON"
+  done
 
   # node-pty ships every platform in one package. A macOS runtime needs only
   # its two Darwin slices; keeping PE/ELF addons complicates signing audits.
@@ -181,13 +206,6 @@ rm -rf "$TARGET"
 mkdir -p "$TARGET/bin" "$TARGET/profile"
 cp "$NODE_DIST/bin/node" "$TARGET/bin/node"
 ditto "$PACKAGE_ROOT/node_modules" "$TARGET/node_modules"
-# Published node-addon-require-builtin 0.1.5 Darwin binaries require macOS 15.
-# The pinned official DSH loader supports Node's explicit --expose-internals
-# path, which every macOS VibeKits launch uses. Remove the incompatible optional
-# fallback packages instead of shipping a hidden macOS 15 dependency.
-rm -rf \
-  "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64" \
-  "$TARGET/node_modules/node-addon-require-builtin-darwin-x64"
 for FILE in \
   vibekits-mcp-server.mjs \
   vibekits-codex-mcp.mjs \
@@ -205,7 +223,6 @@ ditto \
   "$PROJECT_ROOT/native/harness/builtin-skills/vibekits-remote-simulator" \
   "$TARGET/builtin-skills/vibekits-remote-simulator"
 
-"$TARGET/bin/node" "$PROJECT_ROOT/tool/patch_harness_runtime.mjs" "$TARGET"
 "$TARGET/bin/node" "$PROJECT_ROOT/tool/test_harness_bundled_skill.mjs" "$TARGET"
 
 cat > "$TARGET/harness-runtime.json" <<EOF
@@ -231,8 +248,8 @@ test -f "$TARGET/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.3
 test -f "$TARGET/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64-0.35.4.node"
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node"
 test -f "$TARGET/node_modules/@koromix/koffi-darwin-x64/darwin_x64/koffi.node"
-test ! -d "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64"
-test ! -d "$TARGET/node_modules/node-addon-require-builtin-darwin-x64"
+test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-arm64/prebuilt/darwin-arm64-napi-v9.node"
+test -f "$TARGET/node_modules/node-addon-require-builtin-darwin-x64/prebuilt/darwin-x64-napi-v9.node"
 test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-arm64/bin/rg"
 test -x "$TARGET/node_modules/@vscode/ripgrep-darwin-x64/bin/rg"
 echo "Prepared macOS Harness runtime: $TARGET"

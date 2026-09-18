@@ -8,7 +8,7 @@
 
 - 上游仓库：<https://github.com/deepseek-ai/deepseek-harness>
 - 官方 Web 指南：<https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/index.md>
-- Windows 与 macOS 当前固定产物：`@deepseek-ai/dsh@0.1.5-rc.2`
+- Windows 与 macOS 当前固定产物：`@deepseek-ai/dsh@0.1.6-alpha.2`
 - 精确行为以 Release 中该版本的 `@deepseek-ai/dsh-web-app` 及 Client UI 包为准；仓库 `master` 只用于跟踪后续变更。
 
 Harness 仍在 Developer Preview，上游明确会有破坏性变更。每次升级固定版本时，必须重跑本文档全部验收项。
@@ -80,15 +80,15 @@ Windows 运行器为每个 Harness 子进程创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB
 
 ## 7. 逐项差异审计
 
-| 检查项 | `@deepseek-ai/dsh@0.1.5-rc.2` 官方行为 | Vibekits 当前处理 |
+| 检查项 | `@deepseek-ai/dsh@0.1.6-alpha.2` 官方行为 | Vibekits 当前处理 |
 |---|---|---|
 | API Key | Models 页写入官方可写凭据文件；环境提供时只读 | 已纠偏为官方链路；仅保留一次旧凭据迁移 |
 | API 地址/模型 | Models 页配置并热更新；内置 Flash/Pro 目录 | Web 启动不再用环境变量覆盖 |
 | 工作区—会话 | 一个工作区管理有序多会话；移除工作区不删文件或会话日志 | 直接使用官方 Web/Host 状态，无 Flutter 副本 |
 | 重启恢复 | 官方存储恢复工作区、会话、设置 | Windows 实机已验证恢复 |
 | 会话归档 | 隐藏会话但保留日志、工作区槽位和取消归档恢复能力 | 保持官方语义，不用假删除替代 |
-| 永久删除会话 | 当前 RC.7 没有 `workspace.deleteSession` Host API 和官方菜单 | 作为明确 Vibekits 扩展：独立“删除会话”菜单、二次确认、停止运行态后精确删除会话目录，并同步工作区索引与投影缓存；重连期间保留原界面并显示底部进度，瞬态失败自动重试一次；不把归档改名伪装成删除 |
-| 权限预设 | `read-only`、`workspace-write`、`danger-full-access`；官方动态显示名含英文 | 内部标识和审批行为保持官方；中文界面显示为“只读 / 工作区读写 / 完全访问” |
+| 永久删除会话 | 使用该版本官方提供的会话操作 | 不增删或替换官方菜单与语义 |
+| 权限预设 | 由官方版本提供并管理 | 不改名称、默认值或审批行为 |
 | 模型二级菜单 | 根菜单进入模型目录或推理等级目录 | 保留官方两级结构；WebView2 返回空焦点时不再误判为外部点击 |
 | API Key 粘贴 | 浏览器输入框支持系统粘贴 | WebView 内增加 Ctrl+V/Cmd+V 安全转发，只写入当前可编辑字段，不记录剪贴板内容 |
 | 推理/工具/计划中间态 | 由官方会话事件投影 | 直接显示官方 UI，不由 Flutter 伪造 |

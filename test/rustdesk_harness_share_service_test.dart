@@ -449,6 +449,7 @@ void main() {
     final host = await RustDeskHarnessShareService.ensureHostAvailable(
       configuredExecutable: executable.path,
       timeout: const Duration(seconds: 1),
+      enforceCurrentProtocol: false,
       runner: (_, arguments) async {
         if (arguments.single == '--vibekits-harness-get-id') {
           return ProcessResult(3, 0, '1554650784\n', '');
@@ -495,6 +496,7 @@ void main() {
     final host = await RustDeskHarnessShareService.ensureHostAvailable(
       configuredExecutable: executable.path,
       timeout: const Duration(milliseconds: 1),
+      enforceCurrentProtocol: false,
       runner: (_, arguments) async {
         if (arguments.single == '--vibekits-harness-get-id') {
           return ProcessResult(1, 0, '1554650784\n', '');
@@ -533,6 +535,63 @@ void main() {
     expect(host.callable, isTrue);
   });
 
+  test('可调用但协议过期的旧单实例也会由当前包内载体接管', () async {
+    final Directory temporary = await Directory.systemTemp.createTemp(
+      'vibekits_rustdesk_protocol_takeover_',
+    );
+    final File executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
+    await executable.writeAsBytes(const <int>[0]);
+    addTearDown(() => temporary.delete(recursive: true));
+    var launched = false;
+    var stopped = false;
+
+    final host = await RustDeskHarnessShareService.ensureHostAvailable(
+      configuredExecutable: executable.path,
+      timeout: const Duration(milliseconds: 1),
+      enforceCurrentProtocol: true,
+      runner: (_, arguments) async {
+        if (arguments.single == '--vibekits-harness-protocol') {
+          return ProcessResult(
+            1,
+            0,
+            stopped
+                ? '{"ok":true,"state":"ready","connections":[],"code":"protocol_v2"}'
+                : '{"ok":false,"state":"unavailable","connections":[],"code":"control_response_invalid"}',
+            '',
+          );
+        }
+        if (arguments.single == '--vibekits-harness-stop') {
+          stopped = true;
+          return ProcessResult(
+            1,
+            0,
+            '{"ok":true,"state":"stopped","connections":[]}',
+            '',
+          );
+        }
+        expect(arguments, const <String>['--vibekits-harness-status']);
+        return ProcessResult(
+          1,
+          0,
+          '{"routingId":"1554650784","callable":true,'
+              '"rendezvousOnline":true,'
+              '"registrationKeyConfirmed":true,"state":"registered"}',
+          '',
+        );
+      },
+      launcher: (_, arguments) async {
+        expect(arguments, const <String>['--vibekits-harness-service']);
+        launched = true;
+      },
+    );
+
+    expect(stopped, isTrue);
+    expect(launched, isTrue);
+    expect(host.callable, isTrue);
+  });
+
   test('旧单实例控制命令超时后会终止残留 relay 并接管', () async {
     final Directory temporary = await Directory.systemTemp.createTemp(
       'vibekits_rustdesk_forced_takeover_',
@@ -548,6 +607,7 @@ void main() {
     final host = await RustDeskHarnessShareService.ensureHostAvailable(
       configuredExecutable: executable.path,
       timeout: const Duration(milliseconds: 1),
+      enforceCurrentProtocol: false,
       runner: (_, arguments) async {
         if (arguments.single == '--vibekits-harness-get-id') {
           return ProcessResult(1, 0, '1554650784\n', '');

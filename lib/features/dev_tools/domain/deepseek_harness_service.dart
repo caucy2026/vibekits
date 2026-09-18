@@ -33,7 +33,7 @@ class HarnessEnvironmentReport {
 
 class HarnessLaunchSpec {
   const HarnessLaunchSpec({required this.workspace, this.port = 3080});
-  static const String packageSpec = '@deepseek-ai/dsh@0.1.5-rc.2';
+  static const String packageSpec = '@deepseek-ai/dsh@0.1.6-alpha.2';
   final String workspace;
   final int port;
   Uri get url => Uri.parse('http://127.0.0.1:$port');

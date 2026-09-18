@@ -126,9 +126,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   static const String _credentialKey = 'deepseek-api-key';
   static const List<String> _builtinModels = <String>[
     'deepseek-flash',
-    'deepseek-v4-flash',
     'deepseek-v4-pro',
   ];
+  static const Map<String, String> _builtinModelNames = <String, String>{
+    'deepseek-flash': 'DeepSeek-V41-Flash',
+    'deepseek-v4-pro': 'DeepSeek-V4-Pro',
+  };
   static const String _customModelValue = '__custom__';
   static const int _maxContextCharacters = 12000;
   static final RegExp _ansiEscape = RegExp(
@@ -2267,7 +2270,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                         child: Text(
                           loadedFromEndpoint
                               ? '来自当前 API 的 /models 实时结果'
-                              : 'DeepSeek 官方模型 · DeepSeek V4.1 Flash 优先',
+                              : '随当前 Harness 版本提供的模型候选',
                           style: TextStyle(
                             color: context.vibe.muted,
                             fontSize: 12,
@@ -2288,9 +2291,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                             for (final String model in availableModels)
                               _ModelChoiceTile(
                                 key: Key('agent-model-$model'),
-                                label: model == 'deepseek-flash'
-                                    ? 'DeepSeek V4.1 Flash（deepseek-flash）'
-                                    : model,
+                                label: loadedFromEndpoint
+                                    ? model
+                                    : _builtinModelNames[model] ?? model,
                                 selected: modelChoice == model,
                                 onTap: () => setStateDialog(() {
                                   modelChoice = model;
