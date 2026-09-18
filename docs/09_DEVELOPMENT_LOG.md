@@ -1727,3 +1727,9 @@
 - 回归测试加入只有收到真实请求才会 ready 的进程模型，定向测试 5/5 通过。
 - 使用 dev.216 控制端真实连接 ID `5298938227` 的 dev.215+2215 Mac：3.8 秒连接成功，P2P/中继、SSH、MCP、207 项工具目录、应用、进程、系统版本与签名读取均通过；结束后无残留连接。
 - 详细证据：`docs/acceptance/V1_9_0_DEV216_REMOTE_SIMULATOR_DEMAND_TRIGGER_2026-09-16.md`。
+# 2026-09-18 · dev.221 Harness 0.1.6 跨平台启动兼容门禁
+
+- 合并 `b310c375` 的官方 Harness `0.1.6-alpha.2` 运行时更新后，发布组合回归发现 macOS 12 兼容副本虽然仍会生成，但新版 `dsh-web-app` 与 `dsh-client-modules` 不再包含旧版分流钩子；原门禁因此失败并阻止发布。
+- 新增 `tool/patch_harness_macos_compatibility.mjs`，只恢复 VibeKits 宿主明确设置 `VIBEKITS_DSH_WEB_DIST_INDEX` 时的 `dist-macos12` 与 `client.macos12.js` 分流，并保留旧 WebKit 所需的单模块批次。官方前端及官方动态模块保持默认路径和原始行为。
+- Windows 继续使用官方运行时，不应用 macOS WebKit 分流；`prepare_harness_runtime.ps1` 固定准备官方 DSH 与 MCP SDK，避免运行后补依赖。
+- macOS 12、Harness 会话、Windows/远程仿真启动组合回归 89 项通过；全量静态检查同时清理一个无用测试 import。今后升级 DSH 时若上游路径再次变化，补丁脚本和契约测试会直接失败，禁止生成需要安装后手工修复的正式候选。

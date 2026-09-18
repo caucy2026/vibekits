@@ -74,6 +74,10 @@ void main() {
       'native/harness/macos/runtime/node_modules/@deepseek-ai/'
       'dsh-client-modules/lib/index.js',
     ).readAsStringSync();
+    final String webAppHost = File(
+      'native/harness/macos/runtime/node_modules/@deepseek-ai/'
+      'dsh-web-app/lib/index.js',
+    ).readAsStringSync();
 
     expect(official.existsSync(), isTrue);
     expect(compatibility.existsSync(), isTrue);
@@ -81,6 +85,7 @@ void main() {
       compatibility.readAsStringSync(),
       isNot(official.readAsStringSync()),
     );
+    expect(webAppHost, contains('process.env.VIBEKITS_DSH_WEB_DIST_INDEX'));
     expect(moduleHost, contains('process.env.VIBEKITS_DSH_WEB_DIST_INDEX'));
     expect(moduleHost, contains('.replace(/\\.js\$/, ".macos12.js")'));
     expect(

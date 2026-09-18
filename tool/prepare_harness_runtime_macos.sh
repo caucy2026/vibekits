@@ -206,6 +206,7 @@ rm -rf "$TARGET"
 mkdir -p "$TARGET/bin" "$TARGET/profile"
 cp "$NODE_DIST/bin/node" "$TARGET/bin/node"
 ditto "$PACKAGE_ROOT/node_modules" "$TARGET/node_modules"
+"$TARGET/bin/node" "$PROJECT_ROOT/tool/patch_harness_macos_compatibility.mjs" "$TARGET"
 for FILE in \
   vibekits-mcp-server.mjs \
   vibekits-codex-mcp.mjs \
