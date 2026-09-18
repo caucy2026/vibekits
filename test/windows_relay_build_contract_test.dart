@@ -28,6 +28,8 @@ void main() {
       expect(prepare, contains('transport_connect_timeout'));
       expect(prepare, contains('stdin_eof_v1'));
       expect(prepare, contains('vibekits-harness-remote-assistance-access'));
+      expect(prepare, contains('SIMULATOR_CONTROL_TARGET'));
+      expect(prepare, contains('32148'));
       expect(prepare, contains('RUSTDESK-AGPL-3.0.txt'));
       expect(prepare, contains('Get-FileHash'));
       expect(prepare, contains('snapshot-sha256:'));

@@ -182,11 +182,17 @@ if (-not (Test-Path -LiteralPath $builtRelay -PathType Leaf)) {
   throw "Cargo did not produce the expected relay: $builtRelay"
 }
 $binaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($builtRelay))
+$relaySourceText = [IO.File]::ReadAllText((Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'))
+if (-not $relaySourceText.Contains('SIMULATOR_CONTROL_TARGET: &str = "127.0.0.1:32148"') -or
+    -not $relaySourceText.Contains('SIMULATOR_MCP_TARGET | SIMULATOR_CONTROL_TARGET | SIMULATOR_SSH_TARGET')) {
+  throw 'Harness relay source is stale; missing authorized simulator control endpoint 32148'
+}
 foreach ($marker in @(
   'transport_connected',
   'transport_connect_timeout',
   'stdin_eof_v1',
-  'vibekits-harness-remote-assistance-access'
+  'vibekits-harness-remote-assistance-access',
+  '32148'
 )) {
   if (-not $binaryText.Contains($marker)) {
     throw "Harness relay is stale; missing marker: $marker"
