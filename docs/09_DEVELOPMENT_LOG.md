@@ -1738,3 +1738,8 @@
 
 - 正式发布构建发现 MetaCubeX `meta-rules-dat/latest` 的三个官方 GeoData 文件已滚动更新；旧固定摘要使 Windows CI 在下载后按预期拒绝继续。
 - 使用 GitHub 官方 Release API 重新核对同一次 `latest` 发布资产，将 `Country.mmdb`、`geoip.dat`、`geosite.dat` 的 SHA-256 固定为当前官方值。仍保持下载后强制校验，未放宽供应链门禁。
+
+# 2026-09-18：Harness 智能体集成测试同步官方 Messages 协议
+
+- 新版官方 Harness 的 DeepSeek 适配器改用 `/v1/messages` 和 Anthropic SSE 事件；旧测试服务器仍只模拟 `/chat/completions`，导致 Windows 发布流水线在产品构建前误失败。
+- 测试服务器现按官方 Harness 实际协议模拟文本、工具调用、工具结果和结束事件，并继续验证原生授权桥、SHA-256 工具与最终响应；本机专项 2/2 通过。
