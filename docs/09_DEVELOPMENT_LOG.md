@@ -1733,3 +1733,8 @@
 - 新增 `tool/patch_harness_macos_compatibility.mjs`，只恢复 VibeKits 宿主明确设置 `VIBEKITS_DSH_WEB_DIST_INDEX` 时的 `dist-macos12` 与 `client.macos12.js` 分流，并保留旧 WebKit 所需的单模块批次。官方前端及官方动态模块保持默认路径和原始行为。
 - Windows 继续使用官方运行时，不应用 macOS WebKit 分流；`prepare_harness_runtime.ps1` 固定准备官方 DSH 与 MCP SDK，避免运行后补依赖。
 - macOS 12、Harness 会话、Windows/远程仿真启动组合回归 89 项通过；全量静态检查同时清理一个无用测试 import。今后升级 DSH 时若上游路径再次变化，补丁脚本和契约测试会直接失败，禁止生成需要安装后手工修复的正式候选。
+
+# 2026-09-18：Windows Mihomo 官方 GeoData 固定摘要刷新
+
+- 正式发布构建发现 MetaCubeX `meta-rules-dat/latest` 的三个官方 GeoData 文件已滚动更新；旧固定摘要使 Windows CI 在下载后按预期拒绝继续。
+- 使用 GitHub 官方 Release API 重新核对同一次 `latest` 发布资产，将 `Country.mmdb`、`geoip.dat`、`geosite.dat` 的 SHA-256 固定为当前官方值。仍保持下载后强制校验，未放宽供应链门禁。
