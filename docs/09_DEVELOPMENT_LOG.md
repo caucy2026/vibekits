@@ -1,5 +1,13 @@
 # Vibekits 开发日志
 
+## 2026-09-18 · dev.220 Windows 更新后远程仿真启动恢复
+
+- 定位 Windows 更新后远程仿真开关 5 秒超时：历史 dev.211 `vibekits-harness-relay.exe` 仍占用独立单实例 IPC，但已无法响应新版停止控制命令；新版服务启动因单实例成为无效操作，旧算法又在 graceful stop 超时后直接失败。
+- Windows 接管流程改为优先正常停止；停止命令超时、异常或返回失败时，只对精确文件名 `vibekits-harness-relay.exe` 执行受限终止，等待 IPC 释放后启动当前包内 Relay并重新验证 HBBS 在线、注册密钥和 `callable`。不终止 RustDesk、KEMI 远程办公、SSH、Harness/Node 或其他进程。
+- 真实启动旧 dev.211 Relay 后运行 dev.220，新版自动接管并恢复持久化开关；相关目标生命周期和 Relay 回归 `32/32` 通过，Windows Release 构建成功。修复提交为 `e376a5e`。
+- 明确纠正产品边界：远程仿真只需要 6～16 位 ID，不需要协同密码，也不走远程协同配对；成功必须以 `vibekits.simulator.connect` 返回 `connected=true`、设备身份和 `p2p_or_relay` 为准。同一 routing ID 自连超时不能替代两个不同 ID 的 P2P/HBBR 真机验收。
+- 完整根因、算法、现场状态、防火墙边界和剩余双机门禁见 `docs/acceptance/V1_9_0_DEV220_WINDOWS_SIMULATOR_STARTUP_RECOVERY_2026-09-18.md`。
+
 ## 2026-09-13 · dev.201 独立运行与 PAD75 补充门禁
 
 - 明确并复核 VibeKits 与 KEMI 远程办公的共存边界：VibeKits 无论远程办公是否安装、运行或正在抓屏/录屏，都必须使用自己的 ID、配置、进程、MCP、SSH/SFTP 与 ADB 通道独立完成工作；远程办公仅可在已经运行时提供人工观察，双方不得互相启动、停止、切换或抢占会话。

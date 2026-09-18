@@ -127,6 +127,7 @@
 118. [dev.209 远程故障取证与配对载体修复验收](acceptance/V1_9_0_DEV209_REMOTE_DIAGNOSTIC_CAPTURE_2026-09-14.md)——配对断线自动撤销、受管隧道不再误走桌面延时、一次性截图/下载、119 项共用回归和真实目标版本阻断证据
 119. [远程仿真失败复盘与唯一实验手册](67_REMOTE_SIMULATION_FAILURE_RETROSPECTIVE_AND_EXPERIMENT_PLAYBOOK.md)——dev.164～dev.216 的 20 类失败根因、对应修复、防回归规则和禁止死循环的唯一实验流程
 120. [dev.216 按需隧道触发修复验收](acceptance/V1_9_0_DEV216_REMOTE_SIMULATOR_DEMAND_TRIGGER_2026-09-16.md)——真实客户端请求触发、5 项回归及设备 5298938227 的 SSH/MCP 实机闭环
+121. [dev.220 Windows 更新后远程仿真启动恢复验收](acceptance/V1_9_0_DEV220_WINDOWS_SIMULATOR_STARTUP_RECOVERY_2026-09-18.md)——旧 Relay 单实例占用、5 秒控制超时、自动接管算法、无密码仿真边界与双机剩余门禁
 
 ## 完成定义
 
