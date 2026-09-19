@@ -1743,3 +1743,11 @@
 
 - 新版官方 Harness 的 DeepSeek 适配器改用 `/v1/messages` 和 Anthropic SSE 事件；旧测试服务器仍只模拟 `/chat/completions`，导致 Windows 发布流水线在产品构建前误失败。
 - 测试服务器现按官方 Harness 实际协议模拟文本、工具调用、工具结果和结束事件，并继续验证原生授权桥、SHA-256 工具与最终响应；本机专项 2/2 通过。
+## 2026-09-19 · dev.221 Windows 远程仿真协议与自包含发布修复
+
+- 定位最新 Windows 包远程仿真失败的直接原因：Dart 启动门禁已要求 `--vibekits-harness-protocol` / `protocol_v2`，但发布目录仍携带不认识该命令的旧 Relay，导致每次开启都被判为过期实例并退出。
+- 从登记的 RustDesk Harness 源码重新构建无界面 Relay，将 EXE、SHA-256 来源清单和 AGPL 许可证纳入应用源码包；全新克隆不再依赖开发机遗留的第三方文件。
+- Windows 构建脚本兼容 PowerShell 5.1，不再调用该运行时缺失的 `Path.IsPathFullyQualified`；对外部测试账户拥有的只读源码只在单次 `git rev-parse` 使用作用域化 `safe.directory`，不修改用户全局 Git 配置。
+- 发布门禁改为同时检查 CLI 协议命令、服务端 `Protocol` 处理和真实 JSON 探针。服务尚未启动时允许明确的 `service_unavailable`，运行中必须返回 `protocol_v2`；不再使用会被 Release 优化移除的 EXE ASCII 字符串作为协议依据。
+- 修复控制器并发测试在 Windows 创建无 `.exe` 假 Relay 的平台兼容错误。Rust Relay 8/8、Flutter 远程仿真 41/41、`flutter analyze` 和完整 Windows Release 自包含检查通过。
+- 运行态证据：`vibekits.exe` 正常响应，内置 Relay 返回 `protocol_v2`；统一 ID `4567540178` 显示 `registrationKeyConfirmed=true`、`callable=true`，固定回环 MCP `32147` 和控制端点 `32148` 均由当前 APP 监听。该证据验证被控端就绪，不冒充另一独立 ID 的跨机连接验收。

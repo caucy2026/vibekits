@@ -17,7 +17,10 @@ if ([string]::IsNullOrWhiteSpace($RustDeskSource)) {
 }
 
 function Assert-DDrivePath([string]$Name, [string]$Path) {
-  if (-not [System.IO.Path]::IsPathFullyQualified($Path)) {
+  # Windows PowerShell 5.1 runs on .NET Framework, which does not expose
+  # Path.IsPathFullyQualified. IsPathRooted plus the explicit D:\ gate below
+  # provides the same safety contract on every supported Windows builder.
+  if (-not [System.IO.Path]::IsPathRooted($Path)) {
     throw "$Name must be an absolute path: $Path"
   }
   if (-not $Path.StartsWith('D:\', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -57,6 +60,7 @@ foreach ($required in @(
   (Join-Path $RustDeskSource 'Cargo.lock'),
   (Join-Path $RustDeskSource 'src\vibekits_harness_cli.rs'),
   (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'),
+  (Join-Path $RustDeskSource 'src\ipc.rs'),
   $cargo,
   (Join-Path $libclangPath 'libclang.dll'),
   (Join-Path $projectRoot 'third_party\rustdesk-transport\LICENCE')
@@ -144,7 +148,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Rust tests failed' }
   & $cargo build --locked --release --target x86_64-pc-windows-msvc --features flutter --bin vibekits-harness-relay
   if ($LASTEXITCODE -ne 0) { throw 'Harness relay Release build failed' }
-  $sourceCommitOutput = @(& git rev-parse HEAD 2>$null)
+  # Imported lab snapshots can be owned by another Windows test account.
+  # Scope the trust exception to this read-only command instead of mutating
+  # the user's global Git safe.directory configuration.
+  $sourceCommitOutput = @(& git -c "safe.directory=$RustDeskSource" rev-parse HEAD 2>$null)
   if ($LASTEXITCODE -eq 0 -and $sourceCommitOutput.Count -gt 0) {
     $sourceCommit = $sourceCommitOutput[0].Trim()
   } else {
@@ -155,7 +162,8 @@ try {
     $sourceFingerprintInputs = @(
       (Join-Path $RustDeskSource 'Cargo.lock'),
       (Join-Path $RustDeskSource 'src\vibekits_harness_cli.rs'),
-      (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs')
+      (Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'),
+      (Join-Path $RustDeskSource 'src\ipc.rs')
     )
     $fingerprintStream = [IO.MemoryStream]::new()
     try {
@@ -183,9 +191,13 @@ if (-not (Test-Path -LiteralPath $builtRelay -PathType Leaf)) {
 }
 $binaryText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($builtRelay))
 $relaySourceText = [IO.File]::ReadAllText((Join-Path $RustDeskSource 'src\vibekits_harness_relay.rs'))
+$ipcSourceText = [IO.File]::ReadAllText((Join-Path $RustDeskSource 'src\ipc.rs'))
 if (-not $relaySourceText.Contains('SIMULATOR_CONTROL_TARGET: &str = "127.0.0.1:32148"') -or
-    -not $relaySourceText.Contains('SIMULATOR_MCP_TARGET | SIMULATOR_CONTROL_TARGET | SIMULATOR_SSH_TARGET')) {
-  throw 'Harness relay source is stale; missing authorized simulator control endpoint 32148'
+    -not $relaySourceText.Contains('SIMULATOR_MCP_TARGET | SIMULATOR_CONTROL_TARGET | SIMULATOR_SSH_TARGET') -or
+    -not $relaySourceText.Contains('PROTOCOL_COMMAND: &str = "--vibekits-harness-protocol"') -or
+    -not $ipcSourceText.Contains('VibekitsHarnessControlRequest::Protocol') -or
+    -not $ipcSourceText.Contains('(true, Some("protocol_v2".to_owned()))')) {
+  throw 'Harness relay source is stale; missing simulator control endpoint or protocol-v2 probe'
 }
 foreach ($marker in @(
   'transport_connected',
@@ -206,6 +218,17 @@ try {
   throw "Harness relay status did not return JSON: $statusText"
 }
 if ($null -eq $status) { throw 'Harness relay status was empty' }
+
+$protocolText = (& $builtRelay --vibekits-harness-protocol 2>$null | Out-String).Trim()
+try {
+  $protocol = $protocolText | ConvertFrom-Json
+} catch {
+  throw "Harness relay protocol probe did not return JSON: $protocolText"
+}
+if ($LASTEXITCODE -ne 0 -or
+    $protocol.code -notin @('protocol_v2', 'service_unavailable')) {
+  throw "Harness relay protocol probe failed: $protocolText"
+}
 
 $outputDirectory = Split-Path -Parent $OutputFile
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null

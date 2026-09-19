@@ -95,6 +95,16 @@ try {
   throw "Bundled Harness relay status did not return JSON: $relayStatusText"
 }
 if ($null -eq $relayStatus) { throw 'Bundled Harness relay status was empty' }
+$relayProtocolText = (& $relay --vibekits-harness-protocol 2>$null | Out-String).Trim()
+try {
+  $relayProtocol = $relayProtocolText | ConvertFrom-Json
+} catch {
+  throw "Bundled Harness relay protocol probe did not return JSON: $relayProtocolText"
+}
+if ($LASTEXITCODE -ne 0 -or
+    $relayProtocol.code -notin @('protocol_v2', 'service_unavailable')) {
+  throw "Bundled Harness relay does not implement protocol_v2: $relayProtocolText"
+}
 
 $version = (Get-Item -LiteralPath $app).VersionInfo
 if ($version.FileVersion -ne $ExpectedVersion -or $version.ProductVersion -ne $ExpectedVersion) {

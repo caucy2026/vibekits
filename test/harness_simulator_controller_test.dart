@@ -87,7 +87,9 @@ void main() {
       'vibekits_simulator_parallel_',
     );
     addTearDown(() => temporary.delete(recursive: true));
-    final executable = File('${temporary.path}/vibekits-harness-relay');
+    final executable = File(
+      '${temporary.path}/${Platform.isWindows ? 'vibekits-harness-relay.exe' : 'vibekits-harness-relay'}',
+    );
     await executable.writeAsBytes(const <int>[0]);
     var nextPort = 43220;
     final processes = <String, _FakeManagedProcess>{};

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "component": "vibekits-harness-relay",
+  "sourceRepository": "https://github.com/caucy2026/rust-desk.git",
+  "sourceCommit": "41849ebd6c77497abba5f591465a5db643e0f391",
+  "target": "x86_64-pc-windows-msvc",
+  "features": [
+    "flutter"
+  ],
+  "sha256": "ddffb8d7e9890d0ef5ceb344a82cfa2ed1dce62b6990251592075e3daed9615f"
+}

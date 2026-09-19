@@ -16,6 +16,7 @@ void main() {
 
       expect(prepare, contains("'D:\\KEMI-Test\\tools'"));
       expect(prepare, contains('Assert-DDrivePath'));
+      expect(prepare, contains('IsPathRooted'));
       expect(prepare, contains('System.Diagnostics.ProcessStartInfo'));
       expect(prepare, contains(r'RedirectStandardOutput = $true'));
       expect(prepare, contains(r'RedirectStandardError = $true'));
@@ -28,7 +29,12 @@ void main() {
       expect(prepare, contains('transport_connect_timeout'));
       expect(prepare, contains('stdin_eof_v1'));
       expect(prepare, contains('vibekits-harness-remote-assistance-access'));
+      expect(prepare, contains('--vibekits-harness-protocol'));
+      expect(prepare, contains('protocol_v2'));
       expect(prepare, contains('SIMULATOR_CONTROL_TARGET'));
+      expect(prepare, contains(r'src\ipc.rs'));
+      expect(prepare, contains('VibekitsHarnessControlRequest::Protocol'));
+      expect(prepare, contains('service_unavailable'));
       expect(prepare, contains('32148'));
       expect(prepare, contains('RUSTDESK-AGPL-3.0.txt'));
       expect(prepare, contains('Get-FileHash'));
@@ -47,6 +53,9 @@ void main() {
       expect(cmake, contains('message(FATAL_ERROR'));
       expect(verify, contains("'vibekits-harness-relay.exe'"));
       expect(verify, contains(r'$relayManifest.sha256 -ne $relayHash'));
+      expect(verify, contains('--vibekits-harness-protocol'));
+      expect(verify, contains('protocol_v2'));
+      expect(verify, contains('service_unavailable'));
     },
   );
 }
