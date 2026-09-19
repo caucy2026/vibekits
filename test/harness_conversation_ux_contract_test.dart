@@ -53,6 +53,17 @@ void main() {
     expect(script, contains('target.click()'));
     expect(script, contains('[data-composer-card]'));
     expect(script, contains("type: 'vibekits.sessionShortcutMissing'"));
+
+    final String workspace = File(
+      'lib/features/local_models/presentation/official_harness_workspace.dart',
+    ).readAsStringSync();
+    expect(workspace, contains('LogicalKeyboardKey.f1'));
+    expect(workspace, contains('LogicalKeyboardKey.f12'));
+    expect(workspace, contains('_focusHarnessSessionAt'));
+    expect(workspace, contains('__vibekitsFocusSessionAt'));
+    expect(workspace, contains('HardwareKeyboard.instance.addHandler'));
+    expect(workspace, contains('HardwareKeyboard.instance.removeHandler'));
+    expect(workspace, contains('_handleHarnessFunctionKey'));
   });
 
   test('Official Harness behavior bundles remain byte-for-byte unpatched', () {

@@ -272,6 +272,22 @@
     composer?.focus();
   };
 
+  window.__vibekitsFocusSessionAt = (position) => {
+    const index = Number(position) - 1;
+    const visibleSessions = visibleSessionRows();
+    const target = visibleSessions[index];
+    if (!(target instanceof HTMLElement)) {
+      postHostMessage({
+        type: 'vibekits.sessionShortcutMissing',
+        position: index + 1,
+      });
+      return false;
+    }
+    target.click();
+    requestAnimationFrame(() => requestAnimationFrame(focusVisibleComposer));
+    return true;
+  };
+
   if (!window.__vibekitsSessionFunctionKeysInstalled) {
     window.__vibekitsSessionFunctionKeysInstalled = true;
     window.addEventListener('keydown', (event) => {
@@ -279,20 +295,9 @@
           event.metaKey || event.shiftKey) return;
       const match = event.key.match(/^F([1-9]|1[0-2])$/);
       if (!match) return;
-      const index = Number(match[1]) - 1;
-      const visibleSessions = visibleSessionRows();
-      const target = visibleSessions[index];
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!(target instanceof HTMLElement)) {
-        postHostMessage({
-          type: 'vibekits.sessionShortcutMissing',
-          position: index + 1,
-        });
-        return;
-      }
-      target.click();
-      requestAnimationFrame(() => requestAnimationFrame(focusVisibleComposer));
+      window.__vibekitsFocusSessionAt(Number(match[1]));
     }, true);
   }
 

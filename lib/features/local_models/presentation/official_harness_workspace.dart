@@ -136,6 +136,21 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   );
   static const String _credentialKey = 'deepseek-api-key';
   static Future<String>? _conversationUxScript;
+  static final Map<LogicalKeyboardKey, int> _functionKeyPositions =
+      <LogicalKeyboardKey, int>{
+        LogicalKeyboardKey.f1: 1,
+        LogicalKeyboardKey.f2: 2,
+        LogicalKeyboardKey.f3: 3,
+        LogicalKeyboardKey.f4: 4,
+        LogicalKeyboardKey.f5: 5,
+        LogicalKeyboardKey.f6: 6,
+        LogicalKeyboardKey.f7: 7,
+        LogicalKeyboardKey.f8: 8,
+        LogicalKeyboardKey.f9: 9,
+        LogicalKeyboardKey.f10: 10,
+        LogicalKeyboardKey.f11: 11,
+        LogicalKeyboardKey.f12: 12,
+      };
   final HarnessWebViewBridge _webview = HarnessWebViewBridge();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
@@ -195,6 +210,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHarnessFunctionKey);
     HarnessRemoteManagementBridge.bind(
       owner: this,
       startHost: _startRemoteHostForCurrentSession,
@@ -771,6 +787,27 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       _webview.build(permissionRequested: _handleWebPermission);
 
   Future<void> _blockNativeWebViewInput() => HarnessWebViewInputGate.acquire();
+
+  Future<void> _focusHarnessSessionAt(int position) async {
+    if (!_webviewReady || position < 1 || position > 12) return;
+    await _webview.executeScriptVoid(
+      'window.__vibekitsFocusSessionAt?.($position);',
+    );
+  }
+
+  bool _handleHarnessFunctionKey(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isShiftPressed) {
+      return false;
+    }
+    final int? position = _functionKeyPositions[event.logicalKey];
+    if (position == null) return false;
+    unawaited(_focusHarnessSessionAt(position));
+    return true;
+  }
 
   Future<void> _unblockNativeWebViewInput() =>
       HarnessWebViewInputGate.release();
@@ -1811,6 +1848,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
   @override
   void dispose() {
     _disposing = true;
+    HardwareKeyboard.instance.removeHandler(_handleHarnessFunctionKey);
     HarnessRemoteManagementBridge.unbind(this);
     _restartTimer?.cancel();
     _stabilityTimer?.cancel();
@@ -1947,6 +1985,30 @@ window.__vibekitsHarnessQueueBridge?.submit(
         HarnessRemoteControllerRuntime.instance.session;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.f1): () =>
+            unawaited(_focusHarnessSessionAt(1)),
+        const SingleActivator(LogicalKeyboardKey.f2): () =>
+            unawaited(_focusHarnessSessionAt(2)),
+        const SingleActivator(LogicalKeyboardKey.f3): () =>
+            unawaited(_focusHarnessSessionAt(3)),
+        const SingleActivator(LogicalKeyboardKey.f4): () =>
+            unawaited(_focusHarnessSessionAt(4)),
+        const SingleActivator(LogicalKeyboardKey.f5): () =>
+            unawaited(_focusHarnessSessionAt(5)),
+        const SingleActivator(LogicalKeyboardKey.f6): () =>
+            unawaited(_focusHarnessSessionAt(6)),
+        const SingleActivator(LogicalKeyboardKey.f7): () =>
+            unawaited(_focusHarnessSessionAt(7)),
+        const SingleActivator(LogicalKeyboardKey.f8): () =>
+            unawaited(_focusHarnessSessionAt(8)),
+        const SingleActivator(LogicalKeyboardKey.f9): () =>
+            unawaited(_focusHarnessSessionAt(9)),
+        const SingleActivator(LogicalKeyboardKey.f10): () =>
+            unawaited(_focusHarnessSessionAt(10)),
+        const SingleActivator(LogicalKeyboardKey.f11): () =>
+            unawaited(_focusHarnessSessionAt(11)),
+        const SingleActivator(LogicalKeyboardKey.f12): () =>
+            unawaited(_focusHarnessSessionAt(12)),
         paste: () => unawaited(_pasteIntoFocusedWebField()),
         pastePlain: () => unawaited(_pasteIntoFocusedWebField()),
         pasteInsert: () => unawaited(_pasteIntoFocusedWebField()),
