@@ -13,6 +13,8 @@ class AppDelegate: FlutterAppDelegate {
   private var pendingFiles: [String] = []
   private var dartReady = false
   private var webViewMouseMonitor: Any?
+  private var harnessFunctionKeyMonitor: Any?
+  private var harnessShortcutsEnabled = false
   private weak var capturedWebViewResponder: NSView?
   private var webViewInputEnabled = true
 
@@ -36,16 +38,23 @@ class AppDelegate: FlutterAppDelegate {
         binaryMessenger: controller.engine.binaryMessenger
       )
       harnessInputChannel?.setMethodCallHandler { [weak self] call, result in
-        guard call.method == "setWebViewInputEnabled",
-              let enabled = call.arguments as? Bool else {
+        guard let enabled = call.arguments as? Bool else {
           result(FlutterMethodNotImplemented)
           return
         }
-        self?.webViewInputEnabled = enabled
-        if !enabled {
-          self?.capturedWebViewResponder = nil
+        switch call.method {
+        case "setWebViewInputEnabled":
+          self?.webViewInputEnabled = enabled
+          if !enabled {
+            self?.capturedWebViewResponder = nil
+          }
+          result(nil)
+        case "setHarnessShortcutsEnabled":
+          self?.harnessShortcutsEnabled = enabled
+          result(nil)
+        default:
+          result(FlutterMethodNotImplemented)
         }
-        result(nil)
       }
       simulatorHostChannel = FlutterMethodChannel(
         name: "vibekits/simulator_host",
@@ -127,6 +136,7 @@ class AppDelegate: FlutterAppDelegate {
       }
     }
     installWebViewMouseRouting()
+    installHarnessFunctionKeyMonitor()
   }
 
   private func storeApplicationURL(_ packageName: String) -> URL? {
@@ -595,7 +605,34 @@ class AppDelegate: FlutterAppDelegate {
       NSEvent.removeMonitor(monitor)
       webViewMouseMonitor = nil
     }
+    if let monitor = harnessFunctionKeyMonitor {
+      NSEvent.removeMonitor(monitor)
+      harnessFunctionKeyMonitor = nil
+    }
     super.applicationWillTerminate(notification)
+  }
+
+  private func installHarnessFunctionKeyMonitor() {
+    let positions: [UInt16: Int] = [
+      122: 1, 120: 2, 99: 3, 118: 4, 96: 5, 97: 6,
+      98: 7, 100: 8, 101: 9, 109: 10, 103: 11, 111: 12,
+    ]
+    harnessFunctionKeyMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: .keyDown
+    ) { [weak self] event in
+      guard let self,
+            self.harnessShortcutsEnabled,
+            event.window === self.mainFlutterWindow,
+            event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+            let position = positions[event.keyCode] else {
+        return event
+      }
+      self.harnessInputChannel?.invokeMethod(
+        "sessionFunctionKey",
+        arguments: position
+      )
+      return nil
+    }
   }
 
   /// Flutter 3.41's macOS AppKitView composition can paint WKWebView while

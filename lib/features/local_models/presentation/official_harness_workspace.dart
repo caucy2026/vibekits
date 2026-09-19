@@ -151,6 +151,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         LogicalKeyboardKey.f11: 11,
         LogicalKeyboardKey.f12: 12,
       };
+  static const MethodChannel _harnessInputChannel = MethodChannel(
+    'vibekits/harness_input',
+  );
   final HarnessWebViewBridge _webview = HarnessWebViewBridge();
   HarnessSessionHandle? _session;
   StreamSubscription<String>? _outputSubscription;
@@ -211,6 +214,17 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleHarnessFunctionKey);
+    _harnessInputChannel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'sessionFunctionKey' && call.arguments is int) {
+        await _focusHarnessSessionAt(call.arguments as int);
+      }
+    });
+    unawaited(
+      _harnessInputChannel.invokeMethod<void>(
+        'setHarnessShortcutsEnabled',
+        true,
+      ),
+    );
     HarnessRemoteManagementBridge.bind(
       owner: this,
       startHost: _startRemoteHostForCurrentSession,
@@ -1849,6 +1863,13 @@ window.__vibekitsHarnessQueueBridge?.submit(
   void dispose() {
     _disposing = true;
     HardwareKeyboard.instance.removeHandler(_handleHarnessFunctionKey);
+    _harnessInputChannel.setMethodCallHandler(null);
+    unawaited(
+      _harnessInputChannel.invokeMethod<void>(
+        'setHarnessShortcutsEnabled',
+        false,
+      ),
+    );
     HarnessRemoteManagementBridge.unbind(this);
     _restartTimer?.cancel();
     _stabilityTimer?.cancel();

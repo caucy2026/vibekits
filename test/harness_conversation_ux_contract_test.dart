@@ -64,6 +64,16 @@ void main() {
     expect(workspace, contains('HardwareKeyboard.instance.addHandler'));
     expect(workspace, contains('HardwareKeyboard.instance.removeHandler'));
     expect(workspace, contains('_handleHarnessFunctionKey'));
+    expect(workspace, contains("'vibekits/harness_input'"));
+    expect(workspace, contains("'sessionFunctionKey'"));
+    expect(workspace, contains("'setHarnessShortcutsEnabled'"));
+
+    final String appDelegate = File(
+      'macos/Runner/AppDelegate.swift',
+    ).readAsStringSync();
+    expect(appDelegate, contains('installHarnessFunctionKeyMonitor'));
+    expect(appDelegate, contains('sessionFunctionKey'));
+    expect(appDelegate, contains('setHarnessShortcutsEnabled'));
   });
 
   test('Official Harness behavior bundles remain byte-for-byte unpatched', () {
