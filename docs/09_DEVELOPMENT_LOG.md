@@ -1751,3 +1751,9 @@
 - 发布门禁改为同时检查 CLI 协议命令、服务端 `Protocol` 处理和真实 JSON 探针。服务尚未启动时允许明确的 `service_unavailable`，运行中必须返回 `protocol_v2`；不再使用会被 Release 优化移除的 EXE ASCII 字符串作为协议依据。
 - 修复控制器并发测试在 Windows 创建无 `.exe` 假 Relay 的平台兼容错误。Rust Relay 8/8、Flutter 远程仿真 41/41、`flutter analyze` 和完整 Windows Release 自包含检查通过。
 - 运行态证据：`vibekits.exe` 正常响应，内置 Relay 返回 `protocol_v2`；统一 ID `4567540178` 显示 `registrationKeyConfirmed=true`、`callable=true`，固定回环 MCP `32147` 和控制端点 `32148` 均由当前 APP 监听。该证据验证被控端就绪，不冒充另一独立 ID 的跨机连接验收。
+
+# 2026-09-19：dev.222 Harness 会话快捷键与 KEMI 商场发布
+
+- F1–F12 支持切换当前可见 Harness 会话并聚焦输入框，macOS 原生窗口与 WebView 焦点路径均接入；加入会话续接关系存储和官方空白会话 API 适配基础。
+- Harness、应用中心与更新专项 45 项及静态分析通过；正式候选完成 Developer ID 签名、Apple 公证、staple、Gatekeeper、Universal 架构和真实 Harness 工具桥验证。
+- KEMI 商场现有 macOS `app_id=53` 已更新到 `1.9.0-dev.222 / 2222`。公开详情、默认列表、CDN 全量回下载、SHA-256、新旧版本更新检查及回下载包二次验签/启动全部闭环。完整证据见 `docs/acceptance/V1_9_0_DEV222_HARNESS_SESSION_SHORTCUT_MARKET_RELEASE_2026-09-19.md`。
