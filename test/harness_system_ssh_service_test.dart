@@ -37,6 +37,42 @@ void main() {
     expect(source, isNot(contains('systemsetup -setremotelogin')));
   });
 
+  test('Windows OpenSSH 使用系统返回的完整 capability 名称安装', () {
+    final source = File(
+      'lib/features/dev_tools/domain/harness_system_ssh_service.dart',
+    ).readAsStringSync();
+
+    expect(
+      source,
+      contains("Get-WindowsCapability -Online -Name 'OpenSSH.Server*'"),
+    );
+    expect(source, contains(r'if ($null -eq $capability)'));
+    expect(
+      source,
+      contains(r'Add-WindowsCapability -Online -Name $capability.Name'),
+    );
+    expect(source, isNot(contains("OpenSSH.Server~~~~0.0.1'")));
+  });
+
+  test('Windows OpenSSH 为当前账户固定独立授权文件', () {
+    final source = File(
+      'lib/features/dev_tools/domain/harness_system_ssh_service.dart',
+    ).readAsStringSync();
+
+    expect(source, contains(r'# BEGIN VibeKits AuthorizedKeys $account'));
+    expect(
+      source,
+      contains(r'AuthorizedKeysFile %h/.ssh/authorized_keys'),
+    );
+    expect(source, contains(r'sshd_config_default'));
+    expect(
+      source,
+      contains(r'Copy-Item -LiteralPath $sshdConfigDefault'),
+    );
+    expect(source, contains(r'& $sshd -t'));
+    expect(source, contains('sshd_config validation failed; backup restored'));
+  });
+
   test('首次公钥授权仅写入受限条目并可精确撤销', () async {
     final home = await Directory.systemTemp.createTemp('vibekits_ssh_home_');
     addTearDown(() => home.delete(recursive: true));

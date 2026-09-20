@@ -70,7 +70,12 @@ abstract final class HarnessSystemSshService {
     if (override != null) return override(enabled);
     final before = await inspect();
     if (!before.supported) throw UnsupportedError(before.message);
-    if (before.enabled == enabled) return before;
+    // Windows also uses the elevated enable path to repair the per-user
+    // AuthorizedKeysFile rule.  Older builds may have installed sshd while
+    // leaving administrator accounts on administrators_authorized_keys.
+    if (before.enabled == enabled && !(Platform.isWindows && enabled)) {
+      return before;
+    }
 
     if (Platform.isMacOS) {
       final Map<Object?, Object?>? response = await _channel
@@ -554,13 +559,58 @@ abstract final class HarnessSystemSshService {
         '${_windowsDirectory()}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
     final String script = enabled
         ? r'''$ErrorActionPreference = 'Stop'
-$capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1'
+$capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' |
+  Select-Object -First 1
+if ($null -eq $capability) {
+  throw 'OpenSSH Server capability not found'
+}
 if ($capability.State -ne 'Installed') {
-  Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1' | Out-Null
+  Add-WindowsCapability -Online -Name $capability.Name | Out-Null
 }
 $keygen = Join-Path $env:WINDIR 'System32\OpenSSH\ssh-keygen.exe'
 & $keygen -A
 if ($LASTEXITCODE -ne 0) { throw 'ssh-keygen failed' }
+$sshdConfig = Join-Path $env:ProgramData 'ssh\sshd_config'
+$sshdConfigDefault = Join-Path $env:WINDIR 'System32\OpenSSH\sshd_config_default'
+if (-not (Test-Path -LiteralPath $sshdConfig)) {
+  if (-not (Test-Path -LiteralPath $sshdConfigDefault)) {
+    throw 'OpenSSH Server default configuration not found'
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path $sshdConfig) |
+    Out-Null
+  Copy-Item -LiteralPath $sshdConfigDefault -Destination $sshdConfig
+}
+$account = $env:USERNAME
+if ([string]::IsNullOrWhiteSpace($account)) {
+  throw 'Current Windows user is unavailable'
+}
+if (Test-Path -LiteralPath $sshdConfig) {
+  $begin = "# BEGIN VibeKits AuthorizedKeys $account"
+  $end = "# END VibeKits AuthorizedKeys $account"
+  $content = [IO.File]::ReadAllText($sshdConfig)
+  $managed = '(?ms)^' + [regex]::Escape($begin) + '.*?^' +
+    [regex]::Escape($end) + '\r?\n?'
+  $content = [regex]::Replace($content, $managed, '')
+  $safeAccount = $account.Replace('"', '\"')
+  $block = "$begin`r`nMatch User `"$safeAccount`"`r`n" +
+    "    AuthorizedKeysFile %h/.ssh/authorized_keys`r`n" +
+    "Match all`r`n$end`r`n"
+  $firstMatch = [regex]::Match($content, '(?im)^\s*Match\s+')
+  if ($firstMatch.Success) {
+    $content = $content.Insert($firstMatch.Index, $block)
+  } else {
+    $content = $content.TrimEnd() + "`r`n`r`n$block"
+  }
+  $backup = "$sshdConfig.vibekits.bak"
+  Copy-Item -LiteralPath $sshdConfig -Destination $backup -Force
+  [IO.File]::WriteAllText($sshdConfig, $content, [Text.UTF8Encoding]::new($false))
+  $sshd = Join-Path $env:WINDIR 'System32\OpenSSH\sshd.exe'
+  & $sshd -t
+  if ($LASTEXITCODE -ne 0) {
+    Copy-Item -LiteralPath $backup -Destination $sshdConfig -Force
+    throw 'sshd_config validation failed; backup restored'
+  }
+}
 Set-Service -Name sshd -StartupType Automatic
 Start-Service -Name sshd
 '''
