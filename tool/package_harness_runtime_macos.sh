@@ -16,7 +16,8 @@ LEGACY_DESTINATION="$APP_BUNDLE/Contents/MacOS/tools/harness"
 # transport. The helper must live inside VibeKits; discovering another
 # installed RustDesk/KEMI application at runtime is deliberately forbidden.
 RELAY_SOURCE="${VIBEKITS_HARNESS_RELAY_SOURCE:-$PROJECT_ROOT/native/rustdesk/macos/runtime/vibekits-harness-relay}"
-RELAY_DESTINATION="$APP_BUNDLE/Contents/MacOS/vibekits-harness-relay"
+RELAY_BUNDLE="$APP_BUNDLE/Contents/Helpers/VibeKitsHarnessRelay.app"
+RELAY_DESTINATION="$RELAY_BUNDLE/Contents/MacOS/vibekits-harness-relay"
 RELAY_LICENSE_SOURCE="$PROJECT_ROOT/third_party/rustdesk-transport/LICENCE"
 RELAY_LICENSE_DESTINATION="$APP_BUNDLE/Contents/Resources/licenses/RustDesk-AGPL-3.0.txt"
 if [ ! -x "$RELAY_SOURCE" ] || [ ! -f "$RELAY_LICENSE_SOURCE" ]; then
@@ -58,6 +59,21 @@ ditto "$RELAY_SIGNING_STAGE" "$RELAY_DESTINATION"
 rm -f "$RELAY_SIGNING_STAGE"
 ditto "$RELAY_LICENSE_SOURCE" "$RELAY_LICENSE_DESTINATION"
 chmod 755 "$RELAY_DESTINATION"
+cat > "$RELAY_BUNDLE/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.caucy.vibekits.harness-relay</string>
+<key>CFBundleExecutable</key><string>vibekits-harness-relay</string>
+<key>CFBundleName</key><string>VibeKits Harness Relay</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSBackgroundOnly</key><true/>
+</dict></plist>
+PLIST
+codesign --force --sign - "$RELAY_BUNDLE"
+# Remove only the obsolete generated copy, never the source runtime.
+rm -f "$APP_BUNDLE/Contents/MacOS/vibekits-harness-relay"
 echo "Packaged Harness RustDesk transport: $RELAY_DESTINATION"
 
 if [ ! -f "$SOURCE/harness-runtime.json" ] || \
@@ -100,6 +116,7 @@ ditto \
   "$DESTINATION/builtin-skills/vibekits-remote-simulator"
 "$DESTINATION/bin/node" "$PROJECT_ROOT/tool/test_harness_bundled_skill.mjs" "$DESTINATION"
 cp "$PROJECT_ROOT/native/harness/vibekits-session-rebind.mjs" "$DESTINATION/vibekits-session-rebind.mjs"
+cp "$PROJECT_ROOT/native/harness/vibekits-continuation-context.mjs" "$DESTINATION/vibekits-continuation-context.mjs"
 chmod 755 "$DESTINATION/bin/node"
 codesign --force --options runtime --sign - \
   --entitlements "$PROJECT_ROOT/macos/Runner/HarnessNodeAdHoc.entitlements" \

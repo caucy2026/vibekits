@@ -1282,7 +1282,7 @@ final class HarnessSimulatorController {
     try {
       final request = await client.putUrl(
         Uri.parse(
-          'http://127.0.0.1:${session.localPort}${SimulatorUpdateService.uploadPath}',
+          'http://127.0.0.1:${session.mcpLocalPort}${SimulatorUpdateService.uploadPath}',
         ),
       );
       request.persistentConnection = false;

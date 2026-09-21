@@ -921,6 +921,9 @@ abstract final class DeepSeekHarnessService {
         '          VIBEKITS_STRESS_REPORT_DIR: !!js process.env.VIBEKITS_STRESS_REPORT_DIR\n'
         '        failOnStartupError: true\n'
         '        toolCallTimeoutMs: 1800000\n'
+        '- insert:\n'
+        '    - id: vibekits-continuation-context\n'
+        '      name: ${jsonEncode(Uri.file(p.join(File(runtime.approvalPluginPath).parent.path, 'vibekits-continuation-context.mjs')).toString())}\n'
         '$approvalPatch';
     // This file is read on every DSH boot. Rewriting and force-flushing an
     // identical patch invalidates filesystem caches and makes Defender scan it

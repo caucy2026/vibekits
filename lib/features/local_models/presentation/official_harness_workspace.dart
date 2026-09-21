@@ -12,12 +12,18 @@ import '../../../app/platform_storage_layout.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/cluster_task_settings.dart';
 import '../../dev_tools/domain/feishu_harness_tasks.dart';
-import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_startup_recovery.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_runtime_log_store.dart';
+import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_legacy_modules.dart';
 import '../../dev_tools/domain/harness_message_queue.dart';
+import '../../dev_tools/domain/harness_command_broker.dart';
+import '../../dev_tools/domain/harness_continuation_coordinator.dart';
+import '../../dev_tools/domain/harness_continuation_summarizer.dart';
+import '../../dev_tools/domain/harness_continuation_source_resolver.dart';
+import '../../dev_tools/domain/harness_continuation_store.dart';
+import '../../dev_tools/domain/harness_official_remote_adapter.dart';
 import '../../dev_tools/domain/harness_remote_controller_session.dart';
 import '../../dev_tools/domain/harness_remote_controller_runtime.dart';
 import '../../dev_tools/domain/harness_remote_access_settings.dart';
@@ -32,6 +38,7 @@ import '../../dev_tools/domain/harness_remote_peer_store.dart';
 import '../../dev_tools/domain/harness_remote_pairing.dart';
 import '../../dev_tools/domain/harness_remote_pairing_service.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
+import '../../dev_tools/domain/harness_source_context_service.dart';
 import '../../dev_tools/domain/harness_tool_activity_store.dart';
 import '../../dev_tools/domain/harness_work_status.dart';
 import '../../dev_tools/domain/lan_peer_discovery_service.dart';
@@ -201,6 +208,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   HarnessMessageQueueScheduler? _messageQueueScheduler;
   String _queueWorkspaceId = '';
   String _queueSessionId = '';
+  final Set<String> _continuationsInProgress = <String>{};
+  Set<String> _continuationOverlaySessionIds = const <String>{};
+  String _continuationOverlayStatus = '';
   int _queuedMessageCount = 0;
   bool _queuePersistencePending = false;
   bool _harnessBusy = false;
@@ -209,6 +219,20 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool _queueDialogOpen = false;
   String _pendingQueueIdempotencyKey = '';
   Completer<bool>? _pendingQueueAcceptance;
+  HarnessOfficialRemoteAdapter? _commandAdapter;
+  HarnessCommandRegistration? _commandRegistration;
+  late final HarnessContinuationStore _continuationStore =
+      HarnessContinuationStore(
+        home: Directory(
+          '${PlatformStorageLayout.current().harnessHomeDirectory}'
+          '${Platform.pathSeparator}continuations',
+        ),
+      );
+  HarnessSourceContextQuery? _sourceContextQuery;
+  final StreamController<Map<String, Object?>> _commandChanges =
+      StreamController<Map<String, Object?>>.broadcast();
+  int _commandCursor = 0;
+  String _commandState = 'idle';
 
   @override
   void initState() {
@@ -378,6 +402,25 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         setState(() => _status = '正在启动本地 DSH…');
       }
       final VibekitsHarnessToolBridge toolBridge = VibekitsHarnessToolBridge(
+        handlers: <String, HarnessToolHandler>{
+          VibekitsHarnessToolBridge.harnessSourceContextId:
+              (Map<String, Object?> arguments) =>
+                  HarnessSourceContextBroker.instance.query(
+                    (arguments['continuationSessionId']?.toString() ?? '')
+                            .trim()
+                            .isEmpty
+                        ? _queueSessionId
+                        : arguments['continuationSessionId']!.toString(),
+                    arguments['query']?.toString() ?? '',
+                    arguments['afterCursor'] is int
+                        ? arguments['afterCursor']! as int
+                        : 0,
+                    arguments['beforeCursor'] is int
+                        ? arguments['beforeCursor']! as int
+                        : null,
+                    arguments['limit'] is int ? arguments['limit']! as int : 8,
+                  ),
+        },
         activityRecorder: _recordHarnessToolActivity,
         remoteWorkspaceLauncher: widget.remoteWorkspaceLauncher,
         screenshotOcrRunner: widget.screenshotOcrRunner,
@@ -443,6 +486,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         return;
       }
       _session = session;
+      await _commandAdapter?.close();
+      _commandAdapter = null;
       widget.onRunningChanged?.call(true);
       await _outputSubscription?.cancel();
       _outputSubscription = session.output.listen((String chunk) {
@@ -460,6 +505,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         session.exitCode.then((int code) {
           if (!mounted || !identical(_session, session)) return;
           _session = null;
+          _resetCommandBridge();
           widget.onRunningChanged?.call(false);
           if (_starting) {
             setState(() {
@@ -472,6 +518,10 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       );
       await _waitUntilReady(session.url);
       if (!mounted || !identical(_session, session)) return;
+      // The official process announces its browser bootstrap token only after
+      // startup. Capture the final authenticated URL here; constructing the
+      // adapter from the initial bare URL makes every later stream return 401.
+      _commandAdapter = HarnessOfficialRemoteAdapter(session.url);
       if (!_webviewReady) {
         if (webviewInitialization == null) {
           await _webview.initialize();
@@ -516,6 +566,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       await _webview.loadUrl(session.url);
       await firstPage;
       if (!mounted || !identical(_session, session)) return;
+      await _waitForRenderedHarnessSurface();
       await _installCodexConversationUx();
       unawaited(
         Future<void>.delayed(const Duration(milliseconds: 600)).then((_) {
@@ -546,6 +597,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     } on Object catch (error) {
       final HarnessSessionHandle? session = _session;
       _session = null;
+      await _resetCommandBridge();
       if (session != null && session.running) await session.stop();
       widget.onRunningChanged?.call(false);
       if (!mounted) return;
@@ -596,6 +648,32 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     } on Object {
       // Remote transport owns its status. It cannot alter or restart Harness.
     }
+  }
+
+  Future<void> _waitForRenderedHarnessSurface() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final rendered = await _webview
+            .executeScript('''
+(() => {
+  const body = document.body;
+  if (!(body instanceof HTMLElement)) return false;
+  const text = (body.innerText || '').trim();
+  const interactive = body.querySelector(
+    'button, textarea, input, [contenteditable="true"], [role="tree"]',
+  );
+  return text.length >= 8 && interactive instanceof Element;
+})()
+''')
+            .timeout(const Duration(seconds: 2));
+        if (rendered == true || rendered?.toString() == 'true') return;
+      } on Object {
+        // The official application shell is still mounting.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    throw TimeoutException('Harness 页面完成导航后未渲染可交互界面');
   }
 
   void _scheduleUnexpectedExitRecovery(int code) {
@@ -742,6 +820,7 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       final String script = await (_conversationUxScript ??= rootBundle
           .loadString('assets/harness/codex_conversation_ux.js'));
       await _webview.executeScriptVoid(script);
+      await _publishContinuationRelations();
       if (_pointerDiagnostics) {
         await _webview.executeScriptVoid('''
           (() => {
@@ -1083,21 +1162,65 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
   bool get _queueContextReady =>
       _queueWorkspaceId.isNotEmpty && _queueSessionId.isNotEmpty;
 
+  Future<void> _resetCommandBridge() async {
+    _commandRegistration?.unregister();
+    _commandRegistration = null;
+    final adapter = _commandAdapter;
+    _commandAdapter = null;
+    if (adapter != null) await adapter.close();
+  }
+
   Future<void> _setQueueContext(String workspaceId, String sessionId) async {
-    final String workspace = workspaceId.trim();
+    var workspace = workspaceId.trim();
     final String session = sessionId.trim();
     if (workspace.isEmpty || session.isEmpty) return;
-    if (_queueWorkspaceId == workspace && _queueSessionId == session) return;
+    if (_queueSessionId == session && _queueWorkspaceId.isNotEmpty) return;
+    if (RegExp(r'^session-[0-9a-f-]{36}$').hasMatch(session)) {
+      final workspaces = await _commandAdapter?.workspaceSnapshot();
+      for (final candidate in workspaces ?? <Map<String, dynamic>>[]) {
+        final ids = candidate['sessionIds'];
+        if (ids is List && ids.contains(session)) {
+          workspace = candidate['workspaceId'].toString();
+          break;
+        }
+      }
+    }
     _pendingQueueAcceptance?.complete(false);
     _pendingQueueAcceptance = null;
     _pendingQueueIdempotencyKey = '';
     _queueWorkspaceId = workspace;
     _queueSessionId = session;
+    final oldQuery = _sourceContextQuery;
+    if (oldQuery != null) {
+      HarnessSourceContextBroker.instance.unregister(oldQuery);
+    }
+    final sourceService = HarnessSourceContextService(
+      store: _continuationStore,
+      historyLoader: _readAnyHarnessHistory,
+    );
+    _sourceContextQuery = (child, query, after, before, limit) =>
+        sourceService.query(
+          workspace: workspace,
+          continuationSessionId: child,
+          query: query,
+          afterCursor: after,
+          beforeCursor: before,
+          limit: limit,
+        );
+    HarnessSourceContextBroker.instance.register(_sourceContextQuery!);
     _messageQueueScheduler = HarnessMessageQueueScheduler(
       repository: _messageQueue,
       workspaceId: workspace,
       sessionId: session,
       submit: _submitQueuedMessage,
+    );
+    _commandRegistration?.unregister();
+    _commandRegistration = HarnessCommandBroker.instance.register(
+      prompt: _submitRemoteHarnessPrompt,
+      status: _readRemoteHarnessStatus,
+      history: _readRemoteHarnessHistory,
+      cancel: _cancelRemoteHarnessSession,
+      changes: _commandChanges.stream,
     );
     await _messageQueue.load(
       workspaceId: workspace,
@@ -1109,6 +1232,336 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       approvalWaiting: _harnessApprovalWaiting,
     );
     await _refreshQueueCount();
+    // Never keep an official session-selection event waiting on WKWebView
+    // JavaScript. On macOS that re-entrant evaluate call can block the native
+    // view while React is replacing the selected session.
+    unawaited(_publishContinuationRelations());
+  }
+
+  Future<Map<String, Object?>> _readAnyHarnessHistory(
+    String sessionId,
+    int cursor,
+  ) async {
+    final adapter = _commandAdapter;
+    if (adapter == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+    final response = await adapter.request(<String, dynamic>{
+      'type': 'client-request',
+      'rpcId': 'source-history-${DateTime.now().microsecondsSinceEpoch}',
+      'method': 'session.history',
+      'payload': <String, Object?>{'sessionId': sessionId, 'cursor': cursor},
+    });
+    final result = response['result'];
+    final value = result is Map ? result['value'] : null;
+    if (value is! Map) throw const FormatException('Invalid Harness history');
+    return Map<String, Object?>.from(value);
+  }
+
+  Future<void> _publishContinuationRelations({
+    bool verifyAvailability = true,
+  }) async {
+    if (!_webviewReady || _queueWorkspaceId.isEmpty) return;
+    final workspaces = verifyAvailability
+        ? await _commandAdapter?.workspaceSnapshot()
+        : const <Map<String, dynamic>>[];
+    final ids = <String>{
+      for (final workspace in workspaces ?? <Map<String, dynamic>>[])
+        if (workspace['workspaceId'] == _queueWorkspaceId &&
+            workspace['sessionIds'] is List)
+          for (final id in workspace['sessionIds'] as List) id.toString(),
+    };
+    final records =
+        (await _continuationStore.recordsForWorkspace(_queueWorkspaceId))
+            .map(
+              (record) => <String, Object?>{
+                ...record.toJson(),
+                'sourceAvailable':
+                    !verifyAvailability || ids.contains(record.sourceSessionId),
+                'continuationAvailable':
+                    !verifyAvailability ||
+                    ids.contains(record.continuationSessionId),
+              },
+            )
+            .toList(growable: false);
+    await _webview.executeScriptVoid(
+      'window.__vibekitsSetContinuationRelations?.('
+      '${jsonEncode(records)}, ${jsonEncode(_queueSessionId)});',
+    );
+  }
+
+  Future<void> _openContinuationSession(
+    String sessionId,
+    String sessionTitle,
+  ) async {
+    // workspace.insertSessionBefore broadcasts the real official session into
+    // the sidebar on newer runtimes. Prefer selecting that row in-place.
+    final deadline = DateTime.now().add(const Duration(seconds: 1));
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final selected = await _webview
+            .executeScript(
+              'Boolean(window.__vibekitsSelectVisibleSession?.('
+              '${jsonEncode(sessionId)}))',
+            )
+            .timeout(const Duration(seconds: 2));
+        if (selected == true || selected?.toString() == 'true') {
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          return;
+        }
+      } on Object {
+        // The official sidebar may still be applying its workspace event.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+
+    // Official alpha.2 rows intentionally omit their internal session id.
+    // The persisted derived title is unique inside its source chain, so use
+    // the official row click before falling back to a bounded reload.
+    try {
+      final selectedByTitle = await _webview
+          .executeScript(
+            'Boolean(window.__vibekitsOpenSessionByTitle?.('
+            '${jsonEncode(sessionTitle)}))',
+          )
+          .timeout(const Duration(seconds: 2));
+      if (selectedByTitle == true || selectedByTitle?.toString() == 'true') {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        return;
+      }
+    } on Object {
+      // The official sidebar may still be applying its rename event.
+    }
+
+    // Official alpha.2 intentionally omits ids from sidebar rows and renders
+    // every blank session as “New Session” even after rename. Previous derived
+    // blanks are decorated from persisted relations, leaving the fresh row as
+    // the only visible blank. Click it, then verify the official selection id.
+    try {
+      final selectedBlank = await _webview
+          .executeScript(
+            'Boolean(window.__vibekitsOpenOnlyVisibleBlankSession?.())',
+          )
+          .timeout(const Duration(seconds: 2));
+      if (selectedBlank == true || selectedBlank?.toString() == 'true') {
+        final deadline = DateTime.now().add(const Duration(seconds: 2));
+        while (DateTime.now().isBefore(deadline)) {
+          final current = await _webview
+              .executeScript('window.__vibekitsCurrentSessionId?.() || ""')
+              .timeout(const Duration(seconds: 2));
+          if (current?.toString().replaceAll('"', '') == sessionId) return;
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+    } on Object {
+      // The bounded persisted-selection fallback below remains authoritative.
+    }
+
+    // The injected UI calls the currently mounted official Workspace `open`
+    // callback for synthetic persisted rows. Never force a WebView reload for
+    // a blank Session: the official boot screen can wait indefinitely while
+    // that projection is still blank. The child remains visible and retryable
+    // in the sidebar if the mounted callback is briefly unavailable.
+  }
+
+  Future<bool> _executeContinuationUi(String script) async {
+    try {
+      await _webview
+          .executeScriptVoid(script)
+          .timeout(const Duration(seconds: 2));
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  void _setContinuationOverlay(String status, Iterable<String> sessionIds) {
+    if (!mounted) return;
+    setState(() {
+      _continuationOverlayStatus = status;
+      _continuationOverlaySessionIds = status.isEmpty
+          ? const <String>{}
+          : Set<String>.unmodifiable(sessionIds.where((id) => id.isNotEmpty));
+    });
+  }
+
+  Future<void> _continueHarnessSession(Map<String, dynamic> payload) async {
+    final adapter = _commandAdapter;
+    if (adapter == null) {
+      await _executeContinuationUi(
+        'window.__vibekitsSetContinuationError?.('
+        '"派生会话服务尚未就绪，请稍后重试", null);',
+      );
+      return;
+    }
+    final requestKey =
+        payload['sessionId']?.toString().trim().isNotEmpty == true
+        ? payload['sessionId']!.toString().trim()
+        : payload['title']?.toString().trim() ?? '';
+    if (!_continuationsInProgress.add(requestKey)) {
+      return;
+    }
+    final coordinator = HarnessContinuationCoordinator(
+      adapter: adapter,
+      store: _continuationStore,
+      timeout: const Duration(seconds: 45),
+      summarizer: HarnessContinuationSummarizer(
+        adapter: adapter,
+        timeout: const Duration(seconds: 60),
+      ).summarize,
+    );
+    String childSessionId = payload['resumeChildId']?.toString() ?? '';
+    String childTitle = payload['resumeChildTitle']?.toString() ?? '';
+    try {
+      final requestedTitle = payload['title']?.toString().trim() ?? '';
+      final source = await HarnessContinuationSourceResolver(adapter).resolve(
+        requestedSessionId: payload['sessionId']?.toString() ?? '',
+        requestedTitle: requestedTitle,
+      );
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.continuation.source_resolved',
+        'workspaceId': source.workspaceId,
+        'sessionId': source.sessionId,
+        'title': source.title,
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+      final preparedChildId = payload['preparedChildId']?.toString() ?? '';
+      var adoptedChildId = preparedChildId;
+      if (childSessionId.isEmpty && preparedChildId.isEmpty) {
+        _setContinuationOverlay('正在创建派生会话…', <String>[source.sessionId]);
+        await _executeContinuationUi(
+          'window.__vibekitsSetContinuationProgress?.('
+          '"正在创建派生会话…", false, '
+          '${jsonEncode(<String>[source.sessionId])}, '
+          '${jsonEncode(<String>[source.title])});',
+        );
+        // Create through the official session/workspace API, then select the
+        // resulting persisted row. Driving the official New Session button
+        // required temporarily archiving unrelated blank sessions and could
+        // stall the UI while React's projection was catching up.
+        adoptedChildId = '';
+      }
+      if (childSessionId.isEmpty && adoptedChildId.isNotEmpty) {
+        final child = await coordinator.prepareExistingChild(
+          workspaceId: source.workspaceId,
+          childSessionId: adoptedChildId,
+          sourceTitle: source.title,
+          sourceSessionId: source.sessionId,
+        );
+        childSessionId = child.$1;
+        childTitle = child.$2;
+        await _executeContinuationUi(
+          'window.__vibekitsSetContinuationProgress?.('
+          '"正在读取来源会话…", false, '
+          '${jsonEncode(<String>[source.sessionId, childSessionId])}, '
+          '${jsonEncode(<String>['新会话', 'New session', childTitle])});',
+        );
+      } else if (childSessionId.isEmpty) {
+        final child = await coordinator.createEmptyChild(
+          workspaceId: source.workspaceId,
+          sourceTitle: source.title,
+          beforeSessionId: source.sessionId,
+          onCreated: (String sessionId, String title) async {
+            childSessionId = sessionId;
+            childTitle = title;
+            // One WebView round trip creates the synthetic persisted row,
+            // starts its local progress state and selects it through the
+            // mounted official Workspace callback. Multiple sequential
+            // evaluateJavaScript calls here can deadlock WKWebView while it is
+            // applying the official session projection.
+            await _executeContinuationUi(
+              'window.__vibekitsSetPendingContinuation?.('
+              '${jsonEncode(<String, Object?>{'sourceSessionId': source.sessionId, 'sourceTitleSnapshot': source.title, 'continuationSessionId': sessionId, 'continuationTitleSnapshot': title})});'
+              'window.__vibekitsSetContinuationProgress?.('
+              '"正在整理上下文…", false, '
+              '${jsonEncode(<String>[source.sessionId, sessionId])}, '
+              '${jsonEncode(<String>['新会话', 'New session', title])});'
+              'window.__vibekitsOpenSession?.(${jsonEncode(sessionId)});',
+            );
+          },
+        );
+        childSessionId = child.$1;
+        childTitle = child.$2;
+      } else {
+        await _executeContinuationUi(
+          'window.__vibekitsSetContinuationProgress?.('
+          '"正在重新整理…", false, ${jsonEncode(<String>[payload['sessionId']?.toString() ?? '', childSessionId])});',
+        );
+        await _openContinuationSession(childSessionId, childTitle);
+      }
+      final record = await coordinator.completeChild(
+        childSessionId: childSessionId,
+        workspace: source.workspaceId,
+        sourceSessionId: source.sessionId,
+        sourceTitle: source.title,
+        continuationTitle: childTitle,
+        onProgress: (String status) {
+          _setContinuationOverlay(status, <String>[
+            source.sessionId,
+            childSessionId,
+          ]);
+          unawaited(
+            HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+              'type': 'harness.continuation.progress',
+              'status': status,
+              'at': DateTime.now().toUtc().toIso8601String(),
+            }),
+          );
+        },
+      );
+      _setContinuationOverlay('', const <String>[]);
+      // Let the official selection render first, then perform one final UI
+      // publication. This keeps the child usable while the durable relation is
+      // already complete even if WebKit temporarily rejects script execution.
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 250), () async {
+          await _setQueueContext(source.workspaceId, childSessionId);
+          await _publishContinuationRelations(verifyAvailability: false);
+          await _executeContinuationUi(
+            'sessionStorage.removeItem("vibekits.continuation.pending");'
+            'window.__vibekitsSetContinuationProgress?.("", true);',
+          );
+        }).catchError((Object error) async {
+          await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+            'type': 'harness.continuation.relation_ui_deferred',
+            'error': '$error',
+            'at': DateTime.now().toUtc().toIso8601String(),
+          });
+        }),
+      );
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.continuation.completed',
+        'sourceSessionId': record.sourceSessionId,
+        'continuationSessionId': record.continuationSessionId,
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+    } on HarnessContinuationCancelled {
+      _setContinuationOverlay('', const <String>[]);
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.continuation.cancelled',
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+      await _executeContinuationUi(
+        'window.__vibekitsSetContinuationError?.("整理已取消", null);',
+      );
+    } on Object catch (error) {
+      _setContinuationOverlay('', const <String>[]);
+      final retryPayload = <String, Object?>{
+        'sessionId': payload['sessionId']?.toString() ?? '',
+        'title': payload['title']?.toString() ?? '',
+        'resumeChildId': childSessionId,
+        'resumeChildTitle': childTitle,
+      };
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.continuation.failed',
+        'error': '$error',
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+      await _executeContinuationUi(
+        'window.__vibekitsSetContinuationError?.('
+        '${jsonEncode('整理失败：$error')}, ${jsonEncode(retryPayload)});',
+      );
+    } finally {
+      _continuationsInProgress.remove(requestKey);
+    }
   }
 
   Future<bool> _submitQueuedMessage(String text, String idempotencyKey) async {
@@ -1136,6 +1589,98 @@ window.__vibekitsHarnessQueueBridge?.submit(
         _pendingQueueIdempotencyKey = '';
       }
     }
+  }
+
+  Future<Map<String, Object?>> _submitRemoteHarnessPrompt(
+    String text,
+    String requestId,
+  ) async {
+    final adapter = _commandAdapter;
+    if (adapter == null || !_queueContextReady) {
+      throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+    }
+    await adapter.request(<String, dynamic>{
+      'type': 'client-request',
+      'rpcId': requestId,
+      'method': 'session.prompt',
+      'payload': <String, Object?>{
+        'sessionId': _queueSessionId,
+        'requestId': requestId,
+        'mode': 'queue',
+        'text': text,
+      },
+    }, timeout: const Duration(milliseconds: 2500));
+    _commandState = _harnessBusy ? 'queued' : 'accepted';
+    final event = _commandSnapshot(requestId: requestId, advance: true);
+    _commandChanges.add(event);
+    return <String, Object?>{'accepted': true, ...event};
+  }
+
+  Future<Map<String, Object?>> _readRemoteHarnessStatus(
+    String sessionId,
+  ) async {
+    _requireCurrentCommandSession(sessionId);
+    return _commandSnapshot();
+  }
+
+  Future<Map<String, Object?>> _readRemoteHarnessHistory(
+    String sessionId,
+    int cursor,
+  ) async {
+    _requireCurrentCommandSession(sessionId);
+    final adapter = _commandAdapter;
+    if (adapter == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+    final response = await adapter.request(<String, dynamic>{
+      'type': 'client-request',
+      'rpcId': 'history-${DateTime.now().microsecondsSinceEpoch}',
+      'method': 'session.history',
+      'payload': <String, Object?>{'sessionId': sessionId, 'cursor': cursor},
+    }, timeout: const Duration(milliseconds: 2500));
+    final result = response['result'];
+    final value = result is Map ? result['value'] : null;
+    if (value is! Map) throw const FormatException('Invalid Harness history');
+    return Map<String, Object?>.from(value);
+  }
+
+  Future<Map<String, Object?>> _cancelRemoteHarnessSession(
+    String sessionId,
+  ) async {
+    _requireCurrentCommandSession(sessionId);
+    final adapter = _commandAdapter;
+    if (adapter == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+    await adapter.request(<String, dynamic>{
+      'type': 'client-request',
+      'rpcId': 'cancel-${DateTime.now().microsecondsSinceEpoch}',
+      'method': 'session.cancel',
+      'payload': <String, Object?>{'sessionId': sessionId},
+    }, timeout: const Duration(milliseconds: 2500));
+    _commandState = 'stop_requested';
+    final event = _commandSnapshot(advance: true);
+    _commandChanges.add(event);
+    return event;
+  }
+
+  void _requireCurrentCommandSession(String sessionId) {
+    if (!_queueContextReady || sessionId != _queueSessionId) {
+      throw StateError('HARNESS_SESSION_NOT_ACTIVE');
+    }
+  }
+
+  Map<String, Object?> _commandSnapshot({
+    String? requestId,
+    bool advance = false,
+  }) {
+    if (advance) _commandCursor++;
+    return <String, Object?>{
+      'workspaceId': _queueWorkspaceId,
+      'sessionId': _queueSessionId,
+      'requestId': ?requestId,
+      'state': _commandState,
+      'busy': _harnessBusy,
+      'approvalWaiting': _harnessApprovalWaiting,
+      'cursor': _commandCursor,
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
+    };
   }
 
   Future<void> _refreshQueueCount() async {
@@ -1551,6 +2096,16 @@ window.__vibekitsHarnessQueueBridge?.submit(
       unawaited(_handleHarnessEvent(payload!));
       return;
     }
+    if (payload?['type'] == 'vibekits.sessionSelection') {
+      unawaited(() async {
+        await _setQueueContext(
+          'resolve',
+          payload?['sessionId']?.toString() ?? '',
+        );
+        if (mounted) setState(() {});
+      }());
+      return;
+    }
     if (payload?['type'] == 'vibekits.queue.open') {
       unawaited(() async {
         await _setQueueContext(
@@ -1584,6 +2139,41 @@ window.__vibekitsHarnessQueueBridge?.submit(
             duration: const Duration(seconds: 2),
           ),
         );
+      return;
+    }
+    if (payload?['type'] == 'vibekits.sessionFocused') {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'type': 'harness.session_function_key',
+          'position': payload?['position'],
+          'sessionId': payload?['sessionId'],
+          'title': payload?['title'],
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+      return;
+    }
+    if (payload?['type'] == 'vibekits.continueSession') {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'type': 'harness.continuation.requested',
+          'sessionId': payload?['sessionId']?.toString() ?? '',
+          'title': payload?['title']?.toString() ?? '',
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+      unawaited(_continueHarnessSession(payload!));
+      return;
+    }
+    if (payload?['type'] == 'vibekits.sessionMenuGeometry') {
+      unawaited(
+        HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+          'type': 'harness.session_menu_geometry',
+          'continuation': payload?['continuation'],
+          'delete': payload?['delete'],
+          'at': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
       return;
     }
     if (_pointerDiagnostics && payload?['type'] == 'vibekits.pointerProbe') {
@@ -1654,7 +2244,51 @@ window.__vibekitsHarnessQueueBridge?.submit(
     if (payload?['type'] != 'vibekits.deleteSession') return;
     final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
     final String title = (payload?['title'] as String? ?? '').trim();
-    unawaited(_confirmDeleteSession(sessionId, title));
+    final bool isCurrent = payload?['isCurrent'] == true;
+    unawaited(
+      _resolveAndConfirmDeleteSession(
+        sessionId,
+        title,
+        reportedCurrent: isCurrent,
+      ),
+    );
+  }
+
+  Future<void> _resolveAndConfirmDeleteSession(
+    String requestedSessionId,
+    String title, {
+    required bool reportedCurrent,
+  }) async {
+    String sessionId = requestedSessionId.trim();
+    final normalizedTitle = title.trim();
+    // Official alpha.2 can keep the previous selection id on a newly opened
+    // blank derived row. Its displayed continuation title is durable and maps
+    // to the exact child, so prefer that relation over a stale DOM id.
+    if (normalizedTitle.isNotEmpty) {
+      for (final record in await _continuationStore.load()) {
+        if (record.continuationTitleSnapshot.trim() == normalizedTitle) {
+          sessionId = record.continuationSessionId;
+          break;
+        }
+      }
+    }
+    if (sessionId.isEmpty) {
+      final adapter = _commandAdapter;
+      if (adapter == null || normalizedTitle.isEmpty) return;
+      try {
+        final source = await HarnessContinuationSourceResolver(
+          adapter,
+        ).resolve(requestedSessionId: '', requestedTitle: normalizedTitle);
+        sessionId = source.sessionId;
+      } on Object {
+        return;
+      }
+    }
+    await _confirmDeleteSession(
+      sessionId,
+      title,
+      isCurrent: reportedCurrent || sessionId == _queueSessionId,
+    );
   }
 
   Future<void> _handleHarnessEvent(Map<String, dynamic> payload) async {
@@ -1666,6 +2300,19 @@ window.__vibekitsHarnessQueueBridge?.submit(
     _queueAdapterCompatible = payload['compatible'] == true;
     _harnessBusy = payload['busy'] == true;
     _harnessApprovalWaiting = payload['approvalWaiting'] == true;
+    _commandState = _harnessApprovalWaiting
+        ? 'waiting_approval'
+        : _harnessBusy
+        ? 'running'
+        : event == 'turn.failed'
+        ? 'failed'
+        : event == 'turn.cancelled'
+        ? 'stopped'
+        : event == 'turn.completed'
+        ? 'completed'
+        : 'idle';
+    final commandEvent = _commandSnapshot(advance: true);
+    _commandChanges.add(commandEvent);
     _messageQueueScheduler?.updateHarnessState(
       busy: _harnessBusy || !_queueAdapterCompatible,
       approvalWaiting: _harnessApprovalWaiting,
@@ -1740,6 +2387,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
     try {
       final HarnessSessionHandle? session = _session;
       _session = null;
+      await _resetCommandBridge();
       if (session != null && session.running) {
         await session.stop();
         widget.onRunningChanged?.call(false);
@@ -1761,11 +2409,34 @@ window.__vibekitsHarnessQueueBridge?.submit(
     }
   }
 
-  Future<void> _confirmDeleteSession(String sessionId, String title) async {
+  Future<void> _confirmDeleteSession(
+    String sessionId,
+    String title, {
+    required bool isCurrent,
+  }) async {
     if (!mounted ||
         _starting ||
         sessionId.isEmpty ||
         !_deletingSessionIds.add(sessionId)) {
+      return;
+    }
+    if (isCurrent && (_harnessBusy || _harnessApprovalWaiting)) {
+      await _withFlutterOverlay<void>(
+        () => showDialog<void>(
+          context: context,
+          builder: (BuildContext dialogContext) => AlertDialog(
+            title: const Text('会话正在运行'),
+            content: const Text('请先停止当前任务，再永久删除此会话。'),
+            actions: <Widget>[
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('知道了'),
+              ),
+            ],
+          ),
+        ),
+      );
+      _deletingSessionIds.remove(sessionId);
       return;
     }
     final bool confirmed =
@@ -1801,21 +2472,52 @@ window.__vibekitsHarnessQueueBridge?.submit(
     }
     setState(() => _status = '正在删除会话…');
     try {
-      // DSH keeps its workspace/session projection in memory. Editing only the
-      // durable files leaves an undeletable ghost row until the backend exits.
-      // Stop it first so it cannot rewrite the stale projection on shutdown.
-      final HarnessSessionHandle? session = _session;
+      // DSH alpha.2 does not expose a session/delete remote endpoint. Stop the
+      // live owner before editing its durable indexes; otherwise its in-memory
+      // projection can write the deleted row back. The preserved WebView is
+      // reconnected immediately after the exact session is removed.
+      final HarnessSessionHandle? runningSession = _session;
       _session = null;
-      if (session != null && session.running) {
-        await session.stop();
+      await _resetCommandBridge();
+      if (runningSession != null && runningSession.running) {
+        await runningSession.stop();
         widget.onRunningChanged?.call(false);
       }
-      await HarnessSessionStore().deleteSession(sessionId);
+      await HarnessSessionStore(
+        home: Directory(PlatformStorageLayout.current().harnessHomeDirectory),
+      ).deleteSession(sessionId);
+      await _continuationStore.removeContinuationSession(sessionId);
       if (!mounted) return;
-      setState(() => _status = '会话已删除，正在刷新列表…');
       await _start(preserveWebview: true);
-    } on Object catch (error) {
+      final adapter = _commandAdapter;
+      if (adapter == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+      final workspaces = await adapter.workspaceSnapshot();
+      final bool stillPresent = workspaces.any(
+        (workspace) =>
+            workspace['sessionIds'] is List &&
+            (workspace['sessionIds'] as List).any(
+              (id) => id.toString() == sessionId,
+            ),
+      );
+      if (stillPresent) throw StateError('HARNESS_SESSION_DELETE_NOT_APPLIED');
       if (!mounted) return;
+      setState(() => _status = '会话已删除');
+      await _publishContinuationRelations();
+    } on Object catch (error) {
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.session_delete.failed',
+        'sessionId': sessionId,
+        'error': '$error',
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
+      if (!mounted) return;
+      if (_session == null) {
+        try {
+          await _start(preserveWebview: true);
+        } on Object {
+          // Keep the original deletion failure visible to the user.
+        }
+      }
       setState(() {
         _status = '删除会话失败：$error';
       });
@@ -1885,6 +2587,17 @@ window.__vibekitsHarnessQueueBridge?.submit(
     _webMessageSubscription?.cancel();
     _loadingStateSubscription?.cancel();
     _navigationDiagnosticSubscription?.cancel();
+    _commandRegistration?.unregister();
+    _commandRegistration = null;
+    final sourceQuery = _sourceContextQuery;
+    if (sourceQuery != null) {
+      HarnessSourceContextBroker.instance.unregister(sourceQuery);
+    }
+    _sourceContextQuery = null;
+    final commandAdapter = _commandAdapter;
+    _commandAdapter = null;
+    unawaited(commandAdapter?.close());
+    unawaited(_commandChanges.close());
     final HarnessSessionHandle? session = _session;
     if (session != null && session.running) unawaited(session.stop());
     // The app-wide remote endpoint is owned by the explicit assistance switch,
@@ -1910,6 +2623,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
   Widget build(BuildContext context) {
     if (_webviewReady && _restartOverlay) {
       return Stack(
+        fit: StackFit.expand,
         children: <Widget>[
           _buildHarnessWebview(),
           const Positioned(
@@ -2045,8 +2759,72 @@ window.__vibekitsHarnessQueueBridge?.submit(
                     children: <Widget>[
                       Expanded(
                         child: Stack(
+                          fit: StackFit.expand,
                           children: <Widget>[
                             _buildHarnessWebview(),
+                            if (_continuationOverlayStatus.isNotEmpty &&
+                                _continuationOverlaySessionIds.contains(
+                                  _queueSessionId,
+                                ))
+                              Positioned(
+                                left: 280,
+                                right: 72,
+                                bottom: 112,
+                                child: IgnorePointer(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Material(
+                                      key: const Key(
+                                        'harness-continuation-progress',
+                                      ),
+                                      elevation: 1,
+                                      color: Color.lerp(
+                                        Theme.of(context).colorScheme.surface,
+                                        const Color(0xFFB98223),
+                                        0.08,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(9),
+                                        side: BorderSide(
+                                          color: Color.lerp(
+                                            Theme.of(
+                                              context,
+                                            ).colorScheme.outlineVariant,
+                                            const Color(0xFFB98223),
+                                            0.20,
+                                          )!,
+                                        ),
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 9,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: <Widget>[
+                                            const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Color(0xFF8E703C),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 9),
+                                            Text(
+                                              _continuationOverlayStatus,
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             if (_quickActionsExpanded)
                               Positioned.fill(
                                 child: GestureDetector(

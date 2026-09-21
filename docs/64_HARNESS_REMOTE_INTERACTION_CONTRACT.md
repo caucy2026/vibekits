@@ -88,6 +88,16 @@ Harness 首次配对密码默认是 `12345678`，用户可在高级设置中修�
 
 ## 6. 同步与命令可靠性
 
+远程仿真控制端连接指定设备后，必须能通过目标端公开的结构化 MCP 接口直接控制目标电脑自己的 Harness，不得依赖桌面截图、OCR、坐标点击或读取 DSH 私有认证信息。目标端至少公开：
+
+- `vibekits.harness.session_prompt`：三秒内返回 `workspaceId`、`sessionId`、`requestId`、接受/排队状态和游标；
+- `vibekits.harness.session_status`：返回运行、工具运行、等待审批、完成、失败、停止和更新时间；
+- `vibekits.harness.session_history`：按游标增量读取官方聊天与工具轨迹；
+- `vibekits.harness.session_wait`：有界等待游标推进，超时返回 `changed=false`，不能误报失败；
+- `vibekits.harness.session_cancel`：停止指定会话并返回可继续查询的状态。
+
+远端 Harness 仍是会话、模型、工具、审批与历史的唯一权威来源；仿真控制层只发送命令和读取结构化投影。运行中追加命令进入官方队列，不打断当前工具调用。
+
 命令使用 peerId + commandId 去重，内容摘要绑定项目/会话/操作。执行前持久化 claim，回执持久化后返回。重启 pending/unknown 不自动重发，由任务/历史查询核实。每次取缓存回执也要重新授权。
 
 事件使用 epoch + sequence，丢序/重连触发快照与所选会话历史重载。先订阅并记录游标，再加载快照，重放期间事件；UI 应用成功才推进游标。快照和授权变更发生竞争时重新检查范围。全量恢复不能只加载项目列表而漏掉聊天历史。

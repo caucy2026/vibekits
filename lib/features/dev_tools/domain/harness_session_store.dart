@@ -14,6 +14,7 @@ class HarnessSessionStore {
     r'^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
   );
 
+
   Future<void> deleteSession(String sessionId) async {
     if (!_sessionIdPattern.hasMatch(sessionId)) {
       throw const FormatException('Harness 会话 ID 无效');
@@ -104,6 +105,7 @@ class HarnessSessionStore {
     await file.delete();
     await temporary.rename(file.path);
   }
+
 
   static Map<String, dynamic>? _map(Object? value) =>
       value is Map<String, dynamic> ? value : null;

@@ -12,12 +12,16 @@ abstract final class HarnessWebViewInputGate {
   static const MethodChannel _channel = MethodChannel('vibekits/harness_input');
   static int _depth = 0;
   static bool _workspaceActive = true;
-  static bool? _lastAppliedEnabled;
+  static bool _surfaceActive = true;
+  static bool? _lastAppliedInputEnabled;
+  static bool? _lastAppliedVisible;
   static Future<void> Function(bool enabled)? testSetter;
 
   static int get depth => _depth;
 
   static bool get workspaceActive => _workspaceActive;
+
+  static bool get surfaceActive => _surfaceActive;
 
   /// Native WKWebView instances can remain in the AppKit view hierarchy while
   /// their Flutter workspace is offstage in an IndexedStack. Keep the native
@@ -25,8 +29,26 @@ abstract final class HarnessWebViewInputGate {
   /// otherwise an invisible WebView can consume clicks meant for App Center,
   /// About, or another Flutter workspace.
   static Future<void> setWorkspaceActive(bool active) async {
-    if (_workspaceActive == active && _lastAppliedEnabled != null) return;
+    if (_workspaceActive == active &&
+        _lastAppliedInputEnabled != null &&
+        _lastAppliedVisible != null) {
+      return;
+    }
     _workspaceActive = active;
+    await _applyEffectiveState();
+  }
+
+  /// Tracks the inner Harness/OCR switch. macOS AppKit platform views can
+  /// remain painted above an offstage child of IndexedStack, so disabling the
+  /// mouse router alone is insufficient: the native WKWebView must be hidden
+  /// while OCR is selected and restored when Harness becomes active again.
+  static Future<void> setSurfaceActive(bool active) async {
+    if (_surfaceActive == active &&
+        _lastAppliedInputEnabled != null &&
+        _lastAppliedVisible != null) {
+      return;
+    }
+    _surfaceActive = active;
     await _applyEffectiveState();
   }
 
@@ -50,7 +72,7 @@ abstract final class HarnessWebViewInputGate {
     }
   }
 
-  static Future<void> _setEnabled(bool enabled) async {
+  static Future<void> _setInputEnabled(bool enabled) async {
     final override = testSetter;
     if (override != null) {
       await override(enabled);
@@ -66,17 +88,36 @@ abstract final class HarnessWebViewInputGate {
     }
   }
 
+  static Future<void> _setVisible(bool visible) async {
+    if (!Platform.isMacOS || testSetter != null) return;
+    try {
+      await _channel.invokeMethod<void>('setWebViewVisible', visible);
+    } on MissingPluginException {
+      // Non-desktop tests and old hosts have no native platform view.
+    } on PlatformException {
+      // Visibility recovery must not interrupt the surrounding workspace.
+    }
+  }
+
   static Future<void> _applyEffectiveState() async {
-    final bool enabled = _workspaceActive && _depth == 0;
-    if (_lastAppliedEnabled == enabled) return;
-    _lastAppliedEnabled = enabled;
-    await _setEnabled(enabled);
+    final bool visible = _workspaceActive && _surfaceActive;
+    final bool inputEnabled = visible && _depth == 0;
+    if (_lastAppliedInputEnabled != inputEnabled) {
+      _lastAppliedInputEnabled = inputEnabled;
+      await _setInputEnabled(inputEnabled);
+    }
+    if (_lastAppliedVisible != visible) {
+      _lastAppliedVisible = visible;
+      await _setVisible(visible);
+    }
   }
 
   static void resetForTesting() {
     _depth = 0;
     _workspaceActive = true;
-    _lastAppliedEnabled = null;
+    _surfaceActive = true;
+    _lastAppliedInputEnabled = null;
+    _lastAppliedVisible = null;
     testSetter = null;
   }
 }

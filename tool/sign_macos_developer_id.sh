@@ -39,11 +39,16 @@ done < <(find \
   "$APP_BUNDLE/Contents/Frameworks" \
   "$APP_BUNDLE/Contents/Resources/tools" \
   "$APP_BUNDLE/Contents/MacOS" \
+  "$APP_BUNDLE/Contents/Helpers" \
   -type f \( -perm -111 -o -name '*.dylib' -o -name '*.node' \) -print0)
 
 while IFS= read -r -d '' FRAMEWORK; do
   codesign --force --timestamp --options runtime --sign "$IDENTITY" "$FRAMEWORK"
 done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
+
+while IFS= read -r -d '' HELPER; do
+  codesign --force --timestamp --options runtime --sign "$IDENTITY" "$HELPER"
+done < <(find "$APP_BUNDLE/Contents/Helpers" -depth -type d -name '*.app' -print0)
 
 # A generic Hardened Runtime signature strips the JIT exception required by
 # V8. Re-sign the embedded Node explicitly before sealing the outer App.
@@ -98,6 +103,7 @@ done < <(find \
   "$APP_BUNDLE/Contents/MacOS" \
   "$APP_BUNDLE/Contents/Resources/tools" \
   "$APP_BUNDLE/Contents/Frameworks" \
+  "$APP_BUNDLE/Contents/Helpers" \
   -type f \( -perm -111 -o -name '*.dylib' -o -name '*.node' \) -print0)
 if [ "$VERIFIED_MACHO_COUNT" -lt 20 ]; then
   echo "Developer ID verification found too few Mach-O payloads: $VERIFIED_MACHO_COUNT" >&2

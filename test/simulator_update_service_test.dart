@@ -9,6 +9,26 @@ import 'package:vibekits/features/dev_tools/domain/lan_mcp_tool_server.dart';
 import 'package:vibekits/features/dev_tools/domain/simulator_update_service.dart';
 
 void main() {
+  test('仿真候选上传固定走独立 MCP 端口', () async {
+    final source = await File(
+      'lib/features/dev_tools/domain/harness_simulator_controller.dart',
+    ).readAsString();
+    expect(
+      source,
+      contains(
+        "'http://127.0.0.1:\${session.mcpLocalPort}\${SimulatorUpdateService.uploadPath}'",
+      ),
+    );
+    expect(
+      source,
+      isNot(
+        contains(
+          "'http://127.0.0.1:\${session.localPort}\${SimulatorUpdateService.uploadPath}'",
+        ),
+      ),
+    );
+  });
+
   test('Universal 候选校验不依赖目标机安装 Xcode 工具', () {
     final ByteData header = ByteData(48)
       ..setUint32(0, 0xcafebabe, Endian.big)
@@ -26,6 +46,29 @@ void main() {
         Uint8List.fromList(<int>[0xcf, 0xfa, 0xed, 0xfe]),
       ),
       isEmpty,
+    );
+  });
+
+  test('仿真候选接受 ditto AppleDouble 元数据但拒绝第二个载荷', () {
+    expect(
+      SimulatorUpdateService.isAllowedArchiveEntry(
+        '__MACOSX/Vibekits.app/Contents/._Info.plist',
+      ),
+      isTrue,
+    );
+    expect(
+      SimulatorUpdateService.isAllowedArchiveEntry(
+        'Vibekits.app/Contents/MacOS/Vibekits',
+      ),
+      isTrue,
+    );
+    expect(
+      SimulatorUpdateService.isAllowedArchiveEntry('Other.app/Contents'),
+      isFalse,
+    );
+    expect(
+      SimulatorUpdateService.isAllowedArchiveEntry('__MACOSX/Other.app/._x'),
+      isFalse,
     );
   });
 

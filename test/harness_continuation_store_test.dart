@@ -16,6 +16,51 @@ void main() {
     if (await temporary.exists()) await temporary.delete(recursive: true);
   });
 
+  test('deleting a derived session removes only its owned relation', () async {
+    final DateTime now = DateTime.utc(2026, 9, 20);
+    HarnessContinuationRecord record(String id, String source, String child) =>
+        HarnessContinuationRecord(
+          id: id,
+          workspace: '/tmp/work',
+          sourceSessionId: source,
+          continuationSessionId: child,
+          sourceTitleSnapshot: '来源',
+          summary: '摘要',
+          sourceMessageCursor: 'cursor',
+          createdAt: now,
+          updatedAt: now,
+        );
+    await store.upsert(record('r1', 'source-a', 'child-a'));
+    await store.upsert(record('r2', 'source-b', 'child-b'));
+
+    await store.removeContinuationSession('child-a');
+
+    final List<HarnessContinuationRecord> records = await store.load();
+    expect(records.map((item) => item.id), <String>['r2']);
+  });
+
+  test('one derived session id cannot point at two source sessions', () async {
+    final DateTime now = DateTime.utc(2026, 9, 20);
+    HarnessContinuationRecord record(String id, String source) =>
+        HarnessContinuationRecord(
+          id: id,
+          workspace: '/tmp/work',
+          sourceSessionId: source,
+          continuationSessionId: 'shared-child',
+          sourceTitleSnapshot: source,
+          summary: '摘要',
+          sourceMessageCursor: 'cursor',
+          createdAt: now,
+          updatedAt: now,
+        );
+    await store.upsert(record('r1', 'source-a'));
+    await store.upsert(record('r2', 'source-b'));
+
+    final List<HarnessContinuationRecord> records = await store.load();
+    expect(records, hasLength(1));
+    expect(records.single.sourceSessionId, 'source-b');
+  });
+
   test('round trips records and resolves direct source and children', () async {
     final record = HarnessContinuationRecord(
       id: 'relation-1',
@@ -23,6 +68,7 @@ void main() {
       sourceSessionId: 'source-1',
       continuationSessionId: 'child-1',
       sourceTitleSnapshot: '原任务',
+      continuationTitleSnapshot: '原任务 2',
       summary: '目标：继续修复\n下一步：运行测试',
       sourceMessageCursor: '42',
       createdAt: DateTime.utc(2026, 9, 19),
@@ -43,6 +89,8 @@ void main() {
       ['child-1'],
     );
     expect((await store.load()).single.schemaVersion, 1);
+    expect((await store.load()).single.continuationTitleSnapshot, '原任务 2');
+    expect(await store.recordsForWorkspace('/tmp/project'), hasLength(1));
   });
 
   test('missing and corrupt files load as an empty collection', () async {

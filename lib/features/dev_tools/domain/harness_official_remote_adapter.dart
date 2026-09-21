@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 
 abstract interface class HarnessRemoteApiAdapter {
   Future<Map<String, dynamic>> request(
@@ -135,6 +138,11 @@ class HarnessOfficialRemoteAdapter
     if (cookie != null) headers.set(HttpHeaders.cookieHeader, cookie);
   }
 
+  void _invalidateAuthentication() {
+    _cookieHeader = null;
+    _authentication = null;
+  }
+
   /// Keep official request/response envelopes intact; rpcId is correlation,
   /// not a promise of deduplication. The outer command ledger provides that.
   @override
@@ -161,7 +169,13 @@ class HarnessOfficialRemoteAdapter
       if (sessionId is! String || sessionId.isEmpty) {
         throw const FormatException('Invalid official Harness session');
       }
-      final value = await _sessionSnapshot(sessionId).timeout(timeout);
+      final afterCursor = request['cursor'] is int
+          ? request['cursor'] as int
+          : 0;
+      final value = await _sessionSnapshot(
+        sessionId,
+        afterCursor: afterCursor,
+      ).timeout(timeout);
       return <String, dynamic>{
         'type': 'server-response',
         'rpcId': rpcId,
@@ -201,6 +215,14 @@ class HarnessOfficialRemoteAdapter
         return const _OfficialInvocation('session/modelCatalog', {
           'args': <String, Object?>{},
         });
+      case 'session.list':
+        return _OfficialInvocation('session/list', {
+          'args': {
+            '_request': {
+              if (request['cursor'] is String) 'cursor': request['cursor'],
+            },
+          },
+        });
       case 'session.history':
         throw StateError('REMOTE_HISTORY_DISPATCH_BYPASSED');
       case 'session.selectModel':
@@ -234,6 +256,30 @@ class HarnessOfficialRemoteAdapter
         });
       case 'session.cancel':
         return _OfficialInvocation('session/cancel', {
+          'args': {'request': request},
+        });
+      case 'session.delete':
+        return _OfficialInvocation('session/delete', {
+          'args': {'request': request},
+        });
+      case 'workspace.insertSessionBefore':
+        final workspaceId = request['workspaceId'];
+        final sessionId = request['sessionId'];
+        if (workspaceId is! String ||
+            workspaceId.isEmpty ||
+            sessionId is! String ||
+            sessionId.isEmpty) {
+          throw const FormatException('Invalid official workspace session');
+        }
+        return _OfficialInvocation('workspace/insertSessionBefore', {
+          'args': {'request': request},
+        });
+      case 'workspace.archiveSession':
+        return _OfficialInvocation('workspace/archiveSession', {
+          'args': {'request': request},
+        });
+      case 'workspace.unarchiveSession':
+        return _OfficialInvocation('workspace/unarchiveSession', {
           'args': {'request': request},
         });
       default:
@@ -300,41 +346,54 @@ class HarnessOfficialRemoteAdapter
     HttpClientRequest? pending;
     var timedOut = false;
     Future<Map<String, dynamic>> send() async {
-      await _ensureAuthenticated();
-      final request = await _http.postUrl(_apiUri(path));
-      pending = request;
-      if (_closed || timedOut) {
-        request.abort();
-        throw StateError('REMOTE_ADAPTER_REQUEST_ABORTED');
-      }
-      request.followRedirects = false;
-      _authorize(request.headers);
-      request.headers.contentType = ContentType.json;
-      request.add(bytes);
-      final response = await request.close();
-      if (response.statusCode != 200) {
-        await response.drain<void>();
-        throw HttpException('Official DSH HTTP ${response.statusCode}');
-      }
-      final output = <int>[];
-      await for (final chunk in response) {
-        if (output.length + chunk.length > maxFrameBytes) {
+      var renewedSession = false;
+      while (true) {
+        await _ensureAuthenticated();
+        final request = await _http.postUrl(_apiUri(path));
+        pending = request;
+        if (_closed || timedOut) {
           request.abort();
-          throw const FormatException('Official response exceeds frame limit');
+          throw StateError('REMOTE_ADAPTER_REQUEST_ABORTED');
         }
-        output.addAll(chunk);
+        request.followRedirects = false;
+        _authorize(request.headers);
+        request.headers.contentType = ContentType.json;
+        request.add(bytes);
+        final response = await request.close();
+        if (response.statusCode == HttpStatus.unauthorized &&
+            _token != null &&
+            !renewedSession) {
+          await response.drain<void>();
+          renewedSession = true;
+          _invalidateAuthentication();
+          continue;
+        }
+        if (response.statusCode != 200) {
+          await response.drain<void>();
+          throw HttpException('Official DSH HTTP ${response.statusCode}');
+        }
+        final output = <int>[];
+        await for (final chunk in response) {
+          if (output.length + chunk.length > maxFrameBytes) {
+            request.abort();
+            throw const FormatException(
+              'Official response exceeds frame limit',
+            );
+          }
+          output.addAll(chunk);
+        }
+        final decoded = jsonDecode(utf8.decode(output));
+        if (decoded is! Map<String, dynamic>) {
+          throw const FormatException('Invalid official response');
+        }
+        if (rpcId != null &&
+            (decoded['type'] != 'server-response' ||
+                decoded['rpcId'] != rpcId ||
+                decoded['result'] is! Map)) {
+          throw const FormatException('Official response identity mismatch');
+        }
+        return decoded;
       }
-      final decoded = jsonDecode(utf8.decode(output));
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Invalid official response');
-      }
-      if (rpcId != null &&
-          (decoded['type'] != 'server-response' ||
-              decoded['rpcId'] != rpcId ||
-              decoded['result'] is! Map)) {
-        throw const FormatException('Official response identity mismatch');
-      }
-      return decoded;
     }
 
     // Timeout is an unknown outcome, never automatic replay or task stop.
@@ -390,7 +449,10 @@ class HarnessOfficialRemoteAdapter
     throw StateError('REMOTE_INVENTORY_UNAVAILABLE');
   }
 
-  Future<Map<String, dynamic>> _sessionSnapshot(String sessionId) async {
+  Future<Map<String, dynamic>> _sessionSnapshot(
+    String sessionId, {
+    int afterCursor = 0,
+  }) async {
     await for (final frame in _openStream('session/follow', <String, Object?>{
       'args': <String, Object?>{
         'request': <String, Object?>{
@@ -409,11 +471,18 @@ class HarnessOfficialRemoteAdapter
           frame['hasMore'] is! bool) {
         throw const FormatException('Invalid official Session snapshot');
       }
+      final records = <dynamic>[
+        for (final record in frame['records'] as List)
+          if (record is! Map ||
+              record['seq'] is! int ||
+              (record['seq'] as int) > afterCursor)
+            record,
+      ];
       return Map<String, dynamic>.unmodifiable(<String, dynamic>{
         'sessionId': sessionId,
         'header': Map<String, dynamic>.from(frame['header'] as Map),
         'cursor': frame['cursor'],
-        'records': List<dynamic>.unmodifiable(frame['records'] as List),
+        'records': List<dynamic>.unmodifiable(records),
         'hasMore': frame['hasMore'],
         if (frame['projections'] is Map)
           'projections': Map<String, dynamic>.from(frame['projections'] as Map),
@@ -426,14 +495,7 @@ class HarnessOfficialRemoteAdapter
     String endpointName,
     Map<String, Object?> payload,
   ) async* {
-    await _ensureAuthenticated();
-    final socket = await WebSocket.connect(
-      _apiUri(_streamMuxPath, scheme: 'ws').toString(),
-      headers: _cookieHeader == null
-          ? null
-          : <String, dynamic>{HttpHeaders.cookieHeader: _cookieHeader},
-      customClient: _http,
-    );
+    final socket = await _connectStreamSocket();
     if (_closed) {
       await socket.close();
       throw StateError('REMOTE_ADAPTER_CLOSED');
@@ -480,6 +542,63 @@ class HarnessOfficialRemoteAdapter
       }
       _sockets.remove(socket);
       await socket.close();
+    }
+  }
+
+  Future<WebSocket> _connectStreamSocket() async {
+    var renewedSession = false;
+    while (true) {
+      await _ensureAuthenticated();
+      final key = base64.encode(
+        List<int>.generate(16, (_) => Random.secure().nextInt(256)),
+      );
+      final upgradeClient = HttpClient();
+      upgradeClient.findProxy = (_) => 'DIRECT';
+      upgradeClient.connectionTimeout = const Duration(seconds: 10);
+      final request = await upgradeClient.getUrl(_apiUri(_streamMuxPath));
+      request.followRedirects = false;
+      _authorize(request.headers);
+      request.headers
+        ..set(HttpHeaders.connectionHeader, 'Upgrade')
+        ..set(HttpHeaders.upgradeHeader, 'websocket')
+        ..set('Sec-WebSocket-Version', '13')
+        ..set('Sec-WebSocket-Key', key);
+      final response = await request.close();
+      if (response.statusCode == HttpStatus.unauthorized &&
+          _token != null &&
+          !renewedSession) {
+        await response.drain<void>();
+        upgradeClient.close(force: true);
+        renewedSession = true;
+        _invalidateAuthentication();
+        continue;
+      }
+      if (response.statusCode != HttpStatus.switchingProtocols) {
+        await response.drain<void>();
+        upgradeClient.close(force: true);
+        throw WebSocketException(
+          'Official DSH stream upgrade ${response.statusCode}',
+        );
+      }
+      final expectedAccept = base64.encode(
+        sha1
+            .convert(utf8.encode('${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11'))
+            .bytes,
+      );
+      if (response.headers.value('Sec-WebSocket-Accept') != expectedAccept ||
+          response.headers.value(HttpHeaders.upgradeHeader)?.toLowerCase() !=
+              'websocket') {
+        await response.drain<void>();
+        upgradeClient.close(force: true);
+        throw const WebSocketException('Invalid official DSH stream upgrade');
+      }
+      final transport = await response.detachSocket();
+      upgradeClient.close();
+      return WebSocket.fromUpgradedSocket(
+        transport,
+        serverSide: false,
+        compression: CompressionOptions.compressionOff,
+      );
     }
   }
 

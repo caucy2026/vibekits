@@ -26,10 +26,19 @@ BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
   "$APP_BUNDLE/Contents/Info.plist")"
 BRIDGE_FILE="$HOME/Library/Application Support/$BUNDLE_ID/Vibekits/Mcp/tool-bridge.json"
 SMOKE_PID=""
+LAUNCHED_PID=""
 cleanup_smoke() {
   if [ -n "$SMOKE_PID" ] && kill -0 "$SMOKE_PID" 2>/dev/null; then
     kill -TERM "$SMOKE_PID" 2>/dev/null || true
   fi
+  if [ -n "$LAUNCHED_PID" ] && [ "$LAUNCHED_PID" != "$SMOKE_PID" ] && \
+      kill -0 "$LAUNCHED_PID" 2>/dev/null; then
+    kill -TERM "$LAUNCHED_PID" 2>/dev/null || true
+  fi
+  RELAY_EXECUTABLE="$APP_BUNDLE/Contents/Helpers/VibeKitsHarnessRelay.app/Contents/MacOS/vibekits-harness-relay"
+  while IFS= read -r RELAY_PID; do
+    [ -z "$RELAY_PID" ] || kill -TERM "$RELAY_PID" 2>/dev/null || true
+  done < <(pgrep -f "$RELAY_EXECUTABLE --vibekits-harness-service" 2>/dev/null || true)
 }
 trap cleanup_smoke EXIT INT TERM
 
@@ -42,7 +51,9 @@ if [ -f "$BRIDGE_FILE" ]; then
   fi
 fi
 
-open -n "$APP_BUNDLE"
+SMOKE_LOG="${TMPDIR:-/tmp}/vibekits-sign-smoke-$$.log"
+"$APP_BUNDLE/Contents/MacOS/Vibekits" >"$SMOKE_LOG" 2>&1 &
+LAUNCHED_PID="$!"
 for _ in $(seq 1 30); do
   if [ -f "$BRIDGE_FILE" ]; then
     CANDIDATE_PID="$(plutil -extract processId raw -o - "$BRIDGE_FILE" 2>/dev/null || true)"
@@ -55,6 +66,7 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 if [ -z "$SMOKE_PID" ]; then
+  [ ! -f "$SMOKE_LOG" ] || cat "$SMOKE_LOG" >&2
   echo "Signed candidate did not publish its Harness bridge within 30 seconds." >&2
   exit 6
 fi

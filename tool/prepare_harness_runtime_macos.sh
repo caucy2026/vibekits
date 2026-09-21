@@ -213,7 +213,8 @@ for FILE in \
   vibekits-approval.mjs \
   vibekits-parent-watchdog.mjs \
   vibekits-android-stress-mcp.mjs \
-  vibekits-session-rebind.mjs; do
+  vibekits-session-rebind.mjs \
+  vibekits-continuation-context.mjs; do
   cp "$PROJECT_ROOT/native/harness/$FILE" "$TARGET/$FILE"
 done
 mkdir -p "$TARGET/builtin-skills"

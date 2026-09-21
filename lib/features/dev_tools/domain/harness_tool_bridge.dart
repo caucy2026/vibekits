@@ -31,6 +31,7 @@ import 'github_proxy_service.dart';
 import 'harness_tool_activity_store.dart';
 import 'harness_runtime_log_store.dart';
 import 'harness_connection_sessions.dart';
+import 'harness_command_broker.dart';
 import 'harness_remote_access_settings.dart';
 import 'harness_remote_management_bridge.dart';
 import 'harness_simulator_access_settings.dart';
@@ -477,6 +478,17 @@ class VibekitsHarnessToolBridge {
   static const String clusterSetEnabledId = 'vibekits.cluster.set_enabled';
   static const String describeToolId = 'vibekits.system.describe_tool';
   static const String harnessDiagnosticsId = 'vibekits.harness.diagnostics';
+  static const String harnessSessionPromptId =
+      'vibekits.harness.session_prompt';
+  static const String harnessSessionStatusId =
+      'vibekits.harness.session_status';
+  static const String harnessSessionHistoryId =
+      'vibekits.harness.session_history';
+  static const String harnessSessionWaitId = 'vibekits.harness.session_wait';
+  static const String harnessSessionCancelId =
+      'vibekits.harness.session_cancel';
+  static const String harnessSourceContextId =
+      'vibekits.harness.source_context';
   static const String projectIterationInspectId =
       'vibekits.project.iteration_inspect';
   static const String projectBuildId = 'vibekits.project.build';
@@ -657,6 +669,78 @@ class VibekitsHarnessToolBridge {
       description:
           '只读返回远程协助、远程仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。',
       properties: const <String, Object?>{},
+    ),
+    harnessSessionPromptId: _definition(
+      id: harnessSessionPromptId,
+      name: '向本机 Harness 下达任务',
+      description: '把命令直接提交给这台电脑当前可见的官方 Harness 会话；三秒内返回接受或排队回执。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{
+        'text': _string('要交给本机 Harness 执行的完整命令'),
+        'requestId': _string('可选；调用方生成的幂等请求标识'),
+      },
+      required: const <String>['text'],
+    ),
+    harnessSessionStatusId: _definition(
+      id: harnessSessionStatusId,
+      name: '读取本机 Harness 任务状态',
+      description: '结构化返回运行、工具执行、等待审批、完成、失败或停止状态。',
+      properties: <String, Object?>{'sessionId': _string('Harness 会话标识')},
+      required: const <String>['sessionId'],
+    ),
+    harnessSessionHistoryId: _definition(
+      id: harnessSessionHistoryId,
+      name: '增量读取本机 Harness 记录',
+      description: '从指定游标增量读取官方聊天消息和工具轨迹。',
+      properties: <String, Object?>{
+        'sessionId': _string('Harness 会话标识'),
+        'cursor': const <String, Object?>{'type': 'integer', 'minimum': 0},
+      },
+      required: const <String>['sessionId'],
+    ),
+    harnessSessionWaitId: _definition(
+      id: harnessSessionWaitId,
+      name: '等待本机 Harness 状态变化',
+      description: '长轮询等待游标推进；超时返回 changed=false，不把任务误报为失败。',
+      properties: <String, Object?>{
+        'sessionId': _string('Harness 会话标识'),
+        'afterCursor': const <String, Object?>{'type': 'integer', 'minimum': 0},
+        'timeoutMs': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 60000,
+        },
+      },
+      required: const <String>['sessionId'],
+    ),
+    harnessSessionCancelId: _definition(
+      id: harnessSessionCancelId,
+      name: '停止本机 Harness 任务',
+      description: '请求停止指定官方 Harness 会话并返回确认后的状态。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'sessionId': _string('Harness 会话标识')},
+      required: const <String>['sessionId'],
+    ),
+    harnessSourceContextId: _definition(
+      id: harnessSourceContextId,
+      name: '查阅来源会话',
+      description: '只读查询当前继续会话的直接来源。仅在交接摘要不足时调用；返回内容会脱敏、限量并记录工具活动。',
+      properties: <String, Object?>{
+        'continuationSessionId': _string('可选；默认当前继续会话标识'),
+        'query': _string('可选关键词'),
+        'afterCursor': const <String, Object?>{'type': 'integer', 'minimum': 0},
+        'beforeCursor': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 0,
+        },
+        'limit': const <String, Object?>{
+          'type': 'integer',
+          'minimum': 1,
+          'maximum': 20,
+        },
+      },
+      required: const <String>[],
+      available: false,
     ),
     remoteAssistanceStatusId: _definition(
       id: remoteAssistanceStatusId,
@@ -3008,6 +3092,11 @@ class VibekitsHarnessToolBridge {
     if (toolId == systemResourcesId) return _inspectSystemResources;
     if (toolId == capabilityCheckId) return _checkHarnessCapabilities;
     if (toolId == advancedCapabilitiesId) return _advancedCapabilities;
+    if (toolId == harnessSessionPromptId) return _harnessSessionPrompt;
+    if (toolId == harnessSessionStatusId) return _harnessSessionStatus;
+    if (toolId == harnessSessionHistoryId) return _harnessSessionHistory;
+    if (toolId == harnessSessionWaitId) return _harnessSessionWait;
+    if (toolId == harnessSessionCancelId) return _harnessSessionCancel;
     if (toolId == remoteAssistanceStatusId) {
       return _remoteAssistanceStatus;
     }
@@ -3632,6 +3721,38 @@ class VibekitsHarnessToolBridge {
     }
     return result;
   }
+
+  Future<Map<String, Object?>> _harnessSessionPrompt(
+    Map<String, Object?> arguments,
+  ) => HarnessCommandBroker.instance.prompt(
+    '${arguments['text'] ?? ''}',
+    requestId: arguments['requestId']?.toString(),
+  );
+
+  Future<Map<String, Object?>> _harnessSessionStatus(
+    Map<String, Object?> arguments,
+  ) => HarnessCommandBroker.instance.status('${arguments['sessionId'] ?? ''}');
+
+  Future<Map<String, Object?>> _harnessSessionHistory(
+    Map<String, Object?> arguments,
+  ) => HarnessCommandBroker.instance.history(
+    '${arguments['sessionId'] ?? ''}',
+    _integer(arguments['cursor'], 0),
+  );
+
+  Future<Map<String, Object?>> _harnessSessionWait(
+    Map<String, Object?> arguments,
+  ) => HarnessCommandBroker.instance.waitForChange(
+    '${arguments['sessionId'] ?? ''}',
+    _integer(arguments['afterCursor'], 0),
+    Duration(
+      milliseconds: _integer(arguments['timeoutMs'], 30000).clamp(1, 60000),
+    ),
+  );
+
+  Future<Map<String, Object?>> _harnessSessionCancel(
+    Map<String, Object?> arguments,
+  ) => HarnessCommandBroker.instance.cancel('${arguments['sessionId'] ?? ''}');
 
   Future<Map<String, Object?>> _connectSimulator(
     Map<String, Object?> arguments,

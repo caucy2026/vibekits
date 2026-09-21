@@ -1,5 +1,6 @@
 import Cocoa
 import ApplicationServices
+import Darwin
 import FlutterMacOS
 import WebKit
 
@@ -17,6 +18,23 @@ class AppDelegate: FlutterAppDelegate {
   private var harnessShortcutsEnabled = false
   private weak var capturedWebViewResponder: NSView?
   private var webViewInputEnabled = true
+  private let harnessWebViewWrappers = NSHashTable<NSView>.weakObjects()
+
+  override func applicationWillFinishLaunching(_ notification: Notification) {
+    if let bundleId = Bundle.main.bundleIdentifier,
+       let existing = NSRunningApplication.runningApplications(
+         withBundleIdentifier: bundleId
+       ).first(where: {
+         $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+       }) {
+      existing.activate(options: [.activateAllWindows])
+      // terminate(_:) is asynchronous and is unreliable this early in the
+      // AppKit launch lifecycle. Exit before Flutter creates a second engine,
+      // window, Dock identity, relay, or Harness runtime.
+      Darwin.exit(EXIT_SUCCESS)
+    }
+    super.applicationWillFinishLaunching(notification)
+  }
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
     mainFlutterWindow?.acceptsMouseMovedEvents = true
@@ -47,6 +65,14 @@ class AppDelegate: FlutterAppDelegate {
           self?.webViewInputEnabled = enabled
           if !enabled {
             self?.capturedWebViewResponder = nil
+          }
+          result(nil)
+        case "setWebViewVisible":
+          if let contentView = self?.mainFlutterWindow?.contentView {
+            self?.setHarnessWebViewsVisible(enabled, in: contentView)
+            contentView.needsLayout = true
+            contentView.needsDisplay = true
+            self?.mainFlutterWindow?.displayIfNeeded()
           }
           result(nil)
         case "setHarnessShortcutsEnabled":
@@ -609,7 +635,6 @@ class AppDelegate: FlutterAppDelegate {
       NSEvent.removeMonitor(monitor)
       harnessFunctionKeyMonitor = nil
     }
-    super.applicationWillTerminate(notification)
   }
 
   private func installHarnessFunctionKeyMonitor() {
@@ -632,6 +657,39 @@ class AppDelegate: FlutterAppDelegate {
         arguments: position
       )
       return nil
+    }
+  }
+
+  private func setHarnessWebViewsVisible(_ visible: Bool, in view: NSView) {
+    if visible, view === mainFlutterWindow?.contentView {
+      for wrapper in harnessWebViewWrappers.allObjects {
+        wrapper.isHidden = false
+        wrapper.needsDisplay = true
+      }
+    }
+    if let webView = view as? WKWebView {
+      // Flutter's macOS platform-view host keeps its own opaque AppKit layer.
+      // Hiding only WKWebView leaves that wrapper painted above the OCR
+      // workspace as an empty dark rectangle. Hide that dedicated wrapper,
+      // while keeping WebKit itself alive so its backing layer and authorized
+      // official page survive the workspace switch.
+      if let wrapper = webView.superview,
+         wrapper !== mainFlutterWindow?.contentView,
+         wrapper.subviews.count == 1 {
+        harnessWebViewWrappers.add(wrapper)
+        wrapper.isHidden = !visible
+        webView.isHidden = false
+      } else {
+        webView.isHidden = !visible
+      }
+      if visible {
+        webView.needsDisplay = true
+        webView.layer?.setNeedsDisplay()
+      }
+      return
+    }
+    for child in view.subviews {
+      setHarnessWebViewsVisible(visible, in: child)
     }
   }
 

@@ -7,6 +7,8 @@ class MainFlutterWindow: NSWindow {
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
+    self.setFrameAutosaveName("VibekitsMainWindow")
+    _ = self.setFrameUsingName("VibekitsMainWindow", force: false)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

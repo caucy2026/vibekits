@@ -129,7 +129,6 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
-    final AppSettings settings = widget.settingsController.value;
     final VibekitsFileKind startupKind = widget.initialFilePath == null
         ? VibekitsFileKind.unsupported
         : SupportedFileTypes.kindForPath(widget.initialFilePath!);
@@ -140,8 +139,7 @@ class _MainShellState extends State<MainShell> {
       VibekitsFileKind.image => 0,
       VibekitsFileKind.model => 0,
       VibekitsFileKind.audio => 4,
-      VibekitsFileKind.unsupported =>
-        settings.restoreLastTab ? _indexForWorkspace(settings) : 0,
+      VibekitsFileKind.unsupported => 0,
     };
     final int requestedWorkspace = _workspaceIds.indexOf(
       widget.initialWorkspaceId ?? '',
@@ -321,7 +319,9 @@ class _MainShellState extends State<MainShell> {
     if (Platform.isAndroid && !_hasUserSelectedTab) {
       restoredIndex = 0;
     }
-    if (settings.restoreLastTab && restoredIndex != _selectedIndex) {
+    if (_hasUserSelectedTab &&
+        settings.restoreLastTab &&
+        restoredIndex != _selectedIndex) {
       setState(() {
         _selectedIndex = restoredIndex;
         if (Platform.isAndroid || Platform.isIOS) {
@@ -618,9 +618,7 @@ class _MainShellState extends State<MainShell> {
                     VibekitsFileKind.image
                 ? widget.initialFilePath
                 : null),
-        initialLargeModelView: Platform.isAndroid
-            ? 'agent'
-            : settings.lastLargeModelView,
+        initialLargeModelView: 'agent',
         onLargeModelViewChanged: (String view) =>
             widget.settingsController.updateInBackground(
               widget.settingsController.value.copyWith(

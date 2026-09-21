@@ -68,4 +68,22 @@ void main() {
     await HarnessWebViewInputGate.release();
     expect(values, <bool>[false, true]);
   });
+
+  test('切到 OCR 时隐藏原生 WebView 并在返回 Harness 后恢复', () async {
+    final values = <bool>[];
+    HarnessWebViewInputGate.testSetter = (bool enabled) async {
+      values.add(enabled);
+    };
+
+    await HarnessWebViewInputGate.setSurfaceActive(false);
+    expect(HarnessWebViewInputGate.surfaceActive, isFalse);
+    expect(values, <bool>[false]);
+
+    await HarnessWebViewInputGate.setWorkspaceActive(false);
+    await HarnessWebViewInputGate.setSurfaceActive(true);
+    expect(values, <bool>[false]);
+
+    await HarnessWebViewInputGate.setWorkspaceActive(true);
+    expect(values, <bool>[false, true]);
+  });
 }

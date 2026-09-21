@@ -68,7 +68,7 @@
 
 - [ ] **Step 1: Add failing adapter tests** with a fake Harness service for summary completion, invalid/cancelled summary, blank session creation, first-request context, and rollback.
 - [ ] **Step 2: Run the focused tests** and confirm missing adapter methods fail.
-- [ ] **Step 3: Add the right-click bridge action** labelled `整理上下文并继续`, disabled for active sessions, with progress and cancellation messages.
+- [ ] **Step 3: Add the right-click bridge action** labelled `新会话`, with tooltip `压缩当前会话上下文并创建新会话继续开发`, disabled for active sessions, with progress and cancellation messages.
 - [ ] **Step 4: Implement adapter orchestration** in the required order: summarize, validate, create empty session, atomically save relation, select the child; delete an empty child if persistence fails.
 - [ ] **Step 5: Run the focused tests** and confirm visible user history stays empty while the first execution receives the bounded handoff.
 

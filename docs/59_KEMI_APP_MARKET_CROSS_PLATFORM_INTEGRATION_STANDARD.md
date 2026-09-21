@@ -583,6 +583,7 @@ security:
 
 ## 13. 禁止事项
 
+- VibeKits 主程序禁止启动时或后台检查、弹窗提示、下载或安装自身更新；VibeKits 的版本发现与更新只允许在“应用中心”商城页面由用户主动触发；
 - 禁止把管理员账号、密码或 token 编译进 APP；
 - 禁止未签名、未公证、调试包或测试包上架；
 - 禁止省略桌面端 `os`；
@@ -604,8 +605,8 @@ security:
 
 - 商城模型、平台过滤、安全下载和安装入口：`lib/features/app_center/domain/app_center_service.dart`
 - 应用中心页面：`lib/features/app_center/presentation/app_center_tab.dart`
-- 自更新检查、下载与校验：`lib/app/app_update_service.dart`
+- VibeKits 自更新禁用边界：`lib/app/app_update_service.dart`（保留兼容接口但必须零网络、零弹窗、零下载、零安装）
 - 商城合同测试：`test/app_center_test.dart`
-- 自更新合同测试：`test/app_update_service_test.dart`
+- 商城专属更新边界测试：`test/app_update_service_test.dart`
 
 复制实现后必须替换包名、版本读取、产品文案和平台安装策略，并重新执行本文全部门禁。VibeKits 的包名、版本或商城 `app_id` 不能成为其他产品的默认值。

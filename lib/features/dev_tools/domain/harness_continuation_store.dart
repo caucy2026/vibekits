@@ -8,6 +8,7 @@ class HarnessContinuationRecord {
     required this.sourceSessionId,
     required this.continuationSessionId,
     required this.sourceTitleSnapshot,
+    this.continuationTitleSnapshot = '',
     required this.summary,
     required this.sourceMessageCursor,
     required this.createdAt,
@@ -20,6 +21,7 @@ class HarnessContinuationRecord {
   final String sourceSessionId;
   final String continuationSessionId;
   final String sourceTitleSnapshot;
+  final String continuationTitleSnapshot;
   final String summary;
   final String sourceMessageCursor;
   final DateTime createdAt;
@@ -33,6 +35,7 @@ class HarnessContinuationRecord {
     'sourceSessionId': sourceSessionId,
     'continuationSessionId': continuationSessionId,
     'sourceTitleSnapshot': sourceTitleSnapshot,
+    'continuationTitleSnapshot': continuationTitleSnapshot,
     'summary': summary,
     'sourceMessageCursor': sourceMessageCursor,
     'createdAt': createdAt.toUtc().toIso8601String(),
@@ -47,6 +50,7 @@ class HarnessContinuationRecord {
       other.sourceSessionId == sourceSessionId &&
       other.continuationSessionId == continuationSessionId &&
       other.sourceTitleSnapshot == sourceTitleSnapshot &&
+      other.continuationTitleSnapshot == continuationTitleSnapshot &&
       other.summary == summary &&
       other.sourceMessageCursor == sourceMessageCursor &&
       other.createdAt == createdAt &&
@@ -60,6 +64,7 @@ class HarnessContinuationRecord {
     sourceSessionId,
     continuationSessionId,
     sourceTitleSnapshot,
+    continuationTitleSnapshot,
     summary,
     sourceMessageCursor,
     createdAt,
@@ -104,7 +109,11 @@ class HarnessContinuationStore {
   Future<void> upsert(HarnessContinuationRecord record) async {
     final HarnessContinuationRecord normalized = _normalize(record);
     final List<HarnessContinuationRecord> records = List.of(await load())
-      ..removeWhere((item) => item.id == normalized.id)
+      ..removeWhere(
+        (item) =>
+            item.id == normalized.id ||
+            item.continuationSessionId == normalized.continuationSessionId,
+      )
       ..add(normalized);
     records.sort((left, right) => left.createdAt.compareTo(right.createdAt));
     if (records.length > maxRecords) {
@@ -141,10 +150,32 @@ class HarnessContinuationStore {
     );
   }
 
+  Future<List<HarnessContinuationRecord>> recordsForWorkspace(
+    String workspace,
+  ) async {
+    final String key = _normalizeWorkspace(workspace);
+    return List<HarnessContinuationRecord>.unmodifiable(
+      (await load()).where((record) => record.workspace == key),
+    );
+  }
+
   Future<void> removeWorkspace(String workspace) async {
     final String key = _normalizeWorkspace(workspace);
     await _save(
       (await load()).where((record) => record.workspace != key).toList(),
+    );
+  }
+
+  /// Removes metadata owned by a deleted derived session. Relations whose
+  /// source was deleted remain so the derived session can explicitly report
+  /// that its source is no longer available.
+  Future<void> removeContinuationSession(String sessionId) async {
+    final String key = sessionId.trim();
+    if (key.isEmpty) return;
+    await _save(
+      (await load())
+          .where((record) => record.continuationSessionId != key)
+          .toList(),
     );
   }
 
@@ -179,6 +210,7 @@ class HarnessContinuationStore {
       sourceSessionId: record.sourceSessionId.trim(),
       continuationSessionId: record.continuationSessionId.trim(),
       sourceTitleSnapshot: record.sourceTitleSnapshot.trim(),
+      continuationTitleSnapshot: record.continuationTitleSnapshot.trim(),
       summary: record.summary,
       sourceMessageCursor: record.sourceMessageCursor.trim(),
       createdAt: record.createdAt.toUtc(),
@@ -203,6 +235,8 @@ class HarnessContinuationStore {
           sourceSessionId: '${value['sourceSessionId'] ?? ''}',
           continuationSessionId: '${value['continuationSessionId'] ?? ''}',
           sourceTitleSnapshot: '${value['sourceTitleSnapshot'] ?? ''}',
+          continuationTitleSnapshot:
+              '${value['continuationTitleSnapshot'] ?? ''}',
           summary: '${value['summary'] ?? ''}',
           sourceMessageCursor: '${value['sourceMessageCursor'] ?? ''}',
           createdAt: createdAt,

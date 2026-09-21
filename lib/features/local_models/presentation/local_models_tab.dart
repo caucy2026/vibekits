@@ -19,6 +19,7 @@ import '../domain/pp_ocr_v6.dart';
 import '../domain/screenshot_capture.dart';
 import '../domain/vad_inference.dart';
 import 'deepseek_agent_workspace.dart';
+import 'harness_webview_input_gate.dart';
 import 'official_harness_workspace.dart';
 
 Future<List<int>> loadBundledModelAsset(String path) async {
@@ -148,10 +149,13 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     _workspace =
         widget.initialImagePath != null || widget.initialImportPath != null
         ? _ModelWorkspace.ocr
-        : widget.initialLargeModelView == 'ocr'
-        ? _ModelWorkspace.ocr
         : _ModelWorkspace.agent;
     _agentOpened = _workspace == _ModelWorkspace.agent;
+    unawaited(
+      HarnessWebViewInputGate.setSurfaceActive(
+        _workspace == _ModelWorkspace.agent,
+      ),
+    );
     if (!Platform.isAndroid && !Platform.isIOS) {
       unawaited(_initializeHarnessDebugDirectory());
     }
@@ -171,6 +175,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
         _workspace = _ModelWorkspace.agent;
         _agentOpened = true;
       });
+      unawaited(HarnessWebViewInputGate.setSurfaceActive(true));
       final Future<void>? update = widget.onLargeModelViewChanged?.call(
         'agent',
       );
@@ -863,6 +868,11 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                       _agentOpened = true;
                     }
                   });
+                  unawaited(
+                    HarnessWebViewInputGate.setSurfaceActive(
+                      _workspace == _ModelWorkspace.agent,
+                    ),
+                  );
                   widget.onLargeModelViewChanged?.call(
                     _workspace == _ModelWorkspace.agent ? 'agent' : 'ocr',
                   );

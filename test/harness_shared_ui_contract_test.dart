@@ -28,6 +28,40 @@ void main() {
     expect(source, contains('VibekitsHarnessToolBridge('));
   });
 
+  test('session deletion stops the live owner and verifies removal', () {
+    final String source = File(
+      'lib/features/local_models/presentation/official_harness_workspace.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('await _resetCommandBridge()'));
+    expect(source, contains('await runningSession.stop()'));
+    expect(source, contains('HarnessSessionStore('));
+    expect(
+      source,
+      contains('PlatformStorageLayout.current().harnessHomeDirectory'),
+    );
+    expect(source, contains(').deleteSession(sessionId)'));
+    expect(source, contains('await _start(preserveWebview: true)'));
+    expect(source, contains('await adapter.workspaceSnapshot()'));
+    expect(source, contains('HARNESS_SESSION_DELETE_NOT_APPLIED'));
+    expect(source, contains('record.continuationTitleSnapshot.trim()'));
+    expect(source, contains('sessionId = record.continuationSessionId'));
+  });
+
+  test(
+    'macOS restores the same native Harness wrapper after OCR switching',
+    () {
+      final String source = File(
+        'macos/Runner/AppDelegate.swift',
+      ).readAsStringSync();
+
+      expect(source, contains('harnessWebViewWrappers'));
+      expect(source, contains('harnessWebViewWrappers.allObjects'));
+      expect(source, contains('harnessWebViewWrappers.add(wrapper)'));
+      expect(source, contains('wrapper.isHidden = false'));
+    },
+  );
+
   test('official and fallback Harness action rails stay scrollable', () {
     final String official = File(
       'lib/features/local_models/presentation/official_harness_workspace.dart',

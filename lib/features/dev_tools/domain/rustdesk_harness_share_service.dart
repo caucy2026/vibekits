@@ -269,6 +269,9 @@ abstract final class RustDeskHarnessShareService {
         ? 'vibekits-harness-relay.exe'
         : 'vibekits-harness-relay';
     final List<String> candidates = <String>[
+      if (Platform.isMacOS)
+        '${File(Platform.resolvedExecutable).parent.parent.path}'
+            '/Helpers/VibeKitsHarnessRelay.app/Contents/MacOS/$siblingName',
       '${File(Platform.resolvedExecutable).parent.path}'
           '${Platform.pathSeparator}$siblingName',
     ];

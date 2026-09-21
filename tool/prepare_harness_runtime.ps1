@@ -91,6 +91,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-parent-watchdog.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-android-stress-mcp.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-session-rebind.mjs') -Destination $target
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-continuation-context.mjs') -Destination $target
 $builtInSkills = Join-Path $target 'builtin-skills'
 New-Item -ItemType Directory -Path $builtInSkills | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\builtin-skills\kemi-s1-hardware-debug') -Destination $builtInSkills -Recurse

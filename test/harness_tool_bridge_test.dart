@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_server_endpoint.dart';
 import 'package:vibekits/features/dev_tools/domain/adb_service.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_bridge.dart';
+import 'package:vibekits/features/dev_tools/domain/harness_command_broker.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_tool_activity_store.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_work_status.dart';
 import 'package:vibekits/features/dev_tools/domain/remote_connection_record.dart';
@@ -18,6 +19,56 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('远程仿真目录公开 Harness 全自动会话闭环', () async {
+    final StreamController<Map<String, Object?>> changes =
+        StreamController<Map<String, Object?>>.broadcast();
+    final registration = HarnessCommandBroker.instance.register(
+      prompt: (String text, String requestId) async => <String, Object?>{
+        'accepted': true,
+        'sessionId': 'session-1',
+        'requestId': requestId,
+        'text': text,
+      },
+      status: (String sessionId) async => <String, Object?>{
+        'sessionId': sessionId,
+        'state': 'running',
+      },
+      history: (String sessionId, int cursor) async => <String, Object?>{
+        'sessionId': sessionId,
+        'cursor': cursor + 1,
+      },
+      cancel: (String sessionId) async => <String, Object?>{
+        'sessionId': sessionId,
+        'state': 'stop_requested',
+      },
+      changes: changes.stream,
+    );
+    addTearDown(() async {
+      registration.unregister();
+      await changes.close();
+    });
+    final bridge = VibekitsHarnessToolBridge();
+    final ids = bridge.executableCatalog.map((tool) => tool.id).toSet();
+    expect(
+      ids,
+      containsAll(<String>{
+        VibekitsHarnessToolBridge.harnessSessionPromptId,
+        VibekitsHarnessToolBridge.harnessSessionStatusId,
+        VibekitsHarnessToolBridge.harnessSessionHistoryId,
+        VibekitsHarnessToolBridge.harnessSessionWaitId,
+        VibekitsHarnessToolBridge.harnessSessionCancelId,
+      }),
+    );
+    final result = await bridge.invoke(
+      toolId: VibekitsHarnessToolBridge.harnessSessionPromptId,
+      arguments: const <String, Object?>{'text': '安装 KOffice'},
+      approve: (_) async => true,
+    );
+    expect(result.ok, isTrue);
+    expect(result.data?['accepted'], isTrue);
+    expect(result.data?['sessionId'], 'session-1');
+  });
+
   test('Harness 可见参数和结果摘要保留工程细节且脱敏凭据', () {
     final String summary = HarnessToolActivityStore.summarizeForDisplay(
       <String, Object?>{

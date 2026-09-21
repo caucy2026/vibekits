@@ -59,8 +59,7 @@ void main() {
     expect(displayContext, contains("MethodChannel('vibekits/display')"));
     expect(displayContext, contains("role == 'continuous_canvas'"));
     expect(shell, contains('_selectedIndex = 0'));
-    expect(shell, contains('initialLargeModelView: Platform.isAndroid'));
-    expect(shell, contains("? 'agent'"));
+    expect(shell, contains("initialLargeModelView: 'agent'"));
     expect(shell, isNot(contains("? 'system_resources'")));
   });
 

@@ -429,16 +429,20 @@ final class SimulatorUpdateService {
         .where((String path) => path != packagePath && path.isNotEmpty)
         .toList(growable: false);
     if (paths.isEmpty ||
-        paths.any(
-          (String path) =>
-              path != 'Vibekits.app' && !path.startsWith('Vibekits.app/'),
-        )) {
+        paths.any((String path) => !isAllowedArchiveEntry(path))) {
       throw StateError('候选 ZIP 条目必须全部位于 Vibekits.app 根目录');
     }
     if (paths.any((String path) => path.split('/').contains('..'))) {
       throw StateError('候选 ZIP 包含不安全路径');
     }
   }
+
+  static bool isAllowedArchiveEntry(String path) =>
+      path == 'Vibekits.app' ||
+      path.startsWith('Vibekits.app/') ||
+      path == '__MACOSX' ||
+      path == '__MACOSX/' ||
+      path.startsWith('__MACOSX/Vibekits.app/');
 
   static String _resolveCurrentBundlePath() {
     Directory current = File(Platform.resolvedExecutable).absolute.parent;

@@ -51,6 +51,15 @@ class HarnessWebViewBridge {
         },
       );
       await controller.setJavaScriptMode(mac.JavaScriptMode.unrestricted);
+      await controller.setOnConsoleMessage((mac.JavaScriptConsoleMessage message) {
+        if (message.level != mac.JavaScriptLogLevel.error &&
+            message.level != mac.JavaScriptLogLevel.warning) {
+          return;
+        }
+        _navigationDiagnostics.add(
+          'console ${message.level.name} ${message.message}',
+        );
+      });
       await controller.addJavaScriptChannel(
         'VibekitsHost',
         onMessageReceived: (mac.JavaScriptMessage message) {

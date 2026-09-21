@@ -54,11 +54,11 @@ void main() {
           'type': 'client-request',
           'rpcId': 'history-1',
           'method': 'session.history',
-          'payload': {'sessionId': 'session-1'},
+          'payload': {'sessionId': 'session-1', 'cursor': 7},
         });
         final value = ((result['result'] as Map)['value'] as Map);
         expect(value['cursor'], 7);
-        expect((value['records'] as List), hasLength(1));
+        expect((value['records'] as List), isEmpty);
       } finally {
         await adapter.close();
         await server.close(force: true);
@@ -104,6 +104,52 @@ void main() {
       );
       expect(event['method'], 'api-session/status');
       expect((event['payload'] as Map)['sessionId'], 's');
+    } finally {
+      await adapter.close();
+      await server.close(force: true);
+    }
+  });
+
+  test('official WebSocket renews a stale browser session once', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final adapter = HarnessOfficialRemoteAdapter(
+      Uri.parse('http://127.0.0.1:${server.port}/?token=local-ui-secret'),
+    );
+    var exchanges = 0;
+    server.listen((request) async {
+      if (request.uri.path == '/') {
+        exchanges++;
+        request.response.cookies.add(
+          Cookie('dsh_session', 'signed-$exchanges'),
+        );
+        request.response.statusCode = HttpStatus.seeOther;
+        await request.response.close();
+        return;
+      }
+      if (request.cookies.single.value == 'signed-1') {
+        request.response.statusCode = HttpStatus.unauthorized;
+        await request.response.close();
+        return;
+      }
+      final socket = await WebSocketTransformer.upgrade(request);
+      final open = jsonDecode(await socket.first as String) as Map;
+      socket.add(
+        jsonEncode({
+          'type': 'item',
+          'streamId': open['streamId'],
+          'value': {
+            'type': 'emit',
+            'event': 'api-session/status',
+            'args': ['renewed', true],
+          },
+        }),
+      );
+      await socket.close();
+    });
+    try {
+      final event = await adapter.events().first;
+      expect((event['payload'] as Map)['sessionId'], 'renewed');
+      expect(exchanges, 2);
     } finally {
       await adapter.close();
       await server.close(force: true);
@@ -219,6 +265,53 @@ void main() {
     },
   );
 
+  test('official HTTP carrier renews a stale browser session once', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final adapter = HarnessOfficialRemoteAdapter(
+      Uri.parse('http://127.0.0.1:${server.port}/?token=local-ui-secret'),
+    );
+    var exchanges = 0;
+    server.listen((request) async {
+      if (request.uri.path == '/') {
+        exchanges++;
+        request.response.cookies.add(
+          Cookie('dsh_session', 'signed-$exchanges'),
+        );
+        request.response.statusCode = HttpStatus.seeOther;
+        await request.response.close();
+        return;
+      }
+      if (request.cookies.single.value == 'signed-1') {
+        request.response.statusCode = HttpStatus.unauthorized;
+        await request.response.close();
+        return;
+      }
+      final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(
+        jsonEncode({
+          'type': 'server-response',
+          'rpcId': body['rpcId'],
+          'result': {'ok': true, 'value': <String, Object?>{}},
+        }),
+      );
+      await request.response.close();
+    });
+    try {
+      final result = await adapter.request({
+        'type': 'client-request',
+        'rpcId': 'renew-once',
+        'method': 'session.cancel',
+        'payload': {'sessionId': 'session'},
+      });
+      expect((result['result'] as Map)['ok'], isTrue);
+      expect(exchanges, 2);
+    } finally {
+      await adapter.close();
+      await server.close(force: true);
+    }
+  });
+
   test(
     'creates an empty official session in the requested workspace',
     () async {
@@ -257,6 +350,68 @@ void main() {
           ((response['result'] as Map)['value'] as Map)['sessionId'],
           'session-empty',
         );
+      } finally {
+        await adapter.close();
+        await server.close(force: true);
+      }
+    },
+  );
+
+  test(
+    'uses official list and archive APIs to isolate reusable blanks',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final adapter = HarnessOfficialRemoteAdapter(
+        Uri.parse('http://127.0.0.1:${server.port}'),
+      );
+      final seen = <String>[];
+      server.listen((request) async {
+        final body = jsonDecode(await utf8.decoder.bind(request).join()) as Map;
+        seen.add(request.uri.path);
+        final args = (body['payload'] as Map)['args'] as Map;
+        if (request.uri.path == '/api/session/list') {
+          expect(args['_request'], {'cursor': 'next'});
+        } else {
+          expect(args['request'], {'sessionId': 'blank-1'});
+        }
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'type': 'server-response',
+            'rpcId': body['rpcId'],
+            'result': {
+              'ok': true,
+              'value': request.uri.path == '/api/session/list'
+                  ? {'items': <Object?>[]}
+                  : {'archivedSessionIds': <Object?>[]},
+            },
+          }),
+        );
+        await request.response.close();
+      });
+      try {
+        await adapter.request({
+          'type': 'client-request',
+          'rpcId': 'list',
+          'method': 'session.list',
+          'payload': {'cursor': 'next'},
+        });
+        for (final method in const [
+          'workspace.archiveSession',
+          'workspace.unarchiveSession',
+        ]) {
+          await adapter.request({
+            'type': 'client-request',
+            'rpcId': method,
+            'method': method,
+            'payload': {'sessionId': 'blank-1'},
+          });
+        }
+        expect(seen, [
+          '/api/session/list',
+          '/api/workspace/archiveSession',
+          '/api/workspace/unarchiveSession',
+        ]);
       } finally {
         await adapter.close();
         await server.close(force: true);

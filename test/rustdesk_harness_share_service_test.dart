@@ -50,6 +50,10 @@ void main() {
     );
     expect(candidates.first, endsWith('/vibekits-harness-relay'));
     expect(
+      candidates.first,
+      contains('/Helpers/VibeKitsHarnessRelay.app/Contents/MacOS/'),
+    );
+    expect(
       candidates,
       isNot(contains('/Applications/KEMI远程办公.app/Contents/MacOS/KEMI远程办公')),
     );

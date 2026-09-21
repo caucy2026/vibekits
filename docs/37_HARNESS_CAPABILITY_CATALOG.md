@@ -7,9 +7,9 @@
 - 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：235。
-- Harness 当前可执行接口：209。
-- 当前不可公开接口：26。
+- Harness 定义接口：241。
+- Harness 当前可执行接口：214。
+- 当前不可公开接口：27。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 83 |
+| 系统诊断 | 89 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,7 +108,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 83）
+## 系统诊断（定义 89）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -150,6 +150,12 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.git_workspace` | `git_workspace` | 版本控制（Git） | 否（环境/接线门禁） | 查看仓库、Diff 和提交；读取 Gerrit/远端 refs 与 manifest，按需浅克隆单仓；通过预览、秘密阻断及分离审批安全备份。 适合：用户明确需要“版本控制（Git）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.github_diagnostics` | `github_diagnostics` | 网络诊断（GitHub） | 否（环境/接线门禁） | 分层检查 GitHub 凭据与网络，发现真实回环代理并可回滚地只修复 GitHub Git。 适合：用户明确需要“网络诊断（GitHub）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.harness.diagnostics` | `harness__diagnostics` | 查询 Harness 诊断日志 | 是 | 只读返回 Harness 最近的启动/运行日志和 Vibekits 工具调用记录，用于定位超时、退出、工具失败和耗时异常；敏感字段会脱敏。 | `readOnly` | `limit` (integer；最小=1；最大=50), `includeLogTail` (boolean) |
+| `vibekits.harness.session_cancel` | `harness__session_cancel` | 停止本机 Harness 任务 | 是 | 请求停止指定官方 Harness 会话并返回确认后的状态。 | `controlsDevice` | `sessionId`* (string) |
+| `vibekits.harness.session_history` | `harness__session_history` | 增量读取本机 Harness 记录 | 是 | 从指定游标增量读取官方聊天消息和工具轨迹。 | `readOnly` | `sessionId`* (string), `cursor` (integer；最小=0) |
+| `vibekits.harness.session_prompt` | `harness__session_prompt` | 向本机 Harness 下达任务 | 是 | 把命令直接提交给这台电脑当前可见的官方 Harness 会话；三秒内返回接受或排队回执。 | `controlsDevice` | `text`* (string), `requestId` (string) |
+| `vibekits.harness.session_status` | `harness__session_status` | 读取本机 Harness 任务状态 | 是 | 结构化返回运行、工具执行、等待审批、完成、失败或停止状态。 | `readOnly` | `sessionId`* (string) |
+| `vibekits.harness.session_wait` | `harness__session_wait` | 等待本机 Harness 状态变化 | 是 | 长轮询等待游标推进；超时返回 changed=false，不把任务误报为失败。 | `readOnly` | `sessionId`* (string), `afterCursor` (integer；最小=0), `timeoutMs` (integer；最小=1；最大=60000) |
+| `vibekits.harness.source_context` | `harness__source_context` | 查阅来源会话 | 否（环境/接线门禁） | 只读查询当前继续会话的直接来源。仅在交接摘要不足时调用；返回内容会脱敏、限量并记录工具活动。 | `readOnly` | `continuationSessionId` (string), `query` (string), `afterCursor` (integer；最小=0), `beforeCursor` (integer；最小=0), `limit` (integer；最小=1；最大=20) |
 | `vibekits.mcp.auto_call` | `mcp__auto_call` | 自动调度并调用 MCP 作战单位 | 是 | 读取实时目录，在最高优先层选择有空闲容量且评分最优的同类节点，先原子预约，再执行真实业务工具，最后释放租约；节点忙碌会自动尝试下一候选。返回选择理由、脱敏租约 ID、完整业务结果和失败尝试，不返回 leaseToken。 | `controlsDevice` | `toolName`* (string), `taskId`* (string), `idempotencyKey`* (string), `scopeDigest`* (string), `arguments`* (object), `requestedSlots` (integer；默认=1；最小=1), `ttlSeconds` (integer；默认=45；最小=10；最大=120) |
 | `vibekits.mcp.catalog_list` | `mcp__catalog_list` | 列出三层 MCP 工具目录 | 是 | 读取 VibeKits、本机其他进程和局域网设备当前经过认证的完整 MCP 工具目录。返回每个实例、连接状态、真实工具名、用途和 inputSchema；调用远端工具前必须先读取本目录，不得猜测工具名或参数。 | `readOnly` | `{}` |
 | `vibekits.mcp.reputation_list` | `mcp__reputation_list` | 查看 MCP 工具全局评分 | 是 | 只读返回跨项目、跨会话、跨重启保留的 MCP 工具类型评分。固定路由顺序为本机 VibeKits MCP、再本地其他进程 MCP、再局域网 MCP；同名工具的多台设备共享一个分数。 | `readOnly` | `{}` |

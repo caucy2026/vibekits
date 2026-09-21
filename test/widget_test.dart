@@ -82,7 +82,7 @@ void main() {
     expect(HarnessWebViewInputGate.workspaceActive, isTrue);
   });
 
-  testWidgets('启动恢复上次一级工作区', (WidgetTester tester) async {
+  testWidgets('普通启动始终进入智能体而不恢复上次一级工作区', (WidgetTester tester) async {
     final AppSettingsController settings = AppSettingsController();
     settings.value = const AppSettings(
       lastTab: 3,
@@ -94,12 +94,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('文档阅读'), findsWidgets);
-    expect(find.text('打开文件'), findsOneWidget);
-    expect(find.byKey(const Key('agent-composer')), findsNothing);
+    expect(find.text('智能体（Harness）'), findsWidgets);
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
+    expect(find.text('打开文件'), findsNothing);
   });
 
-  testWidgets('启动恢复 Harness 内部 OCR 子页', (WidgetTester tester) async {
+  testWidgets('普通启动不恢复 Harness 内部 OCR 子页', (WidgetTester tester) async {
     final AppSettingsController settings = AppSettingsController();
     settings.value = const AppSettings(
       lastWorkspaceId: 'large-model',
@@ -112,8 +112,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('智能体（Harness）'), findsWidgets);
-    expect(find.byKey(const Key('ocr-screenshot')), findsOneWidget);
-    expect(find.byKey(const Key('agent-composer')), findsNothing);
+    expect(find.byKey(const Key('ocr-screenshot')), findsNothing);
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
   });
 
   testWidgets('Ctrl+数字键切换 Tab', (WidgetTester tester) async {
@@ -181,6 +181,9 @@ void main() {
     };
     await tester.pumpWidget(const VibekitsApp());
     await tester.pump();
+    // Ignore the normal startup activation; this case measures only the
+    // settings overlay's pause/resume pair.
+    nativeInputStates.clear();
     await tester.tap(find.byKey(const Key('app-settings-button')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
