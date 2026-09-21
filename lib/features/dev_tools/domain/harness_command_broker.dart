@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 typedef HarnessPromptHandler =
     Future<Map<String, Object?>> Function(String text, String requestId);
@@ -71,10 +72,63 @@ final class HarnessCommandBroker {
   Future<Map<String, Object?>> history(String sessionId, int cursor) {
     final handler = _history;
     if (handler == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
-    return handler(
-      _sessionId(sessionId),
-      cursor,
-    ).timeout(const Duration(seconds: 3));
+    final id = _sessionId(sessionId);
+    return handler(id, cursor)
+        .timeout(const Duration(seconds: 3))
+        .then((value) => _boundedHistory(id, cursor, value));
+  }
+
+  static const int _maxHistoryRecords = 64;
+  static const int _maxHistoryBytes = 256 * 1024;
+  static const int _maxRecordBytes = 32 * 1024;
+
+  static Map<String, Object?> _boundedHistory(
+    String sessionId,
+    int afterCursor,
+    Map<String, Object?> value,
+  ) {
+    final source = value['records'];
+    final records = <Object?>[];
+    var bytes = 0;
+    var nextCursor = afterCursor;
+    var truncated = false;
+    if (source is List) {
+      for (final item in source) {
+        if (item is! Map) continue;
+        final record = Map<String, Object?>.from(item);
+        final seq = record['seq'];
+        if (seq is! int || seq <= afterCursor) continue;
+        Object? output = record;
+        var encoded = utf8.encode(jsonEncode(output));
+        if (encoded.length > _maxRecordBytes) {
+          final raw = jsonEncode(record);
+          output = <String, Object?>{
+            'type': record['type']?.toString() ?? 'record',
+            'seq': seq,
+            if (record['time'] != null) 'time': record['time'],
+            'truncated': true,
+            'preview': raw.length <= 8192 ? raw : raw.substring(0, 8192),
+          };
+          encoded = utf8.encode(jsonEncode(output));
+        }
+        if (records.length >= _maxHistoryRecords ||
+            bytes + encoded.length > _maxHistoryBytes) {
+          truncated = true;
+          break;
+        }
+        records.add(output);
+        bytes += encoded.length;
+        nextCursor = seq;
+      }
+      if (records.length < source.length) truncated = true;
+    }
+    return <String, Object?>{
+      'sessionId': sessionId,
+      'cursor': nextCursor,
+      'records': records,
+      'hasMore': value['hasMore'] == true || truncated,
+      if (truncated) 'truncated': true,
+    };
   }
 
   Future<Map<String, Object?>> cancel(String sessionId) =>

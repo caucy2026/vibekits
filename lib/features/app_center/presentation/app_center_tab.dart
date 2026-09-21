@@ -23,7 +23,8 @@ class _AppCenterTabState extends State<AppCenterTab> {
   String? _error;
   bool _loading = true;
   int _requestSerial = 0;
-  Map<String, AppCenterLocalVersion> _versions = <String, AppCenterLocalVersion>{};
+  Map<String, AppCenterLocalVersion> _versions =
+      <String, AppCenterLocalVersion>{};
 
   @override
   void initState() {
@@ -222,7 +223,9 @@ class _AppCenterTabState extends State<AppCenterTab> {
                 status: _versions[apps[index].packageName] == null
                     ? AppCenterUpdateStatus.checking
                     : _service.updateStatus(
-                        apps[index], _versions[apps[index].packageName]!),
+                        apps[index],
+                        _versions[apps[index].packageName]!,
+                      ),
                 onTap: () => _showDetails(apps[index]),
               ),
             );
@@ -248,7 +251,11 @@ class _AppCenterTabState extends State<AppCenterTab> {
 }
 
 class _AppCard extends StatelessWidget {
-  const _AppCard({required this.item, required this.status, required this.onTap});
+  const _AppCard({
+    required this.item,
+    required this.status,
+    required this.onTap,
+  });
 
   final AppCenterItem item;
   final AppCenterUpdateStatus status;
@@ -506,7 +513,9 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 '下载量：${item.downloadCount}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
-              if (!item.hasVerifiedInstaller) ...<Widget>[
+              if (!item.hasVerifiedInstaller &&
+                  status != AppCenterUpdateStatus.current &&
+                  status != AppCenterUpdateStatus.downgrade) ...<Widget>[
                 const SizedBox(height: 12),
                 const Text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'),
               ],

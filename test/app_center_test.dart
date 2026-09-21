@@ -102,7 +102,9 @@ void main() {
     expect(item.packageName, 'com.caucy.vibekits');
     expect(item.androidPackageName, 'com.vibekits.vibekits');
     expect(item.androidInstallPackageName, 'com.vibekits.vibekits');
-    final AppCenterItem legacy = AppCenterItem.fromJson(_itemJson(os: 'android'));
+    final AppCenterItem legacy = AppCenterItem.fromJson(
+      _itemJson(os: 'android'),
+    );
     expect(legacy.androidInstallPackageName, 'com.vibekits.vibekits');
   });
 
@@ -133,10 +135,15 @@ void main() {
       ..._itemJson(os: 'macos'),
       'platforms': <String>['windows'],
     });
-    final AppCenterService service = AppCenterService(platformOverride: 'macos');
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'macos',
+    );
     addTearDown(service.dispose);
     expect(item.supportsPlatform('macos'), isFalse);
-    expect(service.canDownload(item, const AppCenterLocalVersion.uninstalled()), isFalse);
+    expect(
+      service.canDownload(item, const AppCenterLocalVersion.uninstalled()),
+      isFalse,
+    );
   });
 
   test('Android 当前包使用真实 applicationId 并禁止重复下载', () async {
@@ -347,6 +354,8 @@ void main() {
               ..._itemJson(os: os),
               if (os == 'android') 'package_name': 'com.vibekits.vibekits',
               'version_code': 2159,
+              'file_size_bytes': 0,
+              'file_size': '大小未知',
             }),
           ],
           total: 1,
@@ -363,6 +372,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('当前已是最新版本，无需重复下载。'), findsOneWidget);
+      expect(find.text('该条目缺少完整的 HTTPS、文件大小或 SHA-256 信息，已禁止安装。'), findsNothing);
       expect(find.text('已是最新版'), findsWidgets);
       expect(
         tester
@@ -415,11 +425,26 @@ void main() {
       'package_name': 'com.kemi.other',
       'version_code': 301,
     });
-    expect(service.updateStatus(same, await service.localVersion(same)), AppCenterUpdateStatus.current);
-    expect(service.updateStatus(older, await service.localVersion(older)), AppCenterUpdateStatus.downgrade);
-    expect(service.canDownload(newer, await service.localVersion(newer)), isTrue);
-    await expectLater(service.downloadAndOpen(same), throwsA(isA<StateError>()));
-    await expectLater(service.downloadAndOpen(older), throwsA(isA<StateError>()));
+    expect(
+      service.updateStatus(same, await service.localVersion(same)),
+      AppCenterUpdateStatus.current,
+    );
+    expect(
+      service.updateStatus(older, await service.localVersion(older)),
+      AppCenterUpdateStatus.downgrade,
+    );
+    expect(
+      service.canDownload(newer, await service.localVersion(newer)),
+      isTrue,
+    );
+    await expectLater(
+      service.downloadAndOpen(same),
+      throwsA(isA<StateError>()),
+    );
+    await expectLater(
+      service.downloadAndOpen(older),
+      throwsA(isA<StateError>()),
+    );
     expect(queried, everyElement('com.kemi.other'));
   });
 
@@ -434,10 +459,17 @@ void main() {
       const AppCenterLocalVersion.installed(0),
     ]) {
       final AppCenterService service = AppCenterService(
-        platformOverride: 'windows', versionLookup: (_) async => local,
+        platformOverride: 'windows',
+        versionLookup: (_) async => local,
       );
-      expect(service.canDownload(item, await service.localVersion(item)), isFalse);
-      await expectLater(service.downloadAndOpen(item), throwsA(isA<StateError>()));
+      expect(
+        service.canDownload(item, await service.localVersion(item)),
+        isFalse,
+      );
+      await expectLater(
+        service.downloadAndOpen(item),
+        throwsA(isA<StateError>()),
+      );
       service.dispose();
     }
     final AppCenterService service = AppCenterService(
@@ -446,9 +478,13 @@ void main() {
     );
     addTearDown(service.dispose);
     final AppCenterItem missing = AppCenterItem.fromJson(<String, Object?>{
-      ..._itemJson(os: 'windows'), 'version_code': 0,
+      ..._itemJson(os: 'windows'),
+      'version_code': 0,
     });
-    expect(service.canDownload(missing, await service.localVersion(missing)), isFalse);
+    expect(
+      service.canDownload(missing, await service.localVersion(missing)),
+      isFalse,
+    );
   });
 
   testWidgets('其他应用同版时详情按钮禁用并显示最新版', (tester) async {
@@ -458,18 +494,31 @@ void main() {
       versionLookup: (_) async => const AppCenterLocalVersion.installed(2153),
       loader: ({category, keyword = ''}) async => AppCenterCatalog(
         categories: const <AppCenterCategory>[],
-        apps: <AppCenterItem>[AppCenterItem.fromJson(<String, Object?>{
-          ..._itemJson(os: 'macos'), 'package_name': 'com.kemi.other',
-        })], total: 1,
+        apps: <AppCenterItem>[
+          AppCenterItem.fromJson(<String, Object?>{
+            ..._itemJson(os: 'macos'),
+            'package_name': 'com.kemi.other',
+          }),
+        ],
+        total: 1,
       ),
     );
     addTearDown(service.dispose);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AppCenterTab(service: service))));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: AppCenterTab(service: service)),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('app-center-item-53')));
     await tester.pumpAndSettle();
     expect(find.text('已是最新版'), findsWidgets);
-    expect(tester.widget<FilledButton>(find.byKey(const Key('app-center-install'))).onPressed, isNull);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('app-center-install')))
+          .onPressed,
+      isNull,
+    );
   });
 }
 

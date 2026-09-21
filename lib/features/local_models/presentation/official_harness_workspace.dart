@@ -1595,22 +1595,23 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String text,
     String requestId,
   ) async {
-    final adapter = _commandAdapter;
-    if (adapter == null || !_queueContextReady) {
+    final scheduler = _messageQueueScheduler;
+    if (scheduler == null || !_queueContextReady || !_queueAdapterCompatible) {
       throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     }
-    await adapter.request(<String, dynamic>{
-      'type': 'client-request',
-      'rpcId': requestId,
-      'method': 'session.prompt',
-      'payload': <String, Object?>{
-        'sessionId': _queueSessionId,
-        'requestId': requestId,
-        'mode': 'queue',
-        'text': text,
-      },
-    }, timeout: const Duration(milliseconds: 2500));
-    _commandState = _harnessBusy ? 'queued' : 'accepted';
+    await _messageQueue.enqueue(
+      workspaceId: _queueWorkspaceId,
+      sessionId: _queueSessionId,
+      text: text,
+      source: HarnessMessageSource.remotePeer,
+      approvedCallerId: requestId,
+    );
+    await _refreshQueueCount();
+    final bool dispatched = !_harnessBusy && !_harnessApprovalWaiting
+        ? await scheduler.dispatchNext()
+        : false;
+    await _refreshQueueCount();
+    _commandState = dispatched ? 'accepted' : 'queued';
     final event = _commandSnapshot(requestId: requestId, advance: true);
     _commandChanges.add(event);
     return <String, Object?>{'accepted': true, ...event};

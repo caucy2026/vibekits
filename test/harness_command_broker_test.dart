@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/dev_tools/domain/harness_command_broker.dart';
@@ -30,7 +31,12 @@ void main() {
         'sessionId': sessionId,
         'cursor': 5,
         'records': <Object?>[
-          <String, Object?>{'role': 'assistant', 'text': 'working'},
+          <String, Object?>{
+            'type': 'assistant/message',
+            'seq': 5,
+            'role': 'assistant',
+            'text': 'working',
+          },
         ],
       },
       cancel: (sessionId) async => <String, Object?>{
@@ -89,5 +95,44 @@ void main() {
       const Duration(milliseconds: 10),
     );
     expect(result, containsPair('changed', false));
+  });
+
+  test('history is cursor scoped and bounded for remote transport', () async {
+    final controller = StreamController<Map<String, Object?>>.broadcast();
+    final registration = HarnessCommandBroker.instance.register(
+      prompt: (_, requestId) async => <String, Object?>{'requestId': requestId},
+      status: (_) async => <String, Object?>{},
+      history: (_, _) async => <String, Object?>{
+        'cursor': 200,
+        'records': <Object?>[
+          <String, Object?>{'type': 'old', 'seq': 4, 'data': 'ignored'},
+          for (var seq = 5; seq < 200; seq++)
+            <String, Object?>{
+              'type': 'tool/output',
+              'seq': seq,
+              'data': 'x' * 40000,
+            },
+        ],
+        'hasMore': false,
+        'projections': <String, Object?>{'huge': 'y' * 1200000},
+      },
+      cancel: (_) async => <String, Object?>{},
+      changes: controller.stream,
+    );
+    addTearDown(() async {
+      registration.unregister();
+      await controller.close();
+    });
+
+    final result = await HarnessCommandBroker.instance.history('s', 4);
+    final records = result['records']! as List<Object?>;
+    expect(records, isNotEmpty);
+    expect(records.length, lessThanOrEqualTo(64));
+    expect((records.first! as Map)['seq'], 5);
+    expect((records.first! as Map)['truncated'], isTrue);
+    expect(result['cursor'], (records.last! as Map)['seq']);
+    expect(result['hasMore'], isTrue);
+    expect(result, isNot(contains('projections')));
+    expect(utf8.encode(jsonEncode(result)).length, lessThan(300 * 1024));
   });
 }

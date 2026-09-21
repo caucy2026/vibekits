@@ -215,6 +215,8 @@ void main() {
     expect(service, contains('vibekits-parent-watchdog.mjs'));
     expect(watchdog, contains('process.kill(parentPid, 0)'));
     expect(watchdog, contains("error?.code !== 'ESRCH'"));
+    expect(watchdog, contains('const immediateParentPid = process.ppid'));
+    expect(watchdog, contains('process.ppid !== immediateParentPid'));
   });
 
   test(
