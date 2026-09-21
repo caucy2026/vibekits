@@ -77,9 +77,10 @@
 - 根据用户明确指定的“先上商城，远端更新后再测试”顺序，使用全局发布工作站记录中的真实 notarytool profile `KEMI_NOTARY` 完成公证；早期记录的 `vibekits-notary` 是失效别名，不再作为阻塞依据。
 - 精确 dev.224 候选完成 Developer ID 正式签名；251 个 Mach-O、Universal `x86_64 + arm64`、签名候选真实启动与 Harness tool bridge 只读调用均通过。签名身份为 `Developer ID Application: zhen ji (26T5WV4GLP)`，Team ID `26T5WV4GLP`。
 - Apple 公证提交 `181f4a96-debb-478a-a19f-90f54439f8ee` 返回 `Accepted`，票据装订成功。为排查受限环境中的签名假阴性，又在本机文件系统隔离候选上完整重走标准脚本，第二次提交 `0e080202-b180-4d8e-9618-482b6fc67655` 同样返回 `Accepted`。
-- KEMI 商场 macOS 既有记录 `app_id=53` 已直接更新为 `1.9.0-dev.224` / `VersionCode 2224`，仍在商城展示、允许取消更新、没有自动弹出更新。发布后历史列表共 10 条记录；本次 dev.224 是第 10 条。
-- 商场 CDN：`https://cdn.newlink-sz.com/kemiAppStore/macpkg/2026/09/1789958262750_707d1c0d_Vibekits-1_9_0-dev_224_2224-macos-univer.zip`。
-- CDN 精确大小 `420473559` bytes，SHA-256 `a7443cc7ffd045e1e58445ce152dedf25351320f3baa806da87ca09be5fa7c96`；整包回下载计算结果与商城接口完全一致。
+- KEMI 商场 macOS 既有记录 `app_id=53` 已直接更新为 `1.9.0-dev.224` / `VersionCode 2224`，仍在商城展示、允许取消更新、没有自动弹出更新。2026-09-21 发现首个 dev.224 ZIP 含 Finder `__MACOSX` 元数据，虽然普通下载、签名和启动有效，但远程候选安装器按安全合同拒绝根目录外条目；随后使用同一份已签名、公证并装订票据的 App 重新生成仅含 `Vibekits.app/` 的干净 ZIP，并再次直接更新线上记录。发布历史现共 11 条。
+- 最终商场 CDN：`https://cdn.newlink-sz.com/kemiAppStore/macpkg/2026/09/1789964877155_d13133e1_Vibekits-1_9_0-dev_224_2224-macos-univer.zip`。
+- 最终 CDN 精确大小 `404481809` bytes，SHA-256 `c2677a4c56018eacbd237208ce7f5ca6e72d54477cf45787cb96c1146107de1f`；整包回下载计算结果与商城接口完全一致，`outside_root=0`。
 - 公开更新接口验证：本地 `2223` 返回 `has_update=true` 并指向 dev.224；本地 `2224` 返回 `has_update=false`；`force_update=false`、`list_in_store=true`、`pending_review=false`。
-- CDN 回下载 ZIP 解压后，在发布工作站真实 macOS 安全环境中通过 `codesign --verify --deep --strict`、Stapler validate 与 Gatekeeper，Gatekeeper 结果为 `accepted`、来源 `Notarized Developer ID`。受限命令环境曾错误报告 invalid signature；同一文件在真实安全环境验证通过，确认是验证环境假阴性而非发布包损坏。
+- 最终 CDN 回下载 ZIP 解压后，在发布工作站真实 macOS 安全环境中通过 `codesign --verify --deep --strict`、Stapler validate 与 Gatekeeper；其本地不可变同源包此前的 Gatekeeper 结果为 `accepted`、来源 `Notarized Developer ID`。受限命令环境曾错误报告 invalid signature；同一文件在真实安全环境验证通过，确认是验证环境假阴性而非发布包损坏。
+- 干净 ZIP 已经通过远程候选安装通道更新设备 `4456560334` 的实际运行副本 `/Users/mac/tools/Vibekits .app`；远端 `Info.plist` 返回版本 `1.9.0.224`、构建号 `2224`。`device.applications` 中显示的 dev.217 是 `/Users/mac/Applications/Vibekits.app` 下另一份未运行副本，不能用于判断本次运行版本。
 - 本次发布只完成“让远端可更新”的前置步骤；双会话、两台仿真机与连续 100 轮仍须在远端安装 dev.224 后继续执行，不得合并成已验收结论。
