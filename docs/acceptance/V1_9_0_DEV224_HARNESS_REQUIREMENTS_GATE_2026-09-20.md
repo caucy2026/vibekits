@@ -71,3 +71,10 @@
 3. 完成派生会话立即出现、会话内动画、最终名称、空聊天记录、来源卡往返和首次继续开发的完整界面闭环。
 4. 完成中文输入、F1～F12、审批“不再询问”、单 Dock 图标与窗口恢复的 Release 复测。
 5. 完成双会话双仿真机与连续 100 轮稳定性测试，并记录 CPU、任务状态、串会话和超时结果。
+
+## 2026-09-21 商城先行更新尝试
+
+- 根据“先上商城、远端更新后再测试”的顺序，精确 dev.224 候选已完成 Developer ID 正式签名；251 个 Mach-O 深度验证、Universal `x86_64 + arm64`、签名候选真实启动和 Harness tool bridge 只读调用均通过。
+- 签名身份为 `Developer ID Application: zhen ji (26T5WV4GLP)`，Team ID `26T5WV4GLP`，带安全时间戳与 Hardened Runtime。
+- 待公证 ZIP 为 `/Volumes/ORICO/kemi-build-cache/app-release-gate/vibekits/macos/dev223-remote-harness-final/build/macos/Build/Products/Release/Vibekits-notarization.zip`，大小 `420473554` bytes，SHA-256 `d34c7154870a2410a8fa2ebe90b5b2df11fcb466008de1d25df39820fd8a87bd`。
+- Apple 上传前被硬性阻断：钥匙串中的 `vibekits-notary` notarytool profile 已不存在，本机也没有其他 notarytool profile、Apple 公证环境变量或 App Store Connect `.p8` 私钥。未绕过 Apple 公证、未上传未公证包、未修改 KEMI 商城记录。
