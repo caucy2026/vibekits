@@ -2,7 +2,7 @@
 
 日期：2026-09-20（2026-09-21 更新）  
 版本：`1.9.0-dev.224+2224`  
-结论：**BLOCKED，不得签名、发布或交给用户验收。**
+结论：**macOS 商城先行发布已完成；完整功能交付仍须在远端更新后继续关闭双机与 100 轮门禁。**
 
 ## 判定规则
 
@@ -47,7 +47,7 @@
 | REMOTE-02 | 三秒内返回会话、请求、状态和游标，后续可自动读取状态与结果 | **PASS** | dev.223 自动化与发布验收通过。 |
 | REMOTE-03 | 两个 Harness 会话分时操作两台仿真机，推理中继续追加命令 | **FAIL** | dev.224 尚未重新完成双机、双会话真实稳定性测试。 |
 | STABILITY-01 | 连续 100 轮真实操作稳定，无卡死、串会话和高 CPU | **FAIL** | 本轮发现并修复多处卡死与退出问题，但新的 100 轮门禁尚未执行。 |
-| RELEASE-01 | 本机全部验收通过后才能签名、公证并发布 KEMI 商城 | **BLOCKED** | 当前存在 `SESSION-07`、`REMOTE-03`、`STABILITY-01` FAIL，以及多项真实界面 PARTIAL；禁止发布。 |
+| RELEASE-01 | 本机全部验收通过后才能签名、公证并发布 KEMI 商城 | **有条件完成** | 用户明确把顺序改为“先上商城，远端更新后再测试”。dev.224 已按正式签名、公证、CDN 回下载门禁发布；`REMOTE-03` 与 `STABILITY-01` 仍是完整功能交付门禁，不能因商城发布而写成通过。 |
 
 ## 本轮已经执行的证据
 
@@ -72,9 +72,14 @@
 4. 完成中文输入、F1～F12、审批“不再询问”、单 Dock 图标与窗口恢复的 Release 复测。
 5. 完成双会话双仿真机与连续 100 轮稳定性测试，并记录 CPU、任务状态、串会话和超时结果。
 
-## 2026-09-21 商城先行更新尝试
+## 2026-09-21 macOS 商城先行发布结果
 
-- 根据“先上商城、远端更新后再测试”的顺序，精确 dev.224 候选已完成 Developer ID 正式签名；251 个 Mach-O 深度验证、Universal `x86_64 + arm64`、签名候选真实启动和 Harness tool bridge 只读调用均通过。
-- 签名身份为 `Developer ID Application: zhen ji (26T5WV4GLP)`，Team ID `26T5WV4GLP`，带安全时间戳与 Hardened Runtime。
-- 待公证 ZIP 为 `/Volumes/ORICO/kemi-build-cache/app-release-gate/vibekits/macos/dev223-remote-harness-final/build/macos/Build/Products/Release/Vibekits-notarization.zip`，大小 `420473554` bytes，SHA-256 `d34c7154870a2410a8fa2ebe90b5b2df11fcb466008de1d25df39820fd8a87bd`。
-- Apple 上传前被硬性阻断：钥匙串中的 `vibekits-notary` notarytool profile 已不存在，本机也没有其他 notarytool profile、Apple 公证环境变量或 App Store Connect `.p8` 私钥。未绕过 Apple 公证、未上传未公证包、未修改 KEMI 商城记录。
+- 根据用户明确指定的“先上商城，远端更新后再测试”顺序，使用全局发布工作站记录中的真实 notarytool profile `KEMI_NOTARY` 完成公证；早期记录的 `vibekits-notary` 是失效别名，不再作为阻塞依据。
+- 精确 dev.224 候选完成 Developer ID 正式签名；251 个 Mach-O、Universal `x86_64 + arm64`、签名候选真实启动与 Harness tool bridge 只读调用均通过。签名身份为 `Developer ID Application: zhen ji (26T5WV4GLP)`，Team ID `26T5WV4GLP`。
+- Apple 公证提交 `181f4a96-debb-478a-a19f-90f54439f8ee` 返回 `Accepted`，票据装订成功。为排查受限环境中的签名假阴性，又在本机文件系统隔离候选上完整重走标准脚本，第二次提交 `0e080202-b180-4d8e-9618-482b6fc67655` 同样返回 `Accepted`。
+- KEMI 商场 macOS 既有记录 `app_id=53` 已直接更新为 `1.9.0-dev.224` / `VersionCode 2224`，仍在商城展示、允许取消更新、没有自动弹出更新。发布后历史列表共 10 条记录；本次 dev.224 是第 10 条。
+- 商场 CDN：`https://cdn.newlink-sz.com/kemiAppStore/macpkg/2026/09/1789958262750_707d1c0d_Vibekits-1_9_0-dev_224_2224-macos-univer.zip`。
+- CDN 精确大小 `420473559` bytes，SHA-256 `a7443cc7ffd045e1e58445ce152dedf25351320f3baa806da87ca09be5fa7c96`；整包回下载计算结果与商城接口完全一致。
+- 公开更新接口验证：本地 `2223` 返回 `has_update=true` 并指向 dev.224；本地 `2224` 返回 `has_update=false`；`force_update=false`、`list_in_store=true`、`pending_review=false`。
+- CDN 回下载 ZIP 解压后，在发布工作站真实 macOS 安全环境中通过 `codesign --verify --deep --strict`、Stapler validate 与 Gatekeeper，Gatekeeper 结果为 `accepted`、来源 `Notarized Developer ID`。受限命令环境曾错误报告 invalid signature；同一文件在真实安全环境验证通过，确认是验证环境假阴性而非发布包损坏。
+- 本次发布只完成“让远端可更新”的前置步骤；双会话、两台仿真机与连续 100 轮仍须在远端安装 dev.224 后继续执行，不得合并成已验收结论。
