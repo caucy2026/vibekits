@@ -66,6 +66,10 @@ class AppCenterItem {
     required this.downloadCount,
     required this.osType,
     required this.platforms,
+    this.artifactType = 'app',
+    this.hostPackageName = '',
+    this.componentId = '',
+    this.standalone = true,
   });
 
   factory AppCenterItem.fromJson(Map<String, Object?> json) => AppCenterItem(
@@ -95,6 +99,10 @@ class AppCenterItem {
               .where((entry) => entry.isNotEmpty)
               .toList(growable: false)
         : const <String>[]),
+    artifactType: '${json['artifact_type'] ?? 'app'}'.trim().toLowerCase(),
+    hostPackageName: '${json['host_package_name'] ?? ''}'.trim(),
+    componentId: '${json['component_id'] ?? ''}'.trim().toLowerCase(),
+    standalone: json['standalone'] != false,
   );
 
   final int appId;
@@ -121,6 +129,12 @@ class AppCenterItem {
   final int downloadCount;
   final String osType;
   final List<String> platforms;
+  final String artifactType;
+  final String hostPackageName;
+  final String componentId;
+  final bool standalone;
+
+  bool get isComponent => artifactType == 'component' && !standalone;
 
   bool supportsPlatform(String platform) {
     final String normalized = platform.trim().toLowerCase();
@@ -277,7 +291,8 @@ class AppCenterService {
       platformName == 'windows' || platformName == 'macos';
 
   Future<bool> isApplicationInstalled(AppCenterItem item) async {
-    if (!supportsOpeningInstalledApplications ||
+    if (item.isComponent ||
+        !supportsOpeningInstalledApplications ||
         !_isSafePackageName(item.packageName)) {
       return false;
     }
@@ -297,7 +312,8 @@ class AppCenterService {
   }
 
   Future<bool> openApplication(AppCenterItem item) async {
-    if (!supportsOpeningInstalledApplications ||
+    if (item.isComponent ||
+        !supportsOpeningInstalledApplications ||
         !_isSafePackageName(item.packageName)) {
       return false;
     }
@@ -402,6 +418,9 @@ class AppCenterService {
     AppCenterItem item, {
     ValueChanged<double>? onProgress,
   }) async {
+    if (item.isComponent) {
+      throw StateError('VibeKits 组件必须由宿主程序安装，不能作为独立应用打开');
+    }
     final String? os = platformName;
     final AppCenterLocalVersion local = await localVersion(item);
     if (!canDownload(item, local)) throw StateError('本机版本未确认或市场版本未高于已安装版本');

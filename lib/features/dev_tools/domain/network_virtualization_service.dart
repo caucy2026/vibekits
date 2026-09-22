@@ -85,17 +85,35 @@ abstract final class NetworkVirtualizationService {
   static String get _toolRoot =>
       '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tools';
 
+  /// Optional runtimes are installed outside the signed application bundle.
+  /// The `current` directory is switched atomically by the component installer;
+  /// the bundled path remains the compatibility fallback for older releases.
+  static String _componentToolRoot(String componentId, String bundledName) {
+    final String separator = Platform.pathSeparator;
+    final String home = Platform.environment['HOME'] ?? '';
+    final String base = Platform.isWindows
+        ? (Platform.environment['LOCALAPPDATA'] ??
+              '${home}${separator}AppData${separator}Local')
+        : '${home}${separator}Library${separator}Application Support';
+    final Directory external = Directory(
+      '$base${separator}Vibekits${separator}components${separator}'
+      '$componentId${separator}current${separator}$bundledName',
+    );
+    if (external.existsSync()) return external.path;
+    return '$_toolRoot$separator$bundledName';
+  }
+
   static String get mihomoExecutable =>
-      '$_toolRoot${Platform.pathSeparator}'
-      'mihomo${Platform.pathSeparator}${Platform.isWindows ? 'mihomo.exe' : 'mihomo'}';
+      _componentToolRoot('network_proxy', 'mihomo') +
+      '${Platform.pathSeparator}${Platform.isWindows ? 'mihomo.exe' : 'mihomo'}';
 
   static String get qemuExecutable =>
-      '$_toolRoot${Platform.pathSeparator}'
-      'qemu${Platform.pathSeparator}${Platform.isWindows ? 'qemu-system-x86_64.exe' : 'qemu-system-x86_64'}';
+      _componentToolRoot('virtual_machine', 'qemu') +
+      '${Platform.pathSeparator}${Platform.isWindows ? 'qemu-system-x86_64.exe' : 'qemu-system-x86_64'}';
 
   static String get qemuImgExecutable =>
-      '$_toolRoot${Platform.pathSeparator}'
-      'qemu${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
+      _componentToolRoot('virtual_machine', 'qemu') +
+      '${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
 
   static Future<BundledRuntimeStatus> inspectMihomo({String? executable}) =>
       _inspect('Clash Verge（Mihomo）', executable ?? mihomoExecutable, <String>[

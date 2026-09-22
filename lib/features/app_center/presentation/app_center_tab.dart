@@ -556,7 +556,8 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
         ),
       ),
       actions: <Widget>[
-        if (widget.service.supportsOpeningInstalledApplications)
+        if (widget.service.supportsOpeningInstalledApplications &&
+            !item.isComponent)
           TextButton.icon(
             key: const Key('app-center-open'),
             onPressed:
