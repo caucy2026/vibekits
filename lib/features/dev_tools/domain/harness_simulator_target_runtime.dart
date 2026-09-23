@@ -88,7 +88,10 @@ final class HarnessSimulatorTargetRuntime {
     HarnessSimulatorSshKeyRevoker? revokeSshKeys,
     Duration connectionPollInterval = const Duration(seconds: 1),
     Duration restoreRetryDelay = const Duration(seconds: 5),
+    bool? requireActivationPassword,
   }) : _settings = settings ?? HarnessSimulatorAccessSettings(),
+       _requireActivationPassword =
+           requireActivationPassword ?? Platform.isAndroid,
        _inspectHost =
            inspectHost ?? (() => RustDeskHarnessShareService.inspect()),
        _startHost =
@@ -127,6 +130,7 @@ final class HarnessSimulatorTargetRuntime {
       HarnessSimulatorTargetRuntime();
 
   final HarnessSimulatorAccessSettings _settings;
+  final bool _requireActivationPassword;
   final HarnessSimulatorHostInspector _inspectHost;
   final HarnessSimulatorHostStarter _startHost;
   final HarnessSimulatorEndpointStarter? _startEndpoint;
@@ -237,7 +241,11 @@ final class HarnessSimulatorTargetRuntime {
     }
   }
 
-  Future<void> enable({bool persist = true}) async {
+  Future<void> enable({bool persist = true, String? password}) async {
+    if (_requireActivationPassword &&
+        !await _settings.verifyActivationPassword(password)) {
+      throw StateError('仿真开启密码错误');
+    }
     await _enable(persist: persist);
     if (!_latest.ready && HarnessSimulatorAccessSettings.enabled) {
       _scheduleRestoreRetry();
@@ -407,7 +415,9 @@ final class HarnessSimulatorTargetRuntime {
       await endpoint?.close();
       await mcpEndpoint?.close();
       _stopConnectionPolling();
-      await _revokeSshKeys();
+      // Android exposes only the fixed local ADB tunnel; it has no managed
+      // desktop SSH keys or HOME directory to revoke.
+      if (!Platform.isAndroid) await _revokeSshKeys();
       final host = await _inspectHost();
       if (host.available && host.executable.isNotEmpty) {
         await _setNativeGate(host.executable, false);
@@ -529,29 +539,35 @@ final class HarnessSimulatorTargetRuntime {
       if (Platform.isAndroid && !await _isLocalAdbReady()) {
         final previous = _latest;
         await _setNativeGate(_hostExecutable, false);
-        _publish(HarnessSimulatorTargetSnapshot(
-          phase: HarnessSimulatorTargetPhase.starting,
-          routingId: previous.routingId,
-          endpoint: previous.endpoint,
-          message: '系统 ADB 已断开，正在恢复…',
-        ));
+        _publish(
+          HarnessSimulatorTargetSnapshot(
+            phase: HarnessSimulatorTargetPhase.starting,
+            routingId: previous.routingId,
+            endpoint: previous.endpoint,
+            message: '系统 ADB 已断开，正在恢复…',
+          ),
+        );
         try {
           await _ensureAndroidAdbReady();
           if (generation != _generation) return;
           await _setNativeGate(_hostExecutable, true);
-          _publish(HarnessSimulatorTargetSnapshot(
-            phase: HarnessSimulatorTargetPhase.ready,
-            routingId: previous.routingId,
-            endpoint: previous.endpoint,
-            message: '仿真机可连接 · 告知对方本机 ID 即可调试',
-          ));
+          _publish(
+            HarnessSimulatorTargetSnapshot(
+              phase: HarnessSimulatorTargetPhase.ready,
+              routingId: previous.routingId,
+              endpoint: previous.endpoint,
+              message: '仿真机可连接 · 告知对方本机 ID 即可调试',
+            ),
+          );
         } on Object catch (error) {
-          _publish(HarnessSimulatorTargetSnapshot(
-            phase: HarnessSimulatorTargetPhase.error,
-            routingId: previous.routingId,
-            endpoint: previous.endpoint,
-            message: '系统 ADB 恢复失败：$error',
-          ));
+          _publish(
+            HarnessSimulatorTargetSnapshot(
+              phase: HarnessSimulatorTargetPhase.error,
+              routingId: previous.routingId,
+              endpoint: previous.endpoint,
+              message: '系统 ADB 恢复失败：$error',
+            ),
+          );
           return;
         }
       }

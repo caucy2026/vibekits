@@ -147,7 +147,6 @@ class DevToolsTab extends StatefulWidget {
 
 class _DevToolsTabState extends State<DevToolsTab> {
   static const Set<String> _desktopRuntimeToolIds = <String>{
-    'network_virtualization',
     'virtual_machine',
     'remote_workspace',
     'serial_port',
@@ -423,6 +422,9 @@ class _DevToolsTabState extends State<DevToolsTab> {
   }
 
   Widget _buildToolArea(ToolSpec tool) {
+    if (Platform.isIOS && tool.id == 'network_virtualization') {
+      return _buildMobileDesktopToolNotice(tool);
+    }
     if ((Platform.isAndroid || Platform.isIOS) &&
         _desktopRuntimeToolIds.contains(tool.id)) {
       return _buildMobileDesktopToolNotice(tool);

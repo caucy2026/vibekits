@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../app_center/presentation/app_center_tab.dart';
 import '../domain/mihomo_controller_service.dart';
@@ -28,11 +30,14 @@ class NetworkVirtualizationWorkspace extends StatefulWidget {
 
 class _NetworkVirtualizationWorkspaceState
     extends State<NetworkVirtualizationWorkspace> {
+  static const MethodChannel _qrScanner = MethodChannel('vibekits/qr-scanner');
   BundledRuntimeStatus? _mihomo;
   BundledRuntimeStatus? _qemu;
   SystemProxySnapshot? _systemProxy;
   final SystemProxyService _systemProxyService = SystemProxyService();
   late final MihomoProfileService _profileService;
+  String? _androidProxyDataDirectory;
+  bool _profilesReady = false;
   List<MihomoProfile> _profiles = const <MihomoProfile>[];
   List<String> _subscriptionLog = const <String>[];
   MihomoProfile? _activeProfile;
@@ -59,9 +64,10 @@ class _NetworkVirtualizationWorkspaceState
   int _cpus = 2;
   int _diskSizeGiB = 32;
 
-  String get _proxyDataDirectory =>
-      '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
-      '${Platform.pathSeparator}mihomo';
+  String get _proxyDataDirectory => Platform.isAndroid
+      ? (_androidProxyDataDirectory ?? '')
+      : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
+            '${Platform.pathSeparator}mihomo';
 
   bool get _proxyRunning =>
       NetworkVirtualizationService.status()['mihomoRunning'] == true;
@@ -76,7 +82,6 @@ class _NetworkVirtualizationWorkspaceState
   @override
   void initState() {
     super.initState();
-    _profileService = MihomoProfileService(dataDirectory: _proxyDataDirectory);
     unawaited(_initialize());
   }
 
@@ -87,15 +92,27 @@ class _NetworkVirtualizationWorkspaceState
   }
 
   Future<void> _initialize() async {
-    await Future.wait<void>(<Future<void>>[_loadProfiles(), _refresh()]);
-    if (_activeProfile != null &&
-        _mihomo?.available == true &&
-        !_proxyRunning) {
-      try {
-        await _ensureCoreRunning();
-      } on Object catch (error) {
-        if (mounted) setState(() => _message = '本地核心未就绪：$error');
+    try {
+      if (Platform.isAndroid) {
+        final Directory support = await getApplicationSupportDirectory();
+        _androidProxyDataDirectory = '${support.path}/mihomo';
       }
+      _profileService = MihomoProfileService(dataDirectory: _proxyDataDirectory);
+      await _loadProfiles();
+      if (!Platform.isAndroid) await _refresh();
+      if (_activeProfile != null &&
+          _mihomo?.available == true &&
+          !_proxyRunning) {
+        try {
+          await _ensureCoreRunning();
+        } on Object catch (error) {
+          if (mounted) setState(() => _message = '本地核心未就绪：$error');
+        }
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '订阅加载失败：$error');
+    } finally {
+      if (mounted) setState(() => _profilesReady = true);
     }
   }
 
@@ -158,6 +175,7 @@ class _NetworkVirtualizationWorkspaceState
         await showDialog<bool>(
           context: context,
           builder: (BuildContext dialogContext) => AlertDialog(
+            scrollable: true,
             title: const Text('添加订阅'),
             content: SizedBox(
               width: 520,
@@ -166,21 +184,98 @@ class _NetworkVirtualizationWorkspaceState
                 children: <Widget>[
                   TextField(
                     controller: name,
-                    autofocus: true,
                     decoration: const InputDecoration(
                       labelText: '名称',
                       hintText: '例如：工作代理',
                     ),
                   ),
                   const SizedBox(height: 10),
-                  TextField(
-                    key: const Key('mihomo-subscription-url'),
-                    controller: url,
-                    decoration: const InputDecoration(
-                      labelText: '订阅地址',
-                      hintText: 'https://…',
-                      helperText: '完整地址保存在系统凭据库，不写入普通设置和日志',
-                    ),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: TextField(
+                          key: const Key('mihomo-subscription-url'),
+                          controller: url,
+                          decoration: const InputDecoration(
+                            labelText: '订阅地址',
+                            hintText: 'https://…',
+                            helperText: '完整地址保存在系统凭据库，不写入普通设置和日志',
+                          ),
+                        ),
+                      ),
+                      if (Platform.isAndroid) ...<Widget>[
+                        const SizedBox(width: 8),
+                        IconButton.filledTonal(
+                          key: const Key('mihomo-scan-subscription'),
+                          tooltip: '扫码输入订阅地址',
+                          icon: const Icon(Icons.qr_code_scanner_rounded),
+                          onPressed: () async {
+                            try {
+                              final String? scanned = await _qrScanner
+                                  .invokeMethod<String>('scan');
+                              if (scanned == null || !dialogContext.mounted) {
+                                return;
+                              }
+                              final Uri uri =
+                                  MihomoProfileService.validatedSubscriptionUri(
+                                    scanned,
+                                  );
+                              final bool useAddress =
+                                  await showDialog<bool>(
+                                    context: dialogContext,
+                                    builder: (BuildContext previewContext) =>
+                                        AlertDialog(
+                                          title: const Text('确认扫码结果'),
+                                          content: Text(
+                                            '识别到 ${uri.host} 的订阅地址。确认后只填入输入框，仍需点击“下载并添加”才会保存。',
+                                          ),
+                                          actions: <Widget>[
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(
+                                                previewContext,
+                                                false,
+                                              ),
+                                              child: const Text('取消'),
+                                            ),
+                                            FilledButton(
+                                              key: const Key(
+                                                'mihomo-use-scanned-url',
+                                              ),
+                                              onPressed: () => Navigator.pop(
+                                                previewContext,
+                                                true,
+                                              ),
+                                              child: const Text('填入地址'),
+                                            ),
+                                          ],
+                                        ),
+                                  ) ??
+                                  false;
+                              if (useAddress) url.text = scanned.trim();
+                            } on Object {
+                              if (!dialogContext.mounted) return;
+                              await showDialog<void>(
+                                context: dialogContext,
+                                builder: (BuildContext errorContext) =>
+                                    AlertDialog(
+                                      title: const Text('无法使用扫码结果'),
+                                      content: const Text(
+                                        '请扫描有效的 HTTPS 订阅二维码，并检查相机权限。',
+                                      ),
+                                      actions: <Widget>[
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(errorContext),
+                                          child: const Text('知道了'),
+                                        ),
+                                      ],
+                                    ),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
@@ -221,6 +316,12 @@ class _NetworkVirtualizationWorkspaceState
     }
     await _profileService.select(profile.id);
     if (mounted) setState(() => _activeProfile = profile);
+    if (Platform.isAndroid && _mihomo?.available != true) {
+      if (mounted) {
+        setState(() => _message = '订阅已保存；PAD 代理核心尚未安装，未启用系统代理');
+      }
+      return;
+    }
     await _run(_ensureCoreRunning, success: '配置已切换');
   }
 
@@ -579,6 +680,30 @@ class _NetworkVirtualizationWorkspaceState
 
   @override
   Widget build(BuildContext context) {
+    if (!_profilesReady) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (Platform.isAndroid && !widget.virtualMachineOnly) {
+      return Column(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  _mihomo?.available == true
+                      ? 'PAD 代理核心已就绪，可管理和使用订阅。'
+                      : 'PAD 代理核心尚未安装；可先扫码或手动保存订阅，当前不会修改系统网络。',
+                ),
+              ),
+            ),
+          ),
+          if (_message.isNotEmpty) Text(_message),
+          Expanded(child: _profilePane(compact: false)),
+        ],
+      );
+    }
     return widget.virtualMachineOnly ? _vmTab() : _proxyTab();
   }
 

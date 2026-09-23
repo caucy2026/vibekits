@@ -1320,6 +1320,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       'cursor': cursor,
       'phase': type == 'complete'
           ? 'completed'
+          : type == 'stopped'
+          ? 'cancelled'
           : type == 'failed'
           ? 'failed'
           : 'running',
@@ -1337,6 +1339,8 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       'sessionId': sessionId,
       'phase': running
           ? 'running'
+          : lastType == 'stopped'
+          ? 'cancelled'
           : lastType == 'failed'
           ? 'failed'
           : lastType == 'complete'
@@ -1636,7 +1640,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       await _persistRunningConversation(run);
       _recordMobileCommand(
         sessionId,
-        'complete',
+        run.stopRequested
+            ? 'stopped'
+            : code == 0
+            ? 'complete'
+            : 'failed',
         run.messages[run.assistantIndex].text,
       );
     } on Object catch (error) {

@@ -29,3 +29,13 @@
 ## 右键菜单重复与关闭回归复验（同日追加）
 
 用户截图显示补充菜单的“派生会话、删除会话”重复出现，并且弹层不易关闭。原因是官方菜单装饰器把同名动作再次附加到自有菜单；自有菜单此前也没有外部点击和 Escape 的关闭处理。现官方装饰器只处理官方菜单，自有菜单不再被二次装饰；两者均保持五项。自有菜单定位收束在侧栏内，外部点击与 Escape 都关闭菜单。隔离 Mac 实测：普通会话右键显示五项；截图对应的补充菜单右键显示五项，重复打开不增项，点空白处和按 Escape 均关闭。`harness_continuation_synthetic_menu_test.cjs` 覆盖自有菜单不被二次装饰、无 `role=menu` 的官方菜单仍能补齐两个动作以及两种关闭方式；相关进度与摘要测试也通过。最终候选版本仍为 `1.9.0.227+2227`，Developer ID 签名与 `codesign --verify --deep --strict` 通过，打包脚本与源码逐字节一致。
+
+## 当晚独立实例复验
+
+另以 `com.caucy.vibekits.continuationqa` 建立独立 Mac 应用和数据副本，未切换正在运行远程仿真的 `continuationtest` 实例，也未恢复已由用户确认删除的正式会话。从已有来源 `PAD63_OK response request` 派生 `PAD63_OK response request 3`，真实子会话 ID 为 `session-56022e5b-7897-43b7-9a5b-5bf02b5b935b`。点击后立即出现新会话和整理进度；完成后关系文件有 2210 字符交接摘要，首次提问前可在界面打开全文，子会话起初没有复制来源聊天时间线。来源卡片可跳回原会话，原消息和附件仍在。
+
+实际模型首轮答出来源中的 20 页、PPTX/PDF、Arial Unicode MS；重启应用后第二轮答出 `make_kemi_ppt.py` 及尚未用 PowerPoint/Keynote 打开校验。重启前后交接摘要 SHA-256 均为 `1326d5b9cb11726eeb28c33d180896824665f697117c9a1c18061ff23782d451`，关系记录仍为一条，证明本轮未重新整理。新会话右键准确显示重命名、分叉、归档、派生、删除五项，无重复；Escape 和菜单外点击均关闭。删除确认框准确显示 `PAD63_OK response request 3`，取消后子会话及来源保留。此前经用户确认的正式子会话删除和重启不复活另有实际记录；本轮没有再执行不可恢复的删除。
+
+打包 Node 运行 `harness_continuation_synthetic_menu_test.cjs`、`harness_continuation_progress_dom_test.cjs`、`harness_continuation_context_test.mjs` 均通过。Mac 候选包按现有 `tool/sign_macos_developer_id.sh` 重签，在可访问 Developer ID 身份的授权环境中 `codesign --verify --deep --strict` 通过；受限沙箱中直接运行 `codesign` 报无效，属于该验证环境不能直接用来判定交付包损坏。
+
+结论：Mac 正常派生、摘要显示和注入、菜单、来源返回及重启持久性本轮实测通过，可供继续试用；完整稳定性门禁仍为 **BLOCK**。当前候选尚未在真实应用内完成“子会话已创建后模型整理超时 → 可见失败 → 点击重试复用同一 ID”的故障链路、长时间 soak，以及其余三端真机验收，不能称四端全部验收通过。

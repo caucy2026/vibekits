@@ -27,6 +27,30 @@ const _sshEnabled = HarnessSystemSshSnapshot(
 );
 
 void main() {
+  test('PAD 仿真开启密码错误时不持久授权或启动端点', () async {
+    final values = <String, String>{};
+    var inspectedHost = false;
+    final settings = HarnessSimulatorAccessSettings(
+      read: (key) async => values[key],
+      write: (key, value) async => values[key] = value,
+    );
+    final runtime = HarnessSimulatorTargetRuntime(
+      settings: settings,
+      requireActivationPassword: true,
+      inspectHost: () async {
+        inspectedHost = true;
+        return _host;
+      },
+    );
+    expect(await settings.verifyActivationPassword('2580'), isTrue);
+    expect(await settings.verifyActivationPassword('0000'), isFalse);
+    await expectLater(runtime.enable(password: '0000'), throwsStateError);
+    await expectLater(runtime.enable(), throwsStateError);
+    expect(inspectedHost, isFalse);
+    expect(await settings.loadEnabled(), isFalse);
+    expect(runtime.latest.ready, isFalse);
+  });
+
   test('错误诊断不会在授权开关关闭时伪装成仿真已开启', () {
     HarnessSimulatorAccessSettings.setEnabled(false);
     const snapshot = HarnessSimulatorTargetSnapshot(

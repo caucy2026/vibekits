@@ -6,10 +6,8 @@ import 'platform_credential_store.dart';
 import 'system_proxy_service.dart';
 
 typedef MihomoCredentialReader = Future<String?> Function(String key);
-typedef MihomoCredentialWriter = Future<void> Function(
-  String key,
-  String value,
-);
+typedef MihomoCredentialWriter =
+    Future<void> Function(String key, String value);
 typedef MihomoCredentialDeleter = Future<void> Function(String key);
 typedef MihomoProxyResolver = Future<String?> Function();
 
@@ -229,7 +227,7 @@ class MihomoProfileService {
     required String name,
     required String url,
   }) async {
-    final Uri uri = _validatedSubscriptionUri(url);
+    final Uri uri = validatedSubscriptionUri(url);
     final String id = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
     final String yaml = await _download(uri);
     await _profilesDirectory.create(recursive: true);
@@ -270,7 +268,7 @@ class MihomoProfileService {
     if (secretUrl == null || secretUrl.trim().isEmpty) {
       throw StateError('订阅凭据已丢失，请删除后重新添加');
     }
-    final Uri uri = _validatedSubscriptionUri(secretUrl);
+    final Uri uri = validatedSubscriptionUri(secretUrl);
     final String yaml = await _download(uri);
     final File target = File(profile.path);
     await _atomicWrite(target, yaml);
@@ -445,7 +443,7 @@ class MihomoProfileService {
     }
   }
 
-  static Uri _validatedSubscriptionUri(String value) {
+  static Uri validatedSubscriptionUri(String value) {
     if (value.trim().length > 1200) {
       throw const FormatException('订阅地址过长（最多 1200 字符）');
     }

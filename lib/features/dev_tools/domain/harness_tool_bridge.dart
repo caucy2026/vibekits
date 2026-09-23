@@ -777,6 +777,10 @@ class VibekitsHarnessToolBridge {
           'type': 'boolean',
           'description': 'true 打开，false 关闭',
         },
+        'password': const <String, Object?>{
+          'type': 'string',
+          'description': '仅 Android PAD 开启仿真时必填的本机密码',
+        },
       },
       required: const <String>['enabled'],
     ),
@@ -3288,7 +3292,6 @@ class VibekitsHarnessToolBridge {
     };
   }
 
-
   Directory get _workspaceDirectory {
     final String? configured = _workspaceRoot?.trim();
     if (configured == null || configured.isEmpty) {
@@ -3712,7 +3715,9 @@ class VibekitsHarnessToolBridge {
       throw UnsupportedError('iOS 暂不开放本机仿真机');
     }
     if (enabled) {
-      await HarnessSimulatorTargetRuntime.shared.enable();
+      await HarnessSimulatorTargetRuntime.shared.enable(
+        password: arguments['password']?.toString(),
+      );
     } else {
       await HarnessSimulatorTargetRuntime.shared.disable();
     }

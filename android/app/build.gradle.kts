@@ -5,6 +5,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+dependencies {
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+}
+
 android {
     namespace = "com.vibekits.vibekits"
     buildFeatures { aidl = true }

@@ -27,6 +27,27 @@
 - 用当前 ADB shell 的 `nlsu` 临时切换到 UID 1000，只把 `service.adb.tcp.port` 写回原值 5555，`setprop` 返回 0；对已经运行的 adbd 执行幂等 `ctl.start adbd` 也返回 0。因此 PAD63 的系统 UID 确有控制 adbd 启动和 TCP 属性的能力，不依赖再提权到 root。未关闭实际 ADB 链路测试冷启动。
 - 不应在现有主 APK 原位增加 `sharedUserId`：已安装包从 UID 10091 迁移到 1000 不属于普通无损覆盖升级，且主应用包含 WebView。`android:process=":web"` 仅分进程，不会改变 APK 的 Linux UID；`xtqx.md` 关于子进程变为普通 UID 的说法不能直接用于 VibeKits。可行适配是单独的平台签名、系统 UID 辅助 APK，通过签名权限限定的本机 IPC 接受 VibeKits 仿真开关请求，控制 adbd 后再开放原有固定隧道。
 
+## 2026-09-23 当前远程 ADB 架构与冷态复验
+
+- 主 APK `com.vibekits.vibekits` 保持普通 UID；独立辅助 APK `com.vibekits.vibekits.component.adb` 在 PAD63 实测 `userId=1000`、版本 `1.1`（versionCode 2）。辅助 APK 声明 `android:sharedUserId="android.uid.system"`；主 APK 通过 `PackageInstaller` 安装随包携带的同签名 APK，并核验包名与证书。只签名不保证别的设备会授予系统 UID，必须以安装结果和 UID 实测为准。
+- 用户开启“允许作为仿真机”后，主 APK 通过签名级 `REMOTE_ADB` 权限发送显式有序广播。辅助组件先核对自身 UID 1000，再设置 `service.adb.tcp.port=5555` 和 `ctl.start=adbd`。主 APK 检查 `127.0.0.1:5555` 就绪后才开放原生 P2P/HBBR 仿真门禁；运行中本机端口消失则暂时关门禁并重试。辅助组件保存用户启用状态，开机广播仅在此前启用时恢复。关闭仿真只停止它自己启动的 adbd。
+- 这不是 SSH，也不是自带 adbd。PAD63 未发现运行中的 SSH 服务；不能把 SSH 当作 ADB 丢失后的救援通道。远端只通过设备 ID 和已授权的仿真隧道访问固定本地 ADB 端口，无需局域网 IP。
+- 2026-09-23 22:49 左右，以 ID `6795854383` 强制 HBBR 中继执行 `tool/manual_pad63_remote_adb_test.dart`，控制端自动建立 ADB 隧道并远程执行 `getprop ro.product.model`，通过。随后 PAD63 真实设置 `service.adb.tcp.port=-1` 并停止 adbd，本地 ADB 会话断开；端口重新出现。第二次断开测试前预置了延时 300 秒的设备本地救援脚本，恢复检查时距离脚本启动约 33 秒，且救援触发标记不存在，因此此次恢复并非该延时脚本触发。恢复后再次强制 HBBR 执行相同远程 ADB 测试，通过。
+- 上述证据证明“已安装系统 UID 辅助组件、仿真已开启、运行中 adbd 断开”的恢复路径与强制中继远程 ADB 可用；未单独证明全新 PAD 首装、重启后的冷开机、辅助组件安装失败时的恢复能力。PAD 目前没有 SSH 备用服务，系统不接受辅助组件以 UID 1000 运行时，普通主 APK 无法保证开启 adbd。
+
+### PAD 专属仿真开启密码（dev.237 真机验收）
+
+- 仅 Android PAD 从关闭状态手动开启“允许作为仿真机”时弹出密码框，默认开启密码为 `2580`；取消或输入错误必须保持关闭，不得保存仿真授权或启动端点。macOS、Windows、Linux 的原有开关不增加此密码。已由用户授权并持久保存的开启状态在应用重启后自动恢复，不把恢复动作当作新的手动开启。
+- 统一在 `HarnessSimulatorTargetRuntime.enable` 入口验证，界面开关和 Harness `vibekits.simulator.set_enabled` 调用不能绕过；关闭无需密码。密码只在 PAD 本机验证，不随设备 ID 发给远程控制端。默认 4 位密码属于本地误操作防护，不应宣称它能替代设备配对、远端授权或高强度认证。
+- dev.236 首轮真实界面测试发现 Android 关闭仿真时错误调用桌面 SSH 密钥撤销，因 PAD 无 HOME 而报“无法定位当前用户目录”。dev.237 仅在非 Android 平台撤销托管 SSH 密钥，保留 Android 关闭门禁与系统辅助组件的原有撤销流程。
+- 最终签名包 `1.9.0-dev.237+2237`（versionCode 2237）在 PAD63 覆盖安装成功，PackageManager 版本一致。主 APK `86,967,773` 字节，SHA-256 `9a42fecc4978b2428a175fad37b95a1731098f8c82bdc0fb4a3848bec2f0cd75`；内嵌辅助 APK `8,868` 字节，SHA-256 `a249b7adf0ddc09ba1a434e43201aeb8321b7b12b88f63765cf70fde74b342e9`。两包 v2 签名验证通过，证书 SHA-256 同为 `c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8`。
+- 真机通过 PAD 设置→高级→“允许作为仿真机”执行：关闭后开关保持关闭；点击开启显示密码框；输入错误 `0000` 后弹窗原位显示“密码错误，仿真未开启”，未触发开启；取消后仍关闭；再次输入默认 `2580` 后开关变为“仿真机可连接”。随后用 ID `6795854383` 强制 HBBR 中继执行 `tool/manual_pad63_remote_adb_test.dart`，控制端 ADB 隧道与远程 `getprop` 均通过。测试中为保留唯一网络 ADB 临时将辅助组件的 `owned` 标志改为 false，测试结束已恢复原 `owned=true, enabled=true`；不能用本轮关闭动作证明组件停止 adbd 的真实断链结果。
+- dev.238 修复 PAD 代理订阅页初始化误等待桌面 QEMU/Mihomo 探测的问题；Android 只加载本地订阅，失败时在页面内显示错误并结束等待。相关静态检查 0 issue、密码与订阅回归共 15 项通过；真机与商城验收记录见后续版本条目。
+- dev.238 签名包在 PAD63 覆盖安装后，真机代理订阅页已显示本地数据目录、未安装核心提示、添加订阅入口和扫码按钮，不再持续转圈。dev.239 增加扫码前的相机运行时权限申请。dev.240 同时取消订阅弹窗的自动唤起键盘并使内容可滚动，避免弹窗操作区遮挡扫码按钮。
+- dev.240 签名包 `1.9.0-dev.240+2240` 在 PAD63 覆盖安装成功，PackageManager 报告 versionCode 2240。主 APK `86,971,012` 字节，SHA-256 `1f34ac59650725ab6ca43bdc36c5f66e975068574b4760960d0fea0d679f636f`，v2/v3 签名验证通过，证书 SHA-256 为 `c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8`。代理页正常显示且真实点击扫码按钮弹出 Android 相机权限请求；自动审批拒绝了控制端代用户选择一次性允许或拒绝，因此本轮不能宣称扫码画面和二维码识别已通过。PAD63 上系统权限弹窗保持待处理，需设备使用者自行选择。
+- dev.240 真机通过设备 ID `6795854383` 强制 HBBR 中继远程 ADB 测试：控制器建立隧道，远端 `adb shell getprop ro.product.model` 有效。
+- 上架前仍须验收商场开发者记录、公网详情、精确字节数、CDN 哈希、旧版检查更新及当前版不循环更新；没有这些证据不得写“正式发布完成”。
+
 ## 待完成的发布门禁
 
 1. 在 2 号屏实际播放视频期间复测帧推进、音频和键盘开关，不以 Activity 的 RESUMED 状态替代播放证据。

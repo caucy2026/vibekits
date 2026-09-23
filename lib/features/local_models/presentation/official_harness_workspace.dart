@@ -5151,6 +5151,65 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     ),
   );
 
+  Future<String?> _requestAndroidSimulatorPassword() async {
+    var password = '';
+    var invalid = false;
+    var checking = false;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, update) => AlertDialog(
+          title: const Text('开启远程仿真'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextField(
+                key: const Key('android-simulator-password'),
+                autofocus: true,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                onChanged: (value) {
+                  password = value;
+                  if (invalid) update(() => invalid = false);
+                },
+                decoration: InputDecoration(
+                  labelText: '请输入开启密码',
+                  errorText: invalid ? '密码错误，仿真未开启' : null,
+                ),
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              key: const Key('android-simulator-password-confirm'),
+              onPressed: checking
+                  ? null
+                  : () async {
+                      update(() => checking = true);
+                      final valid = await HarnessSimulatorAccessSettings()
+                          .verifyActivationPassword(password);
+                      if (!dialogContext.mounted) return;
+                      if (valid) {
+                        Navigator.of(dialogContext).pop(password);
+                      } else {
+                        update(() {
+                          checking = false;
+                          invalid = true;
+                        });
+                      }
+                    },
+              child: const Text('确认开启'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildAndroidSimulatorAccess(RustDeskHostInfo host) =>
       StreamBuilder<HarnessSimulatorTargetSnapshot>(
         stream: HarnessSimulatorTargetRuntime.shared.changes,
@@ -5168,7 +5227,17 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
             onChanged: host.available && !changing
                 ? (enabled) async {
                     if (enabled) {
-                      await HarnessSimulatorTargetRuntime.shared.enable();
+                      final password = await _requestAndroidSimulatorPassword();
+                      if (password == null) return;
+                      try {
+                        await HarnessSimulatorTargetRuntime.shared.enable(
+                          password: password,
+                        );
+                      } on Object catch (error) {
+                        if (mounted) {
+                          setState(() => _message = '仿真机启动失败：$error');
+                        }
+                      }
                     } else {
                       await HarnessSimulatorTargetRuntime.shared.disable();
                     }

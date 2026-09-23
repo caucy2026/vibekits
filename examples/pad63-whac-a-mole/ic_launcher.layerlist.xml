@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  打地鼠应用图标（美术源文件，layer-list 实现）。
+
+  基准画布 96dp x 96dp，由底层深绿圆角 shape 的 <size> 决定。
+
+  视觉与新版本游戏界面统一：
+    · 深绿垂直渐变底板 + 琥珀色描边内框（同一套圆角 / 描边语言）
+    · 木质地鼠从土洞里探出（棕系渐变 + 深棕描边）
+    · 琥珀色鼻子与头部裂纹（对应游戏内命中头部后的裂纹特效色 #FFC857）
+    · 右上角木质锤子（琥珀色锤头 + 木柄），示意"锤击"
+
+  说明：构建桥会把本文件复制为 app/src/main/res/drawable/ic_launcher.xml，
+  即实际 launcher 图标；两个文件保持完全一致。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. 深绿圆角底板（垂直渐变，与游戏背景同色系） -->
+    <item android:gravity="center">
+        <shape android:shape="rectangle">
+            <size
+                android:width="96dp"
+                android:height="96dp" />
+            <corners android:radius="22dp" />
+            <gradient
+                android:angle="270"
+                android:endColor="#08261A"
+                android:startColor="#1E8A50" />
+        </shape>
+    </item>
+
+    <!-- 2. 琥珀色描边内框（统一视觉语言） -->
+    <item android:gravity="center">
+        <shape android:shape="rectangle">
+            <size
+                android:width="84dp"
+                android:height="84dp" />
+            <corners android:radius="17dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#E8A33D" />
+        </shape>
+    </item>
+
+    <!-- 3. 洞口土堆 -->
+    <item
+        android:bottom="10dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="84dp"
+                android:height="26dp" />
+            <solid android:color="#5D4037" />
+        </shape>
+    </item>
+
+    <!-- 4. 深色洞口 -->
+    <item
+        android:bottom="14dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="72dp"
+                android:height="20dp" />
+            <solid android:color="#150B06" />
+        </shape>
+    </item>
+
+    <!-- 5. 地鼠双耳 -->
+    <item
+        android:bottom="60dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="40dp">
+        <shape android:shape="oval">
+            <size
+                android:width="20dp"
+                android:height="20dp" />
+            <solid android:color="#8D6E63" />
+        </shape>
+    </item>
+    <item
+        android:bottom="60dp"
+        android:gravity="bottom|center_horizontal"
+        android:left="40dp">
+        <shape android:shape="oval">
+            <size
+                android:width="20dp"
+                android:height="20dp" />
+            <solid android:color="#8D6E63" />
+        </shape>
+    </item>
+
+    <!-- 6. 地鼠脑袋（棕色渐变 + 深棕描边） -->
+    <item
+        android:bottom="24dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="58dp"
+                android:height="52dp" />
+            <gradient
+                android:angle="270"
+                android:endColor="#5D4037"
+                android:startColor="#B08A6E" />
+            <stroke
+                android:width="2dp"
+                android:color="#4E342E" />
+        </shape>
+    </item>
+
+    <!-- 7. 浅色口鼻 -->
+    <item
+        android:bottom="24dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="30dp"
+                android:height="18dp" />
+            <solid android:color="#E7D3C4" />
+        </shape>
+    </item>
+
+    <!-- 8. 眼白 -->
+    <item
+        android:bottom="46dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="24dp">
+        <shape android:shape="oval">
+            <size
+                android:width="12dp"
+                android:height="12dp" />
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+    <item
+        android:bottom="46dp"
+        android:gravity="bottom|center_horizontal"
+        android:left="24dp">
+        <shape android:shape="oval">
+            <size
+                android:width="12dp"
+                android:height="12dp" />
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+
+    <!-- 9. 瞳孔 -->
+    <item
+        android:bottom="46dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="24dp">
+        <shape android:shape="oval">
+            <size
+                android:width="6dp"
+                android:height="6dp" />
+            <solid android:color="#1A1A1A" />
+        </shape>
+    </item>
+    <item
+        android:bottom="46dp"
+        android:gravity="bottom|center_horizontal"
+        android:left="24dp">
+        <shape android:shape="oval">
+            <size
+                android:width="6dp"
+                android:height="6dp" />
+            <solid android:color="#1A1A1A" />
+        </shape>
+    </item>
+
+    <!-- 10. 琥珀色鼻子 -->
+    <item
+        android:bottom="36dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="11dp"
+                android:height="9dp" />
+            <solid android:color="#FFB300" />
+        </shape>
+    </item>
+
+    <!-- 11. 胡须（左右各一） -->
+    <item
+        android:bottom="40dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="36dp">
+        <shape android:shape="line">
+            <size
+                android:width="20dp"
+                android:height="2dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#3E2723" />
+        </shape>
+    </item>
+    <item
+        android:bottom="40dp"
+        android:gravity="bottom|center_horizontal"
+        android:left="36dp">
+        <shape android:shape="line">
+            <size
+                android:width="20dp"
+                android:height="2dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#3E2723" />
+        </shape>
+    </item>
+
+    <!-- 12. 头部琥珀色裂纹（对应游戏内命中头部后的裂纹特效） -->
+    <item
+        android:bottom="60dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="30dp">
+        <shape android:shape="line">
+            <size
+                android:width="12dp"
+                android:height="2dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#FFC857" />
+        </shape>
+    </item>
+    <item
+        android:bottom="68dp"
+        android:gravity="bottom|center_horizontal"
+        android:left="26dp">
+        <shape android:shape="line">
+            <size
+                android:width="12dp"
+                android:height="2dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#FFC857" />
+        </shape>
+    </item>
+    <item
+        android:bottom="64dp"
+        android:gravity="bottom|center_horizontal"
+        android:right="44dp">
+        <shape android:shape="line">
+            <size
+                android:width="10dp"
+                android:height="2dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#FFC857" />
+        </shape>
+    </item>
+
+    <!-- 13. 木质锤柄（先柄后头，锤头压在上方） -->
+    <item
+        android:gravity="top|right"
+        android:right="20dp"
+        android:top="24dp">
+        <shape android:shape="rectangle">
+            <size
+                android:width="8dp"
+                android:height="22dp" />
+            <corners android:radius="3dp" />
+            <solid android:color="#8D6E63" />
+        </shape>
+    </item>
+
+    <!-- 14. 琥珀色锤头 -->
+    <item
+        android:gravity="top|right"
+        android:right="8dp"
+        android:top="10dp">
+        <shape android:shape="rectangle">
+            <size
+                android:width="32dp"
+                android:height="14dp" />
+            <corners android:radius="4dp" />
+            <solid android:color="#FFC857" />
+            <stroke
+                android:width="2dp"
+                android:color="#B7791F" />
+        </shape>
+    </item>
+
+</layer-list>

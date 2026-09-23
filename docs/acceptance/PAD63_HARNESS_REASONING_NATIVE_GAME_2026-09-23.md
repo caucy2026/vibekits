@@ -2,7 +2,7 @@
 
 日期：2026-09-23。目标设备：PAD63（VibeKits ID `6795854383`，ADB `192.168.3.63:5555`）。本文件的六项要求均以 PAD 真机、当前安装包和 Harness 会话记录为准；源码存在、工具链已安装或控制端代编译均不等于通过。
 
-真机当前安装：VibeKits `1.9.0-dev.232` / versionCode `2232`；打地鼠包 `com.vibekits.whacdemo` 的 `pm path` 存在。测试包未作为商城正式包发布。下表保留此前阶段结果；最新复验见末节。
+真机当前安装：VibeKits `1.9.0-dev.233` / versionCode `2233`；打地鼠包 `com.vibekits.whacdemo` 已在第二屏运行。测试包未作为商城正式包发布。下表保留此前阶段结果；最新复验见末节。
 
 | ID | 用户要求 | 可执行验收标准 | 当前结果 |
 |---|---|---|---|
@@ -50,3 +50,17 @@
 - 真实 UI 复验：在 PAD Harness 建立 `session-1790161281297150`，私有会话文件先有用户消息，任务完成后有 2 条消息和 4257 字符的回复。`am force-stop` 后重新启动，侧栏与正文均显示原任务和回复。无共享目录复制用户会话文件。
 - 双屏复验：设备的 display 0 `mResumedActivity` 为 `com.vibekits.vibekits/.SingleScreenActivity`，display 2 为 `com.vibekits.whacdemo/.WhacActivity`；Harness 冷启动恢复后两者仍同时处于前台。设备本地打地鼠构建桥的 `launch_game` 已指定 `am start --display 2`。PAD 本地触发完整编译，资源、Java、DEX、打包、签名、验签、安装、第二屏启动八步退出码均为 0；随即检查两屏仍分别是游戏与 Harness。本轮触发来自设备控制端，未让 PAD Harness 再次发出 `/build` 调用，因此 Harness 到双屏构建的端到端链路仍待复测。
 - `flutter analyze` 修复文件 0 issue；`test/deepseek_harness_test.dart` 全部 34 项通过。ADB 辅助组件曾实测在 adbd 停止后约 8 秒恢复，但跨网隧道、关闭撤销、重启后的全链路 ADB 尚未验完，原六项总验收仍为 **BLOCK**。
+
+## dev233：Harness 重设计打地鼠与重启记忆复验
+
+- PAD63 安装并运行 `1.9.0-dev.233` / `2233`。沿用会话 `session-1790161281297150`，通过 VibeKits 远程仿真给 **PAD 自身的 Harness** 连续下达源码改版、图标改版和本机构建命令。Harness 真正重写 `WhacActivity.java` 与 launcher 图标，调用设备本地 `/build`；`compile_resources`、`compile_java`、`create_dex`、`package_dex`、`sign_apk`、`verify_apk`、`install_apk`、`launch_game` 八步退出码均为 0，`phase=completed`、`error=null`。源码和图标已同步回 `examples/pad63-whac-a-mole/`，SHA-256 分别为 `7ec8fca4a209aedf1db11d9ba4fdcffd52df6b6deeabf652fc8020de1675b2a4` 和 `8eeb77e35e7c17076d20485d2f6a54873c93da618ea2cca33cd829d16624fe99`，与 PAD 文件一致。
+- 真机 `dumpsys activity activities` 独立确认 display 2 前台是 `com.vibekits.whacdemo/.WhacActivity`，display 0 前台是 `com.vibekits.vibekits/.SingleScreenActivity`。第二屏截图观察到新版深绿九宫格、地鼠、60 秒倒计时、计分、最高分和开始/重新开始按钮；实际点击开始后进入运行态，再点击重新开始后倒计时重新开始。此次随手点九宫格记录为漏掉 13 只，未正向捕获新版单次锤击/裂纹动画；旧版曾实测最高分 130，不能当作本轮新版动画通过。
+- 第一次重设计命令触发 Harness 的 12 次工具交互上限，进程退出码 1，但旧接口误报 `phase=completed`。已修复移动端命令状态映射：仅退出码 0 才为 completed；非零为 failed，主动停止为 cancelled。后续拆分任务在同一会话继续完成。`flutter analyze` 相关文件 0 issue；`test/deepseek_harness_test.dart` 34 项通过。
+- 强制停止 VibeKits 后重新启动：相同活动会话 ID 和 8 条消息均从设备私有持久化文件恢复，Harness 聊天界面显示之前的构建结论；游戏仍在第二屏。重启后向同一会话发出只读追问，它正确复述了图标两个文件、此前的 `WhacActivity.java`、PAD 本机构建八步成功及 display 2；这是恢复后的真实模型回答，不只是静态 UI 恢复。手动远程复验入口 `test/manual_pad63_whac_redesign_test.dart`。
+- 此节仅判定“PAD Harness 重设计、独立构建、双屏运行与重启后记忆”通过。原六项中推理内容、跨网 ADB、持续性能及新版锤击裂纹逐帧效果仍按上表证据边界验收，不能因此把总验收改为 PASS。
+
+### PAD63 会话删除冷重启复验
+
+- 在 display 0 的 Harness 真实界面点击“新建会话”，得到临时空会话 `session-1790170723679231`；原打地鼠会话 `session-1790161281297150` 保留 10 条消息。
+- 点击临时会话的省略号 →“删除会话”→ 弹窗“永久删除”。确认后，侧栏只剩原会话，聊天区切回原会话，没有退回应用首页；设备私有会话文件也只剩原会话 10 条消息。
+- `am force-stop` 并重新打开 VibeKits 后，临时会话没有复活，原会话仍是活动会话且 10 条消息完整；display 0 为 VibeKits Harness，display 2 仍为打地鼠游戏。本次仅删除了新建的空测试会话，未删除用户原有会话。

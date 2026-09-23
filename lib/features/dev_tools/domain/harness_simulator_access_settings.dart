@@ -19,6 +19,9 @@ final class HarnessSimulatorAccessSettings {
        _write = write ?? PlatformCredentialStore.write;
 
   static const String _enabledKey = 'harness-simulator-v1-enabled';
+  static const String defaultActivationPassword = '2580';
+  static const String _activationPasswordKey =
+      'harness-simulator-v1-activation-password';
   static const String _relayFingerprintKey =
       'harness-simulator-v1-relay-fingerprint';
   static const String _relayExecutableKey =
@@ -49,6 +52,12 @@ final class HarnessSimulatorAccessSettings {
   Future<void> saveEnabled(bool value) async {
     await _write(_enabledKey, value ? 'true' : 'false');
     setEnabled(value);
+  }
+
+  Future<bool> verifyActivationPassword(String? value) async {
+    final saved = await _read(_activationPasswordKey);
+    return value ==
+        (saved?.isNotEmpty == true ? saved : defaultActivationPassword);
   }
 
   Future<String> loadRelayFingerprint() async =>

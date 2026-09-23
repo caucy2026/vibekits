@@ -33,6 +33,24 @@ rules:
 ''';
 
 void main() {
+  test('扫码订阅只接受有效 HTTPS 地址且不修改凭据', () {
+    final Uri uri = MihomoProfileService.validatedSubscriptionUri(
+      ' https://proxy.example/sub?token=private ',
+    );
+    expect(uri.host, 'proxy.example');
+    expect(uri.queryParameters['token'], 'private');
+    expect(
+      () => MihomoProfileService.validatedSubscriptionUri('https://'),
+      throwsFormatException,
+    );
+    expect(
+      () => MihomoProfileService.validatedSubscriptionUri(
+        'http://proxy.example/sub',
+      ),
+      throwsFormatException,
+    );
+  });
+
   late Directory sandbox;
   late Map<String, String> credentials;
   late MihomoProfileService service;
