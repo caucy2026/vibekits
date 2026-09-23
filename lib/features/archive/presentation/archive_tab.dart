@@ -29,6 +29,8 @@ class ArchiveTab extends StatefulWidget {
     super.key,
     this.initialPath,
     this.openRequest,
+    this.acceptedExtensions = SupportedFileTypes.archiveExtensions,
+    this.externalBackendsEnabled = true,
     this.maxEntries = 100000,
     this.maxSingleExpandedBytes = 20 * 1024 * 1024 * 1024,
     this.headerReader = readArchiveHeader,
@@ -37,6 +39,8 @@ class ArchiveTab extends StatefulWidget {
 
   final String? initialPath;
   final ValueListenable<int>? openRequest;
+  final List<String> acceptedExtensions;
+  final bool externalBackendsEnabled;
   final int maxEntries;
   final int maxSingleExpandedBytes;
   final Future<Uint8List> Function(String path) headerReader;
@@ -91,9 +95,9 @@ class _ArchiveTabState extends State<ArchiveTab> {
   }
 
   Future<void> _open() async {
-    const XTypeGroup group = XTypeGroup(
+    final XTypeGroup group = XTypeGroup(
       label: '压缩包',
-      extensions: SupportedFileTypes.archiveExtensions,
+      extensions: widget.acceptedExtensions,
     );
     final XFile? file = await openFile(acceptedTypeGroups: <XTypeGroup>[group]);
     if (file == null) return;
@@ -113,6 +117,9 @@ class _ArchiveTabState extends State<ArchiveTab> {
           format == ArchiveFormat.rar ||
           format == ArchiveFormat.iso ||
           format == ArchiveFormat.external) {
+        if (!widget.externalBackendsEnabled) {
+          throw UnsupportedError('此版本仅支持 ZIP、TAR、GZ、BZ2 和 XZ');
+        }
         final List<SevenZipEntry> entries = await widget.nativeLister(path);
         if (entries.length > widget.maxEntries ||
             entries.any(
@@ -611,7 +618,9 @@ class _ArchiveTabState extends State<ArchiveTab> {
     if (listing == null) {
       return Center(
         child: Text(
-          '拖入或打开压缩包即可查看内容\n支持 RAR / ZIP / 7z / TAR / ISO / WIM / DMG 等常用格式',
+          widget.externalBackendsEnabled
+              ? '拖入或打开压缩包即可查看内容\n支持 RAR / ZIP / 7z / TAR / ISO / WIM / DMG 等常用格式'
+              : '拖入或打开压缩包即可查看内容\n支持 ZIP / TAR / GZ / BZ2 / XZ',
           textAlign: TextAlign.center,
           style: TextStyle(color: context.vibe.muted),
         ),

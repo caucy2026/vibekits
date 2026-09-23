@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.9.0-dev.225+2225
+version: 1.9.225+2226
 
 environment:
   sdk: ^3.11.0
@@ -35,9 +35,6 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   crypto: ^3.0.7
-  # Pure-Dart EC key and X.509 generation for the persistent LMCP/2 HTTPS
-  # instance identity. Private keys are stored by PlatformCredentialStore.
-  basic_utils: ^5.8.2
   convert: ^3.1.2
   fast_gbk: ^1.0.0
   flutter_markdown_plus: ^1.0.12
@@ -45,31 +42,10 @@ dependencies:
   xml: ^7.0.1
   csv: ^8.0.0
   webview_windows: ^0.4.0
-  # Official Harness Web is the single workspace/session/plugin UI on macOS.
-  # Windows keeps WebView2 through webview_windows until the same bridge has
-  # completed Windows binary compatibility validation.
-  webview_flutter: ^4.14.1
   flutter_svg: ^2.3.0
   archive: ^4.0.9
   ffi: ^2.2.0
   image: ^4.5.4
-  # Native runtime is supply-chain pinned; upgrade only with new hashes and
-  # Universal/macOS compatibility evidence.
-  sherpa_onnx: 1.13.6
-  # SQLite 3.x uses Dart native-asset hooks and bundles official SQLite builds
-  # for Windows and macOS; no legacy sqlite3_flutter_libs package is required.
-  sqlite3: ^3.5.0
-  postgres: ^3.5.12
-  mysql_dart: ^3.0.0
-  libserialport_plus: ^1.0.1
-  # Interactive SSH/SFTP protocol and terminal rendering. Host keys are
-  # verified by Vibekits; verification is never disabled.
-  dartssh2: ^2.22.4
-  xterm: ^4.0.0
-  # MIT: bundled cross-platform local playback for the audio debugging lab.
-  audioplayers: 6.5.1
-  # BSD-3-Clause: render the one-time LAN Harness Key onboarding QR locally.
-  qr_flutter: ^4.1.0
   path: ^1.9.1
   path_provider: ^2.1.5
 
@@ -84,18 +60,6 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
-# Flutter's current macOS native-assets runner hard-codes target_version=13
-# (flutter/flutter#145104), even when the app deployment target is macOS 12.
-# Keep audited source copies of the two affected packages so their build hooks
-# can explicitly preserve Vibekits' supported macOS 12 deployment floor.
-dependency_overrides:
-  libserialport_plus:
-    path: third_party/dart/libserialport_plus
-  objective_c:
-    path: third_party/dart/objective_c
-  sqlite3:
-    path: third_party/dart/sqlite3
-
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -107,11 +71,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
-    - macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_128.png
+    - macos/Runner/Assets.xcassets/AppIconStore.appiconset/app_icon_128.png
     - assets/cleaner/windows_rules_v6.json
-    - assets/harness/AGENTS.md
     - assets/harness/SERIAL_SKILL.md
     - assets/harness/codex_conversation_ux.js
+    - assets/harness/harness_message_queue_bridge.js
     - test_data/models/silero_vad.onnx
     - test_data/models/silero_vad_v6.onnx
     - test_data/models/ppocrv6_tiny/det.onnx

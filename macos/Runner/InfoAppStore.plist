@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key><string></string>
+	<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits 压缩文件</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>zip</string><string>tar</string><string>gz</string><string>tgz</string>
+				<string>bz2</string><string>tbz2</string><string>xz</string><string>txz</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Vibekits 文档与源代码</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Owner</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>txt</string><string>log</string><string>md</string><string>markdown</string>
+				<string>ini</string><string>cfg</string><string>conf</string><string>properties</string>
+				<string>yaml</string><string>yml</string><string>toml</string><string>env</string>
+				<string>editorconfig</string><string>gitignore</string><string>diff</string><string>patch</string>
+				<string>tex</string><string>latex</string><string>csv</string><string>tsv</string>
+				<string>json</string><string>xml</string><string>html</string><string>htm</string>
+				<string>epub</string><string>svg</string><string>svgz</string><string>bin</string>
+				<string>dart</string><string>js</string><string>mjs</string><string>cjs</string>
+				<string>ts</string><string>tsx</string><string>jsx</string><string>css</string>
+				<string>scss</string><string>less</string><string>vue</string><string>svelte</string>
+				<string>py</string><string>pyw</string><string>java</string><string>kt</string><string>kts</string>
+				<string>c</string><string>h</string><string>cc</string><string>cpp</string><string>cxx</string><string>hpp</string>
+				<string>cs</string><string>go</string><string>rs</string><string>swift</string>
+				<string>sh</string><string>bash</string><string>zsh</string><string>bat</string><string>cmd</string><string>ps1</string>
+				<string>sql</string><string>gradle</string><string>cmake</string><string>dockerfile</string>
+				<string>rb</string><string>php</string><string>phtml</string><string>lua</string><string>r</string>
+				<string>scala</string><string>sc</string><string>groovy</string>
+				<string>clj</string><string>cljs</string><string>cljc</string><string>edn</string>
+				<string>ex</string><string>exs</string><string>erl</string><string>hrl</string>
+				<string>fs</string><string>fsx</string><string>fsi</string><string>vb</string><string>vbs</string>
+				<string>asm</string><string>s</string><string>v</string><string>zig</string>
+				<string>nim</string><string>nims</string><string>sol</string><string>proto</string>
+				<string>graphql</string><string>gql</string><string>tf</string><string>tfvars</string><string>hcl</string>
+				<string>nix</string><string>fish</string><string>nu</string><string>awk</string><string>sed</string>
+				<string>pl</string><string>pm</string><string>tcl</string><string>coffee</string>
+				<string>wat</string><string>wasm</string><string>lock</string><string>ipynb</string>
+				<string>astro</string><string>elm</string><string>hs</string><string>lhs</string><string>jl</string>
+				<string>ml</string><string>mli</string><string>pas</string><string>pp</string><string>inc</string>
+				<string>rego</string><string>yara</string><string>yar</string>
+				<string>glsl</string><string>vert</string><string>frag</string><string>comp</string><string>hlsl</string><string>metal</string>
+				<string>rst</string><string>adoc</string><string>bazel</string><string>bzl</string><string>build</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleVersion</key><string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+	<key>ITSAppUsesNonExemptEncryption</key><false/>
+	<key>NSHumanReadableCopyright</key><string>$(PRODUCT_COPYRIGHT)</string>
+	<key>NSMainNibFile</key><string>MainMenu</string>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
