@@ -20,10 +20,16 @@ fi
 cd "$PROJECT_ROOT"
 [[ -d /Volumes/ORICO && -w /Volumes/ORICO ]] || { echo 'ORICO build volume unavailable' >&2; exit 2; }
 export TMPDIR="$STORE_CACHE/tmp/"
-mkdir -p "$TMPDIR"
-FLUTTER_BUILD_DIR="$(sed -n 's/^FLUTTER_BUILD_DIR=//p' macos/Flutter/ephemeral/Flutter-Generated.xcconfig | head -1)"
-[[ -n "$FLUTTER_BUILD_DIR" ]] || { echo 'Flutter build directory is unavailable' >&2; exit 2; }
-APP="$PROJECT_ROOT/$FLUTTER_BUILD_DIR/macos/Build/Products/Release/Vibekits.app"
+export XDG_CONFIG_HOME="$STORE_CACHE/flutter-config"
+mkdir -p "$TMPDIR" "$XDG_CONFIG_HOME"
+[[ "$(dirname "$STORE_CACHE")" == "$(dirname "$PROJECT_ROOT")" ]] || {
+  echo 'Store cache must be a sibling of the isolated worktree.' >&2
+  exit 2
+}
+STORE_BUILD_DIR="../$(basename "$STORE_CACHE")/flutter-build"
+"$FLUTTER_BIN" config --build-dir="$STORE_BUILD_DIR" >/dev/null
+"$FLUTTER_BIN" pub get >/dev/null
+APP="$PROJECT_ROOT/$STORE_BUILD_DIR/macos/Build/Products/Release/Vibekits.app"
 # Flutter's incremental macOS build keeps files that were produced by an
 # earlier distribution variant. Remove the product before the Store build so
 # a direct-build `Contents/MacOS/tools` directory can never leak into the
@@ -38,6 +44,11 @@ VIBEKITS_APP_STORE_BUILD=1 VIBEKITS_INFO_PLIST=Runner/InfoAppStore.plist \
   --dart-define=VIBEKITS_DISTRIBUTION=mac-app-store \
   --dart-define="VIBEKITS_APP_STORE_DISPLAY_VERSION=$STORE_VERSION"
 
+FLUTTER_BUILD_DIR="$(sed -n 's/^FLUTTER_BUILD_DIR=//p' macos/Flutter/ephemeral/Flutter-Generated.xcconfig | head -1)"
+[[ "$FLUTTER_BUILD_DIR" == "$STORE_BUILD_DIR" ]] || {
+  echo 'Flutter build directory escaped the isolated Store cache.' >&2
+  exit 2
+}
 [[ -d "$APP/Contents" ]] || { echo 'Store Flutter app was not built' >&2; exit 2; }
 if find "$APP/Contents" -path '*/tools/*' -print -quit | grep -q .; then
   echo "Store build unexpectedly contains external tool runtimes." >&2
