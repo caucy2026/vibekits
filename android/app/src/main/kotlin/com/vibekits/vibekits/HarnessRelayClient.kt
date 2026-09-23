@@ -25,6 +25,7 @@ class HarnessRelayClient(private val context: Context) {
         const val OPEN_TUNNEL = 5
         const val CLOSE_TUNNEL = 6
         const val STOP = 7
+        const val SIMULATOR_ACCESS = 8
         private const val RESULT = 100
     }
 

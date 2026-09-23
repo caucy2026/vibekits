@@ -2,7 +2,9 @@ param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Release',
   [string]$ExpectedVersion = '',
-  [string]$BundlePath = ''
+  [string]$BundlePath = '',
+  [switch]$IncludeOptionalRuntimes,
+  [switch]$SkipLiveRelayProbe
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +17,16 @@ if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) {
   }
   $ExpectedVersion = $versionMatch.Matches[0].Groups[1].Value
 }
+$appVersionSource = Get-Content -LiteralPath (Join-Path $projectRoot 'lib\app\app_version.dart') -Raw
+$semanticMatch = [regex]::Match($appVersionSource, "static const String semantic = '([^']+)';")
+$buildMatch = [regex]::Match($appVersionSource, 'static const int build = (\d+);')
+if (-not $semanticMatch.Success -or -not $buildMatch.Success) {
+  throw 'Unable to read AppVersion semantic/build constants'
+}
+$sourceVersion = "$($semanticMatch.Groups[1].Value)+$($buildMatch.Groups[1].Value)"
+if ($sourceVersion -ne $ExpectedVersion) {
+  throw "Source version mismatch: pubspec/expected=$ExpectedVersion, AppVersion=$sourceVersion"
+}
 $bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
   Join-Path $projectRoot "build\windows\x64\runner\$Configuration"
 } else {
@@ -22,6 +34,8 @@ $bundle = if ([string]::IsNullOrWhiteSpace($BundlePath)) {
 }
 $app = Join-Path $bundle 'vibekits.exe'
 $required = @(
+  'flutter_windows.dll',
+  'data\app.so',
   'vibekits-harness-relay.exe',
   'vibekits-harness-relay.json',
   'RUSTDESK-AGPL-3.0.txt',
@@ -53,14 +67,6 @@ $required = @(
   'tools\harness\builtin-skills\vibekits-remote-simulator\references\tool-contract.md',
   'tools\harness\builtin-skills\vibekits-remote-simulator\scripts\invoke.rb',
   'tools\lark-cli\lark-cli.exe',
-  'tools\mihomo\mihomo.exe',
-  'tools\mihomo\vibekits-mihomo-runtime.json',
-  'tools\mihomo\Country.mmdb',
-  'tools\mihomo\geoip.dat',
-  'tools\mihomo\geosite.dat',
-  'tools\qemu\qemu-system-x86_64.exe',
-  'tools\qemu\qemu-img.exe',
-  'tools\qemu\vibekits-qemu-runtime.json',
   'libserialport_plus.dll',
   'onnxruntime.dll',
   'vibekits_onnx.dll',
@@ -68,6 +74,19 @@ $required = @(
   'data\flutter_assets\test_data\models\ppocrv6_tiny\rec.onnx',
   'data\flutter_assets\test_data\models\ppocrv6_tiny\rec.yml'
 )
+
+if ($IncludeOptionalRuntimes) {
+  $required += @(
+  'tools\mihomo\mihomo.exe',
+  'tools\mihomo\vibekits-mihomo-runtime.json',
+  'tools\mihomo\Country.mmdb',
+  'tools\mihomo\geoip.dat',
+  'tools\mihomo\geosite.dat',
+  'tools\qemu\qemu-system-x86_64.exe',
+  'tools\qemu\qemu-img.exe',
+  'tools\qemu\vibekits-qemu-runtime.json'
+  )
+}
 
 if (-not (Test-Path -LiteralPath $app)) {
   throw "Windows bundle is missing: $app"
@@ -88,6 +107,9 @@ if ($relayManifest.component -ne 'vibekits-harness-relay' -or
     $relayManifest.sha256 -ne $relayHash) {
   throw 'Bundled Harness relay provenance or SHA256 is invalid'
 }
+# Structural checks can run while another installed VibeKits owns the relay.
+# Release acceptance must also run the default live probe with THIS bundle active.
+if (-not $SkipLiveRelayProbe) {
 $relayStatusText = (& $relay --vibekits-harness-status 2>$null | Out-String).Trim()
 try {
   $relayStatus = $relayStatusText | ConvertFrom-Json
@@ -106,9 +128,22 @@ if ($LASTEXITCODE -ne 0 -or
   throw "Bundled Harness relay does not implement protocol_v2: $relayProtocolText"
 }
 
+}
+
 $version = (Get-Item -LiteralPath $app).VersionInfo
 if ($version.FileVersion -ne $ExpectedVersion -or $version.ProductVersion -ne $ExpectedVersion) {
   throw "Version mismatch: File=$($version.FileVersion), Product=$($version.ProductVersion)"
+}
+# The EXE resource and installer can report the new version while Flutter's
+# actual AOT payload is left over from an older build. Check the version shown
+# by the running app in app.so before accepting the staged directory.
+$expectedSemanticVersion = ($ExpectedVersion -split '\+')[0]
+$appSo = Join-Path $bundle 'data\app.so'
+$appSoText = [Text.Encoding]::GetEncoding(28591).GetString(
+  [IO.File]::ReadAllBytes($appSo)
+)
+if (-not $appSoText.Contains($expectedSemanticVersion)) {
+  throw "Flutter AOT version mismatch: data\app.so does not contain $expectedSemanticVersion"
 }
 $git = Join-Path $bundle 'tools\git\cmd\git.exe'
 $gitVersion = (& $git --version).Trim()

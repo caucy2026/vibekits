@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import 'remote_simulation_activity.dart';
+import 'adb_service.dart';
 import 'simulator_update_service.dart';
 
 import 'rustdesk_harness_share_service.dart';
@@ -354,6 +355,8 @@ typedef HarnessSimulatorTunnelOpener =
       bool forceRelay,
     );
 typedef HarnessSimulatorMcpTunnelOpener = HarnessSimulatorTunnelOpener;
+typedef HarnessSimulatorAdbTunnelOpener = HarnessSimulatorTunnelOpener;
+typedef HarnessSimulatorAdbConnector = Future<String> Function(int localPort);
 typedef HarnessSimulatorPortAllocator = Future<int> Function();
 typedef HarnessSimulatorSshTunnelOpener =
     Future<RustDeskHarnessTunnelLease> Function(
@@ -375,6 +378,8 @@ final class HarnessSimulatorController {
     HarnessSimulatorHostResolver? resolveHost,
     HarnessSimulatorTunnelOpener? openTunnel,
     HarnessSimulatorMcpTunnelOpener? openMcpTunnel,
+    HarnessSimulatorAdbTunnelOpener? openAdbTunnel,
+    HarnessSimulatorAdbConnector? connectAdb,
     HarnessSimulatorPortAllocator? allocatePort,
     HarnessSimulatorMcpClient? mcpClient,
     HarnessSimulatorControlClient? controlClient,
@@ -382,10 +387,13 @@ final class HarnessSimulatorController {
     HarnessSimulatorProcessRunner? processRunner,
     Directory? sshKeyRoot,
     this.enableSshBootstrap = true,
+    bool? enableAdbBootstrap,
   }) : _resolveHost =
            resolveHost ?? RustDeskHarnessShareService.ensureHostAvailable,
        _openTunnel = openTunnel ?? _defaultOpenTunnel,
        _openMcpTunnel = openMcpTunnel ?? _defaultOpenMcpTunnel,
+       _openAdbTunnel = openAdbTunnel ?? _defaultOpenAdbTunnel,
+       _connectAdb = connectAdb ?? _defaultConnectAdb,
        _allocatePort =
            allocatePort ?? RustDeskHarnessShareService.allocateTunnelPort,
        _mcpClient = mcpClient ?? const _LoopbackHarnessSimulatorMcpClient(),
@@ -393,13 +401,16 @@ final class HarnessSimulatorController {
            controlClient ?? const _LoopbackHarnessSimulatorControlClient(),
        _openSshTunnel = openSshTunnel ?? _defaultOpenSshTunnel,
        _processRunner = processRunner ?? _defaultProcessRunner,
-       _sshKeyRootOverride = sshKeyRoot;
+       _sshKeyRootOverride = sshKeyRoot,
+       enableAdbBootstrap = enableAdbBootstrap ?? openTunnel == null;
 
   static final HarnessSimulatorController shared = HarnessSimulatorController();
 
   final HarnessSimulatorHostResolver _resolveHost;
   final HarnessSimulatorTunnelOpener _openTunnel;
   final HarnessSimulatorMcpTunnelOpener _openMcpTunnel;
+  final HarnessSimulatorAdbTunnelOpener _openAdbTunnel;
+  final HarnessSimulatorAdbConnector _connectAdb;
   final HarnessSimulatorPortAllocator _allocatePort;
   final HarnessSimulatorMcpClient _mcpClient;
   final HarnessSimulatorControlClient _controlClient;
@@ -407,6 +418,7 @@ final class HarnessSimulatorController {
   final HarnessSimulatorProcessRunner _processRunner;
   final Directory? _sshKeyRootOverride;
   final bool enableSshBootstrap;
+  final bool enableAdbBootstrap;
   final Map<String, _HarnessSimulatorSession> _sessions =
       <String, _HarnessSimulatorSession>{};
 
@@ -468,6 +480,36 @@ final class HarnessSimulatorController {
     localPort: localPort,
     forceRelay: forceRelay,
   );
+
+  static Future<RustDeskHarnessTunnelLease> _defaultOpenAdbTunnel(
+    String executable,
+    String routingId,
+    int localPort,
+    bool forceRelay,
+  ) => RustDeskHarnessShareService.openSimulatorAdbTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    forceRelay: forceRelay,
+  );
+
+  static Future<String> _defaultConnectAdb(int localPort) async {
+    final bundled = File(AdbService.bundledExecutablePath());
+    final executable = await bundled.exists() ? bundled.path : 'adb';
+    final serial = '127.0.0.1:$localPort';
+    await AdbService.connect(executable, serial);
+    final result = await AdbService.runCommand(executable, <String>[
+      '-s',
+      serial,
+      'shell',
+      'getprop',
+      'ro.product.model',
+    ]);
+    if (result.exitCode != 0 || result.stdout.trim().isEmpty) {
+      throw StateError('远程 ADB 握手后无法读取设备型号：${result.stderr.trim()}');
+    }
+    return serial;
+  }
 
   Future<Map<String, Object?>> connect(
     String routingId, {
@@ -534,7 +576,11 @@ final class HarnessSimulatorController {
           ),
         );
         await tunnel.waitUntilConnected(timeout: timeout);
-        ssh = await sshFuture;
+        try {
+          ssh = await sshFuture;
+        } on HarnessSimulatorControllerException catch (error) {
+          if (error.code != 'android_no_ssh') rethrow;
+        }
         mcpLocalPort = await _allocatePort();
         mcpTunnel = await _openMcpTunnel(
           host.executable,
@@ -573,11 +619,16 @@ final class HarnessSimulatorController {
           ssh: ssh,
           connectedAt: DateTime.now().toUtc(),
         );
+        if (ssh == null && enableAdbBootstrap) {
+          await _attachAndroidAdb(session, host.executable, timeout);
+        }
         _sessions[id] = session;
         _publishStatus();
         activity.succeed(
-          '已连接 ${ssh.hostname} · ${tools.length} 项工具'
-          ' · SSH 已就绪 · 工具通道已就绪',
+          ssh == null
+              ? '已连接 Android 仿真机 · ${tools.length} 项工具 · 工具通道已就绪'
+              : '已连接 ${ssh.hostname} · ${tools.length} 项工具'
+                    ' · SSH 已就绪 · 工具通道已就绪',
         );
         return _snapshot(session);
       }
@@ -647,6 +698,34 @@ final class HarnessSimulatorController {
       'connected': _sessions.isNotEmpty,
       'sessions': _sessions.values.map(_snapshot).toList(growable: false),
     };
+  }
+
+  Future<void> _attachAndroidAdb(
+    _HarnessSimulatorSession session,
+    String executable,
+    Duration timeout,
+  ) async {
+    RustDeskHarnessTunnelLease? adbTunnel;
+    try {
+      final localPort = await _allocatePort();
+      adbTunnel = await _openAdbTunnel(
+        executable,
+        session.routingId,
+        localPort,
+        session.forceRelay,
+      );
+      final connectFuture = _connectAdb(localPort).timeout(timeout);
+      unawaited(
+        connectFuture.then<void>((_) {}, onError: (Object error, StackTrace trace) {}),
+      );
+      await adbTunnel.waitUntilConnected(timeout: timeout);
+      session.adbSerial = await connectFuture;
+      session.adbTunnel = adbTunnel;
+      session.adbError = '';
+    } on Object catch (error) {
+      await adbTunnel?.close();
+      session.adbError = '$error';
+    }
   }
 
   List<Map<String, Object?>> catalog(String routingId) {
@@ -1099,6 +1178,14 @@ final class HarnessSimulatorController {
       publicKey: publicKeyText,
       timeout: timeout,
     );
+    if (identity['platform'] == 'android' &&
+        identity['sshSupported'] == false &&
+        identity['authorized'] == true) {
+      throw const HarnessSimulatorControllerException(
+        'android_no_ssh',
+        'Android 仿真机通过已认证的 MCP 通道提供设备工具',
+      );
+    }
     final username = '${identity['username'] ?? ''}'.trim();
     final platform = '${identity['platform'] ?? ''}'.trim().toLowerCase();
     final fingerprint = '${identity['hostKeyFingerprint'] ?? ''}'.trim();
@@ -1350,6 +1437,7 @@ final class HarnessSimulatorController {
     );
     final session = _sessions.remove(id);
     await session?.ssh?.tunnel.close();
+    await session?.adbTunnel?.close();
     await session?.mcpTunnel?.close();
     await session?.tunnel.close();
     _publishStatus();
@@ -1362,6 +1450,7 @@ final class HarnessSimulatorController {
     _sessions.clear();
     for (final session in sessions) {
       await session.ssh?.tunnel.close();
+      await session.adbTunnel?.close();
       await session.mcpTunnel?.close();
       await session.tunnel.close();
     }
@@ -1410,32 +1499,37 @@ final class HarnessSimulatorController {
     _ => '调用远程工具 · $toolId',
   };
 
-  static Map<String, Object?> _snapshot(_HarnessSimulatorSession session) =>
-      <String, Object?>{
-        'connected':
-            !session.tunnel.closed &&
-            (session.mcpTunnel == null || !session.mcpTunnel!.closed) &&
-            session.mcpReady,
-        'transportReady':
-            !session.tunnel.closed &&
-            (session.mcpTunnel == null || !session.mcpTunnel!.closed),
-        'routingId': session.routingId,
-        'transport': session.forceRelay ? 'relay' : 'p2p_or_relay',
-        'connectedAt': session.connectedAt.toIso8601String(),
-        'toolCount': session.tools.length,
-        'sshReady': session.ssh != null,
-        'mcpReady': session.mcpReady,
-        if (session.mcpError.isNotEmpty) 'mcpError': session.mcpError,
-        if (session.ssh case final ssh?) ...<String, Object?>{
-          'sshUsername': ssh.username,
-          'sshHostKeyFingerprint': ssh.hostKeyFingerprint,
-          'hostname': ssh.hostname,
-        },
-      };
+  static Map<String, Object?> _snapshot(
+    _HarnessSimulatorSession session,
+  ) => <String, Object?>{
+    'connected':
+        !session.tunnel.closed &&
+        (session.mcpTunnel == null || !session.mcpTunnel!.closed) &&
+        session.mcpReady,
+    'transportReady':
+        !session.tunnel.closed &&
+        (session.mcpTunnel == null || !session.mcpTunnel!.closed),
+    'routingId': session.routingId,
+    'transport': session.forceRelay ? 'relay' : 'p2p_or_relay',
+    'connectedAt': session.connectedAt.toIso8601String(),
+    'toolCount': session.tools.length,
+    'sshReady': session.ssh != null,
+    'mcpReady': session.mcpReady,
+    'adbReady':
+        session.adbSerial.isNotEmpty && (session.adbTunnel?.closed == false),
+    if (session.adbSerial.isNotEmpty) 'adbSerial': session.adbSerial,
+    if (session.adbError.isNotEmpty) 'adbError': session.adbError,
+    if (session.mcpError.isNotEmpty) 'mcpError': session.mcpError,
+    if (session.ssh case final ssh?) ...<String, Object?>{
+      'sshUsername': ssh.username,
+      'sshHostKeyFingerprint': ssh.hostKeyFingerprint,
+      'hostname': ssh.hostname,
+    },
+  };
 }
 
 final class _HarnessSimulatorSession {
-  const _HarnessSimulatorSession({
+  _HarnessSimulatorSession({
     required this.routingId,
     required this.controllerRoutingId,
     required this.localPort,
@@ -1462,6 +1556,9 @@ final class _HarnessSimulatorSession {
   final String mcpError;
   final _HarnessSimulatorSshSession? ssh;
   final DateTime connectedAt;
+  RustDeskHarnessTunnelLease? adbTunnel;
+  String adbSerial = '';
+  String adbError = '';
 }
 
 final class _HarnessSimulatorSshSession {

@@ -994,6 +994,26 @@ class _MainShellState extends State<MainShell> {
   }
 
   Future<void> _exitAndroidApp() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('退出 VibeKits？'),
+        content: const Text('退出后将关闭当前 PAD 上的 Harness 会话和远程仿真服务。'),
+        actions: <Widget>[
+          TextButton(
+            key: const Key('android-exit-cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('android-exit-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('确认退出'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     try {
       await AndroidDisplayContext.exitApp();
     } on PlatformException {
@@ -1156,7 +1176,6 @@ class _MainShellState extends State<MainShell> {
                 key: ValueKey<String>('nav-${_tabTitles[index]}'),
                 icon: _tabIcons[index],
                 label: _tabTitles[index],
-                shortcut: '${index + 1}',
                 selected: selected,
                 onTap: () => _selectTab(index),
               ),
@@ -1226,14 +1245,12 @@ class _NavigationItem extends StatelessWidget {
     super.key,
     required this.icon,
     required this.label,
-    required this.shortcut,
     required this.selected,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
-  final String shortcut;
   final bool selected;
   final VoidCallback onTap;
 
@@ -1283,13 +1300,6 @@ class _NavigationItem extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  shortcut,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: foreground,
-                    fontFamily: 'Cascadia Mono',
-                  ),
-                ),
               ],
             ),
           ),
@@ -1307,10 +1317,7 @@ class _DeferredWorkspace extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        SizedBox.square(
-          dimension: 22,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
+        Icon(Icons.hourglass_empty_rounded, size: 22),
         SizedBox(height: 12),
         Text('界面已就绪，正在加载工作区…'),
       ],

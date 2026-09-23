@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../../../app/app_theme.dart';
 import '../../../app/platform_storage_layout.dart';
+import '../../app_center/domain/app_center_service.dart';
 import '../../dev_tools/domain/deepseek_harness_service.dart';
 import '../../dev_tools/domain/harness_tool_bridge.dart';
 import '../domain/bundled_model_installer.dart';
@@ -23,6 +24,22 @@ import 'harness_webview_input_gate.dart';
 import 'official_harness_workspace.dart';
 
 Future<List<int>> loadBundledModelAsset(String path) async {
+  if (Platform.isAndroid) {
+    const prefix = 'test_data/models/';
+    if (!path.startsWith(prefix)) {
+      throw const FormatException('不支持的 Android 模型资源');
+    }
+    try {
+      final data = await const MethodChannel('vibekits/app-installer')
+          .invokeMethod<Uint8List>('readModelComponentAsset', <String, Object?>{
+            'path': path.substring(prefix.length),
+          });
+      if (data == null || data.isEmpty) throw StateError('模型组件资源为空');
+      return data;
+    } on PlatformException catch (error) {
+      throw StateError('请先从应用中心安装 VibeKits 模型组件：${error.message}');
+    }
+  }
   final ByteData bundled = await rootBundle.load(path);
   return bundled.buffer.asUint8List(
     bundled.offsetInBytes,
@@ -208,7 +225,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       });
       if (_imagePath != null && !_autoOcrStarted) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
-          if (!_ocrBundleInstalled) await _downloadOcrBundle();
+          if (!_ocrBundleInstalled) await _prepareOcrBundle();
           if (mounted && _ocrBundleInstalled && !_autoOcrStarted) {
             _autoOcrStarted = true;
             await _runOcr();
@@ -379,6 +396,53 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
     }
   }
 
+  Future<void> _prepareOcrBundle() async {
+    if (!Platform.isAndroid) return _downloadOcrBundle();
+    try {
+      final installed = await const MethodChannel('vibekits/app-installer')
+          .invokeMethod<Uint8List>(
+            'readModelComponentAsset',
+            const <String, Object?>{'path': 'ppocrv6_tiny/rec.yml'},
+          );
+      if (installed != null && installed.isNotEmpty) {
+        await _downloadOcrBundle();
+        return;
+      }
+    } on PlatformException {
+      // The optional component is absent; the user-initiated market flow below
+      // verifies HTTPS, exact size, SHA-256 and the signed Android package.
+    }
+    final market = AppCenterService();
+    try {
+      if (mounted) setState(() => _message = '正在查询应用中心的 VibeKits 模型组件…');
+      final catalog = await market.load();
+      final item = catalog.apps
+          .where(
+            (entry) =>
+                entry.packageName == 'com.vibekits.vibekits.component.models',
+          )
+          .firstOrNull;
+      if (item == null) {
+        throw StateError('应用中心尚未上架 VibeKits Android 模型组件');
+      }
+      await market.installComponent(
+        item,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _message = '正在下载模型组件 ${(progress * 100).round()}%');
+          }
+        },
+      );
+      if (mounted) {
+        setState(() => _message = '请在系统安装界面确认；安装完成后再次点击“安装模型”');
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '模型组件安装未完成：$error');
+    } finally {
+      market.dispose();
+    }
+  }
+
   Future<void> _downloadOcrMediumBundle() async {
     if (_downloadingId != null || Platform.isAndroid || Platform.isIOS) return;
     final Directory downloads = Directory(
@@ -529,7 +593,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       _portablePreviewAttempted = false;
       _portablePreviewError = null;
     });
-    if (!_ocrBundleInstalled) await _downloadOcrBundle();
+    if (!_ocrBundleInstalled) await _prepareOcrBundle();
     if (_ocrBundleInstalled) await _runOcr();
   }
 
@@ -563,7 +627,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
       if (_ocrBundleInstalled) {
         await _runOcr();
       } else {
-        await _downloadOcrBundle();
+        await _prepareOcrBundle();
         if (_ocrBundleInstalled) await _runOcr();
       }
     } on Object catch (error) {
@@ -887,7 +951,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   key: const Key('ocr-install'),
                   onPressed: _ocrBundleInstalled || _downloadingId != null
                       ? null
-                      : _downloadOcrBundle,
+                      : _prepareOcrBundle,
                   child: Text(_ocrBundleInstalled ? '已安装' : '安装模型'),
                 ),
               if (_workspace == _ModelWorkspace.ocr)
@@ -1122,7 +1186,7 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
               key: const Key('ocr-install'),
               onPressed: _ocrBundleInstalled || _downloadingId != null
                   ? null
-                  : _downloadOcrBundle,
+                  : _prepareOcrBundle,
               child: Text(_ocrBundleInstalled ? '已安装' : '安装'),
             ),
     );
@@ -1299,6 +1363,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                             child: Text(
                               _ocrBundleInstalled
                                   ? '识别结果会显示在这里'
+                                  : Platform.isAndroid
+                                  ? '首次识别需从应用中心安装模型组件'
                                   : '首次识别会自动准备内置 PP-OCRv6 tiny',
                               style: TextStyle(color: context.vibe.muted),
                             ),

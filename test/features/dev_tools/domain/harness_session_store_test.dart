@@ -43,8 +43,17 @@ void main() {
         }),
       );
 
+      expect(
+        await HarnessSessionStore(home: home).containsSession(deleted),
+        isTrue,
+      );
+
       await HarnessSessionStore(home: home).deleteSession(deleted);
 
+      expect(
+        await HarnessSessionStore(home: home).containsSession(deleted),
+        isFalse,
+      );
       expect(await session.exists(), isFalse);
       expect(await session.parent.exists(), isFalse);
       final dynamic workspace = jsonDecode(
@@ -58,6 +67,45 @@ void main() {
       expect(cache['tables']['sessions'].keys, [kept]);
     },
   );
+
+  test('owner final flush cannot resurrect a deleted session on refresh', () async {
+    final home = await Directory.systemTemp.createTemp('delete-owner-');
+    addTearDown(() => home.delete(recursive: true));
+    const id = 'session-11111111-1111-1111-1111-111111111111';
+    final session = Directory('${home.path}/sessions/work/$id');
+    await session.create(recursive: true);
+    final index = File('${home.path}/storages/session_projcache.json');
+    await index.parent.create(recursive: true);
+    final stale = jsonEncode({'tables': {'sessions': {id: {'title': 'test'}}}});
+    await index.writeAsString(stale);
+    await HarnessSessionStore(home: home).deleteSessionAfterStoppingOwner(
+      id,
+      stopOwner: () async {
+        // Simulate the live owner's buffered final write while it shuts down.
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await index.writeAsString(stale);
+      },
+    );
+    final refreshed = jsonDecode(await index.readAsString());
+    expect(refreshed['tables']['sessions'].containsKey(id), isFalse);
+    expect(await session.exists(), isFalse);
+    expect(await HarnessSessionStore(home: home).containsSession(id), isFalse);
+  });
+
+  test('failed owner shutdown preserves the session', () async {
+    final home = await Directory.systemTemp.createTemp('delete-owner-failed-');
+    addTearDown(() => home.delete(recursive: true));
+    const id = 'session-11111111-1111-1111-1111-111111111111';
+    final session = Directory('${home.path}/sessions/work/$id');
+    await session.create(recursive: true);
+    await expectLater(
+      HarnessSessionStore(home: home).deleteSessionAfterStoppingOwner(
+        id, stopOwner: () async => throw StateError('owner still running'),
+      ),
+      throwsStateError,
+    );
+    expect(await session.exists(), isTrue);
+  });
 
   test('rejects a path-like session id', () async {
     final Directory home = await Directory.systemTemp.createTemp(
@@ -86,8 +134,9 @@ void main() {
     await userWorkspace.create(recursive: true);
     await File('${userWorkspace.path}/keep.txt').writeAsString('user');
 
-    final int removed = await HarnessSessionStore(home: home)
-        .deleteLegacyNativeProbeSessions();
+    final int removed = await HarnessSessionStore(
+      home: home,
+    ).deleteLegacyNativeProbeSessions();
 
     expect(removed, 1);
     expect(await probe.exists(), isFalse);

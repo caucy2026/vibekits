@@ -4,6 +4,95 @@ import 'package:vibekits/features/app_center/domain/app_center_service.dart';
 import 'package:vibekits/features/app_center/presentation/app_center_tab.dart';
 
 void main() {
+  test('Android 模型组件归属实际 PAD 包名且不能伪装宿主', () async {
+    final service = AppCenterService(platformOverride: 'android');
+    addTearDown(service.dispose);
+    final item = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.vibekits.vibekits.component.models',
+    });
+    expect(item.isComponent, isTrue);
+    expect(item.componentId, 'android_models');
+    expect(item.hostPackageName, 'com.vibekits.vibekits');
+    final wrongHost = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.vibekits.vibekits.component.models',
+      'host_package_name': 'com.caucy.vibekits',
+    });
+    await expectLater(
+      service.installComponent(wrongHost),
+      throwsFormatException,
+    );
+  });
+
+  test('旧商城接口按精确包名识别两个 Windows 组件', () {
+    for (final id in ['virtual_machine', 'network_proxy']) {
+      final item = AppCenterItem.fromJson({
+        ..._itemJson(os: 'windows'),
+        'package_name': 'com.caucy.vibekits.component.$id',
+      });
+      expect(item.isComponent, isTrue);
+      expect(item.standalone, isFalse);
+      expect(item.componentId, id);
+      expect(item.hostPackageName, 'com.caucy.vibekits');
+    }
+    final unrelated = AppCenterItem.fromJson({
+      ..._itemJson(os: 'windows'),
+      'package_name': 'com.caucy.vibekits.component.untrusted',
+    });
+    expect(unrelated.isComponent, isFalse);
+  });
+
+  test('组件标记不能通过 standalone=true 绕过宿主安装入口', () async {
+    final service = AppCenterService(platformOverride: 'windows');
+    addTearDown(service.dispose);
+    final item = AppCenterItem.fromJson({
+      ..._itemJson(os: 'windows'),
+      'artifact_type': 'component',
+      'standalone': true,
+      'host_package_name': 'com.caucy.vibekits',
+      'component_id': 'network_proxy',
+    });
+    expect(item.isComponent, isTrue);
+    await expectLater(service.downloadAndOpen(item), throwsStateError);
+    await expectLater(service.installComponent(item), throwsFormatException);
+  });
+
+  test('宿主组件不能作为独立应用打开或下载安装器', () async {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'windows',
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem item = AppCenterItem.fromJson({
+      ..._itemJson(os: 'windows'),
+      'artifact_type': 'component',
+      'standalone': false,
+      'host_package_name': 'com.caucy.vibekits',
+      'component_id': 'network_proxy',
+    });
+    expect(item.isComponent, isTrue);
+    expect(await service.openApplication(item), isFalse);
+    expect(await service.isApplicationInstalled(item), isFalse);
+    await expectLater(service.downloadAndOpen(item), throwsStateError);
+  });
+
+  test('未知组件和错误宿主在下载前拒绝', () async {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'windows',
+    );
+    addTearDown(service.dispose);
+    for (final String component in ['../escape', 'unknown']) {
+      final AppCenterItem item = AppCenterItem.fromJson({
+        ..._itemJson(os: 'windows'),
+        'artifact_type': 'component',
+        'standalone': false,
+        'host_package_name': 'com.caucy.vibekits',
+        'component_id': component,
+      });
+      await expectLater(service.installComponent(item), throwsFormatException);
+    }
+  });
+
   test('macOS 应用中心请求严格携带 os 并解析当前平台条目', () async {
     final List<Uri> requests = <Uri>[];
     final AppCenterService service = AppCenterService(

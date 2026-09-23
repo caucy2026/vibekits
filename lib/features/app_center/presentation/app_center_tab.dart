@@ -6,9 +6,10 @@ import '../../../app/app_theme.dart';
 import '../domain/app_center_service.dart';
 
 class AppCenterTab extends StatefulWidget {
-  const AppCenterTab({super.key, this.service});
+  const AppCenterTab({super.key, this.service, this.initialKeyword = ''});
 
   final AppCenterService? service;
+  final String initialKeyword;
 
   @override
   State<AppCenterTab> createState() => _AppCenterTabState();
@@ -29,6 +30,7 @@ class _AppCenterTabState extends State<AppCenterTab> {
   @override
   void initState() {
     super.initState();
+    _search.text = widget.initialKeyword;
     unawaited(_load());
   }
 
@@ -433,6 +435,39 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
     });
   }
 
+  Future<void> _uninstallComponent() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('卸载功能组件？'),
+        content: const Text('只移除组件运行文件，保留主程序、代理配置和虚拟磁盘。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('卸载组件'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _progress = 0);
+    try {
+      await widget.service.uninstallComponent(widget.item);
+      if (mounted) setState(() => _message = '组件已卸载');
+    } on Object catch (error) {
+      if (mounted) setState(() => _message = '卸载失败：$error');
+    } finally {
+      if (mounted) {
+        setState(() => _progress = null);
+        await _refreshVersion();
+      }
+    }
+  }
+
   Future<void> _install() async {
     if (_checkingVersion ||
         !widget.service.canDownload(widget.item, _localVersion)) {
@@ -443,13 +478,23 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
       _message = '正在下载并验证安装包…';
     });
     try {
-      await widget.service.downloadAndOpen(
-        widget.item,
-        onProgress: (value) {
-          if (mounted) setState(() => _progress = value);
-        },
-      );
-      if (mounted) setState(() => _message = '校验通过，已交给系统打开');
+      if (widget.item.isComponent) {
+        await widget.service.installComponent(
+          widget.item,
+          onProgress: (value) {
+            if (mounted) setState(() => _progress = value);
+          },
+        );
+        if (mounted) setState(() => _message = '组件已安装，返回功能页面即可使用');
+      } else {
+        await widget.service.downloadAndOpen(
+          widget.item,
+          onProgress: (value) {
+            if (mounted) setState(() => _progress = value);
+          },
+        );
+        if (mounted) setState(() => _message = '校验通过，已交给系统打开');
+      }
     } on Object catch (error) {
       if (mounted) {
         setState(() {
@@ -489,6 +534,8 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 spacing: 8,
                 runSpacing: 6,
                 children: <Widget>[
+                  if (item.isComponent)
+                    const Chip(label: Text('VibeKits 功能组件')),
                   Chip(label: Text(item.category)),
                   Chip(
                     label: Text('版本 ${item.versionName} (${item.versionCode})'),
@@ -509,6 +556,12 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
                 '开发者包名：${item.packageName}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (item.isComponent) ...<Widget>[
+                Text(
+                  '宿主程序：${item.hostPackageName}（不能单独运行）',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
               Text(
                 '下载量：${item.downloadCount}',
                 style: Theme.of(context).textTheme.bodySmall,
@@ -556,6 +609,13 @@ class _AppDetailsDialogState extends State<_AppDetailsDialog> {
         ),
       ),
       actions: <Widget>[
+        if (item.isComponent && _localVersion.installed == true)
+          TextButton.icon(
+            key: const Key('app-center-uninstall-component'),
+            onPressed: _progress == null ? _uninstallComponent : null,
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('卸载组件'),
+          ),
         if (widget.service.supportsOpeningInstalledApplications &&
             !item.isComponent)
           TextButton.icon(

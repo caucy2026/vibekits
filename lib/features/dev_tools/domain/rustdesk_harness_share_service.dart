@@ -217,6 +217,7 @@ abstract final class RustDeskHarnessShareService {
   static const int simulatorRemotePort = 32147;
   static const int simulatorControlRemotePort = 32148;
   static const int simulatorSshRemotePort = 22;
+  static const int simulatorAdbRemotePort = 5555;
   static const String _currentProtocolCommand = '--vibekits-harness-protocol';
   static const String _currentProtocolCode = 'protocol_v2';
   static const MethodChannel _androidRelay = MethodChannel(
@@ -295,7 +296,9 @@ abstract final class RustDeskHarnessShareService {
         final id = payload['routingId']?.toString() ?? '';
         final state = payload['state']?.toString() ?? 'invalid_response';
         return RustDeskHostInfo(
-          executable: 'android://vibekits-harness-relay',
+          executable:
+              payload['executable']?.toString() ??
+              'android://vibekits-harness-relay',
           id: id,
           available: true,
           callable: payload['callable'] == true,
@@ -808,7 +811,12 @@ abstract final class RustDeskHarnessShareService {
     RustDeskProcessRunner? runner,
   }) async {
     if (Platform.isAndroid) {
-      throw UnsupportedError('PAD 只作为协助端，不开放本机仿真机访问');
+      final response = await _androidRelay.invokeMapMethod<String, Object?>(
+        'setSimulatorAccess',
+        <String, Object?>{'enabled': enabled},
+      );
+      if (response?['ok'] != true) throw StateError('Android 仿真授权更新失败');
+      return;
     }
     final ProcessResult result = await _runControlCommand(
       executable,
@@ -952,6 +960,21 @@ abstract final class RustDeskHarnessShareService {
     routingId: routingId,
     localPort: localPort,
     remotePort: simulatorSshRemotePort,
+    forceRelay: forceRelay,
+    launcher: launcher,
+  );
+
+  static Future<RustDeskHarnessTunnelLease> openSimulatorAdbTunnel(
+    String executable, {
+    required String routingId,
+    required int localPort,
+    bool forceRelay = false,
+    RustDeskManagedProcessLauncher? launcher,
+  }) => openTunnel(
+    executable,
+    routingId: routingId,
+    localPort: localPort,
+    remotePort: simulatorAdbRemotePort,
     forceRelay: forceRelay,
     launcher: launcher,
   );

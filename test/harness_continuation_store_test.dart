@@ -93,6 +93,27 @@ void main() {
     expect(await store.recordsForWorkspace('/tmp/project'), hasLength(1));
   });
 
+  test('official workspace ids are stable across working directories', () async {
+    const String workspaceId = 'a1b76c30-c368-4668-980a-4a7473146c2d';
+    await store.upsert(HarnessContinuationRecord(
+      id: 'relation-id',
+      workspace: workspaceId,
+      sourceSessionId: 'source-id',
+      continuationSessionId: 'child-id',
+      sourceTitleSnapshot: '来源',
+      summary: '交接摘要',
+      sourceMessageCursor: '1',
+      createdAt: DateTime.utc(2026, 9, 23),
+      updatedAt: DateTime.utc(2026, 9, 23),
+    ));
+    expect((await store.load()).single.workspace, '/$workspaceId/');
+    expect(await store.recordsForWorkspace(workspaceId), hasLength(1));
+    expect(
+      await store.recordsForWorkspace('/Users/example/project/$workspaceId/'),
+      hasLength(1),
+    );
+  });
+
   test('missing and corrupt files load as an empty collection', () async {
     expect(await store.load(), isEmpty);
     await File('${temporary.path}/continuations.json').writeAsString('{no');

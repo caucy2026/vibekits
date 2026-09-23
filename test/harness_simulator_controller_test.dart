@@ -8,6 +8,92 @@ import 'package:vibekits/features/dev_tools/domain/harness_simulator_controller.
 import 'package:vibekits/features/dev_tools/domain/rustdesk_harness_share_service.dart';
 
 void main() {
+  test('Android target uses authenticated MCP without opening SSH', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'vibekits_android_target_',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final executable = File('${temporary.path}/vibekits-harness-relay');
+    await executable.writeAsBytes(const <int>[0]);
+    final controlProcess = _DemandDrivenManagedProcess();
+    final toolProcess = _DemandDrivenManagedProcess();
+    final adbProcess = _DemandDrivenManagedProcess();
+    final mcp = _AndroidTargetMcpClient(
+      onBootstrap: controlProcess.notifyDemand,
+      onInitialize: toolProcess.notifyDemand,
+    );
+    final ports = <int>[43270, 43271, 43272];
+    final controller = HarnessSimulatorController(
+      resolveHost: () async => RustDeskHostInfo(
+        executable: executable.path,
+        id: '1554650784',
+        available: true,
+        callable: true,
+        message: 'ready',
+      ),
+      allocatePort: () async => ports.removeAt(0),
+      openTunnel: (_, _, localPort, _) async =>
+          RustDeskHarnessShareService.openTunnel(
+            executable.path,
+            routingId: '6795854383',
+            localPort: localPort,
+            remotePort: RustDeskHarnessShareService.simulatorRemotePort,
+            launcher: (_, _) async => controlProcess,
+          ),
+      openMcpTunnel: (_, _, localPort, _) async =>
+          RustDeskHarnessShareService.openTunnel(
+            executable.path,
+            routingId: '6795854383',
+            localPort: localPort,
+            remotePort: RustDeskHarnessShareService.simulatorRemotePort,
+            launcher: (_, _) async => toolProcess,
+          ),
+      openAdbTunnel: (_, _, localPort, forceRelay) async =>
+          RustDeskHarnessShareService.openSimulatorAdbTunnel(
+            executable.path,
+            routingId: '6795854383',
+            localPort: localPort,
+            forceRelay: forceRelay,
+            launcher: (_, args) async {
+              expect(args, contains('5555'));
+              return adbProcess;
+            },
+          ),
+      connectAdb: (localPort) async {
+        adbProcess.notifyDemand();
+        return '127.0.0.1:$localPort';
+      },
+      enableAdbBootstrap: true,
+      openSshTunnel: (_, _, _, _) =>
+          throw StateError('Android must not start SSH'),
+      mcpClient: mcp,
+      controlClient: mcp,
+      sshKeyRoot: Directory('${temporary.path}/keys'),
+      processRunner: (path, arguments) async {
+        final keyPath = arguments[arguments.indexOf('-f') + 1];
+        await File(keyPath).writeAsString('private-key');
+        await File('$keyPath.pub').writeAsString('ssh-ed25519 TEST controller');
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+    addTearDown(controller.closeAll);
+
+    final connected = await controller.connect('6795854383');
+    expect(connected['connected'], isTrue);
+    expect(connected['sshReady'], isFalse);
+    expect(connected['mcpReady'], isTrue);
+    expect(connected['adbReady'], isTrue);
+    expect(connected['adbSerial'], '127.0.0.1:43272');
+    expect(connected['toolCount'], 1);
+    expect(mcp.callerIds, everyElement('1554650784'));
+    final result = await controller.call(
+      '6795854383',
+      'vibekits.device.processes',
+      const {},
+    );
+    expect(result['called'], 'vibekits.device.processes');
+  });
+
   test('只凭 ID 建立连接、读取目录、调用工具并可靠断开', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'vibekits_simulator_controller_',
@@ -623,6 +709,58 @@ final class _FakeMcpClient implements HarnessSimulatorMcpClient {
   }) async {
     lastPort = localPort;
     return <String, Object?>{'called': toolId, 'arguments': arguments};
+  }
+}
+
+final class _AndroidTargetMcpClient
+    implements HarnessSimulatorMcpClient, HarnessSimulatorControlClient {
+  _AndroidTargetMcpClient({
+    required this.onBootstrap,
+    required this.onInitialize,
+  });
+
+  final void Function() onBootstrap;
+  final void Function() onInitialize;
+  final List<String> callerIds = <String>[];
+
+  @override
+  Future<Map<String, Object?>> bootstrapSsh(
+    int localPort, {
+    required String callerId,
+    required String publicKey,
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    callerIds.add(callerId);
+    onBootstrap();
+    return <String, Object?>{
+      'platform': 'android',
+      'sshSupported': false,
+      'authorized': true,
+      'peerId': callerId,
+    };
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> initializeAndList(
+    int localPort, {
+    String callerId = '',
+  }) async {
+    callerIds.add(callerId);
+    onInitialize();
+    return <Map<String, Object?>>[
+      <String, Object?>{'name': 'vibekits.device.processes'},
+    ];
+  }
+
+  @override
+  Future<Map<String, Object?>> call(
+    int localPort,
+    String toolId,
+    Map<String, Object?> arguments, {
+    String callerId = '',
+  }) async {
+    callerIds.add(callerId);
+    return <String, Object?>{'called': toolId};
   }
 }
 

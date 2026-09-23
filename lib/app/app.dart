@@ -69,13 +69,14 @@ class _VibekitsAppState extends State<VibekitsApp> {
     // The external Harness/MCP endpoint is a desktop integration. Starting a
     // local socket server on Android adds cold-start work and keeps resources
     // alive without providing a usable mobile workflow.
-    if (!_isFlutterTest && !Platform.isAndroid && !Platform.isIOS) {
-      unawaited(_startMcpFabricAndExternalToolServer());
-      unawaited(_startHarnessStatusPublisher());
-      // Simulator hosting is an app-level desktop capability. Restore it from
-      // the saved switch without waiting for the Harness workspace to mount;
-      // the asynchronous runtime keeps the first frame independent from P2P,
-      // relay and local MCP endpoint readiness.
+    if (!_isFlutterTest) {
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        unawaited(_startMcpFabricAndExternalToolServer());
+        unawaited(_startHarnessStatusPublisher());
+      }
+      // Simulator hosting is available on desktop and Android. The mobile
+      // relay is a separate bounded service; it does not start the desktop
+      // MCP server or WebView.
       unawaited(HarnessSimulatorTargetRuntime.shared.restore());
     }
     if (!_isFlutterTest) MarketingCacheService.instance.start();

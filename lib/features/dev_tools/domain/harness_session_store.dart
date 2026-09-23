@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// Removes one official Harness session after its server has been stopped.
+/// Removes one official Harness session without navigating or restarting the
+/// live workspace UI.
 ///
 /// The operation is deliberately scoped to the exact session id and the two
 /// official indexes that reference it. Callers must obtain user confirmation.
@@ -14,6 +15,38 @@ class HarnessSessionStore {
     r'^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
   );
 
+  Future<bool> containsSession(String sessionId) async {
+    if (!_sessionIdPattern.hasMatch(sessionId)) {
+      throw const FormatException('Harness 会话 ID 无效');
+    }
+    final Directory sessionsRoot = Directory(
+      '${home.path}${Platform.pathSeparator}sessions',
+    );
+    if (await sessionsRoot.exists()) {
+      await for (final FileSystemEntity workspace in sessionsRoot.list()) {
+        if (workspace is! Directory) continue;
+        if (await Directory(
+          '${workspace.path}${Platform.pathSeparator}$sessionId',
+        ).exists()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Wait for the live owner's final flush before editing its durable indexes.
+  /// A failed stop must leave the original session untouched.
+  Future<void> deleteSessionAfterStoppingOwner(
+    String sessionId, {
+    required Future<void> Function() stopOwner,
+  }) async {
+    if (!_sessionIdPattern.hasMatch(sessionId)) {
+      throw const FormatException('Harness 会话 ID 无效');
+    }
+    await stopOwner();
+    await deleteSession(sessionId);
+  }
 
   Future<void> deleteSession(String sessionId) async {
     if (!_sessionIdPattern.hasMatch(sessionId)) {
@@ -105,7 +138,6 @@ class HarnessSessionStore {
     await file.delete();
     await temporary.rename(file.path);
   }
-
 
   static Map<String, dynamic>? _map(Object? value) =>
       value is Map<String, dynamic> ? value : null;

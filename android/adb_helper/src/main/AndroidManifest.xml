@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="android.uid.system">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <permission
+        android:name="com.vibekits.vibekits.permission.REMOTE_ADB"
+        android:protectionLevel="signature" />
+    <application
+        android:allowBackup="false"
+        android:hasCode="true"
+        android:label="VibeKits ADB Helper">
+        <receiver
+            android:name=".RemoteAdbReceiver"
+            android:exported="true"
+            android:permission="com.vibekits.vibekits.permission.REMOTE_ADB">
+            <intent-filter>
+                <action android:name="com.vibekits.vibekits.action.ENSURE_REMOTE_ADB" />
+                <action android:name="com.vibekits.vibekits.action.DISABLE_REMOTE_ADB" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".RemoteAdbBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

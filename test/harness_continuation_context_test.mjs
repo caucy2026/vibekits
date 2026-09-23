@@ -15,8 +15,17 @@ try {
   records[0].workspace = '/workspace/';
   writeFileSync(join(home, 'continuations/continuations.json'),JSON.stringify({records}));
   assert.match(continuationContext(home,child),/继续实现验收测试/, 'real app persists normalized workspace keys');
+  const workspaceId = 'a1b76c30-c368-4668-980a-4a7473146c2d';
+  records[0].workspace = `/Users/example/project/${workspaceId}/`;
+  writeFileSync(join(home, 'continuations/continuations.json'),JSON.stringify({records}));
+  writeFileSync(join(home, 'storages/workspace.json'),JSON.stringify({tables:{workspaces:{[workspaceId]:{sessionIds:[child]}}}}));
+  assert.match(continuationContext(home,child),/继续实现验收测试/, 'legacy cwd-prefixed workspace ids still inject');
+  records[0].workspace = '/workspace/';
+  writeFileSync(join(home, 'continuations/continuations.json'),JSON.stringify({records}));
+  writeFileSync(join(home, 'storages/workspace.json'),JSON.stringify({tables:{workspaces:{workspace:{sessionIds:[child]}}}}));
   assert.equal(markContinuationConsumed(home, child), true);
-  assert.equal(continuationContext(home, child), '', 'handoff is injected only until the first successful assistant message');
+  assert.match(continuationContext(home, child), /继续实现验收测试/, 'the same handoff remains available on later turns');
+  assert.equal(markContinuationConsumed(home, child), false, 'first-reply marker is written once');
   rmSync(join(home, 'continuations', 'consumed'), {recursive:true, force:true});
   assert.equal(continuationContext(home,'session-22222222-2222-2222-2222-222222222222'),'');
   let provider;
@@ -29,7 +38,7 @@ try {
   process.env.DSH_HOME=home;
   assert.match(provider.text({agent:{id:child}}),/目标：/);
   sessionEvent({id:child},{type:'assistant/message'});
-  assert.equal(provider.text({agent:{id:child}}), '', 'a successful first assistant reply consumes the handoff');
+  assert.match(provider.text({agent:{id:child}}),/目标：/, 'a successful reply does not remove later-turn context');
   rmSync(join(home, 'continuations', 'consumed'), {recursive:true, force:true});
   const { Context } = await import('../native/harness/macos/runtime/node_modules/@deepseek-ai/cordis/lib/index.js');
   const { default: SystemPrompt } = await import('../native/harness/macos/runtime/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js');

@@ -251,6 +251,15 @@ class HarnessContinuationStore {
   static String _normalizeWorkspace(String workspace) {
     final String value = workspace.trim();
     if (value.isEmpty) return '';
+    // Official Harness workspace ids are UUIDs, not filesystem paths. An
+    // earlier build resolved bare ids against the app's working directory;
+    // accept those persisted records while writing a stable id key now.
+    final RegExpMatch? workspaceId = RegExp(
+      r'(?:^|[/\\])([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})[/\\]?$',
+    ).firstMatch(value);
+    if (workspaceId != null) {
+      return '/${workspaceId.group(1)!.toLowerCase()}/';
+    }
     return Directory(value).absolute.uri.normalizePath().toFilePath();
   }
 

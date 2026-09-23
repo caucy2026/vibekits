@@ -1,6 +1,7 @@
 package com.vibekits.vibekits
 
 import android.app.Presentation
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
@@ -47,18 +48,22 @@ open class MainActivity : FlutterActivity() {
     private val displayChannelName = "vibekits/display"
     private val harnessRelayChannelName = "vibekits/harness-relay"
     private val appInstallerChannelName = "vibekits/app-installer"
+    private val harnessKeyboardChannelName = "vibekits/harness-keyboard"
+    private val remoteAdbChannelName = "vibekits/remote-adb"
     private val keyAlias = "VibekitsAndroidCredentialKey"
     private val preferencesName = "vibekits_secure_credentials"
     private var continuousDisplay: ContinuousDisplayCoordinator? = null
     private var harnessRelayClient: HarnessRelayClient? = null
+    private var harnessKeyboard: HarnessCrossDisplayKeyboard? = null
 
     protected val isDualMode: Boolean
         get() = intent?.getBooleanExtra(EXTRA_DUAL_MODE, false) == true
 
-    // Texture rendering is required because the D2 Presentation draws the
-    // authoritative Flutter View into a second hardware Canvas. SurfaceView
-    // content cannot participate in View.draw(Canvas).
-    override fun getRenderMode(): RenderMode = RenderMode.texture
+    // Only the dual-display canvas needs a TextureView for View.draw(Canvas).
+    // Single-screen PAD mode uses SurfaceView to avoid the extra texture copy
+    // and JNI texture thread while Harness is idle.
+    override fun getRenderMode(): RenderMode =
+        if (isDualMode) RenderMode.texture else RenderMode.surface
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,13 +93,20 @@ open class MainActivity : FlutterActivity() {
     @Deprecated("Deprecated in Android")
     override fun onBackPressed() {
         if (isDualMode) {
-            finishAndRemoveTask()
+            android.app.AlertDialog.Builder(this)
+                .setTitle("退出 VibeKits？")
+                .setMessage("退出后将关闭当前 PAD 上的 Harness 会话和远程仿真服务。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("确认退出") { _, _ -> finishAndRemoveTask() }
+                .show()
         } else {
             super.onBackPressed()
         }
     }
 
     override fun onDestroy() {
+        harnessKeyboard?.close()
+        harnessKeyboard = null
         harnessRelayClient?.close()
         harnessRelayClient = null
         continuousDisplay?.release()
@@ -102,8 +114,76 @@ open class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 
+    private fun requestRemoteAdb(result: MethodChannel.Result, enable: Boolean) {
+        val action = if (enable) "com.vibekits.vibekits.action.ENSURE_REMOTE_ADB"
+            else "com.vibekits.vibekits.action.DISABLE_REMOTE_ADB"
+        val intent = Intent(action)
+            .setClassName(
+                RemoteAdbBootstrap.helperPackage,
+                "com.vibekits.vibekits.component.adb.RemoteAdbReceiver",
+            )
+        try {
+            sendOrderedBroadcast(
+                intent,
+                "com.vibekits.vibekits.permission.REMOTE_ADB",
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        result.success(mapOf(
+                            "accepted" to (resultCode == RESULT_OK),
+                            "message" to (resultData ?: "ADB helper unavailable"),
+                        ))
+                    }
+                },
+                Handler(Looper.getMainLooper()),
+                RESULT_CANCELED,
+                null,
+                null,
+            )
+        } catch (error: Exception) {
+            result.success(mapOf(
+                "accepted" to false,
+                "message" to (error.message ?: error.javaClass.simpleName),
+            ))
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, remoteAdbChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "ensureAdbd" && call.method != "disableAdbd") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val enable = call.method == "ensureAdbd"
+                if (!RemoteAdbBootstrap.installed(this)) {
+                    if (!enable) {
+                        result.success(mapOf("accepted" to true, "message" to "No ADB helper installed"))
+                        return@setMethodCallHandler
+                    }
+                    RemoteAdbBootstrap.installBundled(this) { installed, message ->
+                        if (installed) requestRemoteAdb(result, true)
+                        else result.success(mapOf("accepted" to false, "message" to message))
+                    }
+                } else {
+                    requestRemoteAdb(result, enable)
+                }
+            }
+        val keyboardChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, harnessKeyboardChannelName,
+        )
+        harnessKeyboard = HarnessCrossDisplayKeyboard(this, keyboardChannel)
+        keyboardChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "available" -> result.success(harnessKeyboard?.available() == true)
+                "open" -> result.success(harnessKeyboard?.open() == true)
+                "close" -> {
+                    harnessKeyboard?.close()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "vibekits/cleanup-platform")
             .setMethodCallHandler { call, result ->
                 if (call.method == "sdkInt") result.success(Build.VERSION.SDK_INT)
@@ -185,6 +265,43 @@ open class MainActivity : FlutterActivity() {
                     }
                     return@setMethodCallHandler
                 }
+                if (call.method == "readModelComponentAsset") {
+                    try {
+                        val path = call.argument<String>("path") ?: error("Missing model asset path")
+                        require(path in setOf(
+                            "silero_vad.onnx", "silero_vad_v6.onnx",
+                            "ppocrv6_tiny/det.onnx", "ppocrv6_tiny/rec.onnx",
+                            "ppocrv6_tiny/rec.yml"
+                        )) { "Unknown model asset" }
+                        val componentPackage = "com.vibekits.vibekits.component.models"
+                        val signerFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            PackageManager.GET_SIGNING_CERTIFICATES
+                        } else {
+                            @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+                        }
+                        val hostInfo = packageManager.getPackageInfo(packageName, signerFlags)
+                        val componentInfo = packageManager.getPackageInfo(componentPackage, signerFlags)
+                        val hostSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            hostInfo.signingInfo?.apkContentsSigners.orEmpty()
+                        } else {
+                            @Suppress("DEPRECATION") hostInfo.signatures.orEmpty()
+                        }
+                        val componentSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            componentInfo.signingInfo?.apkContentsSigners.orEmpty()
+                        } else {
+                            @Suppress("DEPRECATION") componentInfo.signatures.orEmpty()
+                        }
+                        require(hostSigners.size == 1 && componentSigners.size == 1 &&
+                            hostSigners[0].toByteArray().contentEquals(componentSigners[0].toByteArray())) {
+                            "Model component signer mismatch"
+                        }
+                        val componentContext = createPackageContext(componentPackage, 0)
+                        result.success(componentContext.assets.open(path).use { it.readBytes() })
+                    } catch (error: Exception) {
+                        result.error("MODEL_COMPONENT_UNAVAILABLE", error.message, null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method != "openApkInstaller") {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -211,6 +328,26 @@ open class MainActivity : FlutterActivity() {
                         @Suppress("DEPRECATION") archive.signatures?.isNotEmpty() == true
                     }
                     require(hasSigner) { "APK signing certificate is missing" }
+                    if (call.argument<Boolean>("hostComponent") == true) {
+                        require(expectedPackage == "com.vibekits.vibekits.component.models") {
+                            "Unknown host component"
+                        }
+                        val ownInfo = packageManager.getPackageInfo(packageName, archiveFlags)
+                        val ownSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            ownInfo.signingInfo?.apkContentsSigners.orEmpty()
+                        } else {
+                            @Suppress("DEPRECATION") ownInfo.signatures.orEmpty()
+                        }
+                        val componentSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            archive.signingInfo?.apkContentsSigners.orEmpty()
+                        } else {
+                            @Suppress("DEPRECATION") archive.signatures.orEmpty()
+                        }
+                        require(ownSigners.size == 1 && componentSigners.size == 1 &&
+                            ownSigners[0].toByteArray().contentEquals(componentSigners[0].toByteArray())) {
+                            "Component signer must match VibeKits"
+                        }
+                    }
                     val actualVersion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         archive.longVersionCode
                     } else {
@@ -243,6 +380,11 @@ open class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "inspect" -> relayClient.request(HarnessRelayClient.STATUS, emptyMap(), result)
+                    "setSimulatorAccess" -> relayClient.request(
+                        HarnessRelayClient.SIMULATOR_ACCESS,
+                        mapOf("enabled" to (call.argument<Boolean>("enabled") ?: false)),
+                        result,
+                    )
                     "connections" -> relayClient.request(HarnessRelayClient.CONNECTIONS, emptyMap(), result)
                     "authorize" -> relayClient.request(
                         HarnessRelayClient.AUTHORIZE,

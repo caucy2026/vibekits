@@ -153,6 +153,51 @@ void main() {
     expect(mcpClosed, isTrue);
   });
 
+  test('第二端点启动失败时关闭第一个端点，重试不残留端口', () async {
+    var controlOpened = 0;
+    var controlClosed = 0;
+    var mcpStarts = 0;
+    final runtime = HarnessSimulatorTargetRuntime(
+      settings: HarnessSimulatorAccessSettings(
+        read: (_) async => null,
+        write: (_, _) async {},
+      ),
+      inspectHost: () async => _host,
+      startHost: () async => _host,
+      startEndpoint: () async {
+        controlOpened++;
+        return HarnessSimulatorEndpointLease(
+          port: HarnessSimulatorTargetRuntime.remotePort,
+          close: () async => controlClosed++,
+        );
+      },
+      startMcpEndpoint: () async {
+        mcpStarts++;
+        if (mcpStarts == 1) throw const SocketException('MCP port busy');
+        return HarnessSimulatorEndpointLease(
+          port: RustDeskHarnessShareService.simulatorRemotePort,
+          close: () async {},
+        );
+      },
+      stopHost: () async {},
+      setNativeGate: (_, _) async {},
+      relayFingerprint: (_) async => 'sha256:current',
+      inspectSsh: () async => _sshEnabled,
+      revokeSshKeys: () async {},
+    );
+
+    await runtime.enable();
+    expect(runtime.latest.phase, HarnessSimulatorTargetPhase.error);
+    expect(controlOpened, 1);
+    expect(controlClosed, 1);
+
+    await runtime.enable();
+    expect(runtime.latest.phase, HarnessSimulatorTargetPhase.ready);
+    await runtime.disable();
+    expect(controlOpened, 2);
+    expect(controlClosed, 2);
+  });
+
   test('普通远程协助仍打开时关闭仿真机不会误停共享网络进程', () async {
     var hostStopped = false;
     final runtime = HarnessSimulatorTargetRuntime(

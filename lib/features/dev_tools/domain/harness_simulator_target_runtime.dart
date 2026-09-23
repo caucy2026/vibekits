@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 
 import 'harness_remote_access_settings.dart';
 import 'harness_simulator_access_settings.dart';
@@ -119,6 +120,9 @@ final class HarnessSimulatorTargetRuntime {
        _restoreRetryDelay = restoreRetryDelay;
 
   static const int remotePort = SimulatorControlServer.portNumber;
+  static const MethodChannel _remoteAdbChannel = MethodChannel(
+    'vibekits/remote-adb',
+  );
   static final HarnessSimulatorTargetRuntime shared =
       HarnessSimulatorTargetRuntime();
 
@@ -190,6 +194,39 @@ final class HarnessSimulatorTargetRuntime {
   static Future<String> _loadRelayFingerprint(String executable) async {
     final digest = await sha256.bind(File(executable).openRead()).first;
     return 'sha256:$digest';
+  }
+
+  static Future<bool> _isLocalAdbReady() async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(
+        InternetAddress.loopbackIPv4,
+        5555,
+        timeout: const Duration(seconds: 2),
+      );
+      return true;
+    } on Object {
+      return false;
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  static Future<void> _ensureAndroidAdbReady() async {
+    // Provision the small system-UID helper while adbd is healthy, too. A
+    // later cold start must not depend on installing the helper through a
+    // transport that has already gone away.
+    final Map<String, Object?>? result = await _remoteAdbChannel
+        .invokeMapMethod<String, Object?>('ensureAdbd')
+        .timeout(const Duration(seconds: 12));
+    if (result?['accepted'] != true) {
+      throw StateError('PAD 系统 ADB 启动失败：${result?['message'] ?? '缺少系统辅助组件'}');
+    }
+    for (var attempt = 0; attempt < 16; attempt++) {
+      if (await _isLocalAdbReady()) return;
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    throw StateError('PAD 系统已请求启动 adbd，但端口 5555 未就绪');
   }
 
   Future<void> restore() async {
@@ -267,6 +304,9 @@ final class HarnessSimulatorTargetRuntime {
               (callerId) =>
                   _isActiveSimulatorCaller(host!.executable, callerId),
             );
+      // Own the control listener before starting the second listener. If the
+      // MCP bind fails, the catch block must close this port before retrying.
+      _endpoint = endpoint;
       final customMcpEndpoint = _startMcpEndpoint;
       // A custom control endpoint is treated as a complete test double unless
       // the test explicitly supplies the MCP endpoint as well. Production
@@ -279,13 +319,20 @@ final class HarnessSimulatorTargetRuntime {
                   _isActiveSimulatorCaller(host!.executable, callerId),
             )
           : null;
+      _mcpEndpoint = mcpEndpoint;
       if (generation != _generation) {
         await endpoint.close();
         await mcpEndpoint?.close();
+        _endpoint = null;
+        _mcpEndpoint = null;
         return;
       }
-      _endpoint = endpoint;
-      _mcpEndpoint = mcpEndpoint;
+      // Android's native tunnel forwards only to the device's local adbd.
+      // Do not show the simulator as ready when that fixed target is absent.
+      // Desktop hosts keep their existing SSH-based startup path unchanged.
+      if (Platform.isAndroid) {
+        await _ensureAndroidAdbReady();
+      }
       // Do not advertise the native RustDesk tunnel gate until the fixed
       // loopback endpoint is actually listening. Otherwise a controller that
       // connects during startup receives an immediate connection refusal even
@@ -364,6 +411,14 @@ final class HarnessSimulatorTargetRuntime {
       final host = await _inspectHost();
       if (host.available && host.executable.isNotEmpty) {
         await _setNativeGate(host.executable, false);
+      }
+      if (Platform.isAndroid) {
+        final result = await _remoteAdbChannel
+            .invokeMapMethod<String, Object?>('disableAdbd')
+            .timeout(const Duration(seconds: 5));
+        if (result?['accepted'] != true) {
+          throw StateError('PAD 系统 ADB 关闭失败：${result?['message'] ?? '未知错误'}');
+        }
       }
       if (_sshChangedByRuntime) {
         await _setSsh(false);
@@ -466,11 +521,40 @@ final class HarnessSimulatorTargetRuntime {
     if (_pollingConnections ||
         generation != _generation ||
         _hostExecutable.isEmpty ||
-        !_latest.ready) {
+        _latest.phase == HarnessSimulatorTargetPhase.disabled) {
       return;
     }
     _pollingConnections = true;
     try {
+      if (Platform.isAndroid && !await _isLocalAdbReady()) {
+        final previous = _latest;
+        await _setNativeGate(_hostExecutable, false);
+        _publish(HarnessSimulatorTargetSnapshot(
+          phase: HarnessSimulatorTargetPhase.starting,
+          routingId: previous.routingId,
+          endpoint: previous.endpoint,
+          message: '系统 ADB 已断开，正在恢复…',
+        ));
+        try {
+          await _ensureAndroidAdbReady();
+          if (generation != _generation) return;
+          await _setNativeGate(_hostExecutable, true);
+          _publish(HarnessSimulatorTargetSnapshot(
+            phase: HarnessSimulatorTargetPhase.ready,
+            routingId: previous.routingId,
+            endpoint: previous.endpoint,
+            message: '仿真机可连接 · 告知对方本机 ID 即可调试',
+          ));
+        } on Object catch (error) {
+          _publish(HarnessSimulatorTargetSnapshot(
+            phase: HarnessSimulatorTargetPhase.error,
+            routingId: previous.routingId,
+            endpoint: previous.endpoint,
+            message: '系统 ADB 恢复失败：$error',
+          ));
+          return;
+        }
+      }
       final connections = await _listConnections(_hostExecutable);
       if (generation != _generation) return;
       final target = connections.where(

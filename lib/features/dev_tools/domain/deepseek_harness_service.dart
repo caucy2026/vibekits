@@ -190,6 +190,18 @@ abstract interface class HarnessAgentHandle {
   Future<void> stop();
 }
 
+enum HarnessAgentEventKind { reasoning, toolStarted, toolCompleted }
+
+class HarnessAgentEvent {
+  const HarnessAgentEvent(this.kind, this.text);
+  final HarnessAgentEventKind kind;
+  final String text;
+}
+
+abstract interface class HarnessAgentEventSource {
+  Stream<HarnessAgentEvent> get events;
+}
+
 typedef HarnessEnvironmentChecker = Future<HarnessEnvironmentReport> Function();
 typedef HarnessSessionStarter =
     Future<HarnessSessionHandle> Function(HarnessLaunchSpec spec);
@@ -332,8 +344,10 @@ abstract final class DeepSeekHarnessService {
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError(
-          response.statusCode == 401 || response.statusCode == 403
-              ? 'API Key 无效或无权访问该端点'
+          response.statusCode == 401
+              ? 'DeepSeek API 返回 401：API Key 未通过认证，请核对是否为 DeepSeek API 平台密钥'
+              : response.statusCode == 403
+              ? 'DeepSeek API 返回 403：当前密钥无权访问该端点'
               : '读取模型列表失败（HTTP ${response.statusCode}）',
         );
       }
@@ -1342,7 +1356,8 @@ Directory? macOsAppBundleForExecutable(String resolvedExecutable) {
   return null;
 }
 
-class _MobileHarnessAgent implements HarnessAgentHandle {
+class _MobileHarnessAgent
+    implements HarnessAgentHandle, HarnessAgentEventSource {
   _MobileHarnessAgent._(this._request) {
     _run();
   }
@@ -1352,13 +1367,19 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
 
   final HarnessAgentRequest _request;
   final StreamController<String> _output = StreamController<String>();
+  final StreamController<HarnessAgentEvent> _events =
+      StreamController<HarnessAgentEvent>();
   final Completer<int> _exit = Completer<int>();
+  final StringBuffer _pendingOutput = StringBuffer();
+  Timer? _outputTimer;
   HttpClient? _client;
   bool _running = true;
   bool _stopped = false;
 
   @override
   Stream<String> get output => _output.stream;
+  @override
+  Stream<HarnessAgentEvent> get events => _events.stream;
   @override
   Future<int> get exitCode => _exit.future;
   @override
@@ -1398,7 +1419,8 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
         },
         <String, Object?>{'role': 'user', 'content': _request.prompt.trim()},
       ];
-      for (int turn = 0; turn < 6 && !_stopped; turn++) {
+      bool completed = false;
+      for (int turn = 0; turn < 12 && !_stopped; turn++) {
         final Map<String, Object?> message = await _requestCompletion(
           messages,
           tools,
@@ -1409,7 +1431,8 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
             : const <Object?>[];
         final String content = '${message['content'] ?? ''}'.trim();
         if (toolCalls.isEmpty) {
-          _emit(content.isEmpty ? '任务已完成。' : content);
+          if (content.isEmpty) _emit('任务已完成。');
+          completed = true;
           break;
         }
         messages.add(message);
@@ -1420,6 +1443,9 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
               ? call['function']! as Map<Object?, Object?>
               : const <Object?, Object?>{};
           final String toolId = _toolId('${function['name'] ?? ''}'.trim());
+          _events.add(
+            HarnessAgentEvent(HarnessAgentEventKind.toolStarted, toolId),
+          );
           final Map<String, Object?> arguments = _decodeArguments(
             function['arguments'],
           );
@@ -1435,21 +1461,39 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
           // envelope into the assistant reply duplicates large JSON payloads in
           // Markdown and can exhaust a PAD's UI memory. Keep the model evidence
           // below, but expose only the final assistant response in the transcript.
+          final String toolResult = jsonEncode(result.toJson());
           messages.add(<String, Object?>{
             'role': 'tool',
             'tool_call_id': '${call['id'] ?? toolId}',
-            'content': jsonEncode(result.toJson()),
+            'content': toolResult.length <= 65536
+                ? toolResult
+                : jsonEncode(<String, Object?>{
+                    'truncated': true,
+                    'originalLength': toolResult.length,
+                    'preview': toolResult.substring(0, 65536),
+                    'nextAction': '请缩小查询范围，分段读取所需内容。',
+                  }),
           });
+          _events.add(
+            HarnessAgentEvent(HarnessAgentEventKind.toolCompleted, toolId),
+          );
         }
+      }
+      if (!_stopped && !completed) {
+        code = 1;
+        _emit('任务尚未完成：达到本轮工具交互上限。请在同一会话继续。');
       }
     } on Object catch (error) {
       code = _stopped ? 0 : 1;
       if (!_stopped) _emit('移动端 Harness 请求失败：$error');
     } finally {
+      _outputTimer?.cancel();
+      _flushOutput();
       _running = false;
       _client?.close(force: true);
       if (!_exit.isCompleted) _exit.complete(code);
       await _output.close();
+      await _events.close();
     }
   }
 
@@ -1464,60 +1508,156 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
             .replaceFirst(RegExp(r'/+$'), '');
     final HttpClient client = _client ??= HttpClient()
       ..connectionTimeout = const Duration(seconds: 30);
-    final HttpClientRequest http = await client
-        .postUrl(Uri.parse('$base/chat/completions'))
-        .timeout(const Duration(seconds: 30));
-    http.headers.set(
-      HttpHeaders.authorizationHeader,
-      'Bearer ${_request.apiKey.trim()}',
-    );
-    http.headers.contentType = ContentType.json;
-    http.write(
-      jsonEncode(<String, Object?>{
-        'model': _request.model.trim().isEmpty
-            ? DeepSeekHarnessService.defaultModel
-            : _request.model.trim(),
-        'messages': messages,
-        if (tools.isNotEmpty) 'tools': tools,
-        if (tools.isNotEmpty) 'tool_choice': 'auto',
-        'stream': false,
-      }),
-    );
-    final HttpClientResponse response = await http.close().timeout(
-      const Duration(seconds: 90),
-    );
-    final BytesBuilder bytes = BytesBuilder(copy: false);
-    int length = 0;
-    await for (final List<int> chunk in response.timeout(
-      const Duration(seconds: 90),
-    )) {
-      length += chunk.length;
-      if (length > 8 * 1024 * 1024) {
-        throw const FormatException('模型响应超过 8 MiB');
+    late HttpClientResponse response;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final HttpClientRequest http = await client
+          .postUrl(Uri.parse('$base/chat/completions'))
+          .timeout(const Duration(seconds: 30));
+      http.headers.set(
+        HttpHeaders.authorizationHeader,
+        'Bearer ${_request.apiKey.trim()}',
+      );
+      http.headers.contentType = ContentType.json;
+      http.write(
+        jsonEncode(<String, Object?>{
+          'model': _request.model.trim().isEmpty
+              ? DeepSeekHarnessService.defaultModel
+              : _request.model.trim(),
+          'messages': messages,
+          if (tools.isNotEmpty) 'tools': tools,
+          if (tools.isNotEmpty) 'tool_choice': 'auto',
+          if (base.startsWith('https://api.deepseek.com'))
+            'thinking': <String, String>{'type': 'enabled'},
+          if (base.startsWith('https://api.deepseek.com'))
+            'reasoning_effort': 'high',
+          'stream': true,
+        }),
+      );
+      response = await http.close().timeout(const Duration(seconds: 90));
+      if (response.statusCode >= 200 && response.statusCode < 300) break;
+      final int statusCode = response.statusCode;
+      final String body = await utf8.decoder.bind(response).join();
+      if (<int>{429, 502, 503, 504}.contains(statusCode) &&
+          attempt < 2 &&
+          !_stopped) {
+        await Future<void>.delayed(Duration(seconds: attempt == 0 ? 2 : 5));
+        continue;
       }
-      bytes.add(chunk);
-    }
-    final String body = utf8.decode(bytes.takeBytes(), allowMalformed: true);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-        response.statusCode == 401 || response.statusCode == 403
-            ? 'API Key 无效或无权访问当前模型'
-            : '模型接口返回 HTTP ${response.statusCode}：${_safeError(body)}',
+        statusCode == 401
+            ? 'DeepSeek API 返回 401：API Key 未通过认证，请核对是否为 DeepSeek API 平台密钥'
+            : statusCode == 403
+            ? 'DeepSeek API 返回 403：当前密钥无权访问所选模型'
+            : '模型接口返回 HTTP $statusCode：${_safeError(body)}',
       );
     }
-    final Object? decoded = jsonDecode(body);
-    if (decoded is! Map || decoded['choices'] is! List) {
-      throw const FormatException('模型响应格式不兼容');
+    final StringBuffer content = StringBuffer();
+    final StringBuffer reasoning = StringBuffer();
+    final Map<int, Map<String, Object?>> calls = <int, Map<String, Object?>>{};
+    bool done = false;
+    bool reasoningTruncated = false;
+    const int maxReasoningChars = 64 * 1024;
+    const int maxContentChars = 2 * 1024 * 1024;
+    const int maxToolArgumentChars = 1024 * 1024;
+    await for (final String line
+        in response
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .timeout(const Duration(seconds: 90))) {
+      if (_stopped) break;
+      if (line.length > 2 * 1024 * 1024) {
+        throw const FormatException('单条模型流式事件超过 2 MiB');
+      }
+      if (!line.startsWith('data:')) continue;
+      final String data = line.substring(5).trim();
+      if (data == '[DONE]') {
+        done = true;
+        break;
+      }
+      if (data.isEmpty) continue;
+      final Object? decoded = jsonDecode(data);
+      if (decoded is! Map || decoded['choices'] is! List) {
+        throw const FormatException('模型流式事件格式不兼容');
+      }
+      final List choices = decoded['choices'] as List;
+      if (choices.isEmpty) continue;
+      final Object? rawDelta = (choices.first as Map)['delta'];
+      if (rawDelta is! Map) continue;
+      final String reasoningDelta = '${rawDelta['reasoning_content'] ?? ''}';
+      if (reasoningDelta.isNotEmpty) {
+        final int remaining = maxReasoningChars - reasoning.length;
+        if (remaining > 0) {
+          final String visible = reasoningDelta.length <= remaining
+              ? reasoningDelta
+              : reasoningDelta.substring(0, remaining);
+          reasoning.write(visible);
+        }
+        if (reasoningDelta.length > remaining && !reasoningTruncated) {
+          reasoningTruncated = true;
+          _events.add(const HarnessAgentEvent(
+            HarnessAgentEventKind.reasoning,
+            '\n（早期推理已折叠，继续显示最新过程。）\n',
+          ));
+        }
+        // Keep forwarding current reasoning after the bounded context buffer
+        // fills. A long model thought must not freeze the visible progress.
+        _events.add(HarnessAgentEvent(
+          HarnessAgentEventKind.reasoning,
+          reasoningDelta.length <= 8192
+              ? reasoningDelta
+              : reasoningDelta.substring(reasoningDelta.length - 8192),
+        ));
+      }
+      final String contentDelta = '${rawDelta['content'] ?? ''}';
+      if (contentDelta.isNotEmpty) {
+        if (content.length + contentDelta.length > maxContentChars) {
+          throw const FormatException('模型回复正文超过 2 MiB 安全上限');
+        }
+        content.write(contentDelta);
+        _emit(contentDelta);
+      }
+      if (rawDelta['tool_calls'] is List) {
+        for (final Object? rawCall in rawDelta['tool_calls'] as List) {
+          if (rawCall is! Map) continue;
+          final int? index = rawCall['index'] is int
+              ? rawCall['index'] as int
+              : null;
+          if (index == null || index < 0 || index > 64) continue;
+          final call = calls.putIfAbsent(
+            index,
+            () => <String, Object?>{
+              'id': '',
+              'type': 'function',
+              'function': <String, String>{'name': '', 'arguments': ''},
+            },
+          );
+          if (rawCall['id'] is String) call['id'] = rawCall['id'];
+          final function = call['function']! as Map<String, String>;
+          if (rawCall['function'] is Map) {
+            final delta = rawCall['function'] as Map;
+            final String namePart = '${delta['name'] ?? ''}';
+            final String argumentPart = '${delta['arguments'] ?? ''}';
+            if (function['name']!.length + namePart.length > 256 ||
+                function['arguments']!.length + argumentPart.length >
+                    maxToolArgumentChars) {
+              throw const FormatException('模型工具调用参数超过安全上限');
+            }
+            function['name'] = '${function['name']}$namePart';
+            function['arguments'] = '${function['arguments']}$argumentPart';
+          }
+        }
+      }
     }
-    final List<Object?> choices = (decoded['choices']! as List).cast<Object?>();
-    if (choices.isEmpty || choices.first is! Map) {
-      throw const FormatException('模型没有返回回复');
-    }
-    final Object? rawMessage = (choices.first as Map)['message'];
-    if (rawMessage is! Map) throw const FormatException('模型回复缺少 message');
-    return rawMessage.map<String, Object?>(
-      (Object? key, Object? value) => MapEntry<String, Object?>('$key', value),
-    );
+    if (!_stopped && !done) throw const FormatException('模型流式响应提前结束');
+    return <String, Object?>{
+      'role': 'assistant',
+      'content': content.toString(),
+      if (reasoning.isNotEmpty) 'reasoning_content': reasoning.toString(),
+      if (calls.isNotEmpty)
+        'tool_calls': <Map<String, Object?>>[
+          for (final index in (calls.keys.toList()..sort())) calls[index]!,
+        ],
+    };
   }
 
   static String _functionName(String toolId) => toolId.replaceAll('.', '__');
@@ -1549,9 +1689,26 @@ class _MobileHarnessAgent implements HarnessAgentHandle {
   }
 
   void _emit(String value) {
+    if (_stopped || _output.isClosed) return;
+    _pendingOutput.write(value);
+    if (_pendingOutput.length >= 1024) {
+      _outputTimer?.cancel();
+      _flushOutput();
+      return;
+    }
+    _outputTimer ??= Timer(const Duration(milliseconds: 350), () {
+      _outputTimer = null;
+      _flushOutput();
+    });
+  }
+
+  void _flushOutput() {
+    if (_pendingOutput.isEmpty) return;
+    final String chunk = _pendingOutput.toString();
+    _pendingOutput.clear();
     if (!_stopped && !_output.isClosed) {
       _output.add(
-        DeepSeekHarnessService.redactSensitiveOutput(value, <String>[
+        DeepSeekHarnessService.redactSensitiveOutput(chunk, <String>[
           _request.apiKey.trim(),
         ]),
       );

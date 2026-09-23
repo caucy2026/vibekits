@@ -7,8 +7,21 @@ plugins {
 
 android {
     namespace = "com.vibekits.vibekits"
+    buildFeatures { aidl = true }
+    sourceSets.getByName("main").assets.srcDir(
+        layout.buildDirectory.dir("generated/adb-helper-assets")
+    )
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    packaging {
+        jniLibs {
+            excludes += setOf(
+                "lib/armeabi-v7a/**",
+                "lib/x86_64/**",
+            )
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -28,6 +41,9 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // KEMI PAD is arm64. Keep the core Harness relay in the base APK,
+        // while excluding unused x86 and 32-bit model runtimes.
+        ndk { abiFilters += "arm64-v8a" }
 
         externalNativeBuild {
             cmake {
@@ -43,13 +59,37 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+    val releaseStore = System.getenv("KEMI_ANDROID_KEYSTORE")
+    signingConfigs {
+        if (!releaseStore.isNullOrBlank()) {
+            create("kemiRelease") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("KEMI_ANDROID_STORE_PASSWORD")
+                keyAlias = System.getenv("KEMI_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("KEMI_ANDROID_KEY_PASSWORD")
+            }
         }
     }
+
+    buildTypes {
+        release {
+            // Without explicit signing inputs produce an unsigned artifact for
+            // the documented external signer; never silently use a debug key.
+            signingConfig = signingConfigs.findByName("kemiRelease")
+        }
+    }
+}
+
+val stageAdbHelperRelease = tasks.register<Copy>("stageAdbHelperRelease") {
+    dependsOn(":adb_helper:assembleRelease")
+    from(project(":adb_helper").layout.buildDirectory.file(
+        "outputs/apk/release/adb_helper-release.apk"
+    ))
+    into(layout.buildDirectory.dir("generated/adb-helper-assets"))
+    rename { "vibekits-adb-helper.apk" }
+}
+tasks.matching { it.name == "mergeReleaseAssets" }.configureEach {
+    dependsOn(stageAdbHelperRelease)
 }
 
 kotlin {
@@ -60,4 +100,10 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Flutter declares these assets for desktop builds. The Android release Copy
+// task omits them; Android reads the separately signed model component APK.
+tasks.withType<Copy>().matching { it.name == "copyFlutterAssetsRelease" }.configureEach {
+    exclude("flutter_assets/test_data/models/**")
 }

@@ -13,6 +13,7 @@ import '../../dev_tools/domain/feishu_harness_tasks.dart';
 import '../../dev_tools/domain/harness_agent_preferences.dart';
 import '../../dev_tools/domain/harness_callback_remote_adapter.dart';
 import '../../dev_tools/domain/harness_conversation_store.dart';
+import '../../dev_tools/domain/harness_command_broker.dart';
 import '../../dev_tools/domain/harness_remote_controller_runtime.dart';
 import '../../dev_tools/domain/harness_remote_controller_session.dart';
 import '../../dev_tools/domain/harness_remote_host_runtime.dart';
@@ -123,16 +124,25 @@ class DeepSeekAgentWorkspace extends StatefulWidget {
 }
 
 class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
+  static const MethodChannel _harnessKeyboard = MethodChannel(
+    'vibekits/harness-keyboard',
+  );
+  static _DeepSeekAgentWorkspaceState? _keyboardHandlerOwner;
   static const String _credentialKey = 'deepseek-api-key';
   static const List<String> _builtinModels = <String>[
     'deepseek-flash',
     'deepseek-v4-pro',
+    'deepseek-v4-flash-vision-exp',
   ];
-  static const Map<String, String> _builtinModelNames = <String, String>{
-    'deepseek-flash': 'DeepSeek-V41-Flash',
-    'deepseek-v4-pro': 'DeepSeek-V4-Pro',
-  };
   static const String _customModelValue = '__custom__';
+
+  String _displayModelName(String model) {
+    final String base = _baseUrl.text.trim().replaceFirst(RegExp(r'/+$'), '');
+    return base.isEmpty || base == DeepSeekHarnessService.defaultBaseUrl
+        ? 'deepseek-official/$model'
+        : model;
+  }
+
   static const int _maxContextCharacters = 12000;
   static final RegExp _ansiEscape = RegExp(
     r'\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))',
@@ -143,6 +153,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   );
   final TextEditingController _composer = TextEditingController();
   final TextEditingController _apiKey = TextEditingController();
+  String? _keyFailure;
+  bool _credentialLookupPending = true;
+  bool _credentialLookupFailed = false;
   final TextEditingController _baseUrl = TextEditingController(
     text: DeepSeekHarnessService.defaultBaseUrl,
   );
@@ -155,6 +168,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         : widget.initialDebugDirectory.trim(),
   );
   final FocusNode _composerFocus = FocusNode();
+  bool _crossDisplayKeyboardAvailable = false;
   final ScrollController _scroll = ScrollController();
   final TextEditingController _workspaceSearch = TextEditingController();
   final List<_AgentMessage> _messages = <_AgentMessage>[];
@@ -180,6 +194,9 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _progressExpanded = false;
   int _idleProgressSequence = 0;
   int _conversationEpoch = 0;
+  final Set<String> _loadedConversationWorkspaces = <String>{};
+  Future<void>? _conversationRestoreFuture;
+  String? _conversationRestoreWorkspace;
   final McpDeviceIdentity _mcpIdentity = McpDeviceIdentity.forVibekits();
   final McpExposurePreferences _mcpExposurePreferences =
       McpExposurePreferences();
@@ -194,6 +211,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       HarnessRemoteHostRuntime.shared;
   StreamSubscription<HarnessRemoteControllerSession?>?
   _remoteControllerSubscription;
+  HarnessCommandRegistration? _mobileCommandRegistration;
+  final StreamController<Map<String, Object?>> _mobileCommandChanges =
+      StreamController<Map<String, Object?>>.broadcast();
+  final Map<String, List<Map<String, Object?>>> _mobileCommandRecords = {};
+  final Map<String, int> _mobileCommandSequence = {};
+  final Map<String, String> _mobileCommandRequests = {};
 
   String _sessionRunKey(String workspace, String sessionId) =>
       '$workspace\u0000$sessionId';
@@ -214,9 +237,114 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
   bool _isSessionRunning(String workspace, String sessionId) =>
       _sessionRuns.containsKey(_sessionRunKey(workspace, sessionId));
 
+  Future<void> _checkCrossDisplayKeyboard() async {
+    try {
+      final bool available =
+          await _harnessKeyboard.invokeMethod<bool>('available') ?? false;
+      if (mounted) setState(() => _crossDisplayKeyboardAvailable = available);
+    } on PlatformException {
+      // Single-screen PADs continue using Flutter's normal input connection.
+    }
+  }
+
+  Future<void> _openCrossDisplayKeyboard() async {
+    if (!_crossDisplayKeyboardAvailable) return;
+    _claimCrossDisplayKeyboard();
+    try {
+      final bool accepted =
+          await _harnessKeyboard.invokeMethod<bool>('open') ?? false;
+      if (!accepted && mounted) {
+        setState(() => _crossDisplayKeyboardAvailable = false);
+      }
+    } on PlatformException {
+      if (mounted) setState(() => _crossDisplayKeyboardAvailable = false);
+    }
+  }
+
+  void _claimCrossDisplayKeyboard() {
+    _keyboardHandlerOwner = this;
+    _harnessKeyboard.setMethodCallHandler(_handleCrossDisplayKeyboard);
+  }
+
+  Future<void> _handleCrossDisplayKeyboard(MethodCall call) async {
+    if (!mounted) return;
+    final Map<Object?, Object?> data =
+        (call.arguments as Map<Object?, Object?>?) ?? const {};
+    if (call.method == 'state') {
+      final String reason = data['reason']?.toString() ?? '';
+      if (reason == 'bind_failed' ||
+          reason == 'show_failed' ||
+          reason == 'show_rejected' ||
+          reason == 'service_unavailable') {
+        setState(() => _crossDisplayKeyboardAvailable = false);
+      }
+      return;
+    }
+    if (call.method != 'input') return;
+    final String operation = data['operation']?.toString() ?? '';
+    final String text = data['text']?.toString() ?? '';
+    final int before = (data['arg1'] as num?)?.toInt() ?? 0;
+    final int after = (data['arg2'] as num?)?.toInt() ?? 0;
+    final TextEditingValue value = _composer.value;
+    final TextSelection selection = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    if (operation == 'commit') {
+      final String next = value.text.replaceRange(
+        selection.start,
+        selection.end,
+        text,
+      );
+      _composer.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(
+          offset: selection.start + text.length,
+        ),
+      );
+    } else if (operation == 'delete' || operation == 'deleteCodePoints') {
+      final int start = (selection.start - before.clamp(0, 32)).clamp(
+        0,
+        value.text.length,
+      );
+      final int end = (selection.end + after.clamp(0, 32)).clamp(
+        start,
+        value.text.length,
+      );
+      _composer.value = TextEditingValue(
+        text: value.text.replaceRange(start, end, ''),
+        selection: TextSelection.collapsed(offset: start),
+      );
+    } else if (operation == 'editorAction') {
+      if (!_running) unawaited(_run());
+    } else if (operation == 'key' && after == 0) {
+      if (before == 66) {
+        if (!_running) unawaited(_run());
+      } else if (before == 67) {
+        final int start = (selection.start - 1).clamp(0, value.text.length);
+        _composer.value = TextEditingValue(
+          text: value.text.replaceRange(start, selection.end, ''),
+          selection: TextSelection.collapsed(offset: start),
+        );
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    if (Platform.isAndroid) {
+      _claimCrossDisplayKeyboard();
+      unawaited(_checkCrossDisplayKeyboard());
+    }
+    if (Platform.isAndroid || Platform.isIOS) {
+      _mobileCommandRegistration = HarnessCommandBroker.instance.register(
+        prompt: _submitMobileRemotePrompt,
+        status: _mobileRemoteStatus,
+        history: _mobileRemoteHistory,
+        cancel: _cancelMobileRemotePrompt,
+        changes: _mobileCommandChanges.stream,
+      );
+    }
     HarnessRemoteManagementBridge.bind(
       owner: this,
       startHost: _startDeepSeekRemoteHost,
@@ -235,7 +363,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _scroll.addListener(_updateScrollToLatest);
     _adoptExternalPrompt();
     unawaited(_loadSettings());
-    unawaited(_restoreConversation(widget.initialWorkspace));
+    unawaited(_restoreConversation(_workspace.text));
     // A remembered, certificate-complete peer must remain usable after an
     // application restart. The runtime itself fails closed when no approved
     // peer exists, so this never turns a routing ID into implicit trust.
@@ -398,14 +526,24 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             _credentialKey,
           ) ??
           '';
-      if (mounted) setState(() {});
     } on Object {
       // Manual entry remains available when the system store is unavailable.
+      _credentialLookupFailed = true;
+    } finally {
+      _credentialLookupPending = false;
+      if (mounted) setState(() {});
     }
   }
 
   @override
   void dispose() {
+    if (Platform.isAndroid && identical(_keyboardHandlerOwner, this)) {
+      _keyboardHandlerOwner = null;
+      unawaited(_harnessKeyboard.invokeMethod<void>('close'));
+      _harnessKeyboard.setMethodCallHandler(null);
+    }
+    _mobileCommandRegistration?.unregister();
+    _mobileCommandChanges.close();
     HarnessRemoteManagementBridge.unbind(this);
     _remoteControllerSubscription?.cancel();
     _captureComposerDraft();
@@ -413,6 +551,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     _conversationEpoch++;
     for (final _HarnessSessionRun run in _sessionRuns.values) {
       run.outputSubscription?.cancel();
+      run.eventSubscription?.cancel();
       run.handle?.stop();
     }
     _workspace.dispose();
@@ -863,10 +1002,28 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
     }
   }
 
-  Future<void> _restoreConversation(String workspace) async {
+  Future<void> _restoreConversation(String workspace) {
     final String target = workspace.trim();
+    if (_conversationRestoreWorkspace == target &&
+        _conversationRestoreFuture != null) {
+      return _conversationRestoreFuture!;
+    }
+    final Future<void> restore = _restoreConversationNow(target);
+    _conversationRestoreWorkspace = target;
+    _conversationRestoreFuture = restore;
+    restore.whenComplete(() {
+      if (identical(_conversationRestoreFuture, restore)) {
+        _conversationRestoreFuture = null;
+        _conversationRestoreWorkspace = null;
+      }
+    });
+    return restore;
+  }
+
+  Future<void> _restoreConversationNow(String target) async {
     final int epoch = ++_conversationEpoch;
     if (target.isEmpty) return;
+    _loadedConversationWorkspaces.remove(target);
     HarnessConversationProject? project;
     try {
       project = await widget.loadConversation(target);
@@ -878,6 +1035,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         target != _workspace.text.trim()) {
       return;
     }
+    _loadedConversationWorkspaces.add(target);
     final List<HarnessConversationSession> restoredSessions =
         List<HarnessConversationSession>.of(
           _workspaceSessions[target] ??
@@ -917,7 +1075,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
 
   Future<void> _persistConversation() async {
     final String workspace = _workspace.text.trim();
-    if (workspace.isEmpty) return;
+    // An in-flight load may still contain all of the user's old sessions on
+    // disk. Never let an empty, not-yet-restored widget snapshot replace it.
+    if (workspace.isEmpty ||
+        !_loadedConversationWorkspaces.contains(workspace)) {
+      return;
+    }
     final DateTime now = DateTime.now();
     final List<HarnessConversationMessage> messages =
         <HarnessConversationMessage>[
@@ -929,6 +1092,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               exitCode: message.exitCode,
               stopped: message.stopped,
               executionTrace: message.executionTrace,
+              reasoningTrace: message.reasoningTrace,
             ),
         ];
     final String? activeId = _activeSessionId;
@@ -986,6 +1150,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         exitCode: message.exitCode,
         stopped: message.stopped,
         executionTrace: message.executionTrace,
+        reasoningTrace: message.reasoningTrace,
       ),
   ];
 
@@ -1105,15 +1270,134 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         '$bounded\n\n用户的新要求：$prompt';
   }
 
+  Future<Map<String, Object?>> _submitMobileRemotePrompt(
+    String text,
+    String requestId,
+  ) async {
+    if (!mounted) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
+    final workspace = _workspace.text.trim();
+    if (!_loadedConversationWorkspaces.contains(workspace)) {
+      await _restoreConversation(workspace);
+      if (!_loadedConversationWorkspaces.contains(workspace)) {
+        throw StateError('HARNESS_CONVERSATION_LOAD_FAILED');
+      }
+    }
+    final previous = _mobileCommandRequests[requestId];
+    if (previous != null) return _mobileRemoteStatus(previous);
+    if (_apiKey.text.trim().isEmpty) {
+      throw StateError('DEEPSEEK_API_KEY_REQUIRED');
+    }
+    if (_running) throw StateError('HARNESS_SESSION_BUSY');
+    _ensureActiveSession(text);
+    final sessionId = _activeSessionId!;
+    _mobileCommandRequests[requestId] = sessionId;
+    _mobileCommandRecords[sessionId] = <Map<String, Object?>>[];
+    _recordMobileCommand(sessionId, 'user', text);
+    _composer.text = text;
+    unawaited(_run());
+    return <String, Object?>{
+      'accepted': true,
+      'sessionId': sessionId,
+      'requestId': requestId,
+      'phase': 'running',
+    };
+  }
+
+  void _recordMobileCommand(String sessionId, String type, String text) {
+    final records = _mobileCommandRecords[sessionId];
+    if (records == null) return;
+    final cursor = (_mobileCommandSequence[sessionId] ?? 0) + 1;
+    _mobileCommandSequence[sessionId] = cursor;
+    records.add(<String, Object?>{
+      'seq': cursor,
+      'type': type,
+      'text': text,
+      'time': DateTime.now().toUtc().toIso8601String(),
+    });
+    if (records.length > 1024) records.removeRange(0, records.length - 1024);
+    _mobileCommandChanges.add(<String, Object?>{
+      'sessionId': sessionId,
+      'cursor': cursor,
+      'phase': type == 'complete'
+          ? 'completed'
+          : type == 'failed'
+          ? 'failed'
+          : 'running',
+    });
+  }
+
+  Future<Map<String, Object?>> _mobileRemoteStatus(String sessionId) async {
+    final records = _mobileCommandRecords[sessionId];
+    if (records == null) throw StateError('HARNESS_SESSION_NOT_FOUND');
+    final running = _sessionRuns.values.any(
+      (run) => run.sessionId == sessionId,
+    );
+    final lastType = records.lastOrNull?['type'];
+    return <String, Object?>{
+      'sessionId': sessionId,
+      'phase': running
+          ? 'running'
+          : lastType == 'failed'
+          ? 'failed'
+          : lastType == 'complete'
+          ? 'completed'
+          : 'queued',
+      'cursor': _mobileCommandSequence[sessionId] ?? 0,
+      'running': running,
+    };
+  }
+
+  Future<Map<String, Object?>> _mobileRemoteHistory(
+    String sessionId,
+    int cursor,
+  ) async {
+    final records = _mobileCommandRecords[sessionId];
+    if (records == null) throw StateError('HARNESS_SESSION_NOT_FOUND');
+    return <String, Object?>{
+      'sessionId': sessionId,
+      'cursor': _mobileCommandSequence[sessionId] ?? 0,
+      'records': records
+          .where((record) => (record['seq'] as int) > cursor)
+          .toList(),
+      'hasMore': false,
+    };
+  }
+
+  Future<Map<String, Object?>> _cancelMobileRemotePrompt(
+    String sessionId,
+  ) async {
+    final records = _mobileCommandRecords[sessionId];
+    if (records == null) throw StateError('HARNESS_SESSION_NOT_FOUND');
+    final run = _sessionRuns.values
+        .where((run) => run.sessionId == sessionId)
+        .firstOrNull;
+    if (run == null) {
+      return <String, Object?>{'sessionId': sessionId, 'cancelled': false};
+    }
+    if (run.handle == null) {
+      run.stopRequested = true;
+    } else {
+      await _stopRun(run);
+    }
+    return <String, Object?>{'sessionId': sessionId, 'cancelled': true};
+  }
+
   Future<void> _run() async {
     final String prompt = _composer.text.trim();
     if (_running || prompt.isEmpty) return;
+    final workspace = _workspace.text.trim();
+    if (!_loadedConversationWorkspaces.contains(workspace)) {
+      await _restoreConversation(workspace);
+      if (!mounted || !_loadedConversationWorkspaces.contains(workspace)) {
+        return;
+      }
+    }
+    if (_credentialLookupPending && _apiKey.text.trim().isEmpty) return;
     if (_apiKey.text.trim().isEmpty) {
-      _show('请先点右上角设置并填写 DeepSeek API Key');
+      setState(() => _keyFailure = '请先填写 API Key，并在模型设置中验证');
       return;
     }
     _ensureActiveSession(prompt);
-    final String workspace = _workspace.text.trim();
     final String sessionId = _activeSessionId!;
     final String runKey = _sessionRunKey(workspace, sessionId);
     final List<_AgentMessage> runMessages = <_AgentMessage>[
@@ -1164,11 +1448,12 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         ..clear()
         ..addAll(run.messages);
       _composer.clear();
-      _progressExpanded = false;
+      _progressExpanded = Platform.isAndroid;
       _sessionRuns[runKey] = run;
       _syncRunningSessionCache(run);
       _notifyRunningState();
     });
+    _recordMobileCommand(sessionId, 'status', 'Harness 已接受任务');
     _syncHarnessWorkspaceStatus();
     HarnessWorkStatusHub.publish(
       phase: HarnessWorkPhase.reasoning,
@@ -1184,6 +1469,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         return;
       }
       run.handle = handle;
+      if (run.stopRequested) await handle.stop();
       _replaceProgress(
         'understand',
         state: _AgentProgressState.completed,
@@ -1207,6 +1493,13 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         }
         final String clean = chunk.replaceAll(_ansiEscape, '');
         if (clean.isEmpty) return;
+        if (clean.contains('DeepSeek API 返回 401') ||
+            clean.contains('DeepSeek API 返回 403')) {
+          _keyFailure = clean.contains('401')
+              ? 'API Key 未通过认证，请重新填写并验证'
+              : '当前 Key 无权访问所选模型，请验证模型权限';
+        }
+        _recordMobileCommand(sessionId, 'assistant_delta', clean);
         final bool stickToBottom = _nearBottom;
         setState(() {
           _replaceProgress(
@@ -1231,17 +1524,56 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               ..clear()
               ..addAll(run.messages);
           }
-          _syncRunningSessionCache(run);
         });
         if (_viewingRun(run)) {
           _scrollToEnd(force: stickToBottom);
         }
       });
+      if (handle is HarnessAgentEventSource) {
+        final HarnessAgentEventSource eventSource =
+            handle as HarnessAgentEventSource;
+        run.eventSubscription = eventSource.events.listen((
+          HarnessAgentEvent event,
+        ) {
+          if (!mounted || _sessionRuns[runKey] != run) return;
+          if (event.kind == HarnessAgentEventKind.reasoning) {
+            const int maxVisibleReasoning = 40000;
+            final String combined = '${run.reasoningBuffer}${event.text}';
+            if (combined.length > maxVisibleReasoning) {
+              const String prefix = '（早期推理已折叠，显示最近内容）\n';
+              run.reasoningBuffer = StringBuffer(prefix)
+                ..write(
+                  combined.substring(
+                    combined.length - (maxVisibleReasoning - prefix.length),
+                  ),
+                );
+            } else {
+              run.reasoningBuffer.write(event.text);
+            }
+            if (run.reasoningClock.elapsedMilliseconds < 350) {
+              return;
+            }
+            run.reasoningClock.reset();
+            setState(() {
+              run.messages[run.assistantIndex] = run
+                  .messages[run.assistantIndex]
+                  .copyWith(reasoningTrace: run.reasoningBuffer.toString());
+              if (_viewingRun(run)) {
+                _messages
+                  ..clear()
+                  ..addAll(run.messages);
+              }
+            });
+          }
+        });
+      }
       final int code = await handle.exitCode;
       final Completer<void>? stopCleanup = run.stopCleanup;
       if (run.stopRequested && stopCleanup != null) await stopCleanup.future;
       final Future<void>? cancelOutput = run.outputSubscription?.cancel();
       if (cancelOutput != null) unawaited(cancelOutput);
+      final Future<void>? cancelEvents = run.eventSubscription?.cancel();
+      if (cancelEvents != null) unawaited(cancelEvents);
       if (!mounted) return;
       run.clock.stop();
       setState(() {
@@ -1273,6 +1605,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
           exitCode: code,
           stopped: run.stopRequested,
           executionTrace: _formatExecutionTrace(run: run),
+          reasoningTrace: run.reasoningBuffer.toString(),
         );
         if (_viewingRun(run)) {
           _messages
@@ -1301,6 +1634,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
         );
       }
       await _persistRunningConversation(run);
+      _recordMobileCommand(
+        sessionId,
+        'complete',
+        run.messages[run.assistantIndex].text,
+      );
     } on Object catch (error) {
       if (!mounted) return;
       run.clock.stop();
@@ -1333,6 +1671,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             : '一个会话启动失败，仍有 ${_sessionRuns.length} 个会话正在运行',
       );
       await _persistRunningConversation(run);
+      _recordMobileCommand(sessionId, 'failed', '$error');
     }
     _syncHarnessWorkspaceStatus();
     if (_viewingRun(run)) {
@@ -2228,6 +2567,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                                       availableModels = models;
                                       loadingModels = false;
                                       loadedFromEndpoint = true;
+                                      _keyFailure = null;
                                       if (!models.contains(modelChoice)) {
                                         modelChoice = models.first;
                                         _model.text = models.first;
@@ -2238,6 +2578,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                                     setStateDialog(() {
                                       loadingModels = false;
                                       modelError = '$error';
+                                      if (modelError!.contains('401') ||
+                                          modelError!.contains('403')) {
+                                        _keyFailure = 'API Key 验证失败，请检查后重试';
+                                      }
                                     });
                                   }
                                 },
@@ -2291,9 +2635,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                             for (final String model in availableModels)
                               _ModelChoiceTile(
                                 key: Key('agent-model-$model'),
-                                label: loadedFromEndpoint
-                                    ? model
-                                    : _builtinModelNames[model] ?? model,
+                                label: _displayModelName(model),
                                 selected: modelChoice == model,
                                 onTap: () => setStateDialog(() {
                                   modelChoice = model;
@@ -2336,7 +2678,10 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             ),
       ),
     );
-    if (save != true) return;
+    if (save != true) {
+      if (mounted) setState(() {});
+      return;
+    }
     try {
       final HarnessDebugPaths debug =
           await DeepSeekHarnessService.prepareDebugDirectory(
@@ -3255,6 +3600,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                                 !_messages[index].user;
                             return _MessageBubble(
                               message: _messages[index],
+                              reasoningRunning: activeAssistant,
                               progressSteps: activeAssistant
                                   ? List<_AgentProgressStep>.unmodifiable(
                                       _progressSteps,
@@ -3608,15 +3954,24 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                                   ),
                             )
                           : runningWorkspace
-                          ? SizedBox.square(
-                              key: ValueKey<String>(
-                                'agent-workspace-running-$workspace',
-                              ),
-                              dimension: 14,
-                              child: const CircularProgressIndicator(
-                                strokeWidth: 1.8,
-                              ),
-                            )
+                          ? Platform.isAndroid
+                                ? Icon(
+                                    Icons.circle,
+                                    key: ValueKey<String>(
+                                      'agent-workspace-running-$workspace',
+                                    ),
+                                    size: 8,
+                                    color: VibekitsColors.warning,
+                                  )
+                                : SizedBox.square(
+                                    key: ValueKey<String>(
+                                      'agent-workspace-running-$workspace',
+                                    ),
+                                    dimension: 14,
+                                    child: const CircularProgressIndicator(
+                                      strokeWidth: 1.8,
+                                    ),
+                                  )
                           : null,
                     ),
                   ),
@@ -3702,13 +4057,22 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
               onDelete: () => _requestDeleteSession(workspace, session),
             )
           : runningThisSession
-          ? SizedBox.square(
-              key: ValueKey<String>(
-                'agent-session-running-$workspace-${session.id}',
-              ),
-              dimension: 14,
-              child: const CircularProgressIndicator(strokeWidth: 1.8),
-            )
+          ? Platform.isAndroid
+                ? Icon(
+                    Icons.circle,
+                    key: ValueKey<String>(
+                      'agent-session-running-$workspace-${session.id}',
+                    ),
+                    size: 8,
+                    color: VibekitsColors.warning,
+                  )
+                : SizedBox.square(
+                    key: ValueKey<String>(
+                      'agent-session-running-$workspace-${session.id}',
+                    ),
+                    dimension: 14,
+                    child: const CircularProgressIndicator(strokeWidth: 1.8),
+                  )
           : null,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
     );
@@ -3814,11 +4178,17 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   if (_checking || _running)
-                    const SizedBox(
-                      width: 13,
-                      height: 13,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                    Platform.isAndroid
+                        ? const Icon(
+                            Icons.circle,
+                            size: 8,
+                            color: VibekitsColors.warning,
+                          )
+                        : const SizedBox(
+                            width: 13,
+                            height: 13,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                   else
                     Icon(
                       Icons.circle,
@@ -3884,11 +4254,17 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
       ),
       child: Row(
         children: <Widget>[
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
+          Platform.isAndroid
+              ? const Icon(
+                  Icons.hourglass_top_rounded,
+                  size: 14,
+                  color: VibekitsColors.warning,
+                )
+              : const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
           const SizedBox(width: 8),
           const Expanded(
             child: Text(
@@ -3940,6 +4316,45 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
+                if (_credentialLookupPending ||
+                    _keyFailure != null ||
+                    (_apiKey.text.trim().isEmpty && !_credentialLookupFailed))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(
+                          _credentialLookupPending
+                              ? Icons.hourglass_empty_rounded
+                              : Icons.key_outlined,
+                          size: 15,
+                          color: _credentialLookupPending
+                              ? context.vibe.muted
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            _credentialLookupPending
+                                ? '系统检测中'
+                                : _keyFailure ?? '尚未设置 API Key，请先填写',
+                            key: const Key('agent-composer-key-warning'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _credentialLookupPending
+                                  ? context.vibe.muted
+                                  : Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ),
+                        if (!_credentialLookupPending)
+                          TextButton(
+                            onPressed: _showSettings,
+                            child: const Text('设置 Key'),
+                          ),
+                      ],
+                    ),
+                  ),
                 Shortcuts(
                   shortcuts: const <ShortcutActivator, Intent>{
                     SingleActivator(LogicalKeyboardKey.enter):
@@ -3958,6 +4373,11 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                       key: const Key('agent-composer'),
                       controller: _composer,
                       focusNode: _composerFocus,
+                      readOnly: _crossDisplayKeyboardAvailable,
+                      showCursor: true,
+                      onTap: _crossDisplayKeyboardAvailable
+                          ? () => unawaited(_openCrossDisplayKeyboard())
+                          : null,
                       minLines: 1,
                       maxLines: 7,
                       textInputAction: TextInputAction.newline,
@@ -3999,7 +4419,7 @@ class _DeepSeekAgentWorkspaceState extends State<DeepSeekAgentWorkspace> {
                                   maxWidth: 190,
                                 ),
                                 child: Text(
-                                  _model.text,
+                                  _displayModelName(_model.text),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontSize: 12),
@@ -4518,6 +4938,9 @@ class _HarnessSessionRun {
   HarnessAgentHandle? handle;
   VibekitsHarnessToolBridge? toolBridge;
   StreamSubscription<String>? outputSubscription;
+  StreamSubscription<HarnessAgentEvent>? eventSubscription;
+  StringBuffer reasoningBuffer = StringBuffer();
+  final Stopwatch reasoningClock = Stopwatch()..start();
   Completer<void>? stopCleanup;
   bool stopping = false;
   bool stopRequested = false;
@@ -4586,6 +5009,7 @@ class _AgentMessage {
     this.exitCode,
     this.stopped = false,
     this.executionTrace = '',
+    this.reasoningTrace = '',
   });
 
   const _AgentMessage.user(String text) : this._(text: text, user: true);
@@ -4603,6 +5027,7 @@ class _AgentMessage {
         exitCode: message.exitCode,
         stopped: message.stopped,
         executionTrace: message.executionTrace,
+        reasoningTrace: message.reasoningTrace,
       );
 
   final String text;
@@ -4611,6 +5036,7 @@ class _AgentMessage {
   final int? exitCode;
   final bool stopped;
   final String executionTrace;
+  final String reasoningTrace;
 
   _AgentMessage copyWith({
     String? text,
@@ -4618,6 +5044,7 @@ class _AgentMessage {
     int? exitCode,
     bool? stopped,
     String? executionTrace,
+    String? reasoningTrace,
   }) => _AgentMessage._(
     text: text ?? this.text,
     user: user,
@@ -4625,6 +5052,7 @@ class _AgentMessage {
     exitCode: exitCode ?? this.exitCode,
     stopped: stopped ?? this.stopped,
     executionTrace: executionTrace ?? this.executionTrace,
+    reasoningTrace: reasoningTrace ?? this.reasoningTrace,
   );
 }
 
@@ -4657,12 +5085,14 @@ String _stripLegacyMobileToolEnvelopes(String text) {
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
+    this.reasoningRunning = false,
     this.progressSteps = const <_AgentProgressStep>[],
     this.progressExpanded = false,
     this.onToggleProgress,
   });
 
   final _AgentMessage message;
+  final bool reasoningRunning;
   final List<_AgentProgressStep> progressSteps;
   final bool progressExpanded;
   final VoidCallback? onToggleProgress;
@@ -4734,6 +5164,11 @@ class _MessageBubble extends StatelessWidget {
                       )
                     else if (message.executionTrace.isNotEmpty)
                       _PersistedExecutionTrace(trace: message.executionTrace),
+                    if (message.reasoningTrace.isNotEmpty)
+                      _ModelReasoningTrace(
+                        trace: message.reasoningTrace,
+                        running: reasoningRunning,
+                      ),
                     if (message.text.isNotEmpty)
                       MarkdownBody(
                         data: message.text,
@@ -5133,6 +5568,83 @@ class _SessionMoveMenuButtonState extends State<_SessionMoveMenuButton> {
               ),
     );
   }
+}
+
+class _ModelReasoningTrace extends StatefulWidget {
+  const _ModelReasoningTrace({required this.trace, required this.running});
+
+  final String trace;
+  final bool running;
+
+  @override
+  State<_ModelReasoningTrace> createState() => _ModelReasoningTraceState();
+}
+
+class _ModelReasoningTraceState extends State<_ModelReasoningTrace> {
+  bool expanded = true;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('agent-model-reasoning'),
+    margin: const EdgeInsets.only(bottom: 10),
+    decoration: BoxDecoration(
+      color: context.vibe.canvas,
+      border: Border.all(color: context.vibe.border),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        InkWell(
+          onTap: () => setState(() => expanded = !expanded),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.psychology_outlined, size: 16),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    widget.running
+                        ? '正在推理${widget.trace.startsWith('（早期推理已折叠') ? ' · 显示最近内容' : ''}'
+                        : '推理过程${widget.trace.startsWith('（早期推理已折叠') ? ' · 显示最近内容' : ''}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  expanded ? '收起' : '展开细节',
+                  style: TextStyle(fontSize: 11, color: context.vibe.muted),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 17,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (expanded)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 440),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: SelectableText(
+                widget.trace,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: context.vibe.muted,
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class _PersistedExecutionTrace extends StatefulWidget {

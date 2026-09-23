@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../../app_center/presentation/app_center_tab.dart';
 import '../domain/mihomo_controller_service.dart';
 import '../domain/mihomo_profile_service.dart';
 import '../domain/network_virtualization_service.dart';
@@ -112,12 +113,11 @@ class _NetworkVirtualizationWorkspaceState
   }
 
   Future<void> _refresh() async {
-    final List<BundledRuntimeStatus> status = await Future.wait(
-      <Future<BundledRuntimeStatus>>[
-        NetworkVirtualizationService.inspectMihomo(),
-        NetworkVirtualizationService.inspectQemu(),
-      ],
-    );
+    final List<BundledRuntimeStatus> status =
+        await Future.wait(<Future<BundledRuntimeStatus>>[
+          NetworkVirtualizationService.inspectMihomo(),
+          NetworkVirtualizationService.inspectQemu(),
+        ]);
     SystemProxySnapshot? systemProxy;
     if (Platform.isWindows) {
       try {
@@ -1604,6 +1604,36 @@ class _NetworkVirtualizationWorkspaceState
     ),
   );
 
+  Future<void> _openComponentMarket() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: SizedBox(
+          width: 1000,
+          height: 720,
+          child: Column(
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  tooltip: '返回功能页',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+              Expanded(
+                child: AppCenterTab(
+                  initialKeyword: widget.virtualMachineOnly ? '虚拟机' : '网络代理',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   Widget _runtimeCard(BundledRuntimeStatus? status) {
     final bool available = status?.available == true;
     return Card(
@@ -1614,14 +1644,24 @@ class _NetworkVirtualizationWorkspaceState
         ),
         title: Text(status?.name ?? '正在检查运行时…'),
         subtitle: Text(
-          status == null ? '' : '${status.version}\n${status.executable}',
+          status == null
+              ? ''
+              : status.available
+              ? '${status.version}\n${status.executable}'
+              : '${status.version}\n请到应用中心安装对应的 VibeKits 功能组件',
           maxLines: 3,
         ),
-        trailing: IconButton(
-          tooltip: '重新检查',
-          onPressed: _refresh,
-          icon: const Icon(Icons.refresh),
-        ),
+        trailing: !available && status != null
+            ? FilledButton.icon(
+                onPressed: _openComponentMarket,
+                icon: const Icon(Icons.download),
+                label: const Text('从应用中心安装'),
+              )
+            : IconButton(
+                tooltip: '重新检查',
+                onPressed: _refresh,
+                icon: const Icon(Icons.refresh),
+              ),
       ),
     );
   }
@@ -1631,7 +1671,7 @@ class _NetworkVirtualizationWorkspaceState
     children: <Widget>[
       Text('轻量虚拟机', style: Theme.of(context).textTheme.headlineSmall),
       const SizedBox(height: 4),
-      const Text('内置 QEMU x86_64 运行时。选择已有磁盘或 ISO 后启动。'),
+      const Text('按需安装 QEMU 虚拟机组件，选择已有磁盘或 ISO 后启动。'),
       const SizedBox(height: 12),
       _runtimeCard(_qemu),
       const SizedBox(height: 12),

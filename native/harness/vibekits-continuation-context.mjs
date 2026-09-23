@@ -12,7 +12,6 @@ const consumedFile = (home, sessionId) =>
 export function continuationContext(home, sessionId) {
   if (!home || !/^session-[0-9a-f-]{36}$/.test(sessionId || '')) return '';
   try {
-    if (existsSync(consumedFile(home, sessionId))) return '';
     const file = join(home, 'continuations', 'continuations.json');
     if (statSync(file).size > 8 * 1024 * 1024) return '';
     const records = JSON.parse(readFileSync(file, 'utf8')).records;
@@ -21,7 +20,11 @@ export function continuationContext(home, sessionId) {
     const workspaceData = JSON.parse(readFileSync(join(home, 'storages', 'workspace.json'), 'utf8'));
     // The app store normalizes its workspace key as an absolute directory.
     // Accept the persisted /<workspace-id>/ form as well as the official ID.
-    const workspaceKey = String(relation.workspace || '').replace(/^[/\\]+|[/\\]+$/g, '');
+    const persistedWorkspace = String(relation.workspace || '');
+    const workspaceTail = persistedWorkspace.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
+    const workspaceKey = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(workspaceTail || '')
+      ? workspaceTail.toLowerCase()
+      : persistedWorkspace.replace(/^[/\\]+|[/\\]+$/g, '');
     const workspace = workspaceData?.tables?.workspaces?.[workspaceKey];
     if (!workspace?.sessionIds?.includes(sessionId)) return '';
     return [
@@ -36,6 +39,7 @@ export function continuationContext(home, sessionId) {
 
 export function markContinuationConsumed(home, sessionId) {
   if (!home || !/^session-[0-9a-f-]{36}$/.test(sessionId || '')) return false;
+  if (existsSync(consumedFile(home, sessionId))) return false;
   if (!continuationContext(home, sessionId)) return false;
   const directory = join(home, 'continuations', 'consumed');
   mkdirSync(directory, { recursive: true });

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -199,5 +200,35 @@ void main() {
     scheduler.updateHarnessState(busy: false, approvalWaiting: true);
     expect(await scheduler.dispatchNext(), isFalse);
     expect(calls, 0);
+  });
+
+  test('queued remote prompt dispatches when Harness becomes ready', () async {
+    final repository = HarnessMessageQueueRepository(
+      root: root,
+      idFactory: () => 'remote-message',
+    );
+    final dispatched = Completer<String>();
+    final scheduler = HarnessMessageQueueScheduler(
+      repository: repository,
+      workspaceId: 'workspace',
+      sessionId: 'session',
+      submit: (text, _) async {
+        dispatched.complete(text);
+        return true;
+      },
+    );
+    scheduler.updateHarnessState(busy: true, approvalWaiting: false);
+    await repository.enqueue(
+      workspaceId: 'workspace',
+      sessionId: 'session',
+      text: 'remote request',
+      source: HarnessMessageSource.remotePeer,
+    );
+    expect(await scheduler.dispatchNext(), isFalse);
+    scheduler.updateHarnessState(busy: false, approvalWaiting: false);
+    expect(
+      await dispatched.future.timeout(const Duration(seconds: 1)),
+      'remote request',
+    );
   });
 }

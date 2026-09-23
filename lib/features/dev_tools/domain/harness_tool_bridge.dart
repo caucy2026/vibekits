@@ -770,7 +770,7 @@ class VibekitsHarnessToolBridge {
     simulatorSetEnabledId: _definition(
       id: simulatorSetEnabledId,
       name: '开关远程仿真机',
-      description: '打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。',
+      description: '打开或关闭本机受控仿真机端点。Android PAD 也可通过显式授权作为被调试端；写操作仍需批准。',
       risk: HarnessToolRisk.controlsDevice,
       properties: <String, Object?>{
         'enabled': const <String, Object?>{
@@ -3288,6 +3288,7 @@ class VibekitsHarnessToolBridge {
     };
   }
 
+
   Directory get _workspaceDirectory {
     final String? configured = _workspaceRoot?.trim();
     if (configured == null || configured.isEmpty) {
@@ -3690,7 +3691,7 @@ class VibekitsHarnessToolBridge {
   ) async {
     final snapshot = HarnessSimulatorTargetRuntime.shared.latest;
     return <String, Object?>{
-      'supportedAsTarget': !Platform.isAndroid && !Platform.isIOS,
+      'supportedAsTarget': !Platform.isIOS,
       'enabled': HarnessSimulatorAccessSettings.enabled,
       'ready': snapshot.ready,
       'phase': snapshot.phase.name,
@@ -3707,8 +3708,8 @@ class VibekitsHarnessToolBridge {
   ) async {
     final enabled = arguments['enabled'];
     if (enabled is! bool) throw const FormatException('enabled 必须是布尔值');
-    if ((Platform.isAndroid || Platform.isIOS) && enabled) {
-      throw UnsupportedError('PAD/移动端只作为控制端，不开放本机仿真机');
+    if (Platform.isIOS && enabled) {
+      throw UnsupportedError('iOS 暂不开放本机仿真机');
     }
     if (enabled) {
       await HarnessSimulatorTargetRuntime.shared.enable();

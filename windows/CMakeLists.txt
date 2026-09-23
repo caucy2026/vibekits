@@ -177,6 +177,10 @@ install(FILES
   DESTINATION "${CMAKE_INSTALL_PREFIX}/tools/7zip"
   COMPONENT Runtime)
 
+# Core releases exclude optional VM/proxy runtimes. Component packaging reads
+# their prepared native runtime directories separately.
+option(VIBEKITS_BUNDLE_OPTIONAL_RUNTIMES "Include legacy QEMU/Mihomo runtimes" OFF)
+if(VIBEKITS_BUNDLE_OPTIONAL_RUNTIMES)
 # Clash Verge-compatible Mihomo core. The private copy is always used so proxy
 # tasks do not depend on another Clash installation or PATH.
 set(MIHOMO_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/../native/mihomo/windows/runtime")
@@ -205,6 +209,8 @@ else()
       message(FATAL_ERROR \"Bundled QEMU is missing. Run tool/prepare_qemu_runtime.ps1.\")
     endif()
   " COMPONENT Runtime)
+endif()
+
 endif()
 
 # The official DeepSeek Harness is prepared ahead of the Release build by

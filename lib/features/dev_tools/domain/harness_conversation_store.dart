@@ -11,6 +11,7 @@ class HarnessConversationMessage {
     this.exitCode,
     this.stopped = false,
     this.executionTrace = '',
+    this.reasoningTrace = '',
   });
 
   final String text;
@@ -19,6 +20,7 @@ class HarnessConversationMessage {
   final int? exitCode;
   final bool stopped;
   final String executionTrace;
+  final String reasoningTrace;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'text': text,
@@ -27,6 +29,7 @@ class HarnessConversationMessage {
     if (exitCode != null) 'exitCode': exitCode,
     if (stopped) 'stopped': true,
     if (executionTrace.isNotEmpty) 'executionTrace': executionTrace,
+    if (reasoningTrace.isNotEmpty) 'reasoningTrace': reasoningTrace,
   };
 
   static HarnessConversationMessage? fromJson(Object? value) {
@@ -54,6 +57,15 @@ class HarnessConversationMessage {
       exitCode: item['exitCode'] is int ? item['exitCode']! as int : null,
       stopped: item['stopped'] == true,
       executionTrace: executionTrace,
+      reasoningTrace: item['reasoningTrace'] is String
+          ? (item['reasoningTrace'] as String).substring(
+              0,
+              (item['reasoningTrace'] as String).length.clamp(
+                0,
+                HarnessConversationStore.maxExecutionTraceCharacters,
+              ),
+            )
+          : '',
     );
   }
 }
@@ -102,13 +114,11 @@ class HarnessConversationProject {
 
 typedef HarnessConversationLoader =
     Future<HarnessConversationProject?> Function(String workspace);
-typedef HarnessConversationSaver = Future<void> Function(
-  HarnessConversationProject project,
-);
+typedef HarnessConversationSaver =
+    Future<void> Function(HarnessConversationProject project);
 typedef HarnessWorkspaceCatalogLoader = Future<List<String>> Function();
-typedef HarnessWorkspaceCatalogSaver = Future<void> Function(
-  List<String> workspaces,
-);
+typedef HarnessWorkspaceCatalogSaver =
+    Future<void> Function(List<String> workspaces);
 
 abstract final class HarnessConversationStore {
   static const int maxSessions = 40;
@@ -118,8 +128,10 @@ abstract final class HarnessConversationStore {
   static const int maxFileBytes = 8 * 1024 * 1024;
   static const int maxWorkspaces = 40;
   static final Map<String, Future<void>> _saveQueues = <String, Future<void>>{};
+  static Future<void>? _androidMigration;
 
   static Future<List<String>> loadWorkspaceCatalog() async {
+    await _migrateAndroidLegacyStore();
     final File file = _catalogFile();
     if (!await file.exists()) return const <String>[];
     try {
@@ -162,6 +174,7 @@ abstract final class HarnessConversationStore {
   }
 
   static Future<Map<String, String>> loadWorkspaceNames() async {
+    await _migrateAndroidLegacyStore();
     final File file = _catalogFile();
     if (!await file.exists()) return const <String, String>{};
     try {
@@ -216,6 +229,7 @@ abstract final class HarnessConversationStore {
   }
 
   static Future<HarnessConversationProject?> load(String workspace) async {
+    await _migrateAndroidLegacyStore();
     final String normalized = _normalizeWorkspace(workspace);
     if (normalized.isEmpty) return null;
     final File file = _fileFor(normalized);
@@ -278,6 +292,7 @@ abstract final class HarnessConversationStore {
   }
 
   static Future<void> save(HarnessConversationProject project) async {
+    await _migrateAndroidLegacyStore();
     final String normalized = _normalizeWorkspace(project.workspace);
     if (normalized.isEmpty) return;
     final Future<void> previous =
@@ -457,12 +472,71 @@ abstract final class HarnessConversationStore {
   );
 
   static Directory _harnessStoreDirectory() {
+    if (Platform.isAndroid) {
+      // Android HOME points to code_cache on this PAD. Package upgrades may
+      // erase it, so conversations must live in the app's persistent files.
+      final String home =
+          Platform.environment['HOME'] ?? Directory.systemTemp.path;
+      return Directory(
+        '${Directory(home).absolute.parent.path}${Platform.pathSeparator}files'
+        '${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
+      );
+    }
     final String base = Platform.isWindows
         ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
         : (Platform.environment['HOME'] ?? Directory.systemTemp.path);
     return Directory(
       '$base${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
     );
+  }
+
+  static Future<void> _migrateAndroidLegacyStore() =>
+      _androidMigration ??= _copyAndroidLegacyStore().catchError((Object _) {});
+
+  static Future<void> _copyAndroidLegacyStore() async {
+    if (!Platform.isAndroid) return;
+    final String home =
+        Platform.environment['HOME'] ?? Directory.systemTemp.path;
+    final Directory oldRoot = Directory(
+      '$home${Platform.pathSeparator}Vibekits${Platform.pathSeparator}Harness',
+    );
+    final Directory newRoot = _harnessStoreDirectory();
+    if (oldRoot.path == newRoot.path || !await oldRoot.exists()) return;
+    await newRoot.create(recursive: true);
+    for (final String name in <String>['workspace-catalog.json']) {
+      final File oldFile = File(
+        '${oldRoot.path}${Platform.pathSeparator}$name',
+      );
+      final File newFile = File(
+        '${newRoot.path}${Platform.pathSeparator}$name',
+      );
+      if (await oldFile.exists() &&
+          !await newFile.exists() &&
+          await oldFile.length() <= 64 * 1024) {
+        await oldFile.copy(newFile.path);
+      }
+    }
+    final Directory oldConversations = Directory(
+      '${oldRoot.path}${Platform.pathSeparator}conversations',
+    );
+    if (!await oldConversations.exists()) return;
+    final Directory newConversations = Directory(
+      '${newRoot.path}${Platform.pathSeparator}conversations',
+    );
+    await newConversations.create(recursive: true);
+    await for (final FileSystemEntity entity in oldConversations.list(
+      followLinks: false,
+    )) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      final String name = entity.uri.pathSegments.last;
+      if (!RegExp(r'^[0-9a-f]{64}\.json$').hasMatch(name)) continue;
+      final File target = File(
+        '${newConversations.path}${Platform.pathSeparator}$name',
+      );
+      if (!await target.exists() && await entity.length() <= maxFileBytes) {
+        await entity.copy(target.path);
+      }
+    }
   }
 
   static List<String> _normalizeWorkspaceList(Iterable<String> values) {

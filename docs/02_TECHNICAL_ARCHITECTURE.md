@@ -197,3 +197,11 @@ void vk_string_free(char* value);
 - 性能：1GB 日志、2GB BIN、64MB JSON、10万行 CSV、10万条目压缩包。
 
 测试夹具必须是生成数据或无隐私样本；禁止用用户真实下载目录做自动清理测试。
+
+## 2026-09-22：Harness 共存与平台组件约束
+
+- VibeKits 内置 Harness 的桌面默认端口为 `127.0.0.1:13080`，独立官方实例可保留 `3080`；占用时申请空闲回环端口，界面与命令桥跟随实际启动 URL。数据目录继续通过独立 `DSH_HOME` 隔离，不改官方内核。
+- 所有平台的应用导航均不显示文字右侧的数字序号；保留既有点击与快捷键映射。
+- PAD 使用 Android 宿主、触控导航、现有双屏组件和移动 Harness 工作区，不能直接嵌入 macOS 专用组件。
+- Linux 必须使用 Linux 支持的原生宿主、输入、文件选择和 Web 渲染组件，按接口适配；禁止将 macOS/Windows 专用实现当作 Linux 已实现。当前工作树没有 Linux runner，Linux 编译和实机验收仍未完成。
+- 本轮可复核结果见 [端口共存验收](acceptance/HARNESS_PORT_COEXISTENCE_2026-09-22.md)。

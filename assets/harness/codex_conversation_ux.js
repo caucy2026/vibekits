@@ -23,7 +23,20 @@
     if (explicit) return explicit;
     const href = row.querySelector('a[href]')?.getAttribute('href') || '';
     const match = href.match(/\/sessions?\/([^/?#]+)/i);
-    return match ? decodeURIComponent(match[1]) : '';
+    if (match) return decodeURIComponent(match[1]);
+    // Bundled official SessionNodeItem receives node.id, but deliberately
+    // renders neither data-session-id nor an anchor. Read only this row's
+    // component props; ungrouped sessions are absent from workspace indexes.
+    const fiberKey = Object.keys(row).find((key) => key.startsWith('__reactFiber$'));
+    let fiber = fiberKey ? row[fiberKey] : null;
+    for (let depth = 0; fiber && depth < 12; depth += 1, fiber = fiber.return) {
+      const props = fiber.memoizedProps;
+      const id = props?.node?.id ?? props?.result?.id;
+      if (typeof id === 'string' && /^session-[0-9a-f-]{36}$/i.test(id)) {
+        return id;
+      }
+    }
+    return '';
   };
 
   const sessionTitleForRow = (row) => {
@@ -136,45 +149,204 @@
   const requestDeleteFromMenu = () => {
     const row = contextSessionRow;
     const rowTitle = sessionTitleForRow(row);
-    const relation = continuationRelations.find((item) =>
-      item.continuationTitleSnapshot === rowTitle,
-    );
     // Official alpha.2 sidebar rows often omit their id. Never substitute the
     // persisted "current" id here: after opening a derived blank session that
     // value can lag behind the selected row and delete the source instead.
     // An empty id is resolved by the host against the clicked row's title.
-    const sessionId = relation?.continuationSessionId || sessionIdForRow(row);
+    const sessionId = sessionIdForRow(row);
     const request = {
       type: 'vibekits.deleteSession',
       sessionId,
-      title: relation?.continuationTitleSnapshot || rowTitle,
+      title: rowTitle,
       isCurrent: sessionId === window.__vibekitsCurrentSessionId(),
+      confirmed: true,
     };
-    postHostMessage(request);
     try {
       document.dispatchEvent(new KeyboardEvent('keydown', {
         key: 'Escape', code: 'Escape', bubbles: true,
       }));
     } catch {
-      // The host confirmation remains authoritative if menu cleanup fails.
+      // Confirmation is independent from the official menu cleanup.
     }
+    document.querySelector('.vibekits-delete-confirmation')?.remove();
+    const backdrop = document.createElement('div');
+    backdrop.className = 'vibekits-delete-confirmation';
+    backdrop.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:2147483647',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(15,23,42,.22)', 'padding:24px',
+    ].join(';');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'vibekits-delete-title');
+    dialog.style.cssText = [
+      'width:min(440px,calc(100vw - 48px))', 'box-sizing:border-box',
+      'background:var(--background-primary,#fff)',
+      'color:var(--text-primary,#202124)', 'border-radius:14px',
+      'box-shadow:0 18px 50px rgba(15,23,42,.22)', 'padding:22px',
+      'font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    ].join(';');
+    const heading = document.createElement('div');
+    heading.id = 'vibekits-delete-title';
+    heading.textContent = '删除这个会话？';
+    heading.style.cssText = 'font-size:17px;font-weight:650;margin-bottom:10px';
+    const content = document.createElement('div');
+    content.setAttribute('data-delete-message', '');
+    content.textContent = `${request.title || request.sessionId}\n\n聊天记录、推理过程和工具调用记录将被永久删除，无法从归档恢复。`;
+    content.style.cssText = 'white-space:pre-wrap;line-height:1.55;color:var(--text-secondary,#5f6368)';
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:22px';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = '取消';
+    cancel.style.cssText = 'border:1px solid rgba(127,127,127,.35);border-radius:8px;background:transparent;color:inherit;padding:7px 15px;cursor:pointer';
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'vibekits-delete-confirm-button';
+    confirm.textContent = '确认删除';
+    confirm.style.cssText = 'border:1px solid rgba(190,120,60,.42);border-radius:8px;background:rgba(212,158,91,.16);color:inherit;padding:7px 15px;cursor:pointer';
+    const close = () => backdrop.remove();
+    cancel.addEventListener('click', close);
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) close();
+    });
+    confirm.addEventListener('click', () => {
+      confirm.disabled = true;
+      confirm.textContent = '正在删除…';
+      postHostMessage(request);
+    });
+    actions.append(cancel, confirm);
+    dialog.append(heading, content, actions);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    window.setTimeout(() => confirm.focus(), 0);
+  };
+
+  const showSyntheticContinuationMenu = (row, action) => {
+    document.querySelector('.vibekits-synthetic-session-menu')?.remove();
+    const menu = document.createElement('div');
+    menu.className = 'vibekits-synthetic-session-menu';
+    menu.setAttribute('role', 'menu');
+    const officialAction = (name) => {
+      const probe = row.classList.contains('vibekits-synthetic-continuation-row')
+        ? visibleSessionRows().find((candidate) =>
+          !candidate.classList.contains('vibekits-synthetic-continuation-row'))
+        : row;
+      const fiberKey = probe && Object.getOwnPropertyNames(probe).find(
+        (key) => key.startsWith('__reactFiber$'),
+      );
+      let fiber = fiberKey ? probe[fiberKey] : null;
+      for (let depth = 0; fiber && depth < 40; depth += 1, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        if (typeof props?.[name] === 'function') return props[name];
+      }
+      return null;
+    };
+    const addItem = (label, run) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = label;
+      item.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.remove();
+        contextSessionRow = row;
+        run(item);
+      });
+      menu.appendChild(item);
+      return item;
+    };
+    const rename = addItem('重命名', () => officialAction('onRename')?.(
+      sessionIdForRow(row), sessionTitleForRow(row),
+    ));
+    addItem('分叉会话', () => officialAction('onFork')?.(sessionIdForRow(row)));
+    addItem('归档会话', () => officialAction('onArchive')?.(sessionIdForRow(row)));
+    addItem('派生会话', (item) => requestContinuationFromMenu(item));
+    addItem('删除会话', () => requestDeleteFromMenu());
+    document.body.appendChild(menu);
+    const rect = action.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(
+      rowRect.right - menuRect.width - 4,
+      window.innerWidth - menuRect.width - 4,
+    ))}px`;
+    menu.style.top = `${Math.max(4, Math.min(
+      rect.bottom + 4, window.innerHeight - menuRect.height - 4,
+    ))}px`;
+    rename.focus();
+  };
+
+  window.__vibekitsSetSessionDeleteState = (
+    sessionId, title, state, message = '',
+  ) => {
+    const confirmation = document.querySelector(
+      '.vibekits-delete-confirmation',
+    );
+    if (confirmation instanceof HTMLElement) {
+      if (state === 'deleting' || state === 'deleted') {
+        confirmation.remove();
+      } else if (state === 'failed') {
+        const confirm = confirmation.querySelector(
+          '.vibekits-delete-confirm-button',
+        );
+        if (confirm instanceof HTMLButtonElement) {
+          confirm.disabled = false;
+          confirm.textContent = '确认删除';
+        }
+        const content = confirmation.querySelector('[data-delete-message]');
+        if (content instanceof HTMLElement && message) {
+          content.textContent = message;
+        }
+      }
+    }
+    const row = visibleSessionRows().find((candidate) =>
+      sessionId ? sessionIdForRow(candidate) === sessionId :
+        (title && sessionTitleForRow(candidate) === title),
+    );
+    if (!(row instanceof HTMLElement)) return confirmation instanceof HTMLElement;
+    if (state === 'deleted') {
+      row.style.transition = 'opacity 140ms ease, max-height 180ms ease';
+      row.style.opacity = '0';
+      row.style.maxHeight = `${row.getBoundingClientRect().height}px`;
+      row.style.overflow = 'hidden';
+      requestAnimationFrame(() => {
+        row.style.maxHeight = '0';
+        window.setTimeout(() => row.remove(), 180);
+      });
+      return true;
+    }
+    const deleting = state === 'deleting';
+    row.toggleAttribute('aria-busy', deleting);
+    row.style.transition = 'opacity 140ms ease';
+    row.style.opacity = deleting ? '0.58' : '';
+    row.style.pointerEvents = deleting ? 'none' : '';
+    if (message) row.title = message;
+    return true;
   };
 
   const decorateSessionContextMenu = () => {
     if (!(contextSessionRow instanceof HTMLElement)) return;
     const menus = [...document.querySelectorAll('[role="menu"]')].filter(
-      (menu) => menu instanceof HTMLElement && menu.offsetParent !== null,
+      (menu) => menu instanceof HTMLElement && menu.offsetParent !== null &&
+        !menu.classList.contains('vibekits-synthetic-session-menu'),
     );
     const archiveAction = [...document.querySelectorAll(
       'button, [role="menuitem"], [data-radix-collection-item]',
     )].find((element) => {
-      if (!(element instanceof HTMLElement) || element.offsetParent === null) {
+      if (!(element instanceof HTMLElement) || element.offsetParent === null ||
+          element.closest('.vibekits-synthetic-session-menu')) {
         return false;
       }
       const label = element.textContent?.trim() || '';
       return label === '归档会话' || label === 'Archive session';
     });
-    const menu = menus.at(-1) ?? archiveAction?.parentElement;
+    if (!(archiveAction instanceof HTMLElement)) return;
+    const menu = archiveAction.closest('[role="menu"]') ??
+      menus.find((candidate) => candidate.contains(archiveAction)) ??
+      archiveAction.parentElement;
     if (!(menu instanceof HTMLElement)) return;
     // Older builds appended one same-labelled row for every child relation.
     // Remove those stale rows and keep exactly one creation action. Navigation
@@ -239,6 +411,18 @@
 
   if (!window.__vibekitsSessionContextMenuInstalled) {
     window.__vibekitsSessionContextMenuInstalled = true;
+    document.addEventListener('pointerdown', (event) => {
+      const menu = document.querySelector('.vibekits-synthetic-session-menu');
+      if (menu instanceof HTMLElement &&
+          !(event.target instanceof Element && menu.contains(event.target))) {
+        menu.remove();
+      }
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        document.querySelector('.vibekits-synthetic-session-menu')?.remove();
+      }
+    }, true);
     // React may reconcile a portal menu after it has been decorated. A
     // delegated capture handler keeps VibeKits actions functional even when
     // React preserves/clones the injected menu row without its node listener.
@@ -249,7 +433,25 @@
       );
       const deleteItem = target?.closest('.vibekits-delete-session-menu-item');
       if (!(continuationItem instanceof HTMLElement) &&
-          !(deleteItem instanceof HTMLElement)) return;
+          !(deleteItem instanceof HTMLElement)) {
+        const action = target?.closest(
+          'button[aria-label^="会话“"], button[aria-label^="Session "]',
+        );
+        const row = action?.closest('[role="treeitem"]');
+        if (action instanceof HTMLElement && row instanceof HTMLElement &&
+            action.classList.contains('vibekits-synthetic-action')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          showSyntheticContinuationMenu(row, action);
+          return;
+        }
+        if (action instanceof HTMLElement && row instanceof HTMLElement &&
+            !row.hasAttribute('aria-expanded')) {
+          contextSessionRow = row;
+          window.setTimeout(decorateSessionContextMenu, 30);
+        }
+        return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       if (continuationItem instanceof HTMLElement) {
@@ -272,6 +474,16 @@
         (event.target instanceof Element
           ? event.target.closest('[role="treeitem"]') : null);
       if (!(row instanceof HTMLElement)) return;
+      if (row.classList.contains('vibekits-synthetic-continuation-row')) {
+        const ownAction = row.querySelector(
+          'button[aria-label^="会话“"], button[aria-label^="Session "]',
+        );
+        if (!(ownAction instanceof HTMLElement)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        showSyntheticContinuationMenu(row, ownAction);
+        return;
+      }
       const actionRow = row.classList.contains(
         'vibekits-synthetic-continuation-row',
       ) ? visibleSessionRows().find((candidate) =>
@@ -509,8 +721,65 @@
         margin: 0;
       }
 
+      .vibekits-continuation-summary-button {
+        display: block;
+        margin: 4px auto 10px;
+        padding: 4px 10px;
+        border: 1px solid color-mix(in srgb, var(--dsw-alias-border-l1) 86%, #b98223 14%);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--dsw-specific-input-major) 96%, #b98223 4%);
+        color: var(--dsw-alias-label-secondary);
+        font: 500 12px/18px system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      .vibekits-continuation-summary-button.is-empty-session {
+        position: fixed;
+        z-index: 1200;
+        margin: 0;
+      }
+
+      .vibekits-synthetic-session-menu {
+        position: fixed;
+        z-index: 2100;
+        min-width: 160px;
+        padding: 5px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-specific-input-major, #fff);
+        box-shadow: 0 8px 24px rgba(15,23,42,.15);
+      }
+
+      .vibekits-synthetic-session-menu button {
+        display: block;
+        width: 100%;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--dsw-alias-label-primary);
+        text-align: left;
+        font: 500 13px/18px system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      .vibekits-synthetic-session-menu button:hover {
+        background: color-mix(in srgb, var(--dsw-specific-input-major) 90%, #b98223 10%);
+      }
+
       .vibekits-synthetic-continuation-row {
         color: color-mix(in srgb, var(--dsw-alias-label-primary) 88%, #b98223 12%);
+      }
+
+      .vibekits-synthetic-action {
+        position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+        background: transparent; color: inherit; cursor: pointer; z-index: 2;
+      }
+
+      .vibekits-synthetic-action:hover {
+        background: color-mix(in srgb, var(--dsw-specific-input-major) 82%, #b98223 18%);
       }
 
       .vibekits-synthetic-session-state {
@@ -566,6 +835,7 @@
         .vibekits-delete-session-menu-item,
         .vibekits-child-session-menu-item,
         .vibekits-continuation-source-card,
+        .vibekits-continuation-summary-button,
         .vibekits-continuation-progress,
         .vibekits-continuation-retry { color: #74654a !important; }
       }
@@ -843,11 +1113,16 @@
     const currentTitle = sessionTitleForRow(selected);
     const sourceSelected = continuationRequestInFlight &&
       selected instanceof HTMLElement && selected === contextSessionRow;
-    if (!continuationProgress ||
-        (!sourceSelected &&
-         !continuationProgress.sessionIds.includes(current) &&
-         !continuationProgress.sessionTitles.includes(currentTitle))) {
+    if (!continuationProgress) {
       card?.remove();
+      return;
+    }
+    if (!sourceSelected &&
+         !continuationProgress.sessionIds.includes(current) &&
+         !continuationProgress.sessionTitles.includes(currentTitle)) {
+      // Keep the retry handler when navigating to an unrelated session.
+      // Removing the card loses recovery state when the user returns.
+      if (card instanceof HTMLElement) card.style.display = 'none';
       return;
     }
     const composer = [...document.querySelectorAll('[data-composer-card]')]
@@ -876,16 +1151,21 @@
       label.className = 'vibekits-continuation-progress-label';
       card.append(spinner, label);
     }
+    card.style.display = '';
     if (card.parentElement !== document.body) document.body.appendChild(card);
     const anchorRect = composerAnchor instanceof HTMLElement
       ? composerAnchor.getBoundingClientRect() : host.getBoundingClientRect();
     card.style.left = `${Math.max(8, anchorRect.left)}px`;
     card.style.top = `${Math.max(8, anchorRect.top - 44)}px`;
     card.style.maxWidth = `${Math.max(220, anchorRect.width)}px`;
-    card.querySelector('.vibekits-continuation-progress-label').textContent =
-      continuationProgress.status;
-    card.classList.remove('is-error');
-    card.querySelector('.vibekits-continuation-retry')?.remove();
+    const label = card.querySelector('.vibekits-continuation-progress-label');
+    if (label.textContent !== continuationProgress.status) {
+      label.textContent = continuationProgress.status;
+    }
+    card.classList.toggle('is-error', continuationProgress.isError === true);
+    if (!continuationProgress.isError) {
+      card.querySelector('.vibekits-continuation-retry')?.remove();
+    }
   };
 
   window.__vibekitsSetContinuationProgress = (
@@ -902,6 +1182,7 @@
       )];
       continuationProgress = {
         status: String(status || '正在整理上下文…'),
+        isError: false,
         sessionIds: [...new Set((Array.isArray(sessionIds) ? sessionIds : [])
           .map(String).filter(Boolean))],
         sessionTitles: normalizedTitles.length > 0
@@ -921,6 +1202,10 @@
       ? continuationProgress.sessionIds
       : [window.__vibekitsCurrentSessionId()].filter(Boolean);
     window.__vibekitsSetContinuationProgress?.(message, false, ids);
+    continuationProgress.isError = true;
+    sessionStorage.setItem(
+      'vibekits.continuation.progress', JSON.stringify(continuationProgress),
+    );
     const card = document.getElementById('vibekits-continuation-progress');
     if (!(card instanceof HTMLElement)) return;
     card.classList.add('is-error');
@@ -942,6 +1227,92 @@
     };
   };
 
+  const showContinuationSummary = (relation) => {
+    document.querySelector('.vibekits-continuation-summary-dialog')?.remove();
+    const backdrop = document.createElement('div');
+    backdrop.className = 'vibekits-continuation-summary-dialog';
+    backdrop.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:2147483647',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(15,23,42,.22)', 'padding:24px',
+    ].join(';');
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', '派生会话交接摘要');
+    dialog.style.cssText = [
+      'width:min(720px,calc(100vw - 48px))', 'max-height:min(75vh,680px)',
+      'display:flex', 'flex-direction:column', 'box-sizing:border-box',
+      'background:var(--dsw-specific-input-major,#fff)',
+      'color:var(--dsw-alias-label-primary,#202124)',
+      'border-radius:14px', 'box-shadow:0 18px 50px rgba(15,23,42,.22)',
+      'padding:20px', 'font:13px/1.6 system-ui,sans-serif',
+    ].join(';');
+    const heading = document.createElement('div');
+    heading.textContent = '派生会话交接摘要';
+    heading.style.cssText = 'font-size:17px;font-weight:650;margin-bottom:4px';
+    const source = document.createElement('div');
+    source.textContent = `来源：《${relation.sourceTitleSnapshot || '未命名会话'}》`;
+    source.style.cssText = 'color:var(--dsw-alias-label-secondary,#666);margin-bottom:12px';
+    const body = document.createElement('div');
+    body.textContent = String(relation.summary || '').replace(/^##\s+/gm, '').trim();
+    body.style.cssText = 'white-space:pre-wrap;overflow:auto;min-height:0;flex:1';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = '关闭';
+    close.style.cssText = [
+      'align-self:flex-end', 'margin-top:14px', 'padding:6px 14px',
+      'border:1px solid var(--dsw-alias-border-l1,#ddd)', 'border-radius:8px',
+      'background:transparent', 'color:inherit', 'cursor:pointer',
+    ].join(';');
+    close.addEventListener('click', () => backdrop.remove());
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) backdrop.remove();
+    });
+    dialog.append(heading, source, body, close);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    close.focus();
+  };
+
+  const renderContinuationSummaryButton = (relation, host, composer) => {
+    let button = document.getElementById('vibekits-continuation-summary-button');
+    if (!relation.summary ||
+        (!(host instanceof HTMLElement) && !(composer instanceof HTMLElement))) {
+      button?.remove();
+      return;
+    }
+    if (!(button instanceof HTMLButtonElement)) {
+      button = document.createElement('button');
+      button.id = 'vibekits-continuation-summary-button';
+      button.type = 'button';
+      button.className = 'vibekits-continuation-summary-button';
+      button.addEventListener('click', () => {
+        const currentId = button.dataset.continuationSessionId || '';
+        const current = continuationRelations.find((item) =>
+          item.continuationSessionId === currentId);
+        if (current?.summary) showContinuationSummary(current);
+      });
+    }
+    button.dataset.continuationSessionId = relation.continuationSessionId;
+    const preview = String(relation.summary).replace(/^##\s+/gm, '')
+      .trim().replace(/\s+/g, ' ').slice(0, 38);
+    const label = `交接摘要：${preview}…（查看全部）`;
+    if (button.textContent !== label) button.textContent = label;
+    if (host instanceof HTMLElement) {
+      if (button.parentElement !== host) host.prepend(button);
+      button.classList.remove('is-empty-session');
+      button.style.removeProperty('left');
+      button.style.removeProperty('top');
+    } else if (composer instanceof HTMLElement) {
+      if (button.parentElement !== document.body) document.body.appendChild(button);
+      const rect = composer.getBoundingClientRect();
+      button.classList.add('is-empty-session');
+      button.style.left = `${Math.max(8, rect.left + rect.width / 2 - 94)}px`;
+      button.style.top = `${Math.max(8, rect.top - 48)}px`;
+    }
+  };
+
   const renderContinuationCard = () => {
     const existing = document.getElementById(
       'vibekits-continuation-source-card',
@@ -949,14 +1320,21 @@
     const selected = document.querySelector(
       '[role="treeitem"][aria-selected="true"]',
     );
-    const currentId = window.__vibekitsCurrentSessionId() || sessionIdForRow(selected) || activeSessionId;
+    const currentId = sessionIdForRow(selected) ||
+      window.__vibekitsCurrentSessionId() || activeSessionId;
     const currentTitle = sessionTitleForRow(selected);
-    const relation = continuationRelations.find(
-      (item) => item.continuationSessionId === currentId ||
-        currentTitle.startsWith(`${item.sourceTitleSnapshot} `),
+    let relation = continuationRelations.find(
+      (item) => item.continuationSessionId === currentId,
     );
+    if (!relation && !currentId) {
+      const titleMatches = continuationRelations.filter((item) =>
+        currentTitle.startsWith(`${item.sourceTitleSnapshot} `));
+      if (titleMatches.length === 1) relation = titleMatches[0];
+    }
     if (!relation) {
       existing?.remove();
+      document.getElementById('vibekits-continuation-summary-button')?.remove();
+      document.querySelector('.vibekits-continuation-summary-dialog')?.remove();
       return;
     }
     const host = findConversationHost();
@@ -993,6 +1371,7 @@
       if (existing.textContent !== text) existing.textContent = text;
       existing.disabled = !sourceExists;
       existing.dataset.sourceSessionId = relation.sourceSessionId;
+      renderContinuationSummaryButton(relation, host, composer);
       return;
     }
     const card = document.createElement('button');
@@ -1018,14 +1397,15 @@
       card.style.maxWidth = `${Math.max(220, rect.width)}px`;
       document.body.appendChild(card);
     }
+    renderContinuationSummaryButton(relation, host, composer);
   };
 
   const decorateContinuationTitles = () => {
     const selected = document.querySelector(
       '[role="treeitem"][aria-selected="true"]',
     );
-    const currentId = window.__vibekitsCurrentSessionId() ||
-      sessionIdForRow(selected) || activeSessionId;
+    const currentId = sessionIdForRow(selected) ||
+      window.__vibekitsCurrentSessionId() || activeSessionId;
     for (const relation of continuationRelations) {
       const title = String(relation.continuationTitleSnapshot || '').trim();
       if (!title) continue;
@@ -1120,16 +1500,40 @@
         relation.continuationTitleSnapshot || '',
       ).trim();
       if (!childId || !childTitle) continue;
+      const uniqueChildTitle = relations.filter((item) =>
+        String(item.continuationTitleSnapshot || '').trim() === childTitle,
+      ).length === 1;
       const officialRow = visibleSessionRows().find((row) =>
         !row.classList.contains('vibekits-synthetic-continuation-row') &&
         (sessionIdForRow(row) === childId ||
-          sessionTitleForRow(row) === childTitle),
+          (!sessionIdForRow(row) && uniqueChildTitle &&
+            sessionTitleForRow(row) === childTitle)),
       );
       const existing = document.querySelector(
         `.vibekits-synthetic-continuation-row[data-session-id="${CSS.escape(childId)}"]`,
       );
       if (officialRow) {
         existing?.remove();
+        officialRow.dataset.vibekitsContinuationTitle = childTitle;
+        officialRow.setAttribute('data-session-id', childId);
+        const nativeAction = [...officialRow.querySelectorAll(
+          'button[aria-label^="会话“"], button[aria-label^="Session "]',
+        )].find((button) =>
+          !button.classList.contains('vibekits-synthetic-action'));
+        if (nativeAction) {
+          officialRow.querySelector('.vibekits-synthetic-action')?.remove();
+          continue;
+        }
+        let action = officialRow.querySelector('.vibekits-synthetic-action');
+        if (!(action instanceof HTMLButtonElement)) {
+          action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'vibekits-synthetic-action';
+          action.textContent = '⋯';
+          officialRow.style.position = 'relative';
+          officialRow.appendChild(action);
+        }
+        action.setAttribute('aria-label', `会话“${childTitle}”的操作`);
         continue;
       }
       const sourceId = String(relation.sourceSessionId || '');
@@ -1137,7 +1541,7 @@
       const sourceRow = visibleSessionRows().find((row) =>
         !row.classList.contains('vibekits-synthetic-continuation-row') &&
         (sessionIdForRow(row) === sourceId ||
-          sessionTitleForRow(row) === sourceTitle),
+          (!sessionIdForRow(row) && sessionTitleForRow(row) === sourceTitle)),
       );
       if (!(sourceRow instanceof HTMLElement)) continue;
       let row = existing;
@@ -1151,12 +1555,21 @@
       }
       row.dataset.vibekitsContinuationTitle = childTitle;
       row.setAttribute('aria-selected', current === childId ? 'true' : 'false');
-      const action = row.querySelector(
+      row.querySelectorAll(
         'button[aria-label^="会话“"], button[aria-label^="Session "]',
-      );
-      if (action instanceof HTMLElement) {
-        action.setAttribute('aria-label', `会话“${childTitle}”的操作`);
+      ).forEach((cloned) => {
+        if (!cloned.classList.contains('vibekits-synthetic-action')) cloned.remove();
+      });
+      let action = row.querySelector('.vibekits-synthetic-action');
+      if (!(action instanceof HTMLButtonElement)) {
+        action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'vibekits-synthetic-action';
+        action.textContent = '⋯';
+        row.style.position = 'relative';
+        row.appendChild(action);
       }
+      action.setAttribute('aria-label', `会话“${childTitle}”的操作`);
       const label = [...row.querySelectorAll('*')].find((candidate) =>
         candidate instanceof HTMLElement && candidate.children.length === 0 &&
         candidate.textContent?.trim() === sourceTitle,

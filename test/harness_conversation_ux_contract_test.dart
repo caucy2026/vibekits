@@ -103,6 +103,23 @@ void main() {
     expect(script, contains("replaceMenuItemLabel(deleteItem, '删除会话')"));
     expect(script, contains('replaceDeleteSessionIcon(deleteItem)'));
     expect(script, contains("type: 'vibekits.deleteSession'"));
+    expect(script, contains("confirmed: true"));
+    expect(script, contains("confirm.textContent = '确认删除'"));
+    expect(script, contains("confirm.textContent = '正在删除…'"));
+    expect(script, contains("document.body.appendChild(backdrop)"));
+    expect(
+      script,
+      contains("confirm.className = 'vibekits-delete-confirm-button'"),
+    );
+    expect(script, contains("content.setAttribute('data-delete-message', '')"));
+    expect(script, contains('window.__vibekitsSetSessionDeleteState'));
+    expect(script, contains("state === 'deleted'"));
+    expect(script, contains("row.style.maxHeight = '0'"));
+    expect(script, contains("action?.closest('[role=\"treeitem\"]')"));
+    expect(
+      script,
+      contains('window.setTimeout(decorateSessionContextMenu, 30)'),
+    );
     expect(
       script,
       isNot(contains('const sessionId = sessionIdForRow(row) ||')),
@@ -247,9 +264,13 @@ void main() {
     );
     expect(workspace, contains('harness.continuation.relation_ui_deferred'));
     expect(workspace, contains('_continuationsInProgress'));
-    expect(workspace, contains("title: const Text('会话正在运行')"));
+    expect(workspace, contains('会话正在运行，请先停止当前任务再删除。'));
     expect(workspace, contains('removeContinuationSession(sessionId)'));
+    expect(workspace, isNot(contains("'method': 'workspace.archiveSession'")));
+    expect(workspace, contains('await store.containsSession(sessionId)'));
     expect(workspace, contains('_resolveAndConfirmDeleteSession'));
+    expect(workspace, contains("payload?['confirmed'] == true"));
+    expect(workspace, contains('confirmedAtSource: confirmedAtSource'));
     expect(workspace, contains('requestedTitle: normalizedTitle'));
     expect(workspace, contains('__vibekitsSelectVisibleSession'));
     expect(workspace, contains('__vibekitsOpenSessionByTitle'));

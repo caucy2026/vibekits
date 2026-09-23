@@ -16,6 +16,87 @@ import 'package:vibekits/features/dev_tools/domain/lan_peer_discovery_service.da
 import 'package:vibekits/features/local_models/presentation/deepseek_agent_workspace.dart';
 
 void main() {
+  testWidgets('启动时从当前工作区恢复已有会话', (tester) async {
+    final workspace = Directory.systemTemp.createTempSync('harness-restore-');
+    addTearDown(() => workspace.delete(recursive: true));
+    String? loadedWorkspace;
+    final now = DateTime.now();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => null,
+            loadConversation: (workspace) async {
+              loadedWorkspace = workspace;
+              return HarnessConversationProject(
+                workspace: workspace,
+                sessions: <HarnessConversationSession>[
+                  HarnessConversationSession(
+                    id: 'restored-session',
+                    title: '打地鼠开发记录',
+                    messages: const <HarnessConversationMessage>[
+                      HarnessConversationMessage(text: '继续调试打地鼠', user: true),
+                    ],
+                    createdAt: now,
+                    updatedAt: now,
+                  ),
+                ],
+                activeSessionId: 'restored-session',
+                updatedAt: now,
+              );
+            },
+            saveConversation: (_) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'test',
+              npxVersion: 'test',
+              message: 'ready',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(loadedWorkspace, isNotNull);
+    expect(loadedWorkspace, isNotEmpty);
+    expect(find.text('打地鼠开发记录'), findsWidgets);
+  });
+
+  testWidgets('会话尚未载入时关闭窗口不会把已有历史覆盖为空', (tester) async {
+    final workspace = Directory.systemTemp.createTempSync('harness-load-race-');
+    addTearDown(() => workspace.delete(recursive: true));
+    final pending = Completer<HarnessConversationProject?>();
+    var saves = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) async => null,
+            loadWorkspaceCatalog: () async => <String>[workspace.path],
+            loadConversation: (_) => pending.future,
+            saveConversation: (_) async {
+              saves++;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'test',
+              npxVersion: 'test',
+              message: 'ready',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump();
+    expect(saves, 0);
+    pending.complete(null);
+    await tester.pump();
+  });
+
   tearDown(() async {
     // The production discovery singleton intentionally lives for the whole
     // application. Widget tests must release its socket and periodic timers
@@ -374,22 +455,26 @@ void main() {
     expect(DeepSeekHarnessService.defaultModel, 'deepseek-flash');
     expect(find.byKey(const Key('agent-model-deepseek-flash')), findsOneWidget);
     expect(find.text('随当前 Harness 版本提供的模型候选'), findsOneWidget);
-    expect(find.text('DeepSeek-V41-Flash'), findsOneWidget);
+    expect(find.text('deepseek-official/deepseek-flash'), findsWidgets);
     expect(
       find.byKey(const Key('agent-model-deepseek-v4-pro')),
       findsOneWidget,
     );
     expect(
       find.byKey(const Key('agent-model-deepseek-v4-flash-vision-exp')),
-      findsNothing,
+      findsOneWidget,
+    );
+    expect(
+      find.text('deepseek-official/deepseek-v4-flash-vision-exp'),
+      findsOneWidget,
     );
     expect(find.byKey(const Key('agent-load-models')), findsOneWidget);
     await tester.enterText(find.byKey(const Key('agent-api-key')), 'test-key');
     await tester.tap(find.byKey(const Key('agent-load-models')));
     await tester.pumpAndSettle();
     expect(find.text('来自当前 API 的 /models 实时结果'), findsOneWidget);
-    expect(find.text('deepseek-chat'), findsOneWidget);
-    expect(find.text('DeepSeek-V41-Flash'), findsNothing);
+    expect(find.text('deepseek-official/deepseek-chat'), findsOneWidget);
+    expect(find.text('deepseek-official/deepseek-flash'), findsOneWidget);
     await tester.ensureVisible(
       find.byKey(const Key('agent-model-deepseek-special')),
     );
@@ -499,6 +584,7 @@ void main() {
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
             saveConversation: (_) async {},
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
@@ -554,6 +640,7 @@ void main() {
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
             saveConversation: (_) async {},
             checkEnvironment: () async => const HarnessEnvironmentReport(
               ready: true,
@@ -616,6 +703,7 @@ void main() {
               text: '任务已完成。',
               user: false,
               executionTrace: trace,
+              reasoningTrace: '先检查输入，再逐步验证工具结果。',
             ),
           ],
           createdAt: now,
@@ -647,6 +735,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('执行时间线 · 48 步'), findsOneWidget);
+    expect(find.byKey(const Key('agent-model-reasoning')), findsOneWidget);
+    expect(find.text('先检查输入，再逐步验证工具结果。'), findsOneWidget);
     expect(
       find.byKey(const Key('agent-persisted-trace-details')),
       findsNothing,
@@ -1536,8 +1626,145 @@ void main() {
     expect(composer.decoration?.filled, isFalse);
     expect(composer.decoration?.fillColor, Colors.transparent);
     expect(composer.decoration?.hintText, '向 Harness 描述任务…');
+    expect(find.byKey(const Key('agent-composer-key-warning')), findsOneWidget);
+    expect(find.text('尚未设置 API Key，请先填写'), findsOneWidget);
     expect(composer.minLines, 1);
     expect(composer.maxLines, 7);
+  });
+
+  testWidgets('Key 尚未读取完成时显示中性检测状态，读取到 Key 后不再警告', (WidgetTester tester) async {
+    final Directory workspace = Directory.systemTemp.createTempSync(
+      'vibekits_key_lookup_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final Completer<String?> keyLookup = Completer<String?>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            credentialReader: (_) => keyLookup.future,
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24',
+              npxVersion: 'mobile-native',
+              message: '就绪',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('系统检测中'), findsOneWidget);
+    expect(find.text('尚未设置 API Key，请先填写'), findsNothing);
+    expect(find.text('设置 Key'), findsNothing);
+    keyLookup.complete('stored-key');
+    await tester.pumpAndSettle();
+    expect(find.text('系统检测中'), findsNothing);
+    expect(find.byKey(const Key('agent-composer-key-warning')), findsNothing);
+  });
+
+  testWidgets('模型认证失败后输入框内提示重新验证 Key', (WidgetTester tester) async {
+    final workspace = Directory.systemTemp.createTempSync(
+      'vibekits_key_failure_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24',
+              npxVersion: 'mobile-native',
+              message: '就绪',
+            ),
+            runAgent: (_) async => handle,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-composer')), '测试认证');
+    await tester.ensureVisible(find.byKey(const Key('agent-send')));
+    await tester.tap(find.byKey(const Key('agent-send')));
+    await tester.pump();
+    handle.add('移动端 Harness 请求失败：Bad state: DeepSeek API 返回 401：API Key 未通过认证');
+    await tester.pump();
+    expect(find.text('API Key 未通过认证，请重新填写并验证'), findsOneWidget);
+    await handle.complete(1);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('长推理超过显示窗口后仍更新最近过程', (WidgetTester tester) async {
+    final workspace = Directory.systemTemp.createTempSync(
+      'vibekits_recent_reasoning_',
+    );
+    addTearDown(() => workspace.deleteSync(recursive: true));
+    final handle = _FakeAgentHandle();
+    addTearDown(handle.dispose);
+    var launched = false;
+    HarnessConversationProject? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DeepSeekAgentWorkspace(
+            initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
+            credentialReader: (_) async => 'test-key',
+            credentialWriter: (_, _) async {},
+            saveConversation: (project) async {
+              saved = project;
+            },
+            checkEnvironment: () async => const HarnessEnvironmentReport(
+              ready: true,
+              nodeVersion: 'v24',
+              npxVersion: 'mobile-native',
+              message: '就绪',
+            ),
+            runAgent: (_) async {
+              launched = true;
+              return handle;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('agent-composer')), '长推理');
+    await tester.ensureVisible(find.byKey(const Key('agent-send')));
+    await tester.tap(find.byKey(const Key('agent-send')));
+    for (var attempt = 0; attempt < 20 && !launched; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(launched, isTrue);
+    for (var attempt = 0; attempt < 20 && !handle.hasEventListener; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(handle.hasEventListener, isTrue);
+    handle.addReasoning('旧' * 40000);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 400)),
+    );
+    await tester.pump();
+    handle.addReasoning('最新推理仍在继续');
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 400)),
+    );
+    await tester.pump();
+    await handle.complete(0);
+    await tester.pumpAndSettle();
+    final trace = saved?.sessions.last.messages.last.reasoningTrace ?? '';
+    expect(trace.length, 40000);
+    expect(trace, startsWith('（早期推理已折叠，显示最近内容）'));
+    expect(trace, contains('最新推理仍在继续'));
   });
 
   testWidgets('帮我批准默认自动执行且三档权限可持久选择', (WidgetTester tester) async {
@@ -1557,6 +1784,7 @@ void main() {
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
             initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             loadPermissionMode: () async => HarnessAgentPermissionMode.assisted,
@@ -1639,6 +1867,7 @@ void main() {
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
             initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             loadPermissionMode: () async => savedMode,
@@ -1674,6 +1903,7 @@ void main() {
         home: Scaffold(
           body: DeepSeekAgentWorkspace(
             initialWorkspace: workspace.path,
+            loadConversation: (_) async => null,
             credentialReader: (_) async => 'test-key',
             credentialWriter: (_, _) async {},
             loadPermissionMode: () async => savedMode,
@@ -2082,12 +2312,17 @@ void main() {
   });
 }
 
-class _FakeAgentHandle implements HarnessAgentHandle {
+class _FakeAgentHandle implements HarnessAgentHandle, HarnessAgentEventSource {
   final StreamController<String> _output = StreamController<String>();
+  final StreamController<HarnessAgentEvent> _events =
+      StreamController<HarnessAgentEvent>();
   final Completer<int> _exit = Completer<int>();
   bool _running = true;
+  bool get hasEventListener => _events.hasListener;
 
   void add(String value) => _output.add(value);
+  void addReasoning(String value) =>
+      _events.add(HarnessAgentEvent(HarnessAgentEventKind.reasoning, value));
 
   Future<void> complete(int code) async {
     if (!_running) return;
@@ -2095,13 +2330,19 @@ class _FakeAgentHandle implements HarnessAgentHandle {
     _exit.complete(code);
   }
 
-  Future<void> dispose() => _output.close();
+  Future<void> dispose() async {
+    await _output.close();
+    await _events.close();
+  }
 
   @override
   Future<int> get exitCode => _exit.future;
 
   @override
   Stream<String> get output => _output.stream;
+
+  @override
+  Stream<HarnessAgentEvent> get events => _events.stream;
 
   @override
   bool get running => _running;

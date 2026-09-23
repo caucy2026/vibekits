@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../app/app_update_service.dart';
+import 'runtime_component_verifier.dart';
+import '../../dev_tools/domain/network_virtualization_service.dart';
 
 typedef AppCenterCatalogLoader =
     Future<AppCenterCatalog> Function({String? category, String keyword});
@@ -72,38 +75,61 @@ class AppCenterItem {
     this.standalone = true,
   });
 
-  factory AppCenterItem.fromJson(Map<String, Object?> json) => AppCenterItem(
-    appId: _asInt(json['app_id']),
-    name: '${json['app_name'] ?? ''}'.trim(),
-    packageName: '${json['package_name'] ?? ''}'.trim(),
-    androidPackageName:
-        '${json['android_package_name'] ?? json['application_id'] ?? ''}'
-            .trim(),
-    versionName: '${json['version_name'] ?? ''}'.trim(),
-    versionCode: _asInt(json['version_code']),
-    category: '${json['category'] ?? ''}'.trim(),
-    shortDescription: '${json['short_desc'] ?? ''}'.trim(),
-    longDescription: '${json['long_desc'] ?? ''}'.trim(),
-    iconUrl: '${json['icon'] ?? ''}'.trim(),
-    downloadUrl: '${json['download_url'] ?? ''}'.trim(),
-    sha256: '${json['apk_sha256'] ?? json['sha256'] ?? ''}'
-        .trim()
-        .toLowerCase(),
-    fileSizeBytes: _asInt(json['file_size_bytes'] ?? json['file_size']),
-    rating: _asDouble(json['rating'], fallback: 5),
-    downloadCount: _asInt(json['download_count']),
-    osType: '${json['os_type'] ?? ''}'.trim().toLowerCase(),
-    platforms: (json['platforms'] is List<Object?>
-        ? (json['platforms']! as List<Object?>)
-              .map((entry) => '$entry'.trim().toLowerCase())
-              .where((entry) => entry.isNotEmpty)
-              .toList(growable: false)
-        : const <String>[]),
-    artifactType: '${json['artifact_type'] ?? 'app'}'.trim().toLowerCase(),
-    hostPackageName: '${json['host_package_name'] ?? ''}'.trim(),
-    componentId: '${json['component_id'] ?? ''}'.trim().toLowerCase(),
-    standalone: json['standalone'] != false,
-  );
+  static const componentPackages = <String, String>{
+    'com.caucy.vibekits.component.virtual_machine': 'virtual_machine',
+    'com.caucy.vibekits.component.network_proxy': 'network_proxy',
+    'com.vibekits.vibekits.component.models': 'android_models',
+  };
+
+  factory AppCenterItem.fromJson(Map<String, Object?> json) {
+    // The current market contract stores package identity, but does not yet
+    // expose component metadata. Only these two exact reserved IDs opt in.
+    final component = componentPackages['${json['package_name'] ?? ''}'.trim()];
+    return AppCenterItem(
+      appId: _asInt(json['app_id']),
+      name: '${json['app_name'] ?? ''}'.trim(),
+      packageName: '${json['package_name'] ?? ''}'.trim(),
+      androidPackageName:
+          '${json['android_package_name'] ?? json['application_id'] ?? ''}'
+              .trim(),
+      versionName: '${json['version_name'] ?? ''}'.trim(),
+      versionCode: _asInt(json['version_code']),
+      category: '${json['category'] ?? ''}'.trim(),
+      shortDescription: '${json['short_desc'] ?? ''}'.trim(),
+      longDescription: '${json['long_desc'] ?? ''}'.trim(),
+      iconUrl: '${json['icon'] ?? ''}'.trim(),
+      downloadUrl: '${json['download_url'] ?? ''}'.trim(),
+      sha256: '${json['apk_sha256'] ?? json['sha256'] ?? ''}'
+          .trim()
+          .toLowerCase(),
+      fileSizeBytes: _asInt(json['file_size_bytes'] ?? json['file_size']),
+      rating: _asDouble(json['rating'], fallback: 5),
+      downloadCount: _asInt(json['download_count']),
+      osType: '${json['os_type'] ?? ''}'.trim().toLowerCase(),
+      platforms: (json['platforms'] is List<Object?>
+          ? (json['platforms']! as List<Object?>)
+                .map((entry) => '$entry'.trim().toLowerCase())
+                .where((entry) => entry.isNotEmpty)
+                .toList(growable: false)
+          : const <String>[]),
+      artifactType: component != null
+          ? 'component'
+          : '${json['artifact_type'] ?? 'app'}'.trim().toLowerCase(),
+      hostPackageName:
+          '${json['host_package_name'] ?? (component == 'android_models'
+                      ? 'com.vibekits.vibekits'
+                      : component != null
+                      ? AppUpdateService.packageName
+                      : '')}'
+              .trim(),
+      componentId: '${json['component_id'] ?? component ?? ''}'
+          .trim()
+          .toLowerCase(),
+      standalone: json['standalone'] != null
+          ? json['standalone'] != false
+          : component == null,
+    );
+  }
 
   final int appId;
   final String name;
@@ -114,8 +140,8 @@ class AppCenterItem {
   String get androidInstallPackageName => androidPackageName.isNotEmpty
       ? androidPackageName
       : packageName == AppUpdateService.packageName
-          ? 'com.vibekits.vibekits'
-          : packageName;
+      ? 'com.vibekits.vibekits'
+      : packageName;
   final String versionName;
   final int versionCode;
   final String category;
@@ -134,7 +160,7 @@ class AppCenterItem {
   final String componentId;
   final bool standalone;
 
-  bool get isComponent => artifactType == 'component' && !standalone;
+  bool get isComponent => artifactType == 'component';
 
   bool supportsPlatform(String platform) {
     final String normalized = platform.trim().toLowerCase();
@@ -148,7 +174,9 @@ class AppCenterItem {
       'windows' => const <String>{'windows', 'all'},
       _ => <String>{normalized},
     };
-    if (platforms.isNotEmpty && !platforms.any(compatible.contains)) return false;
+    if (platforms.isNotEmpty && !platforms.any(compatible.contains)) {
+      return false;
+    }
     return osType == normalized || platforms.any(compatible.contains);
   }
 
@@ -220,12 +248,54 @@ class AppCenterService {
   final AppCenterApplicationOpener? _applicationOpener;
 
   Future<AppCenterLocalVersion> localVersion(AppCenterItem item) async {
+    if (item.isComponent && platformName == 'android') {
+      if (item.componentId != 'android_models' ||
+          item.packageName != 'com.vibekits.vibekits.component.models' ||
+          item.hostPackageName != 'com.vibekits.vibekits' ||
+          !item.supportsPlatform('android')) {
+        return const AppCenterLocalVersion.unknown();
+      }
+    } else if (item.isComponent) {
+      if (!const {
+            'virtual_machine',
+            'network_proxy',
+          }.contains(item.componentId) ||
+          item.hostPackageName != AppUpdateService.packageName) {
+        return const AppCenterLocalVersion.unknown();
+      }
+      final File receipt;
+      try {
+        receipt = File(
+          '${RuntimeComponentVerifier.activeDirectory(item.componentId).path}/component.json',
+        );
+      } on Object {
+        return const AppCenterLocalVersion.unknown();
+      }
+      if (!await receipt.exists()) {
+        return const AppCenterLocalVersion.uninstalled();
+      }
+      try {
+        final Map<String, dynamic> data =
+            jsonDecode(await receipt.readAsString()) as Map<String, dynamic>;
+        final code = data['version_code'];
+        if (data['host_package_name'] != item.hostPackageName ||
+            data['component_id'] != item.componentId ||
+            code is! int ||
+            code <= 0) {
+          return const AppCenterLocalVersion.unknown();
+        }
+        return AppCenterLocalVersion.installed(code);
+      } on Object {
+        return const AppCenterLocalVersion.unknown();
+      }
+    }
     final String? os = platformName;
     if (os == null || !item.supportsPlatform(os)) {
       return const AppCenterLocalVersion.unknown();
     }
     final String packageName = os == 'android'
-        ? item.androidInstallPackageName : item.packageName;
+        ? item.androidInstallPackageName
+        : item.packageName;
     if (!_isSafePackageName(packageName)) {
       return const AppCenterLocalVersion.unknown();
     }
@@ -274,7 +344,9 @@ class AppCenterService {
 
   bool canDownload(AppCenterItem item, AppCenterLocalVersion local) {
     final String? os = platformName;
-    if (os == null || !item.supportsPlatform(os) || !item.hasVerifiedInstaller) {
+    if (os == null ||
+        !item.supportsPlatform(os) ||
+        !item.hasVerifiedInstaller) {
       return false;
     }
     try {
@@ -418,14 +490,14 @@ class AppCenterService {
     AppCenterItem item, {
     ValueChanged<double>? onProgress,
   }) async {
-    if (item.isComponent) {
+    if (item.isComponent && platformName != 'android') {
       throw StateError('VibeKits 组件必须由宿主程序安装，不能作为独立应用打开');
     }
     final String? os = platformName;
     final AppCenterLocalVersion local = await localVersion(item);
     if (!canDownload(item, local)) throw StateError('本机版本未确认或市场版本未高于已安装版本');
-    if (os == null ||
-        !item.supportsPlatform(os) ||
+    if (!const {'windows', 'macos', 'android'}.contains(os) ||
+        !item.supportsPlatform(os!) ||
         !item.hasVerifiedInstaller) {
       throw const FormatException('安装包缺少当前系统、HTTPS、大小或 SHA-256 验证信息');
     }
@@ -439,6 +511,7 @@ class AppCenterService {
       final HttpClientRequest request = await _client
           .getUrl(uri)
           .timeout(const Duration(seconds: 15));
+      request.followRedirects = false;
       final HttpClientResponse response = await request.close().timeout(
         const Duration(seconds: 30),
       );
@@ -472,6 +545,261 @@ class AppCenterService {
       return output.path;
     } on Object {
       if (await output.exists()) await output.delete();
+      rethrow;
+    }
+  }
+
+  /// Downloads and installs a VibeKits runtime component. Components are
+  /// extracted into a versioned user directory and activated by an atomic
+  /// versioned directory and active-pointer switch; they are never opened as applications.
+  Future<String> installComponent(
+    AppCenterItem item, {
+    ValueChanged<double>? onProgress,
+  }) async {
+    if (platformName == 'android') {
+      if (!item.isComponent ||
+          item.componentId != 'android_models' ||
+          item.packageName != 'com.vibekits.vibekits.component.models' ||
+          item.hostPackageName != 'com.vibekits.vibekits' ||
+          item.standalone ||
+          !item.supportsPlatform('android')) {
+        throw const FormatException('不是 VibeKits Android 模型组件');
+      }
+      return downloadAndOpen(item, onProgress: onProgress);
+    }
+    if (!item.isComponent ||
+        item.standalone ||
+        !const {
+          'virtual_machine',
+          'network_proxy',
+        }.contains(item.componentId) ||
+        item.hostPackageName != AppUpdateService.packageName) {
+      throw const FormatException('市场条目不是 VibeKits 宿主组件');
+    }
+    final String? os = platformName;
+    if (!const {'windows', 'macos'}.contains(os) ||
+        !item.supportsPlatform(os!) ||
+        !item.hasVerifiedInstaller ||
+        !(Uri.parse(item.downloadUrl).path.toLowerCase().endsWith('.zip') ||
+            (os == 'windows' &&
+                Uri.parse(
+                  item.downloadUrl,
+                ).path.toLowerCase().endsWith('.exe')))) {
+      throw const FormatException('组件缺少当前平台、HTTPS、大小或 SHA-256 信息');
+    }
+    final local = await localVersion(item);
+    if (!canDownload(item, local)) {
+      throw StateError('组件版本未确认或市场版本未高于已安装版本');
+    }
+    final bool executableInstaller = Uri.parse(
+      item.downloadUrl,
+    ).path.toLowerCase().endsWith('.exe');
+    final Directory temporary = await getTemporaryDirectory();
+    final File archiveFile = File(
+      '${temporary.path}${Platform.pathSeparator}KEMI-component-'
+      '${item.componentId}-${item.versionCode}${executableInstaller ? '.exe' : '.zip'}',
+    );
+    try {
+      final HttpClientRequest request = await _client
+          .getUrl(Uri.parse(item.downloadUrl))
+          .timeout(const Duration(seconds: 15));
+      // The market returns the final CDN URL. Reject redirects instead of
+      // allowing an HTTPS request to downgrade to an unverified destination.
+      request.followRedirects = false;
+      final HttpClientResponse response = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        throw FormatException('组件下载返回 HTTP ${response.statusCode}');
+      }
+      final IOSink sink = archiveFile.openWrite();
+      int received = 0;
+      try {
+        await for (final List<int> chunk in response) {
+          received += chunk.length;
+          if (received > item.fileSizeBytes) {
+            throw const FormatException('组件大小超过市场声明');
+          }
+          sink.add(chunk);
+          onProgress?.call(received / item.fileSizeBytes);
+        }
+      } finally {
+        await sink.close();
+      }
+      if (received != item.fileSizeBytes) {
+        throw const FormatException('组件大小与市场声明不一致');
+      }
+      final String actual = (await sha256.bind(archiveFile.openRead()).first)
+          .toString()
+          .toLowerCase();
+      if (actual != item.sha256) {
+        throw const FormatException('组件 SHA-256 校验失败');
+      }
+      if (executableInstaller) {
+        await RuntimeComponentVerifier.verifyWindowsInstaller(archiveFile.path);
+        final process = await Process.start(archiveFile.path, [
+          '/VERYSILENT',
+          '/SUPPRESSMSGBOXES',
+          '/NORESTART',
+          '/SP-',
+        ], runInShell: false);
+        await Future.wait<void>([
+          process.stdout.drain<void>(),
+          process.stderr.drain<void>(),
+        ]);
+        final exitCode = await process.exitCode;
+        if (exitCode != 0) throw StateError('组件安装失败：$exitCode，原版本保持不变');
+        final root = RuntimeComponentVerifier.activeDirectory(item.componentId);
+        await RuntimeComponentVerifier.verify(
+          root,
+          item.componentId,
+          versionCode: item.versionCode,
+        );
+        return root.path;
+      }
+      return await _extractComponent(item, archiveFile);
+    } finally {
+      if (await archiveFile.exists()) await archiveFile.delete();
+    }
+  }
+
+  Future<void> uninstallComponent(AppCenterItem item) async {
+    if (!item.isComponent ||
+        item.standalone ||
+        item.hostPackageName != AppUpdateService.packageName) {
+      throw const FormatException('不是当前主程序的组件');
+    }
+    final root = RuntimeComponentVerifier.componentDirectory(item.componentId);
+    final status = NetworkVirtualizationService.status();
+    final running = item.componentId == 'virtual_machine'
+        ? status['qemuRunning']
+        : status['mihomoRunning'];
+    if (running == true) throw StateError('请先停止正在运行的组件');
+    if (await FileSystemEntity.type(root.path, followLinks: false) ==
+        FileSystemEntityType.link) {
+      throw const FormatException('组件目录异常，已停止卸载');
+    }
+    if (await root.exists()) await root.delete(recursive: true);
+  }
+
+  Future<String> _extractComponent(AppCenterItem item, File archiveFile) async {
+    final String separator = Platform.pathSeparator;
+    final Directory component = RuntimeComponentVerifier.componentDirectory(
+      item.componentId,
+    );
+    await component.create(recursive: true);
+    final Directory stage = await component.createTemp(
+      '.staging-${item.versionCode}-',
+    );
+    final Directory version = Directory(
+      '${component.path}$separator${item.versionCode}',
+    );
+    bool promoted = false;
+    bool activated = false;
+    try {
+      final Archive decoded = ZipDecoder().decodeBytes(
+        await archiveFile.readAsBytes(),
+        verify: true,
+      );
+      for (final ArchiveFile entry in decoded) {
+        final String normalized = entry.name.replaceAll('\\', '/');
+        if (normalized.startsWith('/') ||
+            normalized.contains(':') ||
+            normalized.split('/').contains('..') ||
+            entry.isSymbolicLink) {
+          throw const FormatException('组件压缩包包含非法路径');
+        }
+        final List<String> parts = normalized
+            .split('/')
+            .where((String part) => part.isNotEmpty)
+            .toList(growable: false);
+        if (parts.isEmpty) continue;
+        final File target = File(
+          '${stage.path}$separator${parts.join(separator)}',
+        );
+        if (entry.isFile) {
+          await target.parent.create(recursive: true);
+          await target.writeAsBytes(entry.content, flush: true);
+        } else {
+          await Directory(target.path).create(recursive: true);
+        }
+      }
+      final String runtimeDirectory = item.componentId == 'virtual_machine'
+          ? 'qemu'
+          : 'mihomo';
+      final Directory expected = Directory(
+        '${stage.path}${separator}tools$separator$runtimeDirectory',
+      );
+      final Directory direct = Directory(
+        '${stage.path}$separator$runtimeDirectory',
+      );
+      if (!expected.existsSync() && !direct.existsSync()) {
+        throw const FormatException('组件压缩包缺少运行时目录');
+      }
+      if (!direct.existsSync()) await expected.rename(direct.path);
+      final List<String> executables = runtimeDirectory == 'qemu'
+          ? <String>['qemu-system-x86_64', 'qemu-img']
+          : <String>['mihomo'];
+      for (final String name in executables) {
+        final File executable = File(
+          '${direct.path}/$name${Platform.isWindows ? '.exe' : ''}',
+        );
+        if (!await executable.exists()) {
+          throw const FormatException('组件压缩包缺少运行程序');
+        }
+        if (Platform.isMacOS) {
+          final ProcessResult result = await Process.run('/bin/chmod', <String>[
+            'u+x',
+            executable.path,
+          ]);
+          if (result.exitCode != 0) {
+            throw const FormatException('无法设置组件运行权限');
+          }
+        }
+      }
+      await RuntimeComponentVerifier.verify(
+        stage,
+        item.componentId,
+        versionCode: item.versionCode,
+      );
+      await RuntimeComponentVerifier.probe(stage, item.componentId);
+      await File('${stage.path}/component.json').writeAsString(
+        jsonEncode({
+          'component_id': item.componentId,
+          'host_package_name': item.hostPackageName,
+          'version_code': item.versionCode,
+          'sha256': item.sha256,
+        }),
+      );
+      await component.create(recursive: true);
+      if (await version.exists()) {
+        throw const FormatException('同版本组件目录已经存在，请检查安装状态');
+      }
+      await stage.rename(version.path);
+      promoted = true;
+      final File active = File('${component.path}/active.json');
+      final File pending = File('${component.path}/active.pending.json');
+      final File backup = File('${component.path}/active.previous.json');
+      await pending.writeAsString(
+        jsonEncode({'version_code': item.versionCode}),
+        flush: true,
+      );
+      if (await backup.exists()) await backup.delete();
+      if (await active.exists()) await active.rename(backup.path);
+      try {
+        await pending.rename(active.path);
+      } catch (_) {
+        if (await backup.exists()) await backup.rename(active.path);
+        rethrow;
+      }
+      activated = true;
+      return version.path;
+    } catch (_) {
+      if (promoted && !activated && await version.exists()) {
+        await version.delete(recursive: true);
+      }
+      if (await stage.exists()) await stage.delete(recursive: true);
       rethrow;
     }
   }
@@ -541,6 +869,7 @@ class AppCenterService {
         'path': path,
         'packageName': item.androidInstallPackageName,
         'versionCode': item.versionCode,
+        'hostComponent': item.isComponent,
       });
     } else if (os == 'macos') {
       await Process.start('open', <String>[

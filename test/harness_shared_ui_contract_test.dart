@@ -28,25 +28,31 @@ void main() {
     expect(source, contains('VibekitsHarnessToolBridge('));
   });
 
-  test('session deletion stops the live owner and verifies removal', () {
-    final String source = File(
-      'lib/features/local_models/presentation/official_harness_workspace.dart',
-    ).readAsStringSync();
+  test(
+    'session deletion stops the live owner before editing durable indexes',
+    () {
+      final String source = File(
+        'lib/features/local_models/presentation/official_harness_workspace.dart',
+      ).readAsStringSync();
 
-    expect(source, contains('await _resetCommandBridge()'));
-    expect(source, contains('await runningSession.stop()'));
-    expect(source, contains('HarnessSessionStore('));
-    expect(
-      source,
-      contains('PlatformStorageLayout.current().harnessHomeDirectory'),
-    );
-    expect(source, contains(').deleteSession(sessionId)'));
-    expect(source, contains('await _start(preserveWebview: true)'));
-    expect(source, contains('await adapter.workspaceSnapshot()'));
-    expect(source, contains('HARNESS_SESSION_DELETE_NOT_APPLIED'));
-    expect(source, contains('record.continuationTitleSnapshot.trim()'));
-    expect(source, contains('sessionId = record.continuationSessionId'));
-  });
+      expect(source, isNot(contains("'method': 'workspace.archiveSession'")));
+      expect(source, contains('HarnessSessionStore('));
+      expect(
+        source,
+        contains('PlatformStorageLayout.current().harnessHomeDirectory'),
+      );
+      expect(source, contains('await store.deleteSessionAfterStoppingOwner('));
+      expect(source, contains('await store.containsSession(sessionId)'));
+      expect(source, contains('HARNESS_SESSION_DELETE_NOT_APPLIED'));
+      expect(source, contains('_setSessionDeleteUi'));
+      expect(
+        source,
+        contains('await runningSession.stop()'),
+      );
+      expect(source, contains('harness.session_delete.resolve_failed'));
+      expect(source, contains('.timeout(const Duration(seconds: 10))'));
+    },
+  );
 
   test(
     'macOS restores the same native Harness wrapper after OCR switching',

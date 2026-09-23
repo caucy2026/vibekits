@@ -106,7 +106,14 @@ class HarnessRelayService : Service() {
             var stopAfterReply = false
             try {
                 when (message.what) {
-                    HarnessRelayClient.STATUS -> response.putString("json", FFI.harnessStatus())
+                    HarnessRelayClient.STATUS -> response.putString("json",
+                        JSONObject(FFI.harnessStatus())
+                            // Native libraries may be loaded directly from APK without extraction.
+                            .put("executable", applicationInfo.sourceDir)
+                            .put("simulatorTargetSupported", true).toString())
+                    HarnessRelayClient.SIMULATOR_ACCESS -> response.putBoolean(
+                        "ok", FFI.harnessSetSimulatorAccess(request.getBoolean("enabled", false)),
+                    )
                     HarnessRelayClient.CONNECTIONS -> response.putString("json", FFI.harnessConnections())
                     HarnessRelayClient.AUTHORIZE -> response.putBoolean(
                         "ok",

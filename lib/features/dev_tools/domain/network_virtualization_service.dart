@@ -1,3 +1,4 @@
+import '../../app_center/domain/runtime_component_verifier.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -86,34 +87,32 @@ abstract final class NetworkVirtualizationService {
       '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tools';
 
   /// Optional runtimes are installed outside the signed application bundle.
-  /// The `current` directory is switched atomically by the component installer;
+  /// The active version pointer is switched by the component installer;
   /// the bundled path remains the compatibility fallback for older releases.
   static String _componentToolRoot(String componentId, String bundledName) {
-    final String separator = Platform.pathSeparator;
-    final String home = Platform.environment['HOME'] ?? '';
-    final String base = Platform.isWindows
-        ? (Platform.environment['LOCALAPPDATA'] ??
-              '${home}${separator}AppData${separator}Local')
-        : '${home}${separator}Library${separator}Application Support';
-    final Directory external = Directory(
-      '$base${separator}Vibekits${separator}components${separator}'
-      '$componentId${separator}current${separator}$bundledName',
-    );
-    if (external.existsSync()) return external.path;
+    final separator = Platform.pathSeparator;
+    final root = RuntimeComponentVerifier.componentDirectory(componentId);
+    try {
+      final external = Directory(
+        '${RuntimeComponentVerifier.activeDirectory(componentId).path}$separator$bundledName',
+      );
+      if (external.existsSync() ||
+          File('${root.path}/active.json').existsSync() ||
+          File('${root.path}/active.previous.json').existsSync()) {
+        return external.path;
+      }
+    } on Object {
+      return '${root.path}${separator}invalid$separator$bundledName';
+    }
     return '$_toolRoot$separator$bundledName';
   }
 
   static String get mihomoExecutable =>
-      _componentToolRoot('network_proxy', 'mihomo') +
-      '${Platform.pathSeparator}${Platform.isWindows ? 'mihomo.exe' : 'mihomo'}';
-
+      '${_componentToolRoot('network_proxy', 'mihomo')}${Platform.pathSeparator}${Platform.isWindows ? 'mihomo.exe' : 'mihomo'}';
   static String get qemuExecutable =>
-      _componentToolRoot('virtual_machine', 'qemu') +
-      '${Platform.pathSeparator}${Platform.isWindows ? 'qemu-system-x86_64.exe' : 'qemu-system-x86_64'}';
-
+      '${_componentToolRoot('virtual_machine', 'qemu')}${Platform.pathSeparator}${Platform.isWindows ? 'qemu-system-x86_64.exe' : 'qemu-system-x86_64'}';
   static String get qemuImgExecutable =>
-      _componentToolRoot('virtual_machine', 'qemu') +
-      '${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
+      '${_componentToolRoot('virtual_machine', 'qemu')}${Platform.pathSeparator}${Platform.isWindows ? 'qemu-img.exe' : 'qemu-img'}';
 
   static Future<BundledRuntimeStatus> inspectMihomo({String? executable}) =>
       _inspect('Clash Verge（Mihomo）', executable ?? mihomoExecutable, <String>[
@@ -138,6 +137,7 @@ abstract final class NetworkVirtualizationService {
       );
     }
     try {
+      await RuntimeComponentVerifier.verifyManagedExecutable(executable);
       final ProcessResult result = await Process.run(
         executable,
         arguments,
@@ -176,6 +176,7 @@ abstract final class NetworkVirtualizationService {
       throw const FormatException('Clash 配置必须是 YAML 文件');
     }
     final String mihomo = executable ?? mihomoExecutable;
+    await RuntimeComponentVerifier.verifyManagedExecutable(mihomo);
     if (!await File(mihomo).exists()) {
       throw StateError('发布包缺少 Mihomo 运行时：$mihomo');
     }
@@ -311,6 +312,7 @@ abstract final class NetworkVirtualizationService {
       throw const FormatException('请选择虚拟磁盘或安装镜像');
     }
     final String qemu = executable ?? qemuExecutable;
+    await RuntimeComponentVerifier.verifyManagedExecutable(qemu);
     if (!await File(qemu).exists()) {
       throw StateError('发布包缺少 QEMU 运行时：$qemu');
     }
@@ -391,6 +393,7 @@ abstract final class NetworkVirtualizationService {
     }
     if (await output.exists()) throw StateError('目标虚拟磁盘已经存在');
     final String qemuImg = executable ?? qemuImgExecutable;
+    await RuntimeComponentVerifier.verifyManagedExecutable(qemuImg);
     if (!await File(qemuImg).exists()) {
       throw StateError('发布包缺少 qemu-img：$qemuImg');
     }

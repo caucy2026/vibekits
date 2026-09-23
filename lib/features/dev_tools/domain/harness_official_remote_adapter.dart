@@ -208,7 +208,12 @@ class HarnessOfficialRemoteAdapter
         }
         return _OfficialInvocation('session/create', {
           'args': {
-            'request': {'workspaceId': workspaceId},
+            'request': {
+              'workspaceId': workspaceId,
+              if (request['sessionId'] is String &&
+                  (request['sessionId'] as String).trim().isNotEmpty)
+                'sessionId': (request['sessionId'] as String).trim(),
+            },
           },
         });
       case 'session.models':

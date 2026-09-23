@@ -12,6 +12,7 @@ object FFI {
     external fun startHarnessServer(appDir: String, trustedKemiPad: Boolean)
     external fun harnessStatus(): String
     external fun harnessConnections(): String
+    external fun harnessSetSimulatorAccess(enabled: Boolean): Boolean
     external fun harnessAuthorize(connectionId: Int): Boolean
     external fun harnessReject(connectionId: Int): Boolean
     external fun harnessOpenTunnel(

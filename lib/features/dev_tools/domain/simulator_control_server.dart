@@ -97,6 +97,21 @@ final class SimulatorControlServer {
         });
         return;
       }
+      // Android exposes the authenticated MCP endpoint but has no system SSH.
+      // Tell the desktop controller explicitly so it opens the MCP tunnel
+      // without treating a missing SSH daemon as a transport failure.
+      if (Platform.isAndroid) {
+        await _json(request.response, HttpStatus.ok, {
+          'ok': true,
+          'data': {
+            'platform': 'android',
+            'sshSupported': false,
+            'authorized': true,
+            'peerId': callerId,
+          },
+        });
+        return;
+      }
       var status = await _loadKeyStatus(peerId: callerId, publicKey: publicKey);
       if (status['authorized'] != true) {
         await _authorizeKey(peerId: callerId, publicKey: publicKey);

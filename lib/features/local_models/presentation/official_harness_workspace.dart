@@ -243,12 +243,14 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
         await _focusHarnessSessionAt(call.arguments as int);
       }
     });
-    unawaited(
-      _harnessInputChannel.invokeMethod<void>(
-        'setHarnessShortcutsEnabled',
-        true,
-      ),
-    );
+    if (Platform.isMacOS) {
+      unawaited(
+        _harnessInputChannel.invokeMethod<void>(
+          'setHarnessShortcutsEnabled',
+          true,
+        ),
+      );
+    }
     HarnessRemoteManagementBridge.bind(
       owner: this,
       startHost: _startRemoteHostForCurrentSession,
@@ -1596,7 +1598,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String requestId,
   ) async {
     final scheduler = _messageQueueScheduler;
-    if (scheduler == null || !_queueContextReady || !_queueAdapterCompatible) {
+    if (scheduler == null || !_queueContextReady) {
       throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     }
     await _messageQueue.enqueue(
@@ -2246,11 +2248,13 @@ window.__vibekitsHarnessQueueBridge?.submit(
     final String sessionId = (payload?['sessionId'] as String? ?? '').trim();
     final String title = (payload?['title'] as String? ?? '').trim();
     final bool isCurrent = payload?['isCurrent'] == true;
+    final bool confirmedAtSource = payload?['confirmed'] == true;
     unawaited(
       _resolveAndConfirmDeleteSession(
         sessionId,
         title,
         reportedCurrent: isCurrent,
+        confirmedAtSource: confirmedAtSource,
       ),
     );
   }
@@ -2259,37 +2263,45 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String requestedSessionId,
     String title, {
     required bool reportedCurrent,
+    required bool confirmedAtSource,
   }) async {
     String sessionId = requestedSessionId.trim();
     final normalizedTitle = title.trim();
-    // Official alpha.2 can keep the previous selection id on a newly opened
-    // blank derived row. Its displayed continuation title is durable and maps
-    // to the exact child, so prefer that relation over a stale DOM id.
-    if (normalizedTitle.isNotEmpty) {
-      for (final record in await _continuationStore.load()) {
-        if (record.continuationTitleSnapshot.trim() == normalizedTitle) {
-          sessionId = record.continuationSessionId;
-          break;
+    try {
+      if (sessionId.isEmpty) {
+        final adapter = _commandAdapter;
+        if (adapter == null || normalizedTitle.isEmpty) {
+          throw StateError('无法识别会话，请关闭弹窗后重新选择会话');
         }
-      }
-    }
-    if (sessionId.isEmpty) {
-      final adapter = _commandAdapter;
-      if (adapter == null || normalizedTitle.isEmpty) return;
-      try {
-        final source = await HarnessContinuationSourceResolver(
-          adapter,
-        ).resolve(requestedSessionId: '', requestedTitle: normalizedTitle);
+        final source = await HarnessContinuationSourceResolver(adapter)
+            .resolve(requestedSessionId: '', requestedTitle: normalizedTitle)
+            .timeout(const Duration(seconds: 10));
         sessionId = source.sessionId;
-      } on Object {
-        return;
       }
+      if (!mounted) return;
+      if (_starting) {
+        throw StateError('Harness 正在启动，请稍后重试');
+      }
+      await _confirmDeleteSession(
+        sessionId,
+        title,
+        isCurrent: reportedCurrent || sessionId == _queueSessionId,
+        confirmedAtSource: confirmedAtSource,
+      );
+    } on Object catch (error) {
+      await _setSessionDeleteUi(
+        sessionId,
+        title,
+        'failed',
+        message: '未能删除会话：$error',
+      );
+      await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
+        'type': 'harness.session_delete.resolve_failed',
+        'sessionId': sessionId,
+        'error': '$error',
+        'at': DateTime.now().toUtc().toIso8601String(),
+      });
     }
-    await _confirmDeleteSession(
-      sessionId,
-      title,
-      isCurrent: reportedCurrent || sessionId == _queueSessionId,
-    );
   }
 
   Future<void> _handleHarnessEvent(Map<String, dynamic> payload) async {
@@ -2414,6 +2426,7 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String sessionId,
     String title, {
     required bool isCurrent,
+    required bool confirmedAtSource,
   }) async {
     if (!mounted ||
         _starting ||
@@ -2421,88 +2434,84 @@ window.__vibekitsHarnessQueueBridge?.submit(
         !_deletingSessionIds.add(sessionId)) {
       return;
     }
-    if (isCurrent && (_harnessBusy || _harnessApprovalWaiting)) {
-      await _withFlutterOverlay<void>(
-        () => showDialog<void>(
-          context: context,
-          builder: (BuildContext dialogContext) => AlertDialog(
-            title: const Text('会话正在运行'),
-            content: const Text('请先停止当前任务，再永久删除此会话。'),
-            actions: <Widget>[
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('知道了'),
-              ),
-            ],
-          ),
-        ),
+    if (_harnessBusy ||
+        _harnessApprovalWaiting ||
+        _deletingSessionIds.length > 1) {
+      await _setSessionDeleteUi(
+        sessionId,
+        title,
+        'failed',
+        message: '会话正在运行，请先停止当前任务再删除。',
       );
       _deletingSessionIds.remove(sessionId);
       return;
     }
-    final bool confirmed =
-        await _withFlutterOverlay<bool>(
-          () => showDialog<bool>(
-            context: context,
-            barrierDismissible: false,
-            builder: (BuildContext dialogContext) => AlertDialog(
-              title: const Text('删除这个会话？'),
-              content: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Text(
-                  '${title.isEmpty ? sessionId : title}\n\n聊天记录、推理过程和工具调用记录将被永久删除，无法从归档恢复。',
+    final bool confirmed = confirmedAtSource
+        ? true
+        : await _withFlutterOverlay<bool>(
+                () => showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (BuildContext dialogContext) => AlertDialog(
+                    title: const Text('删除这个会话？'),
+                    content: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      child: Text(
+                        '${title.isEmpty ? sessionId : title}\n\n聊天记录、推理过程和工具调用记录将被永久删除，无法从归档恢复。',
+                      ),
+                    ),
+                    actions: <Widget>[
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('取消'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        child: const Text('删除'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('删除'),
-                ),
-              ],
-            ),
-          ),
-        ) ??
-        false;
+              ) ??
+              false;
     if (!confirmed || !mounted) {
       _deletingSessionIds.remove(sessionId);
       return;
     }
-    setState(() => _status = '正在删除会话…');
+    await _setSessionDeleteUi(sessionId, title, 'deleting');
     try {
-      // DSH alpha.2 does not expose a session/delete remote endpoint. Stop the
-      // live owner before editing its durable indexes; otherwise its in-memory
-      // projection can write the deleted row back. The preserved WebView is
-      // reconnected immediately after the exact session is removed.
-      final HarnessSessionHandle? runningSession = _session;
-      _session = null;
-      await _resetCommandBridge();
-      if (runningSession != null && runningSession.running) {
-        await runningSession.stop();
-        widget.onRunningChanged?.call(false);
+      // The official runtime owns in-memory indexes. It must finish its last
+      // flush before we touch disk, otherwise refresh resurrects the session.
+      final runningSession = _session;
+      if (runningSession == null) {
+        throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
       }
-      await HarnessSessionStore(
+      final store = HarnessSessionStore(
         home: Directory(PlatformStorageLayout.current().harnessHomeDirectory),
-      ).deleteSession(sessionId);
+      );
+      await store.deleteSessionAfterStoppingOwner(
+        sessionId,
+        stopOwner: () async {
+          await _resetCommandBridge();
+          await runningSession.stop();
+          _session = null;
+          widget.onRunningChanged?.call(false);
+        },
+      );
       await _continuationStore.removeContinuationSession(sessionId);
       if (!mounted) return;
-      await _start(preserveWebview: true);
-      final adapter = _commandAdapter;
-      if (adapter == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
-      final workspaces = await adapter.workspaceSnapshot();
-      final bool stillPresent = workspaces.any(
-        (workspace) =>
-            workspace['sessionIds'] is List &&
-            (workspace['sessionIds'] as List).any(
-              (id) => id.toString() == sessionId,
-            ),
-      );
-      if (stillPresent) throw StateError('HARNESS_SESSION_DELETE_NOT_APPLIED');
+      if (await store.containsSession(sessionId)) {
+        throw StateError('HARNESS_SESSION_DELETE_NOT_APPLIED');
+      }
       if (!mounted) return;
-      setState(() => _status = '会话已删除');
+      await _start(preserveWebview: true);
+      if (_session == null || !_session!.running) {
+        throw StateError('HARNESS_RESTART_FAILED');
+      }
+      if (await store.containsSession(sessionId)) {
+        throw StateError('HARNESS_SESSION_DELETE_NOT_APPLIED');
+      }
+      await _setSessionDeleteUi(sessionId, title, 'deleted');
       await _publishContinuationRelations();
     } on Object catch (error) {
       await HarnessRuntimeLogStore.appendWorkEvent(<String, Object?>{
@@ -2512,18 +2521,39 @@ window.__vibekitsHarnessQueueBridge?.submit(
         'at': DateTime.now().toUtc().toIso8601String(),
       });
       if (!mounted) return;
+      await _setSessionDeleteUi(
+        sessionId,
+        title,
+        'failed',
+        message: '删除或恢复失败，请刷新核对会话状态',
+      );
       if (_session == null) {
-        try {
-          await _start(preserveWebview: true);
-        } on Object {
-          // Keep the original deletion failure visible to the user.
-        }
+        await _start(preserveWebview: true);
       }
       setState(() {
         _status = '删除会话失败：$error';
       });
     } finally {
       _deletingSessionIds.remove(sessionId);
+    }
+  }
+
+  Future<void> _setSessionDeleteUi(
+    String sessionId,
+    String title,
+    String state, {
+    String message = '',
+  }) async {
+    if (!_webviewReady) return;
+    try {
+      await _webview.executeScriptVoid(
+        'window.__vibekitsSetSessionDeleteState?.('
+        '${jsonEncode(sessionId)}, ${jsonEncode(title)}, '
+        '${jsonEncode(state)}, ${jsonEncode(message)});',
+      );
+    } on Object {
+      // The official controller remains authoritative if a transient DOM
+      // transition cannot be applied.
     }
   }
 
@@ -2567,12 +2597,14 @@ window.__vibekitsHarnessQueueBridge?.submit(
     _disposing = true;
     HardwareKeyboard.instance.removeHandler(_handleHarnessFunctionKey);
     _harnessInputChannel.setMethodCallHandler(null);
-    unawaited(
-      _harnessInputChannel.invokeMethod<void>(
-        'setHarnessShortcutsEnabled',
-        false,
-      ),
-    );
+    if (Platform.isMacOS) {
+      unawaited(
+        _harnessInputChannel.invokeMethod<void>(
+          'setHarnessShortcutsEnabled',
+          false,
+        ),
+      );
+    }
     HarnessRemoteManagementBridge.unbind(this);
     _restartTimer?.cancel();
     _stabilityTimer?.cancel();
@@ -5089,8 +5121,41 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
     ),
   );
 
+  Widget _buildAndroidSimulatorAccess(RustDeskHostInfo host) =>
+      StreamBuilder<HarnessSimulatorTargetSnapshot>(
+        stream: HarnessSimulatorTargetRuntime.shared.changes,
+        initialData: HarnessSimulatorTargetRuntime.shared.latest,
+        builder: (context, snapshot) {
+          final state =
+              snapshot.data ?? HarnessSimulatorTargetRuntime.shared.latest;
+          final changing = state.phase == HarnessSimulatorTargetPhase.starting;
+          return SwitchListTile(
+            key: const Key('android-simulator-access-enabled'),
+            secondary: const Icon(Icons.developer_mode_rounded),
+            title: const Text('允许作为仿真机'),
+            subtitle: Text(state.message),
+            value: state.enabled,
+            onChanged: host.available && !changing
+                ? (enabled) async {
+                    if (enabled) {
+                      await HarnessSimulatorTargetRuntime.shared.enable();
+                    } else {
+                      await HarnessSimulatorTargetRuntime.shared.disable();
+                    }
+                  }
+                : null,
+          );
+        },
+      );
+
   Widget _buildEmbeddedMode(RustDeskHostInfo host) => _controllerOnly
-      ? _buildEmbeddedConnector(host)
+      ? Column(
+          children: [
+            _buildLocalIdentityCard(host),
+            if (Platform.isAndroid) _buildAndroidSimulatorAccess(host),
+            _buildEmbeddedConnector(host),
+          ],
+        )
       : Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[

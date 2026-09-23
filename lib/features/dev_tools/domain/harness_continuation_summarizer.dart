@@ -28,6 +28,13 @@ class HarnessContinuationSummarizer {
       if (helperSessionId.isEmpty) {
         throw const FormatException('Harness 未创建摘要任务');
       }
+      // Official DSH has no session.delete RPC. Hide this internal helper
+      // through the supported archive API before it receives any messages.
+      _value(
+        await _request('workspace.archiveSession', <String, Object?>{
+          'sessionId': helperSessionId,
+        }),
+      );
       final requestId =
           'continuation-summary-${DateTime.now().microsecondsSinceEpoch}';
       await _request('session.prompt', <String, Object?>{
@@ -64,11 +71,11 @@ $sourceMaterial''',
     } finally {
       if (helperSessionId.isNotEmpty) {
         try {
-          await _request('session.delete', <String, Object?>{
+          await _request('workspace.archiveSession', <String, Object?>{
             'sessionId': helperSessionId,
           });
         } on Object {
-          // The helper is not inserted into the workspace sidebar.
+          // Preserve the original outcome; the helper was archived before work.
         }
       }
     }
