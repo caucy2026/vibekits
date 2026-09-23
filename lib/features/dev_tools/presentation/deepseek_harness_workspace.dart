@@ -32,7 +32,7 @@ class DeepSeekHarnessWorkspace extends StatefulWidget {
 }
 
 class _DeepSeekHarnessWorkspaceState extends State<DeepSeekHarnessWorkspace> {
-  static const int _port = 3080;
+  static const int _port = HarnessLaunchSpec.defaultPort;
   late final TextEditingController _workspaceController;
   HarnessEnvironmentReport? _environment;
   HarnessSessionHandle? _session;
@@ -150,8 +150,9 @@ class _DeepSeekHarnessWorkspaceState extends State<DeepSeekHarnessWorkspace> {
       await widget.openBrowser(session.url);
     } on Object catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('无法打开浏览器：$error')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('无法打开浏览器：$error')));
     }
   }
 

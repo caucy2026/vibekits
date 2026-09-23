@@ -32,7 +32,9 @@ class HarnessEnvironmentReport {
 }
 
 class HarnessLaunchSpec {
-  const HarnessLaunchSpec({required this.workspace, this.port = 3080});
+  const HarnessLaunchSpec({required this.workspace, this.port = defaultPort});
+  // Keep the official standalone Harness port available for coexistence.
+  static const int defaultPort = 13080;
   static const String packageSpec = '@deepseek-ai/dsh@0.1.6-alpha.2';
   final String workspace;
   final int port;
@@ -660,7 +662,10 @@ abstract final class DeepSeekHarnessService {
   static Future<int> findFreeLoopbackPort() async {
     ServerSocket socket;
     try {
-      socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 3080);
+      socket = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        HarnessLaunchSpec.defaultPort,
+      );
     } on SocketException {
       socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     }

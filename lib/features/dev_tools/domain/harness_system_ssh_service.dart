@@ -495,11 +495,12 @@ abstract final class HarnessSystemSshService {
     required String home,
   }) async {
     final config = File('${_programDataDirectory()}\\ssh\\sshd_config');
-    if (!await config.exists()) return null;
+    final lines = await readWindowsSshdConfigLines(config);
+    if (lines == null) return null;
     String? globalValue;
     String? exactUserValue;
     bool inExactUserBlock = false;
-    for (final rawLine in await config.readAsLines()) {
+    for (final rawLine in lines) {
       final line = rawLine.trim();
       if (line.isEmpty || line.startsWith('#')) continue;
       final match = RegExp(
@@ -547,6 +548,18 @@ abstract final class HarnessSystemSshService {
     }
     if (home.isEmpty) return null;
     return File('$home/${expanded.replaceAll('\\', '/')}');
+  }
+
+  /// Windows protects sshd_config on some machines. A missing or unreadable
+  /// config leaves the caller to use the per-user key path; the controller
+  /// still proves that sshd accepts the key with a real login.
+  static Future<List<String>?> readWindowsSshdConfigLines(File config) async {
+    try {
+      if (!await config.exists()) return null;
+      return await config.readAsLines();
+    } on FileSystemException {
+      return null;
+    }
   }
 
   static String _programDataDirectory() =>

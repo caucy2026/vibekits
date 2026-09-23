@@ -60,17 +60,18 @@ void main() {
     ).readAsStringSync();
 
     expect(source, contains(r'# BEGIN VibeKits AuthorizedKeys $account'));
-    expect(
-      source,
-      contains(r'AuthorizedKeysFile %h/.ssh/authorized_keys'),
-    );
+    expect(source, contains(r'AuthorizedKeysFile %h/.ssh/authorized_keys'));
     expect(source, contains(r'sshd_config_default'));
-    expect(
-      source,
-      contains(r'Copy-Item -LiteralPath $sshdConfigDefault'),
-    );
+    expect(source, contains(r'Copy-Item -LiteralPath $sshdConfigDefault'));
     expect(source, contains(r'& $sshd -t'));
     expect(source, contains('sshd_config validation failed; backup restored'));
+  });
+
+  test('受保护的 Windows sshd_config 不会中断仿真公钥路径回退', () async {
+    final lines = await HarnessSystemSshService.readWindowsSshdConfigLines(
+      _AccessDeniedConfigFile(),
+    );
+    expect(lines, isNull);
   });
 
   test('首次公钥授权仅写入受限条目并可精确撤销', () async {
@@ -176,4 +177,16 @@ void main() {
     expect(result['removed'], 2);
     expect(await authorizedKeys.readAsString(), 'ssh-ed25519 USERKEY owner\n');
   });
+}
+
+final class _AccessDeniedConfigFile implements File {
+  @override
+  Future<bool> exists() async => true;
+
+  @override
+  Future<List<String>> readAsLines({Encoding encoding = utf8}) async =>
+      throw const FileSystemException('Access is denied', 'sshd_config');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
