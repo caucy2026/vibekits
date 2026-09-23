@@ -100,67 +100,28 @@ $sourceMaterial''',
     return result['value'] as Map;
   }
 
-  static String _flatten(Object? value) {
-    if (value is String) return value;
-    if (value is Iterable) {
-      return value.map(_flatten).where((text) => text.isNotEmpty).join('\n');
-    }
-    if (value is Map) {
-      return value.entries
-          .where(
-            (entry) => !const {
-              'token',
-              'apiKey',
-              'authorization',
-              'cookie',
-            }.contains('${entry.key}'),
-          )
-          .map((entry) => _flatten(entry.value))
-          .where((text) => text.isNotEmpty)
-          .join('\n');
-    }
-    return '';
-  }
-
   static String _assistantText(Object? value) {
-    const headings = <String>[
-      '目标',
-      '约束',
-      '已完成',
-      '关键决定',
-      '文件与版本',
-      '验证结果',
-      '未完成项',
-      '已知问题',
-      '下一步',
-    ];
-    final leaves = <String>[];
-    void collect(Object? node) {
-      if (node is String && node.trim().isNotEmpty) {
-        leaves.add(node.trim());
-      } else if (node is Iterable) {
-        for (final item in node) {
-          collect(item);
-        }
-      } else if (node is Map) {
-        for (final entry in node.entries) {
-          if (!const {
-            'token',
-            'apiKey',
-            'authorization',
-            'cookie',
-          }.contains('${entry.key}')) {
-            collect(entry.value);
-          }
-        }
-      }
-    }
-
-    collect(value);
-    final structured =
-        leaves.where((text) => headings.every(text.contains)).toList()
-          ..sort((left, right) => left.length.compareTo(right.length));
-    final selected = structured.isNotEmpty ? structured.first : _flatten(value);
-    return selected.length <= 24000 ? selected : selected.substring(0, 24000);
+    final message = value is Map ? value['message'] : null;
+    final content = message is Map
+        ? message['content']
+        : value is Map
+        ? value['content']
+        : value;
+    final text = switch (content) {
+      String text => text.trim(),
+      Iterable parts =>
+        parts
+            .whereType<Map>()
+            .where((part) => part['type'] == 'text')
+            .map((part) => part['text'])
+            .whereType<String>()
+            .where((part) => part.trim().isNotEmpty)
+            .join('\n')
+            .trim(),
+      _ => '',
+    };
+    // DSH stores private reasoning and final text in the same assistant
+    // message. Only the typed final text is a user-facing handoff summary.
+    return text.length <= 24000 ? text : text.substring(0, 24000);
   }
 }

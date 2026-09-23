@@ -23,6 +23,18 @@ if ! security find-identity -v -p codesigning | grep -Fq "$IDENTITY"; then
   exit 4
 fi
 
+sign_timestamped() {
+  local attempt=1
+  while ! codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"; do
+    if [ "$attempt" -ge 4 ]; then
+      echo "Developer ID timestamp signing failed after $attempt attempts: $*" >&2
+      return 1
+    fi
+    sleep "$((attempt * 2))"
+    attempt=$((attempt + 1))
+  done
+}
+
 while IFS= read -r -d '' ITEM; do
   KIND="$(/usr/bin/file -b "$ITEM")"
   case "$KIND" in
@@ -32,7 +44,7 @@ while IFS= read -r -d '' ITEM; do
         continue
       fi
       printf '%s\n' "$INODE" >> "$SIGNED_INODES"
-      codesign --force --timestamp --options runtime --sign "$IDENTITY" "$ITEM"
+      sign_timestamped "$ITEM"
       ;;
   esac
 done < <(find \
@@ -43,18 +55,16 @@ done < <(find \
   -type f \( -perm -111 -o -name '*.dylib' -o -name '*.node' \) -print0)
 
 while IFS= read -r -d '' FRAMEWORK; do
-  codesign --force --timestamp --options runtime --sign "$IDENTITY" "$FRAMEWORK"
+  sign_timestamped "$FRAMEWORK"
 done < <(find "$APP_BUNDLE/Contents/Frameworks" -depth -type d -name '*.framework' -print0)
 
 while IFS= read -r -d '' HELPER; do
-  codesign --force --timestamp --options runtime --sign "$IDENTITY" "$HELPER"
+  sign_timestamped "$HELPER"
 done < <(find "$APP_BUNDLE/Contents/Helpers" -depth -type d -name '*.app' -print0)
 
 # A generic Hardened Runtime signature strips the JIT exception required by
 # V8. Re-sign the embedded Node explicitly before sealing the outer App.
-codesign --force --timestamp --options runtime --sign "$IDENTITY" \
-  --entitlements "$HARNESS_NODE_ENTITLEMENTS" \
-  "$HARNESS_NODE"
+sign_timestamped --entitlements "$HARNESS_NODE_ENTITLEMENTS" "$HARNESS_NODE"
 
 OUTER_ENTITLEMENTS="$PROJECT_ROOT/macos/Runner/Release.entitlements"
 OUTER_ENTITLEMENTS_JSON="$(plutil -convert json -o - "$OUTER_ENTITLEMENTS" | tr -d '[:space:]')"
@@ -62,12 +72,9 @@ if [ "$OUTER_ENTITLEMENTS_JSON" = "{}" ]; then
   # A non-sandboxed Developer ID app needs no outer entitlement. Passing an
   # empty plist to codesign creates an entitlement blob that current macOS
   # reports as invalid, even though the nested Node keeps its own JIT grants.
-  codesign --force --timestamp --options runtime --sign "$IDENTITY" \
-    "$APP_BUNDLE"
+  sign_timestamped "$APP_BUNDLE"
 else
-  codesign --force --timestamp --options runtime --sign "$IDENTITY" \
-    --entitlements "$OUTER_ENTITLEMENTS" \
-    "$APP_BUNDLE"
+  sign_timestamped --entitlements "$OUTER_ENTITLEMENTS" "$APP_BUNDLE"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 

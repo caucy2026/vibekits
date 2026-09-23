@@ -32,7 +32,7 @@ class HarnessSessionStore {
         }
       }
     }
-    return false;
+    return await _projectionFile(sessionId).exists();
   }
 
   /// Wait for the live owner's final flush before editing its durable indexes.
@@ -82,7 +82,14 @@ class HarnessSessionStore {
       final Map<String, dynamic>? tables = _map(root['tables']);
       _map(tables?['sessions'])?.remove(sessionId);
     });
+    final File projection = _projectionFile(sessionId);
+    if (await projection.exists()) await projection.delete();
   }
+
+  File _projectionFile(String sessionId) => File(
+    '${home.path}${Platform.pathSeparator}storages${Platform.pathSeparator}'
+    'session_projcache${Platform.pathSeparator}sessions${Platform.pathSeparator}$sessionId.json',
+  );
 
   /// Removes temporary native-Harness workspaces created by VibeKits' older
   /// acceptance probes. They are not user workspaces and otherwise appear as

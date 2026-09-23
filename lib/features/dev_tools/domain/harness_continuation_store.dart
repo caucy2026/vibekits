@@ -179,6 +179,36 @@ class HarnessContinuationStore {
     );
   }
 
+  /// Keep sidebar labels in sync with names persisted by the official Harness.
+  Future<void> updateContinuationTitles(Map<String, String> titles) async {
+    if (titles.isEmpty) return;
+    bool changed = false;
+    final records = <HarnessContinuationRecord>[];
+    for (final record in await load()) {
+      final title = titles[record.continuationSessionId]?.trim() ?? '';
+      if (title.isEmpty || title == record.continuationTitleSnapshot) {
+        records.add(record);
+        continue;
+      }
+      changed = true;
+      records.add(
+        HarnessContinuationRecord(
+          id: record.id,
+          workspace: record.workspace,
+          sourceSessionId: record.sourceSessionId,
+          continuationSessionId: record.continuationSessionId,
+          sourceTitleSnapshot: record.sourceTitleSnapshot,
+          continuationTitleSnapshot: title,
+          summary: record.summary,
+          sourceMessageCursor: record.sourceMessageCursor,
+          createdAt: record.createdAt,
+          updatedAt: DateTime.now().toUtc(),
+        ),
+      );
+    }
+    if (changed) await _save(records);
+  }
+
   Future<void> _save(List<HarnessContinuationRecord> records) async {
     await home.create(recursive: true);
     final File temporary = File('${_file.path}.tmp');

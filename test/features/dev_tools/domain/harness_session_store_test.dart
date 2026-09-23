@@ -42,6 +42,14 @@ void main() {
           },
         }),
       );
+      final projectionDir = Directory(
+        '${stores.path}/session_projcache/sessions',
+      );
+      await projectionDir.create(recursive: true);
+      final deletedProjection = File('${projectionDir.path}/$deleted.json');
+      final keptProjection = File('${projectionDir.path}/$kept.json');
+      await deletedProjection.writeAsString('deleted title cache');
+      await keptProjection.writeAsString('kept title cache');
 
       expect(
         await HarnessSessionStore(home: home).containsSession(deleted),
@@ -56,6 +64,8 @@ void main() {
       );
       expect(await session.exists(), isFalse);
       expect(await session.parent.exists(), isFalse);
+      expect(await deletedProjection.exists(), isFalse);
+      expect(await keptProjection.exists(), isTrue);
       final dynamic workspace = jsonDecode(
         await File('${stores.path}/workspace.json').readAsString(),
       );
@@ -68,28 +78,55 @@ void main() {
     },
   );
 
-  test('owner final flush cannot resurrect a deleted session on refresh', () async {
-    final home = await Directory.systemTemp.createTemp('delete-owner-');
+  test(
+    'owner final flush cannot resurrect a deleted session on refresh',
+    () async {
+      final home = await Directory.systemTemp.createTemp('delete-owner-');
+      addTearDown(() => home.delete(recursive: true));
+      const id = 'session-11111111-1111-1111-1111-111111111111';
+      final session = Directory('${home.path}/sessions/work/$id');
+      await session.create(recursive: true);
+      final index = File('${home.path}/storages/session_projcache.json');
+      await index.parent.create(recursive: true);
+      final stale = jsonEncode({
+        'tables': {
+          'sessions': {
+            id: {'title': 'test'},
+          },
+        },
+      });
+      await index.writeAsString(stale);
+      await HarnessSessionStore(home: home).deleteSessionAfterStoppingOwner(
+        id,
+        stopOwner: () async {
+          // Simulate the live owner's buffered final write while it shuts down.
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          await index.writeAsString(stale);
+        },
+      );
+      final refreshed = jsonDecode(await index.readAsString());
+      expect(refreshed['tables']['sessions'].containsKey(id), isFalse);
+      expect(await session.exists(), isFalse);
+      expect(
+        await HarnessSessionStore(home: home).containsSession(id),
+        isFalse,
+      );
+    },
+  );
+
+  test('a leftover projection counts as undeleted session data', () async {
+    final home = await Directory.systemTemp.createTemp('delete-projection-');
     addTearDown(() => home.delete(recursive: true));
     const id = 'session-11111111-1111-1111-1111-111111111111';
-    final session = Directory('${home.path}/sessions/work/$id');
-    await session.create(recursive: true);
-    final index = File('${home.path}/storages/session_projcache.json');
-    await index.parent.create(recursive: true);
-    final stale = jsonEncode({'tables': {'sessions': {id: {'title': 'test'}}}});
-    await index.writeAsString(stale);
-    await HarnessSessionStore(home: home).deleteSessionAfterStoppingOwner(
-      id,
-      stopOwner: () async {
-        // Simulate the live owner's buffered final write while it shuts down.
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-        await index.writeAsString(stale);
-      },
+    final projection = File(
+      '${home.path}/storages/session_projcache/sessions/$id.json',
     );
-    final refreshed = jsonDecode(await index.readAsString());
-    expect(refreshed['tables']['sessions'].containsKey(id), isFalse);
-    expect(await session.exists(), isFalse);
-    expect(await HarnessSessionStore(home: home).containsSession(id), isFalse);
+    await projection.parent.create(recursive: true);
+    await projection.writeAsString('cached title');
+    final store = HarnessSessionStore(home: home);
+    expect(await store.containsSession(id), isTrue);
+    await store.deleteSession(id);
+    expect(await store.containsSession(id), isFalse);
   });
 
   test('failed owner shutdown preserves the session', () async {
@@ -100,7 +137,8 @@ void main() {
     await session.create(recursive: true);
     await expectLater(
       HarnessSessionStore(home: home).deleteSessionAfterStoppingOwner(
-        id, stopOwner: () async => throw StateError('owner still running'),
+        id,
+        stopOwner: () async => throw StateError('owner still running'),
       ),
       throwsStateError,
     );

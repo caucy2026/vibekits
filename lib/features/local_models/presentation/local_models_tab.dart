@@ -20,6 +20,7 @@ import '../domain/pp_ocr_v6.dart';
 import '../domain/screenshot_capture.dart';
 import '../domain/vad_inference.dart';
 import 'deepseek_agent_workspace.dart';
+import 'harness_connection_badge.dart';
 import 'harness_webview_input_gate.dart';
 import 'official_harness_workspace.dart';
 
@@ -909,9 +910,8 @@ class _LocalModelsTabState extends State<LocalModelsTab> {
                   ButtonSegment<_ModelWorkspace>(
                     value: _ModelWorkspace.agent,
                     icon: const Icon(Icons.terminal, size: 17),
-                    label: Badge(
-                      isLabelVisible: _agentRunning,
-                      smallSize: 7,
+                    label: HarnessConnectionBadge(
+                      running: _agentRunning,
                       child: const Padding(
                         padding: EdgeInsets.only(right: 3),
                         child: Text('智能体（Harness）'),

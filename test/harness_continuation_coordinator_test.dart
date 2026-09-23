@@ -148,6 +148,54 @@ void main() {
     expect(adapter.methods.last, 'session.delete');
   });
 
+  test('summary timeout retry completes the same persisted child', () async {
+    final adapter = _FakeAdapter();
+    var summaryAttempts = 0;
+    final coordinator = HarnessContinuationCoordinator(
+      adapter: adapter,
+      store: store,
+      pollInterval: Duration.zero,
+      timeout: const Duration(seconds: 1),
+      summarizer:
+          ({
+            required workspaceId,
+            required sourceSessionId,
+            required sourceTitle,
+            required sourceMaterial,
+          }) async {
+            summaryAttempts++;
+            if (summaryAttempts == 1) {
+              throw TimeoutException('controlled summary timeout');
+            }
+            return sourceMaterial;
+          },
+    );
+
+    final child = await coordinator.createEmptyChild(
+      workspaceId: 'workspace-1',
+      sourceTitle: '长任务',
+      beforeSessionId: 'source-1',
+    );
+    Future<HarnessContinuationRecord> complete() => coordinator.completeChild(
+      childSessionId: child.$1,
+      workspace: '/tmp/project',
+      sourceSessionId: 'source-1',
+      sourceTitle: '长任务',
+      continuationTitle: child.$2,
+    );
+
+    await expectLater(complete(), throwsA(isA<TimeoutException>()));
+    expect(await store.load(), isEmpty);
+    final record = await complete();
+    expect(record.continuationSessionId, child.$1);
+    expect(record.continuationTitleSnapshot, '长任务 2');
+    expect(
+      adapter.methods.where((method) => method == 'session.create'),
+      hasLength(1),
+    );
+    expect((await store.load()).single.continuationSessionId, child.$1);
+  });
+
   test(
     'a non-responsive official create request exits by the hard timeout',
     () async {

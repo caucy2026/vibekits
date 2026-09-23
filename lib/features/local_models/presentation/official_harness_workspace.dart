@@ -1262,6 +1262,36 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     bool verifyAvailability = true,
   }) async {
     if (!_webviewReady || _queueWorkspaceId.isEmpty) return;
+    if (verifyAvailability) {
+      try {
+        final response = await _commandAdapter?.request(<String, dynamic>{
+          'type': 'client-request',
+          'rpcId':
+              'continuation-titles-${DateTime.now().microsecondsSinceEpoch}',
+          'method': 'session.list',
+          'payload': const <String, Object?>{},
+        }, timeout: const Duration(seconds: 5));
+        final result = response?['result'];
+        final value = result is Map ? result['value'] : null;
+        final items = value is Map ? value['items'] : null;
+        if (items is List) {
+          final titles = <String, String>{};
+          for (final item in items) {
+            if (item is! Map) continue;
+            final id = item['sessionId']?.toString() ?? '';
+            final projections = item['projections'];
+            final values = projections is Map ? projections['values'] : null;
+            final title = values is Map
+                ? values['title']?.toString() ?? ''
+                : '';
+            if (id.isNotEmpty && title.trim().isNotEmpty) titles[id] = title;
+          }
+          await _continuationStore.updateContinuationTitles(titles);
+        }
+      } on Object {
+        // A temporarily unavailable catalog must not hide saved relations.
+      }
+    }
     final workspaces = verifyAvailability
         ? await _commandAdapter?.workspaceSnapshot()
         : const <Map<String, dynamic>>[];
