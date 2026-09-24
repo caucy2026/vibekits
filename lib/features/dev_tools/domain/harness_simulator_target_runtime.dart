@@ -335,11 +335,17 @@ final class HarnessSimulatorTargetRuntime {
         _mcpEndpoint = null;
         return;
       }
-      // Android's native tunnel forwards only to the device's local adbd.
-      // Do not show the simulator as ready when that fixed target is absent.
-      // Desktop hosts keep their existing SSH-based startup path unchanged.
+      // Keep the authenticated control and MCP tunnels available even if
+      // Android's optional ADB endpoint cannot be restored yet. Closing the
+      // whole native gate here would also remove the only remote diagnostic
+      // path needed to investigate a broken adbd.
+      String adbMessage = '';
       if (Platform.isAndroid) {
-        await _ensureAndroidAdbReady();
+        try {
+          await _ensureAndroidAdbReady();
+        } on Object catch (error) {
+          adbMessage = '诊断通道可连接，ADB 尚未就绪：$error';
+        }
       }
       // Do not advertise the native RustDesk tunnel gate until the fixed
       // loopback endpoint is actually listening. Otherwise a controller that
@@ -355,7 +361,9 @@ final class HarnessSimulatorTargetRuntime {
           endpoint: '127.0.0.1:${endpoint.port}',
           sshEndpoint: ssh?.endpoint ?? '',
           sshUsername: ssh?.username ?? '',
-          message: '仿真机可连接 · 告知对方本机 ID 即可调试',
+          message: adbMessage.isEmpty
+              ? '仿真机可连接 · 告知对方本机 ID 即可调试'
+              : adbMessage,
         ),
       );
       _clearRestoreRetry();
@@ -538,19 +546,17 @@ final class HarnessSimulatorTargetRuntime {
     try {
       if (Platform.isAndroid && !await _isLocalAdbReady()) {
         final previous = _latest;
-        await _setNativeGate(_hostExecutable, false);
         _publish(
           HarnessSimulatorTargetSnapshot(
-            phase: HarnessSimulatorTargetPhase.starting,
+            phase: HarnessSimulatorTargetPhase.ready,
             routingId: previous.routingId,
             endpoint: previous.endpoint,
-            message: '系统 ADB 已断开，正在恢复…',
+            message: '诊断通道可连接，系统 ADB 已断开，正在恢复…',
           ),
         );
         try {
           await _ensureAndroidAdbReady();
           if (generation != _generation) return;
-          await _setNativeGate(_hostExecutable, true);
           _publish(
             HarnessSimulatorTargetSnapshot(
               phase: HarnessSimulatorTargetPhase.ready,
@@ -562,10 +568,10 @@ final class HarnessSimulatorTargetRuntime {
         } on Object catch (error) {
           _publish(
             HarnessSimulatorTargetSnapshot(
-              phase: HarnessSimulatorTargetPhase.error,
+              phase: HarnessSimulatorTargetPhase.ready,
               routingId: previous.routingId,
               endpoint: previous.endpoint,
-              message: '系统 ADB 恢复失败：$error',
+              message: '诊断通道可连接，系统 ADB 恢复失败：$error',
             ),
           );
           return;

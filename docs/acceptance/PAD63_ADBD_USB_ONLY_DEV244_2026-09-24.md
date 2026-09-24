@@ -21,4 +21,12 @@
 
 ## PAD63 仍需闭环
 
-当前 63 号设备既不能通过 ADB 5555，也不能通过已关闭的仿真门禁安装修复包。需要设备本地或另一条既有授权安装路径，先临时恢复 ADB/安装 dev.244；随后读取主程序与辅助组件版本、UID，重新输入开启密码并用 ID `6795854383` 建立远程 ADB，最后在 63 上复现 USB-only 场景。没有这些现场步骤，不标记 PAD63 通过。
+2026-09-24 用户在设备本地重新打开 ADB 后，已在 PAD63 覆盖安装正式平台签名的 dev.245（versionCode 2245）和辅助组件 v5（UID 1000）。通过设备 ID `6795854383` 建立 P2P/中继会话，返回 `connected=true`、`mcpReady=true`、`adbReady=true`，远程 ADB 隧道实际读取到 `KEMI Vibe Pads S1`、主程序 2245、辅助组件 v5/UID 1000。PAD63 当前远程 ADB 闭环通过；**没有在 PAD63 人为关闭 ADB**，USB-only 故障恢复仍以 PAD75 的实机结果为依据。
+
+## dev.245：ADB 失联后保留诊断通道
+
+- Android 启动时如果系统辅助组件暂时不能恢复 5555，仍保留已鉴权的仿真控制端点和 MCP 端点，状态明确显示“诊断通道可连接，ADB 尚未就绪”；后台探测期间也不再因 ADB 失联关闭原生仿真门禁。macOS、Windows、Linux 的 SSH 启动路径未改。
+- PAD75 已覆盖安装 dev.245 和辅助组件 v5。人为停用辅助组件并关闭 adbd 后，设备 ID `9464730211` 仍返回 `connected=true`、`mcpReady=true`、`adbReady=false`；远程调用 `vibekits.simulator.status` 可读到 ADB 恢复失败原因，调用 `vibekits.system.resources` 实际取得 Android CPU/内存采样。证明 ADB 消失后控制端不再完全失明。
+- 该极端试验中辅助组件被人为设为 `disabled-user`，预置的独立救援脚本未恢复它；PAD75 当前 ADB 仍不可用，须在设备本地重新启用辅助组件/ADB。**不能据此宣称已具备无条件远程重启 ADB。**普通 USB-only 的 adbd 端口故障由辅助组件 v5 自动恢复，前节 PAD75 实测通过。
+- 当前 Android 没有 SSH 服务端，连接状态 `sshReady=false`。现有 SSH 工具是控制端客户端，不能当作 PAD 的备用 SSH。若要求在辅助组件也被禁用时完全远程自救，需要另行交付经鉴权的、独立于 ADB 的 PAD 端系统控制服务，并在真机上验证；不得把 MCP 只读诊断冒充系统命令执行。
+- dev.245 签名候选：`dist/candidates/Vibekits-1.9.0-dev.245+2245-android-pad63-kemi-signed.apk`，86,829,813 字节，SHA-256 `a70c608b1571d22c82a14acd676b487ceb7f41fb1e119e2fa1cc2b57fb196f87`。`harness_simulator_target_runtime_test.dart` 12 项通过。
