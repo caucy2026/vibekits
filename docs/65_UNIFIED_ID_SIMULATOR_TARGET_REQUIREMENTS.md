@@ -146,6 +146,27 @@ Harness 启动链只允许包含官方 DSH 进程、官方浏览器 URL 和原�
 
 ## 11. 控制端连接器契约
 
+### 11.1 将目标目录挂载到控制端（2026-09-24 Mac 实测）
+
+此功能的入口仍是目标设备的 VibeKits 数字 ID；目标端先开启“允许作为仿真机”并完成首次 SSH 公钥批准。控制端通过 `vibekits.simulator.connect` 确认 `connected=true`、目标身份、主机指纹及 `p2p_or_relay`，再使用连接器建立的**本机回环 SSH 端口**。该端口是每次连接分配的临时端口，不是目标机的公网 SSH 端口；必须遵守本规范的固定端点、严格 `known_hosts` 和受管密钥约束。不得为了挂载另外暴露 SSH、索取密码，或以远程桌面代替仿真通道。
+
+2026-09-24 在 Mac 控制端与 `4456560334` Mac 目标端验证的链路是：
+
+```text
+目标 /Users/mac/kemi/vibekits
+  → VibeKits 受管 P2P/HBBR SSH 隧道（控制端 127.0.0.1:动态端口）
+  → rclone SFTP 后端（限定到该目标目录）
+  → rclone serve webdav（仅监听控制端 127.0.0.1:38445）
+  → macOS mount_webdav
+  → 控制端 /Users/newlink/VibeKits-4456560334
+```
+
+这是一种**控制端临时文件系统映射**，并未把目标磁盘复制或迁移过来。映射建立前应先验证 SFTP 可以读取指定目录；挂载后在两侧各创建一个无害测试目录，验证双向可见与写入，再清理测试目录。此次远端新建目录最初因 rclone 默认目录缓存而延迟可见；将 `--dir-cache-time 2s --poll-interval 0` 用于 WebDAV 服务后，复验约 4 秒可见。Finder 刷新不是远端数据丢失的证据。挂载依赖仿真连接、rclone 服务和本机挂载进程；任一退出应卸载并关闭本机服务，重新连接时重新验证身份与动态端口。当前并无自动重连或开机自动挂载验收。
+
+Windows 控制端可以复用**同一个 VibeKits SSH 隧道和 rclone SFTP 后端**，但不能使用 macOS 的 `mount_webdav`。推荐在已安装 WinFsp 的 Windows 上用 `rclone mount <受管SFTP远端>:<目录> <空闲盘符> --dir-cache-time 2s --poll-interval 0` 呈现给资源管理器；从非提权的用户会话启动，避免提升权限创建的盘符在普通资源管理器中不可见。Windows 原生 WebDAV 也是一种客户端，但其 HTTP Basic 认证默认受系统限制，不应为使用本机 HTTP 映射而放宽系统注册表认证策略。无论采用哪种呈现方式，WebDAV 如启用必须只绑定回环地址，不能成为 LAN/公网文件服务。Windows 的目录双向写入、文件锁、断线恢复、盘符可见性和卸载清理**尚未真机验收**，不能把 Mac 实测当作 Windows 已完成。
+
+操作说明只记录目录、流程和非敏感参数；不保存隧道令牌、SSH 私钥、凭据、临时端口或用户文件内容。rclone 的 Windows 挂载依赖与权限边界见 [rclone mount 文档](https://rclone.org/commands/rclone_mount/#installing-on-windows)，WebDAV 服务及 Windows 客户端限制见 [rclone serve webdav 文档](https://rclone.org/commands/rclone_serve_webdav/#access-webdav-on-windows)。本次实际验收细节见 [dev.236 远程目录映射记录](acceptance/V1_9_0_DEV236_MAC_RELEASE_REMOTE_MAP_2026-09-24.md)。
+
 面向大模型的连接器只接收 `routingId`；`forceRelay` 只允许在内部验收接口使用。本地空闲端口由连接器自动分配，远端目标固定为 `127.0.0.1:32147`、桌面系统 `127.0.0.1:22`，以及 Android 设备 `127.0.0.1:5555`；任何调用方都不能传入，防止把该能力滥用为任意代理。连接过程必须依次产生：
 
 1. `listener_ready`：控制端回环监听已建立，但尚不能调用；
