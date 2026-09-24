@@ -5,7 +5,8 @@
 | 内容 | 来源与版本 | 随包许可文本 |
 | --- | --- | --- |
 | aapt 16.0.0.4-2、apksigner 37.0.0、dx 1:1.16-7 | Termux 官方包 | `termux-licenses-Apache-2.0.txt` |
-| Android API 35 `android.jar` | Android SDK；再分发条款待核验 | 待补充 |
+| 设备自带 Android 框架 | 在 PAD 上按需读取 `/system/framework/framework.jar` 与 `framework-res.apk`；不随组件分发 | 依设备系统许可 |
+| dex2jar v2.4 及依赖 | 官方 GitHub 发布包；只用于从本机框架 DEX 生成编译桩 | 工具链内 `dex2jar/LICENSE.txt`、`NOTICE.txt`、`lib/open-source-license.txt` |
 | libandroid-shmem 0.7 | Termux 官方包 | `libandroid-shmem-copyright` |
 | libandroid-spawn 0.3 | Termux 官方包 | `libandroid-spawn-LICENSE` |
 | libexpat 2.8.5 | Termux 官方包 | `libexpat-copyright` |

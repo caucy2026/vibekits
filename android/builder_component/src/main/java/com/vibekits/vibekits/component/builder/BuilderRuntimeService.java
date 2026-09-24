@@ -38,7 +38,7 @@ import java.util.zip.ZipInputStream;
 public final class BuilderRuntimeService extends Service {
     private static final String ARCHIVE = "pad-builder-toolchain-arm64.zip";
     private static final String ARCHIVE_SHA256 =
-        "367d0f2327bf28b57509351fd06afb38656e7e9b2562a9ad46e72720c91f1452";
+        "bcacea0edd080e7aff7d1c2ec4c68bd0acdc6d5ad47ec914a67e651016f6cf17";
     private static final Pattern TASK_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
     private static final Pattern PACKAGE = Pattern.compile("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+");
     private static final Pattern APK_PACKAGE = Pattern.compile("package: name='([^']+)'");
@@ -186,10 +186,11 @@ public final class BuilderRuntimeService extends Service {
             }
             File aapt = path(toolchain, "bin/aapt");
             File java = path(toolchain, "java-21-openjdk/bin/java");
-            File jar = path(toolchain, "android.jar");
-            if (!aapt.isFile() || !java.isFile() || !jar.isFile()) {
+            if (!aapt.isFile() || !java.isFile()) {
                 throw new IOException("incomplete builder toolchain");
             }
+            DeviceFrameworkClasspath.resources();
+            DeviceFrameworkClasspath.ensure(toolchain, getCacheDir());
             File smokeMarker = path(toolchain, ".smoke-ok");
             if (!ARCHIVE_SHA256.equals(readSmall(smokeMarker))) {
                 File sample = new File(getCacheDir(), "builder-smoke");
@@ -198,8 +199,13 @@ public final class BuilderRuntimeService extends Service {
                 File source = path(src, "app/src/main/java/com/vibekits/buildersmoke/Smoke.java");
                 write(manifest, "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
                     "package=\"com.vibekits.buildersmoke\"><uses-sdk android:minSdkVersion=\"24\" " +
-                    "android:targetSdkVersion=\"31\"/><application/></manifest>");
-                write(source, "package com.vibekits.buildersmoke; public final class Smoke {}\n");
+                    "android:targetSdkVersion=\"31\"/><application><activity android:name=\".Smoke\" " +
+                    "android:exported=\"true\"/></application></manifest>");
+                write(source, "package com.vibekits.buildersmoke; " +
+                    "public final class Smoke extends android.app.Activity { " +
+                    "public void onCreate(android.os.Bundle state) { super.onCreate(state); " +
+                    "android.widget.TextView text = new android.widget.TextView(this); " +
+                    "text.setText(\"PAD builder ready\"); setContentView(text); } }\n");
                 File output = buildProject(new Job("smoke", "com.vibekits.buildersmoke", null, null),
                     src, new File(sample, "out"));
                 if (!output.isFile() || output.length() == 0) throw new IOException("empty smoke APK");
@@ -307,7 +313,7 @@ public final class BuilderRuntimeService extends Service {
             generated.getAbsolutePath(), "-M", manifest.getAbsolutePath());
         File res = path(src, "app/src/main/res");
         if (res.isDirectory()) { aapt.add("-S"); aapt.add(res.getAbsolutePath()); }
-        aapt.add("-I"); aapt.add(path(toolchain, "android.jar").getAbsolutePath());
+        aapt.add("-I"); aapt.add(DeviceFrameworkClasspath.resources().getAbsolutePath());
         aapt.add("-F"); aapt.add(unsigned.getAbsolutePath());
         runStep(job, "resources", aapt, out);
         List<File> sources = new ArrayList<>();
@@ -315,7 +321,8 @@ public final class BuilderRuntimeService extends Service {
         collectJava(generated, sources);
         if (sources.isEmpty()) throw new IOException("no Java source files");
         List<String> javac = command("java-21-openjdk/bin/javac", "-source", "8", "-target", "8",
-            "-cp", path(toolchain, "android.jar").getAbsolutePath(), "-d", classes.getAbsolutePath());
+            "-cp", path(toolchain, "device-android-api.jar").getAbsolutePath(),
+            "-d", classes.getAbsolutePath());
         for (File source : sources) javac.add(source.getAbsolutePath());
         runStep(job, "java", javac, out);
         runStep(job, "dex", list("/system/bin/dalvikvm", "-Xmx256m", "-cp",
