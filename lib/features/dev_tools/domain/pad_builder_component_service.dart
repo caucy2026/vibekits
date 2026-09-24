@@ -137,14 +137,8 @@ class PadBuilderComponentService {
     ValueChanged<double>? onProgress,
   }) {
     if (status.item == null ||
-        !const <PadBuilderComponentState>{
-          PadBuilderComponentState.availableInMarket,
-          PadBuilderComponentState.termuxAvailableInMarket,
-        }.contains(status.state)) {
+        status.state != PadBuilderComponentState.availableInMarket) {
       throw StateError('编译组件未上架或市场安装信息不完整');
-    }
-    if (status.state == PadBuilderComponentState.termuxAvailableInMarket) {
-      return _market.downloadAndOpen(status.item!, onProgress: onProgress);
     }
     return _market.installComponent(status.item!, onProgress: onProgress);
   }

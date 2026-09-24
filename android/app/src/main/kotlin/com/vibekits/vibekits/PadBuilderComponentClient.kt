@@ -19,6 +19,7 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -30,12 +31,10 @@ internal class PadBuilderComponentClient(context: Context) {
     private val serviceClass = "$componentPackage.BuilderRuntimeService"
     private val taskIdPattern = Regex("[A-Za-z0-9_-]{1,64}")
     private val packagePattern = Regex("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+")
-    @Volatile private var runtime: IBuilderRuntime? = null
-    private var connection: ServiceConnection? = null
-
     fun handle(
         method: String,
         sourceDirectory: String?,
+        workspaceRoot: String?,
         expectedPackage: String?,
         taskId: String?,
         result: MethodChannel.Result,
@@ -43,18 +42,20 @@ internal class PadBuilderComponentClient(context: Context) {
         Thread({
             val response = try {
                 verifyPackage()
-                val service = connect()
-                when (method) {
-                    "componentStatus" -> payload(service.getRuntimeStatus())
-                    "startBuild" -> start(service, sourceDirectory, expectedPackage, taskId)
-                    "buildStatus" -> status(service, taskId)
-                    "prepareInstall" -> prepareInstall(service, taskId)
-                    "cancelBuild" -> {
-                        require(taskId != null && taskIdPattern.matches(taskId)) { "任务 ID 无效" }
-                        service.cancelBuild(taskId)
-                        payload(service.getBuildStatus(taskId))
+                withService { service ->
+                    when (method) {
+                        "componentStatus" -> payload(service.getRuntimeStatus())
+                        "startBuild" -> start(service, sourceDirectory, workspaceRoot,
+                            expectedPackage, taskId)
+                        "buildStatus" -> status(service, taskId)
+                        "prepareInstall" -> prepareInstall(service, taskId)
+                        "cancelBuild" -> {
+                            require(taskId != null && taskIdPattern.matches(taskId)) { "任务 ID 无效" }
+                            service.cancelBuild(taskId)
+                            payload(service.getBuildStatus(taskId))
+                        }
+                        else -> throw IllegalArgumentException("未知 PAD 编译组件操作")
                     }
-                    else -> throw IllegalArgumentException("未知 PAD 编译组件操作")
                 }
             } catch (error: Exception) {
                 mapOf("available" to false, "buildReady" to false,
@@ -67,14 +68,17 @@ internal class PadBuilderComponentClient(context: Context) {
     private fun start(
         service: IBuilderRuntime,
         sourceDirectory: String?,
+        workspaceRoot: String?,
         expectedPackage: String?,
         taskId: String?,
     ): Map<String, Any?> {
         require(taskId != null && taskIdPattern.matches(taskId)) { "任务 ID 无效" }
         require(expectedPackage != null && packagePattern.matches(expectedPackage)) { "APK 包名无效" }
-        val workspace = File(app.filesDir, "Vibekits/workspace").canonicalFile
+        require(!workspaceRoot.isNullOrBlank()) { "PAD Harness 工作区无效" }
+        val workspace = File(workspaceRoot).canonicalFile
         val source = File(sourceDirectory ?: "").canonicalFile
-        require(source.isDirectory && source.path.startsWith(workspace.path + File.separator)) {
+        require(workspace.isDirectory && source.isDirectory &&
+            (source == workspace || source.path.startsWith(workspace.path + File.separator))) {
             "源码必须位于 PAD Harness 工作区"
         }
         val manifest = File(source, "app/src/main/AndroidManifest.xml")
@@ -198,27 +202,25 @@ internal class PadBuilderComponentClient(context: Context) {
         }
     }
 
-    @Synchronized private fun connect(): IBuilderRuntime {
-        runtime?.let { return it }
+    private fun <T> withService(action: (IBuilderRuntime) -> T): T {
         val latch = CountDownLatch(1)
+        val runtime = AtomicReference<IBuilderRuntime?>()
         val current = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                runtime = IBuilderRuntime.Stub.asInterface(binder)
+                runtime.set(IBuilderRuntime.Stub.asInterface(binder))
                 latch.countDown()
             }
-            override fun onServiceDisconnected(name: ComponentName?) { runtime = null }
+            override fun onServiceDisconnected(name: ComponentName?) { runtime.set(null) }
         }
         val intent = Intent().setClassName(componentPackage, serviceClass)
         check(app.bindService(intent, current, Context.BIND_AUTO_CREATE)) { "PAD 编译服务不可用" }
-        connection = current
-        check(latch.await(8, TimeUnit.SECONDS) && runtime != null) { "PAD 编译服务连接超时" }
-        return runtime!!
+        try {
+            check(latch.await(8, TimeUnit.SECONDS)) { "PAD 编译服务连接超时" }
+            return action(checkNotNull(runtime.get()) { "PAD 编译服务已断开" })
+        } finally {
+            app.unbindService(current)
+        }
     }
 
-    fun close() {
-        val current = connection ?: return
-        connection = null
-        runtime = null
-        app.unbindService(current)
-    }
+    fun close() = Unit
 }

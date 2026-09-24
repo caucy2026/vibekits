@@ -47,19 +47,30 @@ public final class BuilderStatusActivity extends Activity {
 
     private void poll() {
         if (runtime == null || isFinishing()) return;
-        try {
-            JSONObject status = new JSONObject(runtime.getRuntimeStatus());
-            String phase = status.optString("state");
-            String error = status.optString("error");
-            label.setText("PAD 编译组件：" + phase + (error.isEmpty() ? "" : "\n" + error));
-            Log.i("PAD_BUILDER_COMPONENT", "state=" + phase + " buildReady=" +
-                status.optBoolean("buildReady") + (error.isEmpty() ? "" : " error=" + error));
-            if ("preparing".equals(phase) && ++polls < 180) {
-                handler.postDelayed(this::poll, 500);
+        IBuilderRuntime current = runtime;
+        new Thread(() -> {
+            try {
+                JSONObject status = new JSONObject(current.getRuntimeStatus());
+                handler.post(() -> {
+                    if (isFinishing() || runtime != current) return;
+                    String phase = status.optString("state");
+                    String error = status.optString("error");
+                    label.setText("PAD 编译组件：" + phase +
+                        (error.isEmpty() ? "" : "\n" + error));
+                    Log.i("PAD_BUILDER_COMPONENT", "state=" + phase + " buildReady=" +
+                        status.optBoolean("buildReady") +
+                        (error.isEmpty() ? "" : " error=" + error));
+                    if ("preparing".equals(phase) && ++polls < 180) {
+                        handler.postDelayed(this::poll, 500);
+                    }
+                });
+            } catch (RemoteException | org.json.JSONException error) {
+                handler.post(() -> {
+                    if (!isFinishing()) label.setText("读取编译组件状态失败：" +
+                        error.getClass().getSimpleName());
+                });
             }
-        } catch (RemoteException | org.json.JSONException error) {
-            label.setText("读取编译组件状态失败：" + error.getClass().getSimpleName());
-        }
+        }, "PadBuilderStatus").start();
     }
 
     @Override protected void onDestroy() {

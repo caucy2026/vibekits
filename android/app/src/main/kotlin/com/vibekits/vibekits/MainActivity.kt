@@ -244,6 +244,7 @@ open class MainActivity : FlutterActivity() {
                         val client = padBuilderComponent
                             ?: PadBuilderComponentClient(this).also { padBuilderComponent = it }
                         client.handle(call.method, call.argument<String>("sourceDirectory"),
+                            call.argument<String>("workspaceRoot"),
                             call.argument<String>("expectedPackageName"),
                             call.argument<String>("taskId"), result)
                     }

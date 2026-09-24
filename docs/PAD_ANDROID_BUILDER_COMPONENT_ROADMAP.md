@@ -39,7 +39,7 @@ PAD63 实测：现有 `com.termux` APK 33 MB，但 `/data/data/com.termux/files/
 
 ## PAD Harness 的任务路由
 
-用户说“在 PAD 上编译代码或 APK”时，PAD Harness 先调用 `vibekits.android.builder_component_status`。优先精确包名的专用构建组件；若尚未上架，检查商城中的原签名 `com.termux` 作为受权限约束的过渡依赖。已安装但 `buildReady=false` 表示只有包名/versionCode，工具链仍未验收；缺失且市场记录可信时调用 `vibekits.android.builder_component_install`，该工具会下载校验并打开 Android 系统安装确认，不能把“打开安装器”说成“安装成功”。用户确认后重查版本，再做构建服务握手。商城没有包、元数据缺 HTTPS/字节/SHA-256、签名不符或权限被拒绝时，保留原会话和源码并报告准确状态，不转去控制端代编、临时 HTTP 桥或现场重建 Android 工具链。
+用户说“在 PAD 上编译代码或 APK”时，PAD Harness 先调用 `vibekits.android.builder_component_status`。仅把精确包名的专用构建组件当作可安装的编译环境；原签名 `com.termux` 即使已在商城或本机，也只供诊断，不能代替完整离线组件。已安装但 `buildReady=false` 表示只有包名/versionCode，工具链仍未验收；缺失且市场记录可信时调用 `vibekits.android.builder_component_install`，该工具会下载校验并打开 Android 系统安装确认，不能把“打开安装器”说成“安装成功”。用户确认后重查版本，再做构建服务握手。商城没有包、元数据缺 HTTPS/字节/SHA-256、签名不符或权限被拒绝时，保留原会话和源码并报告准确状态，不转去控制端代编、临时 HTTP 桥或现场重建 Android 工具链。
 
 任务中的“编译”指 PAD 本机真正执行构建；Harness 可生成源码，但编译环境只能来自经 KEMI 商城验证并已安装的完整组件。组件缺失时应保持当前会话与源码，提示“正在检查/需要安装 PAD 编译组件”，由商城安装完成后继续同一任务。不能把桌面编译产物、下载 Termux 后现场组装工具链、或仅检查 `aapt` 命令存在，称作已满足请求。
 
@@ -51,7 +51,7 @@ Termux 的[官方 RUN_COMMAND 契约](https://github.com/termux/termux-app/wiki/
 
 - 宿主已将 `com.vibekits.vibekits.component.builder` 作为保留组件 ID 识别，按真实 PackageManager versionCode 查询；同签名宿主安装白名单已加入该精确包名。伪造原生包名会在下载前被拒绝。商城回归测试 28/28 通过。
 - PAD Harness 的移动端任务规则与 MCP 工具已接入：收到“在 PAD 编译”先查组件状态，只有完整可信的商城条目才能发起下载并打开系统安装确认；安装动作不冒充构建完成。查询工具会明确标记 `buildReady=false`，直到受限服务在真机完成原生构建握手。商城、Harness 桥接、能力目录和 DeepSeek 相关回归通过（既有 1 项按条件跳过）；Dart 静态分析与 Android Kotlin 编译通过。
-- 当专用构建组件未上架时，商城发现支持原包名 `com.termux` 的独立 APK；伪造 `android_package_name` 的条目在下载前被拒绝。Termux 安装只解决依赖入口，不代表其权限、包集和构建结果已经验收。
+- 当专用构建组件未上架时，商城诊断仍可发现原包名 `com.termux` 的独立 APK；但 PAD 编译任务入口现在明确拒绝把它当作完整组件安装。伪造 `android_package_name` 的条目在下载前被拒绝。Termux 仅用于开发对照，不代表其权限、包集和构建结果已经验收。
 - 2026-09-24 公共商城 `api/store/apps?os=android` 分别搜索 `Termux` 和 `VibeKits 编译组件`，两次均返回 `status=200, total=0, list=[]`。因此目前只能证明客户端路由，不能在 PAD63 演示“从商城安装”；发布前须有真实签名包、完整条目和设备端验收。
 - 2026-09-24 实机候选 dev.253+2253：Release APK 85,027,740 字节，以既有 PAD 签名编译并安装到 63 号 PAD，PackageManager 回报已安装 dev.253。应用可以启动。安装传输后仿真 ADB 隧道离线；用已验证的同一设备 LAN ADB 查询确认安装成功，仿真重连报告托管 Harness 访问被禁用，故此轮不能声称完成远程 Harness 工具调用。
 - 实机 Termux 已安装，但 VibeKits 的 `com.termux.permission.RUN_COMMAND` 初始为 `granted=false`，Termux 的 `allow-external-apps` 仍是注释状态。测试时临时授予了前一权限，随后已撤销恢复原状；后一配置始终未开启。因此工具命令实际执行、原生 APK 编译和从商城安装均未通过。专用组件必须避免让用户自行搭建整套 Termux 环境。
@@ -62,3 +62,6 @@ Termux 的[官方 RUN_COMMAND 契约](https://github.com/termux/termux-app/wiki/
 - 同签名的独立测试客户端在 PAD63 经 Binder 递交源码 ZIP，组件回传 8,535 字节已签名 APK；客户端复核包名 `com.vibekits.builderipcprobe` 与 SHA-256 `5d8085262e9c80f846c30f02b0dca6f5e2865c53c49b81645f6e9a3f65faa897`。这证明跨应用 IPC 与真实编译闭环，不等同于 VibeKits Harness 自己已调用成功。
 - 宿主新增同签名 Binder 客户端及 `builder_component_build/task_status/cancel/install_apk` 工具，任务源码限于 PAD 工作区，完成时重新核对 APK 包名、字节、SHA-256。宿主 Release Kotlin 编译、Dart 静态分析和 Harness/商城回归通过；此版宿主尚未安装到 PAD63 做 Harness 会话实测。PAD63 随后局域网 ADB 与仿真 ID 均暂时离线，故主程序端到端验收、断网/重启验收及商城下载升级仍未完成。
 - 当前组件只支持有 `app/src/main/AndroidManifest.xml` 和 Java 源码的 Android 项目，可包含 XML 资源；使用组件私有的开发签名，不支持把任意 Flutter/Kotlin/C++/Gradle 工程误报为可编译。下一阶段须完成宿主实机调用、系统安装确认和恢复验收，再取得可复现供应链证据并发布可信商城条目。未完成这些前 P06/P12/P13 仍为 BLOCK。
+- 宿主源码入口已改为相对当前 Harness 工作区的项目路径（根目录填 `.`），由 Flutter 桥先拒绝绝对路径、`..` 和符号链接，再由 Android 宿主核对真实工作区边界；不再把工作区硬编码为默认目录。每次 Binder 状态/构建调用完即解除绑定，避免只查一次状态便让服务空闲常驻；首次解包及自检最多等待 90 秒再返回状态，诊断页在后台等待，主线程只更新文字。
+- 2026-09-24 本轮 Harness/商城 71 项测试通过（1 项按条件跳过），新增相对路径契约与 Termux 不可代替正式组件的回归通过；Dart 静态分析和 Android 宿主/组件 Release 编译通过。最终组件候选 `1.0.1`（versionCode 2）Release APK 为 91,223,704 字节，SHA-256 `27b4148f083d45223b2fbb5553bd397b54642b2bbfc76d27c3f0752ca2fb480b`，证书 SHA-256 仍为 `c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8`，内嵌工具链 ZIP 哈希与固定值一致。宿主候选 `1.9.0-dev.254+2254` 为 86,846,549 字节，SHA-256 `1fea55f39f587b27c945f91a4d4e7db4f48cdf62b08ad5c95b50c01181515209`，同一证书。两个包尚未在 PAD63 以最终字节实装验证，不能据此解除真机与商城门禁。
+- PAD63 在本轮重试时，局域网 ADB `192.168.3.63:5555` 连接超时，仿真 ID `6795854383` 返回 `Remote desktop is offline`。设备恢复后先安装上述精确哈希候选，验证首次自检、独立客户端 Binder 编译、宿主 Harness 会话、构建完释放服务、重启持久状态和第二屏运行。离线期间不改用控制端代编充当 PAD 验收。

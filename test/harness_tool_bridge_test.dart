@@ -34,6 +34,7 @@ void main() {
     expect(termux.risk, HarnessToolRisk.readOnly);
     expect(status.description, contains('已安装不等于工具链可用'));
     expect(install.description, contains('Android 系统安装确认'));
+    expect(install.description, contains('Termux 不能代替此组件'));
     expect(status.available, Platform.isAndroid);
     expect(install.available, Platform.isAndroid);
     expect(termux.available, Platform.isAndroid);
@@ -42,6 +43,14 @@ void main() {
     expect(cancel.risk, HarnessToolRisk.writesData);
     expect(installApk.risk, HarnessToolRisk.controlsDevice);
     expect(build.available, Platform.isAndroid);
+    expect(
+      build.inputSchema['properties'],
+      isA<Map>().having(
+        (properties) => properties['sourceDirectory'].toString(),
+        'sourceDirectory contract',
+        contains('相对路径'),
+      ),
+    );
   });
 
   test('远程仿真目录公开 Harness 全自动会话闭环', () async {

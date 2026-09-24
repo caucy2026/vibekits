@@ -1330,7 +1330,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderInstallId,
       name: '从 KEMI 商城安装 PAD 编译组件',
       description:
-          '仅在用户明确需要 PAD 本机原生编译时调用。优先同签名构建组件，商城未上架时可安装原签名 Termux；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查安装状态与工具链权限。',
+          '仅在用户明确需要 PAD 本机原生编译时调用。只安装同签名的完整 PAD 编译组件；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查组件自检状态。Termux 不能代替此组件。',
       risk: HarnessToolRisk.writesData,
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
@@ -1342,7 +1342,7 @@ class VibekitsHarnessToolBridge {
           '仅调用已安装、同签名且自检成功的 KEMI PAD 编译组件。源码必须在 PAD Harness 工作区，编译、DEX 和签名全在 PAD 上完成；返回任务 ID 后按状态工具查询，不由控制端代编。',
       risk: HarnessToolRisk.writesData,
       properties: <String, Object?>{
-        'sourceDirectory': _string('PAD 工作区内含 app/src/main 的项目绝对路径'),
+        'sourceDirectory': _string('PAD 工作区内含 app/src/main 的项目相对路径；工作区根目录填 .'),
         'packageName': _string('预期 APK 包名，例如 com.example.game'),
       },
       required: <String>['sourceDirectory', 'packageName'],
@@ -3270,7 +3270,7 @@ class VibekitsHarnessToolBridge {
     final component = PadBuilderComponentService();
     try {
       final status = await component.check();
-      final isTermux =
+      final hasTermux =
           status.state == PadBuilderComponentState.termuxInstalled ||
           status.state == PadBuilderComponentState.termuxAvailableInMarket;
       if (status.state == PadBuilderComponentState.installed) {
@@ -3288,15 +3288,14 @@ class VibekitsHarnessToolBridge {
         };
       }
       return <String, Object?>{
-        'packageName': isTermux
-            ? PadBuilderComponentService.termuxPackageName
-            : PadBuilderComponentService.packageName,
-        'state': status.state.name,
-        'installedVersionCode': status.versionCode,
-        'marketVersionCode': status.item?.versionCode,
+        'packageName': PadBuilderComponentService.packageName,
+        'state': hasTermux ? 'notListed' : status.state.name,
+        if (hasTermux) 'legacyTermuxState': status.state.name,
+        'installedVersionCode': hasTermux ? null : status.versionCode,
+        'marketVersionCode': hasTermux ? null : status.item?.versionCode,
         'buildReady': false,
-        'reason': isTermux
-            ? 'Termux 已安装或可从商城安装，但 RUN_COMMAND 授权、工具链与 PAD 构建尚未验收'
+        'reason': hasTermux
+            ? '专用 PAD 编译组件尚未上架；Termux 不能代替完整离线编译组件'
             : '编译工具链服务尚未通过 PAD 真机构建握手，不能声明可编译 APK',
       };
     } finally {
@@ -3311,7 +3310,7 @@ class VibekitsHarnessToolBridge {
     if (!Platform.isAndroid) throw UnsupportedError('PAD 编译组件仅适用于 Android');
     final response = await const MethodChannel('vibekits/pad-builder')
         .invokeMapMethod<String, Object?>(method, arguments)
-        .timeout(const Duration(seconds: 30));
+        .timeout(Duration(seconds: method == 'componentStatus' ? 110 : 30));
     if (response == null) throw StateError('PAD 编译组件未返回结果');
     return <String, Object?>{...response};
   }
@@ -3319,14 +3318,21 @@ class VibekitsHarnessToolBridge {
   Future<Map<String, Object?>> _padBuilderBuild(
     Map<String, Object?> arguments,
   ) async {
-    final source = (arguments['sourceDirectory'] ?? '').toString().trim();
+    if ((arguments['sourceDirectory'] ?? '').toString().trim().isEmpty) {
+      throw const FormatException('必须提供 PAD 工作区内的项目相对路径；根目录填 .');
+    }
+    final source = _resolveWorkspacePath(
+      arguments['sourceDirectory'],
+      allowRoot: true,
+    );
     final packageName = (arguments['packageName'] ?? '').toString().trim();
-    if (source.isEmpty || packageName.isEmpty) {
+    if (packageName.isEmpty) {
       throw const FormatException('必须提供 PAD 源码目录和预期 APK 包名');
     }
     final taskId = 'pad${DateTime.now().microsecondsSinceEpoch}';
     final result = await _padBuilderNative('startBuild', <String, Object?>{
       'sourceDirectory': source,
+      'workspaceRoot': _workspaceDirectory.path,
       'expectedPackageName': packageName,
       'taskId': taskId,
     });
@@ -3385,8 +3391,7 @@ class VibekitsHarnessToolBridge {
     final component = PadBuilderComponentService();
     try {
       final status = await component.check();
-      if (status.state != PadBuilderComponentState.availableInMarket &&
-          status.state != PadBuilderComponentState.termuxAvailableInMarket) {
+      if (status.state != PadBuilderComponentState.availableInMarket) {
         return <String, Object?>{
           'installerOpened': false,
           'state': status.state.name,

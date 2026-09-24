@@ -65,6 +65,7 @@ void main() {
     final termux = await component.check();
     expect(termux.state, PadBuilderComponentState.termuxAvailableInMarket);
     expect(termux.item?.packageName, 'com.termux');
+    expect(() => component.requestInstall(termux), throwsStateError);
 
     listing = AppCenterItem.fromJson({
       ..._itemJson(os: 'android'),

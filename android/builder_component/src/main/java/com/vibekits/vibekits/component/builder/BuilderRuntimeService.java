@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -48,12 +49,17 @@ public final class BuilderRuntimeService extends Service {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ConcurrentHashMap<String, Job> jobs = new ConcurrentHashMap<>();
     private final AtomicInteger activeJobs = new AtomicInteger();
+    private final CountDownLatch prepared = new CountDownLatch(1);
     private volatile String phase = "preparing";
     private volatile String runtimeError = "";
     private File toolchain;
 
     private final IBuilderRuntime.Stub binder = new IBuilderRuntime.Stub() {
         @Override public String getRuntimeStatus() {
+            if ("preparing".equals(phase)) {
+                try { prepared.await(90, TimeUnit.SECONDS); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+            }
             JSONObject value = new JSONObject();
             put(value, "state", phase);
             put(value, "buildReady", "ready".equals(phase));
@@ -203,6 +209,8 @@ public final class BuilderRuntimeService extends Service {
         } catch (Exception error) {
             runtimeError = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
             phase = "failed";
+        } finally {
+            prepared.countDown();
         }
     }
 
