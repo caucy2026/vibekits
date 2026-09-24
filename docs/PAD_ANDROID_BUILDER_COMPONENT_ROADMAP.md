@@ -8,6 +8,8 @@ PAD63 实测：现有 `com.termux` APK 33 MB，但 `/data/data/com.termux/files/
 
 2026-09-24 再查 PAD63：系统 API 31、arm64；已装 `com.termux` 的 targetSdk 28；独立 `com.vibekits.vibekits.component.builder` 尚未安装。不能把现有 Termux 当作已交付的商城组件，也不能为了沿用旧版可执行文件策略让新组件无评估地降到 targetSdk 28。
 
+进一步对 PAD63 的现有工具链做只读二进制检查：`aapt` 文件内含 `/data/data/com.termux/files/usr`；`javac` 为 ELF 启动器，运行库路径含该前缀；`dx` 脚本首行是 `#!/data/data/com.termux/files/usr/bin/sh`，并从该前缀加载 `dx.jar`。这直接否定“把现有 bin 目录复制到独立 APK 即可运行”的捷径，专用组件需要重建/移植工具链或换用不依赖固定前缀的实现。
+
 ## 选择的交付结构
 
 1. 保留 PAD 主包中的 Harness、仿真服务和 ADB 辅助组件，不依赖编译组件即可正常启动与远程调试。
