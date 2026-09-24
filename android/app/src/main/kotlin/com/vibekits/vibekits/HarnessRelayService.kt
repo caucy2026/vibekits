@@ -20,6 +20,8 @@ import ffi.FFI
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * VibeKits-owned rendezvous/P2P/HBBR transport process.
@@ -39,6 +41,26 @@ class HarnessRelayService : Service() {
     }
 
     private val messenger = Messenger(IncomingHandler(Looper.getMainLooper()))
+    private val padAdbFallback = PadAdbFallbackServer()
+    private var uiBound = false
+    private val handler = Handler(Looper.getMainLooper())
+    private val adbWatch = object : Runnable {
+        override fun run() {
+            if (!getSharedPreferences("simulator_service", MODE_PRIVATE)
+                    .getBoolean("enabled", false)) return
+            Thread({
+                try {
+                    Socket().use { it.connect(InetSocketAddress("127.0.0.1", 5555), 300) }
+                } catch (_: Exception) {
+                    val intent = Intent("com.vibekits.vibekits.action.ENSURE_REMOTE_ADB")
+                        .setClassName(RemoteAdbBootstrap.helperPackage,
+                            "com.vibekits.vibekits.component.adb.RemoteAdbReceiver")
+                    sendBroadcast(intent, "com.vibekits.vibekits.permission.REMOTE_ADB")
+                }
+            }, "PadAdbHealthCheck").start()
+            handler.postDelayed(this, 15_000)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -72,7 +94,24 @@ class HarnessRelayService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder = messenger.binder
+    override fun onBind(intent: Intent?): IBinder {
+        uiBound = true
+        padAdbFallback.stop()
+        return messenger.binder
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        uiBound = false
+        if (getSharedPreferences("simulator_service", MODE_PRIVATE)
+                .getBoolean("enabled", false)) padAdbFallback.start()
+        return true
+    }
+
+    override fun onRebind(intent: Intent?) {
+        uiBound = true
+        padAdbFallback.stop()
+        super.onRebind(intent)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action != KEEP_ALIVE && intent != null) return START_NOT_STICKY
@@ -97,11 +136,16 @@ class HarnessRelayService : Service() {
         if (getSharedPreferences("simulator_service", MODE_PRIVATE)
                 .getBoolean("enabled", false)) {
             FFI.harnessSetSimulatorAccess(true)
+            if (!uiBound) padAdbFallback.start()
+            handler.removeCallbacks(adbWatch)
+            handler.post(adbWatch)
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(adbWatch)
+        padAdbFallback.stop()
         Log.i(TAG, "VibeKits embedded Harness transport stopping")
         super.onDestroy()
         // The Rust rendezvous worker is process-scoped. This service is the
@@ -148,9 +192,18 @@ class HarnessRelayService : Service() {
                     HarnessRelayClient.SIMULATOR_ACCESS -> response.putBoolean(
                         "ok", FFI.harnessSetSimulatorAccess(request.getBoolean("enabled", false))
                             .also { accepted ->
-                                if (accepted) getSharedPreferences("simulator_service", MODE_PRIVATE)
-                                    .edit().putBoolean("enabled", request.getBoolean("enabled", false))
-                                    .apply()
+                                if (accepted) {
+                                    val enabled = request.getBoolean("enabled", false)
+                                    getSharedPreferences("simulator_service", MODE_PRIVATE)
+                                        .edit().putBoolean("enabled", enabled).commit()
+                                    if (enabled) {
+                                        handler.removeCallbacks(adbWatch)
+                                        handler.post(adbWatch)
+                                    } else {
+                                        handler.removeCallbacks(adbWatch)
+                                        padAdbFallback.stop()
+                                    }
+                                }
                             },
                     )
                     HarnessRelayClient.CONNECTIONS -> response.putString("json", FFI.harnessConnections())

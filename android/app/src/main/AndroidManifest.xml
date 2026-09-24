@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
@@ -42,6 +43,15 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:process=":vibekits_harness" />
+        <receiver
+            android:name=".PadSimulatorBootReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:process=":vibekits_harness">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".RemoteAdbInstallReceiver"
             android:exported="false" />

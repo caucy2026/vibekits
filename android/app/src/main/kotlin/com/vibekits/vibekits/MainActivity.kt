@@ -464,7 +464,16 @@ open class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, harnessRelayChannelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "inspect" -> relayClient.request(HarnessRelayClient.STATUS, emptyMap(), result)
+                    "inspect" -> {
+                        // A closed PAD simulator must not bind/start the 30 MB
+                        // transport merely because the settings page polls ID.
+                        val enabled = runCatching {
+                            readCredential("harness-simulator-v1-enabled") == "true"
+                        }.getOrDefault(false)
+                        if (enabled) relayClient.request(HarnessRelayClient.STATUS, emptyMap(), result)
+                        else result.success(mapOf("json" to
+                            "{\"state\":\"disabled\",\"callable\":false}"))
+                    }
                     "setSimulatorAccess" -> {
                         val enabled = call.argument<Boolean>("enabled") ?: false
                         val serviceIntent = Intent(this, HarnessRelayService::class.java)
@@ -477,6 +486,7 @@ open class MainActivity : FlutterActivity() {
                                         if (!enabled || (value as? Map<*, *>)?.get("ok") != true) {
                                             pendingSimulatorForeground = false
                                             stopService(serviceIntent)
+                                            if (!enabled) relayClient.close()
                                         }
                                         result.success(value)
                                     }
@@ -528,7 +538,16 @@ open class MainActivity : FlutterActivity() {
                     "stop" -> relayClient.request(
                         HarnessRelayClient.STOP,
                         emptyMap(),
-                        result,
+                        object : MethodChannel.Result {
+                            override fun success(value: Any?) {
+                                relayClient.close()
+                                result.success(value)
+                            }
+                            override fun error(code: String, message: String?, details: Any?) {
+                                result.error(code, message, details)
+                            }
+                            override fun notImplemented() { result.notImplemented() }
+                        },
                     )
                     else -> result.notImplemented()
                 }
