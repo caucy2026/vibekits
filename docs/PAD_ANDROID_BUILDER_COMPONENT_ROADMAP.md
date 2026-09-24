@@ -41,6 +41,8 @@ PAD63 实测：现有 `com.termux` APK 33 MB，但 `/data/data/com.termux/files/
 
 用户说“在 PAD 上编译代码或 APK”时，PAD Harness 先调用 `vibekits.android.builder_component_status`。仅把精确包名的专用构建组件当作可安装的编译环境；原签名 `com.termux` 即使已在商城或本机，也只供诊断，不能代替完整离线组件。已安装但 `buildReady=false` 表示只有包名/versionCode，工具链仍未验收；缺失且市场记录可信时调用 `vibekits.android.builder_component_install`，该工具会下载校验并打开 Android 系统安装确认，不能把“打开安装器”说成“安装成功”。用户确认后重查版本，再做构建服务握手。商城没有包、元数据缺 HTTPS/字节/SHA-256、签名不符或权限被拒绝时，保留原会话和源码并报告准确状态，不转去控制端代编、临时 HTTP 桥或现场重建 Android 工具链。
 
+`builder_component_status` 的结果必须带可执行的 `nextAction`：商城可信且组件缺失时明确指向 `builder_component_install`；未上架、元数据不完整或本机安装状态未知时明确停在相应故障，不建议另找工具链。Harness 可以先在当前工作区准备源码，但只有组件自检 `buildReady=true` 才能开始 PAD 本机编译；系统安装确认期间保留当前任务，不把安装器打开当成完成。
+
 任务中的“编译”指 PAD 本机真正执行构建；Harness 可生成源码，但编译环境只能来自经 KEMI 商城验证并已安装的完整组件。组件缺失时应保持当前会话与源码，提示“正在检查/需要安装 PAD 编译组件”，由商城安装完成后继续同一任务。不能把桌面编译产物、下载 Termux 后现场组装工具链、或仅检查 `aapt` 命令存在，称作已满足请求。
 
 对已安装的 Termux，Harness 继续调用 `vibekits.android.termux_probe`。此探针只通过官方 `RUN_COMMAND` API 执行固定的 `aapt/javac/dx/apksigner` 存在性检查，返回包版本、权限状态、命令是否齐全和有界错误；它不运行用户任意文本，不替代实际 APK 构建验收。接收结果使用一次性 PendingIntent，最多等待 15 秒，不启动常驻桥服务。

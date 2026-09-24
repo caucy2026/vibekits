@@ -33,6 +33,7 @@ void main() {
     expect(install.risk, HarnessToolRisk.writesData);
     expect(termux.risk, HarnessToolRisk.readOnly);
     expect(status.description, contains('已安装不等于工具链可用'));
+    expect(status.description, contains('Termux 不能代替此组件'));
     expect(install.description, contains('Android 系统安装确认'));
     expect(install.description, contains('Termux 不能代替此组件'));
     expect(status.available, Platform.isAndroid);

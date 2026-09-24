@@ -17,6 +17,18 @@ class PadBuilderComponentStatus {
   final PadBuilderComponentState state;
   final int? versionCode;
   final AppCenterItem? item;
+
+  String get nextAction => switch (state) {
+    PadBuilderComponentState.installed => '检查组件自检结果，确认 buildReady=true 后再编译',
+    PadBuilderComponentState.availableInMarket =>
+      '调用 vibekits.android.builder_component_install 从 KEMI 商城安装，等待系统安装确认后重新检查',
+    PadBuilderComponentState.notListed =>
+      'KEMI 商城尚未上架 PAD 编译组件；保留当前任务和源码，报告无法在 PAD 本机编译',
+    PadBuilderComponentState.incompleteMarketRecord =>
+      '商城记录缺少可信的 HTTPS、精确大小、SHA-256、包名或版本；停止安装并报告缺失项',
+    PadBuilderComponentState.unknownLocalState =>
+      '本机安装状态尚未确认；重试组件状态检查，不能改用 Termux 或其他下载源',
+  };
 }
 
 /// Only reports installation and market availability. A separate build-service

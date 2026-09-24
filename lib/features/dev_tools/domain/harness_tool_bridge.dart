@@ -1322,7 +1322,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderStatusId,
       name: '检查 PAD 本机编译组件',
       description:
-          '查询本机 Android 编译组件或官方 Termux 的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。',
+          '查询专用 PAD 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包，并按 nextAction 处理。已安装不等于工具链可用，Termux 不能代替此组件。',
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
     ),
@@ -3291,6 +3291,7 @@ class VibekitsHarnessToolBridge {
         'marketVersionCode': status.item?.versionCode,
         'buildReady': false,
         'reason': '专用 PAD 编译组件尚未安装或工具链未验收；Termux 不能代替完整离线组件',
+        'nextAction': status.nextAction,
       };
     } finally {
       component.dispose();
@@ -3390,6 +3391,7 @@ class VibekitsHarnessToolBridge {
           'installerOpened': false,
           'state': status.state.name,
           'reason': '编译组件已安装、未上架或商城安装信息不完整',
+          'nextAction': status.nextAction,
         };
       }
       await component.requestInstall(status);

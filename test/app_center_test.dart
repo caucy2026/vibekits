@@ -38,11 +38,13 @@ void main() {
     final component = PadBuilderComponentService(market: market);
     final available = await component.check();
     expect(available.state, PadBuilderComponentState.availableInMarket);
+    expect(available.nextAction, contains('builder_component_install'));
     expect(available.item, same(valid));
 
     listed = builder('http://cdn.example.test/builder.apk');
     final unsafe = await component.check();
     expect(unsafe.state, PadBuilderComponentState.incompleteMarketRecord);
+    expect(unsafe.nextAction, contains('停止安装'));
     expect(() => component.requestInstall(unsafe), throwsStateError);
   });
 
