@@ -31,6 +31,20 @@ void main() {
     final taskStatus = tools[VibekitsHarnessToolBridge.padBuilderTaskStatusId]!;
     final cancel = tools[VibekitsHarnessToolBridge.padBuilderCancelId]!;
     final installApk = tools[VibekitsHarnessToolBridge.padBuilderInstallApkId]!;
+    final genericBuild = tools[VibekitsHarnessToolBridge.projectBuildId]!;
+    expect(
+      VibekitsHarnessToolBridge.requiresDesktopNode(
+        VibekitsHarnessToolBridge.projectBuildId,
+      ),
+      isFalse,
+    );
+    expect(
+      genericBuild.risk,
+      Platform.isAndroid
+          ? HarnessToolRisk.readOnly
+          : HarnessToolRisk.writesData,
+    );
+    expect(genericBuild.description, contains('商城专用编译组件'));
     expect(status.risk, HarnessToolRisk.readOnly);
     expect(install.risk, HarnessToolRisk.writesData);
     expect(waitInstall.risk, HarnessToolRisk.readOnly);

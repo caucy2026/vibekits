@@ -1307,8 +1307,10 @@ class VibekitsHarnessToolBridge {
       id: projectBuildId,
       name: '验证并编译 Vibekits APP',
       description:
-          '在指定源码工作区依次执行 Analyze、Harness 自动注册合同测试和目标平台 Release 构建。只生成 build 产物，不覆盖运行中的 APP。',
-      risk: HarnessToolRisk.writesData,
+          '桌面端在指定源码工作区执行 Analyze、合同测试和 Release 构建；PAD 端只返回 KEMI 商城专用编译组件状态与下一步操作，不运行通用构建。',
+      risk: Platform.isAndroid
+          ? HarnessToolRisk.readOnly
+          : HarnessToolRisk.writesData,
       properties: <String, Object?>{
         'workspace': _string('Vibekits Flutter 工作区绝对路径'),
         'target': <String, Object?>{
@@ -2964,6 +2966,9 @@ class VibekitsHarnessToolBridge {
   /// registered desktop node. Keeping them in the schema lets Harness explain
   /// and plan the workflow instead of silently pretending the APP lacks them.
   static bool requiresDesktopNode(String toolId) {
+    // On Android project.build is a read-only redirect to the trusted PAD
+    // component state, not a desktop build request.
+    if (toolId == projectBuildId) return false;
     const Set<String> prefixes = <String>{
       'vibekits.adb.',
       'vibekits.capture.',
@@ -4263,12 +4268,23 @@ class VibekitsHarnessToolBridge {
 
   Future<Map<String, Object?>> _buildProjectIteration(
     Map<String, Object?> arguments,
-  ) => _projectIterationService.build(
-    workspace: (arguments['workspace'] ?? '').toString(),
-    target: (arguments['target'] ?? '').toString(),
-    flutterExecutable: (arguments['flutterExecutable'] ?? '').toString(),
-    runTests: arguments['runTests'] != false,
-  );
+  ) async {
+    if (Platform.isAndroid) {
+      final status = await _padBuilderStatus(const <String, Object?>{});
+      return <String, Object?>{
+        ...status,
+        'built': false,
+        'reason': 'PAD 本机编译须使用 KEMI 商城的专用编译组件；通用 Flutter 构建入口不能代替 PAD 本机编译',
+        'nextAction': status['nextAction'],
+      };
+    }
+    return _projectIterationService.build(
+      workspace: (arguments['workspace'] ?? '').toString(),
+      target: (arguments['target'] ?? '').toString(),
+      flutterExecutable: (arguments['flutterExecutable'] ?? '').toString(),
+      runTests: arguments['runTests'] != false,
+    );
+  }
 
   Future<Map<String, Object?>> _runtimeStatus(
     Map<String, Object?> arguments,
