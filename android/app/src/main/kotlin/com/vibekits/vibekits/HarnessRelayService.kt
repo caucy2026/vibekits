@@ -1,8 +1,12 @@
 package com.vibekits.vibekits
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -29,6 +33,9 @@ class HarnessRelayService : Service() {
     companion object {
         private const val TAG = "VibeHarnessTransport"
         private const val RESULT = 100
+        private const val CHANNEL = "vibekits_simulator"
+        private const val NOTIFICATION_ID = 32148
+        const val KEEP_ALIVE = "com.vibekits.vibekits.action.KEEP_SIMULATOR_ALIVE"
     }
 
     private val messenger = Messenger(IncomingHandler(Looper.getMainLooper()))
@@ -66,6 +73,33 @@ class HarnessRelayService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = messenger.binder
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action != KEEP_ALIVE && intent != null) return START_NOT_STICKY
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(
+            CHANNEL, "VibeKits 远程仿真", NotificationManager.IMPORTANCE_LOW,
+        ))
+        val notification = Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("VibeKits 远程仿真运行中")
+            .setContentText("已授权的远程设备可连接")
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIFICATION_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        // The native relay is deliberately isolated from the Flutter UI.
+        // Android can recreate this started service after reclaiming its process.
+        if (getSharedPreferences("simulator_service", MODE_PRIVATE)
+                .getBoolean("enabled", false)) {
+            FFI.harnessSetSimulatorAccess(true)
+        }
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         Log.i(TAG, "VibeKits embedded Harness transport stopping")
@@ -112,7 +146,12 @@ class HarnessRelayService : Service() {
                             .put("executable", applicationInfo.sourceDir)
                             .put("simulatorTargetSupported", true).toString())
                     HarnessRelayClient.SIMULATOR_ACCESS -> response.putBoolean(
-                        "ok", FFI.harnessSetSimulatorAccess(request.getBoolean("enabled", false)),
+                        "ok", FFI.harnessSetSimulatorAccess(request.getBoolean("enabled", false))
+                            .also { accepted ->
+                                if (accepted) getSharedPreferences("simulator_service", MODE_PRIVATE)
+                                    .edit().putBoolean("enabled", request.getBoolean("enabled", false))
+                                    .apply()
+                            },
                     )
                     HarnessRelayClient.CONNECTIONS -> response.putString("json", FFI.harnessConnections())
                     HarnessRelayClient.AUTHORIZE -> response.putBoolean(

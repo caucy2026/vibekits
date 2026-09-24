@@ -60,6 +60,7 @@ open class MainActivity : FlutterActivity() {
     private var harnessRelayClient: HarnessRelayClient? = null
     private var harnessKeyboard: HarnessCrossDisplayKeyboard? = null
     private var proxyComponent: ProxyComponentClient? = null
+    private var pendingSimulatorForeground = false
 
     protected val isDualMode: Boolean
         get() = intent?.getBooleanExtra(EXTRA_DUAL_MODE, false) == true
@@ -82,6 +83,24 @@ open class MainActivity : FlutterActivity() {
         super.onPostResume()
         applyImmersiveCanvas(window)
         window.decorView.post { continuousDisplay?.attach() }
+        if (pendingSimulatorForeground) {
+            pendingSimulatorForeground = false
+            startSimulatorForegroundService()
+        }
+    }
+
+    private fun startSimulatorForegroundService() {
+        val intent = Intent(this, HarnessRelayService::class.java)
+            .setAction(HarnessRelayService.KEEP_ALIVE)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent)
+            else startService(intent)
+        } catch (error: IllegalStateException) {
+            // Restore can run before Android marks the Activity resumed. Keep
+            // the bound transport and promote it as soon as the UI resumes.
+            pendingSimulatorForeground = true
+            Log.w("VibeHarnessTransport", "foreground promotion deferred", error)
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -446,11 +465,40 @@ open class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "inspect" -> relayClient.request(HarnessRelayClient.STATUS, emptyMap(), result)
-                    "setSimulatorAccess" -> relayClient.request(
-                        HarnessRelayClient.SIMULATOR_ACCESS,
-                        mapOf("enabled" to (call.argument<Boolean>("enabled") ?: false)),
-                        result,
-                    )
+                    "setSimulatorAccess" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val serviceIntent = Intent(this, HarnessRelayService::class.java)
+                            .setAction(HarnessRelayService.KEEP_ALIVE)
+                        try {
+                            if (enabled) startSimulatorForegroundService()
+                            relayClient.request(HarnessRelayClient.SIMULATOR_ACCESS,
+                                mapOf("enabled" to enabled), object : MethodChannel.Result {
+                                    override fun success(value: Any?) {
+                                        if (!enabled || (value as? Map<*, *>)?.get("ok") != true) {
+                                            pendingSimulatorForeground = false
+                                            stopService(serviceIntent)
+                                        }
+                                        result.success(value)
+                                    }
+                                    override fun error(code: String, message: String?, details: Any?) {
+                                        if (enabled) {
+                                            pendingSimulatorForeground = false
+                                            stopService(serviceIntent)
+                                        }
+                                        result.error(code, message, details)
+                                    }
+                                    override fun notImplemented() {
+                                        if (enabled) {
+                                            pendingSimulatorForeground = false
+                                            stopService(serviceIntent)
+                                        }
+                                        result.notImplemented()
+                                    }
+                                })
+                        } catch (error: Exception) {
+                            result.error("SIMULATOR_SERVICE_ERROR", error.message, null)
+                        }
+                    }
                     "connections" -> relayClient.request(HarnessRelayClient.CONNECTIONS, emptyMap(), result)
                     "authorize" -> relayClient.request(
                         HarnessRelayClient.AUTHORIZE,
