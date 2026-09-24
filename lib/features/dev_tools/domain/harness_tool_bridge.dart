@@ -3270,9 +3270,6 @@ class VibekitsHarnessToolBridge {
     final component = PadBuilderComponentService();
     try {
       final status = await component.check();
-      final hasTermux =
-          status.state == PadBuilderComponentState.termuxInstalled ||
-          status.state == PadBuilderComponentState.termuxAvailableInMarket;
       if (status.state == PadBuilderComponentState.installed) {
         final runtime = await _padBuilderNative('componentStatus');
         return <String, Object?>{
@@ -3289,14 +3286,11 @@ class VibekitsHarnessToolBridge {
       }
       return <String, Object?>{
         'packageName': PadBuilderComponentService.packageName,
-        'state': hasTermux ? 'notListed' : status.state.name,
-        if (hasTermux) 'legacyTermuxState': status.state.name,
-        'installedVersionCode': hasTermux ? null : status.versionCode,
-        'marketVersionCode': hasTermux ? null : status.item?.versionCode,
+        'state': status.state.name,
+        'installedVersionCode': status.versionCode,
+        'marketVersionCode': status.item?.versionCode,
         'buildReady': false,
-        'reason': hasTermux
-            ? '专用 PAD 编译组件尚未上架；Termux 不能代替完整离线编译组件'
-            : '编译工具链服务尚未通过 PAD 真机构建握手，不能声明可编译 APK',
+        'reason': '专用 PAD 编译组件尚未安装或工具链未验收；Termux 不能代替完整离线组件',
       };
     } finally {
       component.dispose();

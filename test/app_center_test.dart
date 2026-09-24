@@ -46,7 +46,7 @@ void main() {
     expect(() => component.requestInstall(unsafe), throwsStateError);
   });
 
-  test('专用组件未上架时只从商城识别原包名 Termux', () async {
+  test('PAD 编译任务不把商城 Termux 当作专用组件', () async {
     var listing = AppCenterItem.fromJson({
       ..._itemJson(os: 'android'),
       'package_name': 'com.termux',
@@ -63,8 +63,8 @@ void main() {
     addTearDown(market.dispose);
     final component = PadBuilderComponentService(market: market);
     final termux = await component.check();
-    expect(termux.state, PadBuilderComponentState.termuxAvailableInMarket);
-    expect(termux.item?.packageName, 'com.termux');
+    expect(termux.state, PadBuilderComponentState.notListed);
+    expect(termux.item, isNull);
     expect(() => component.requestInstall(termux), throwsStateError);
 
     listing = AppCenterItem.fromJson({
@@ -74,22 +74,26 @@ void main() {
       'download_url': 'https://cdn.example.test/termux.apk',
     });
     final spoofed = await component.check();
-    expect(spoofed.state, PadBuilderComponentState.incompleteMarketRecord);
+    expect(spoofed.state, PadBuilderComponentState.notListed);
     expect(() => component.requestInstall(spoofed), throwsStateError);
   });
 
-  test('已安装 Termux 不遮蔽后来上架的专用 PAD 编译组件', () async {
+  test('Termux 本地状态未知也不遮蔽已上架的专用 PAD 编译组件', () async {
     final builder = AppCenterItem.fromJson({
       ..._itemJson(os: 'android'),
       'package_name': PadBuilderComponentService.packageName,
       'download_url': 'https://cdn.example.test/builder.apk',
       'version_code': 9,
     });
+    final queried = <String>[];
     final market = AppCenterService(
       platformOverride: 'android',
-      versionLookup: (packageName) async => packageName == 'com.termux'
-          ? const AppCenterLocalVersion.installed(1002)
-          : const AppCenterLocalVersion.uninstalled(),
+      versionLookup: (packageName) async {
+        queried.add(packageName);
+        return packageName == 'com.termux'
+            ? const AppCenterLocalVersion.unknown()
+            : const AppCenterLocalVersion.uninstalled();
+      },
       loader: ({category, keyword = ''}) async =>
           AppCenterCatalog(categories: const [], apps: [builder], total: 1),
     );
@@ -97,6 +101,7 @@ void main() {
     final status = await PadBuilderComponentService(market: market).check();
     expect(status.state, PadBuilderComponentState.availableInMarket);
     expect(status.item, same(builder));
+    expect(queried, <String>[PadBuilderComponentService.packageName]);
   });
 
   test('PAD 编译组件按独立包名查询重启后版本并拒绝伪装条目', () async {
