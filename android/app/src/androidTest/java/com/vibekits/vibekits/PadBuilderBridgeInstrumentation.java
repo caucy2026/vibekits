@@ -6,8 +6,10 @@ import android.content.Context;
 import android.os.Bundle;
 
 import java.io.File;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -19,9 +21,14 @@ import io.flutter.plugin.common.MethodChannel;
 /** Runs the production Kotlin bridge against the signed builder on a real PAD. */
 public final class PadBuilderBridgeInstrumentation extends Instrumentation {
     private static final String PACKAGE = "com.vibekits.hostbridgeprobe";
+    private static final String GAME_PACKAGE = "com.vibekits.whacdemo";
+    private boolean realGame;
+    private boolean exportGame;
 
     @Override public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
+        realGame = arguments != null && "true".equals(arguments.getString("realGame"));
+        exportGame = arguments != null && "true".equals(arguments.getString("exportGame"));
         start();
     }
 
@@ -37,24 +44,46 @@ public final class PadBuilderBridgeInstrumentation extends Instrumentation {
             require(Boolean.TRUE.equals(status.get("buildReady")), "component not ready: " + status);
 
             workspace = new File(target.getFilesDir(), "pad-builder-bridge-test");
-            File source = new File(workspace, "sample");
+            String expectedPackage = realGame ? GAME_PACKAGE : PACKAGE;
+            File source = new File(workspace, realGame ? "whac" : "sample");
             File manifest = new File(source, "app/src/main/AndroidManifest.xml");
-            File java = new File(source, "app/src/main/java/com/vibekits/hostbridgeprobe/Probe.java");
+            File java = new File(source, realGame
+                ? "app/src/main/java/com/vibekits/whacdemo/WhacActivity.java"
+                : "app/src/main/java/com/vibekits/hostbridgeprobe/Probe.java");
             require(manifest.getParentFile().mkdirs() || manifest.getParentFile().isDirectory(), "manifest directory");
             require(java.getParentFile().mkdirs() || java.getParentFile().isDirectory(), "source directory");
-            Files.write(manifest.toPath(), ("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
-                "package=\"" + PACKAGE + "\"><uses-sdk android:minSdkVersion=\"24\" " +
-                "android:targetSdkVersion=\"35\"/><application/></manifest>").getBytes(StandardCharsets.UTF_8));
-            Files.write(java.toPath(), ("package " + PACKAGE + "; public final class Probe {}\n")
-                .getBytes(StandardCharsets.UTF_8));
+            if (realGame) {
+                Files.write(manifest.toPath(), ("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
+                    "package=\"" + GAME_PACKAGE + "\" android:versionCode=\"1\" " +
+                    "android:versionName=\"1.0\"><uses-sdk android:minSdkVersion=\"24\" " +
+                    "android:targetSdkVersion=\"35\"/><application android:label=\"PAD 打地鼠\" " +
+                    "android:icon=\"@drawable/ic_launcher\"><activity android:name=\".WhacActivity\" " +
+                    "android:exported=\"true\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/>" +
+                    "<category android:name=\"android.intent.category.LAUNCHER\"/></intent-filter>" +
+                    "</activity></application></manifest>").getBytes(StandardCharsets.UTF_8));
+                try (InputStream input = getContext().getAssets().open("WhacActivity.java")) {
+                    Files.copy(input, java.toPath());
+                }
+                File icon = new File(source, "app/src/main/res/drawable/ic_launcher.xml");
+                require(icon.getParentFile().mkdirs() || icon.getParentFile().isDirectory(), "icon directory");
+                try (InputStream input = getContext().getAssets().open("ic_launcher.layerlist.xml")) {
+                    Files.copy(input, icon.toPath());
+                }
+            } else {
+                Files.write(manifest.toPath(), ("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" " +
+                    "package=\"" + PACKAGE + "\"><uses-sdk android:minSdkVersion=\"24\" " +
+                    "android:targetSdkVersion=\"35\"/><application/></manifest>").getBytes(StandardCharsets.UTF_8));
+                Files.write(java.toPath(), ("package " + PACKAGE + "; public final class Probe {}\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            }
             Map<String, Object> rejected = call(client, "startBuild", target.getCacheDir().getAbsolutePath(),
-                workspace.getAbsolutePath(), PACKAGE, "bridgeReject");
+                workspace.getAbsolutePath(), expectedPackage, "bridgeReject");
             require(!Boolean.TRUE.equals(rejected.get("accepted")) &&
                 String.valueOf(rejected.get("error")).contains("工作区"),
                 "outside-workspace source was not rejected: " + rejected);
             taskId = "bridge" + System.currentTimeMillis();
             Map<String, Object> started = call(client, "startBuild", source.getAbsolutePath(),
-                workspace.getAbsolutePath(), PACKAGE, taskId);
+                workspace.getAbsolutePath(), expectedPackage, taskId);
             require(Boolean.TRUE.equals(started.get("accepted")), "build rejected: " + started);
 
             Map<String, Object> built = null;
@@ -67,8 +96,15 @@ public final class PadBuilderBridgeInstrumentation extends Instrumentation {
                 Boolean.TRUE.equals(built.get("verified")), "build not verified: " + built);
             Map<String, Object> prepared = call(client, "prepareInstall", null, null, null, taskId);
             require(Boolean.TRUE.equals(prepared.get("verified")), "installer cache rejected: " + prepared);
-            require(PACKAGE.equals(prepared.get("packageName")), "wrong generated package");
+            require(expectedPackage.equals(prepared.get("packageName")), "wrong generated package");
+            if (realGame && exportGame) {
+                File export = new File(target.getExternalFilesDir(null), "pad75-whac-built.apk");
+                Files.copy(new File(String.valueOf(prepared.get("path"))).toPath(),
+                    export.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                result.putString("exportedApk", export.getAbsolutePath());
+            }
             result.putString("status", "passed");
+            result.putString("packageName", expectedPackage);
             result.putString("sha256", String.valueOf(built.get("actualSha256")));
             result.putLong("bytes", ((Number) built.get("bytes")).longValue());
         } catch (Throwable error) {

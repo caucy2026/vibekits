@@ -12,6 +12,7 @@ android {
     sourceSets.getByName("main").assets.srcDir(
         layout.buildDirectory.dir("generated/adb-helper-assets")
     )
+    sourceSets.getByName("androidTest").assets.srcDir("../../examples/pad63-whac-a-mole")
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
