@@ -64,4 +64,6 @@ PAD75 又以正式同签名候选 `1.0.4+5`（67,392,855 字节，SHA-256 `6ca9f
 
 PAD75 对 1.0.5 做组件进程恢复回归：确认没有活动编译服务后只停止组件进程，不清数据、不重启设备；宿主原生桥重新绑定并两轮构建相同 APK。`pad75-process-recovery-v6/receipt.json` 为 `passed`，设备内组件字节仍匹配冻结 SHA-256，测试 APK 清理且两屏前台不变。P13 的“无需临时桥、进程恢复可继续编译”子项通过；整机重启与真实 Harness 模型发起任务仍待验。
 
+PAD63 离线后改在 PAD75 验证当前 `1.9.0-dev.257+2257`：独立 ADB server `-P 5039` 连接 `192.168.3.75:5555`；启动 VibeKits 后界面由“远程仿真准备中”进入“远程仿真可连接”，`HarnessRelayService` 在独立进程 `:vibekits_harness` 前台运行。用设备 ID `9464730211` 通过 VibeKits 仿真控制接口重新连接，返回 `connected=true`、`mcpReady=true`、`adbReady=true`、`sshReady=false`；隧道 `127.0.0.1:65336` 的真实 ADB shell 读到型号 `huanglong`。远端 `vibekits.simulator.status` 返回 enabled/ready，`vibekits.android.builder_component_status` 返回版本码 6、`buildReady=true`、工具链 SHA-256 `599349bf9191997632814b3dcc7d596c764672356891c8f140923194ee48483a`。把 display 0 的原笔记界面恢复到前台后，设备 ID 连接仍为 `mcpReady=true`、`adbReady=true`。远端 `vibekits.system.resources` 连续三次采样整机 CPU 为 3.14%–4.94%（8 核），这只证明该次空闲采样，没有覆盖长时高负载。界面明确显示“尚未设置 API Key”，因此这次无法把控制接口和组件自检等同于 Harness 模型自行生成并编译 APK。辅助组件原已安装 v5、ADB 原已打开，P15 的无辅助组件/ADB 关闭冷态仍未验。
+
 **BLOCK。** P06、P12、P13、P20 尚未实现或交付；P15 未做首装冷态闭环；P03、P09、P17 等仍缺用户要求的实机正向证据。不能把当前 PAD63 远程 ADB 子目标已通过写成“两天需求全部解决”。
