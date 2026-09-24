@@ -2,8 +2,86 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vibekits/features/app_center/domain/app_center_service.dart';
 import 'package:vibekits/features/app_center/presentation/app_center_tab.dart';
+import 'package:vibekits/features/dev_tools/domain/pad_builder_component_service.dart';
 
 void main() {
+  test('PAD 编译组件已安装时离线读取本地版本，不依赖市场', () async {
+    final market = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (_) async => const AppCenterLocalVersion.installed(3),
+      loader: ({category, keyword = ''}) async => throw StateError('不应访问市场'),
+    );
+    final component = PadBuilderComponentService(market: market);
+    addTearDown(market.dispose);
+    final status = await component.check();
+    expect(status.state, PadBuilderComponentState.installed);
+    expect(status.versionCode, 3);
+    expect(status.item, isNull);
+  });
+
+  test('PAD 编译组件缺失时只接受完整且可信的商城记录', () async {
+    AppCenterItem builder(String url) => AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': PadBuilderComponentService.packageName,
+      'download_url': url,
+      'version_code': 1,
+    });
+    final valid = builder('https://cdn.example.test/builder.apk');
+    var listed = valid;
+    final market = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
+      loader: ({category, keyword = ''}) async =>
+          AppCenterCatalog(categories: const [], apps: [listed], total: 1),
+    );
+    addTearDown(market.dispose);
+    final component = PadBuilderComponentService(market: market);
+    final available = await component.check();
+    expect(available.state, PadBuilderComponentState.availableInMarket);
+    expect(available.item, same(valid));
+
+    listed = builder('http://cdn.example.test/builder.apk');
+    final unsafe = await component.check();
+    expect(unsafe.state, PadBuilderComponentState.incompleteMarketRecord);
+    expect(() => component.requestInstall(unsafe), throwsStateError);
+  });
+
+  test('PAD 编译组件按独立包名查询重启后版本并拒绝伪装条目', () async {
+    final queried = <String>[];
+    final service = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (packageName) async {
+        queried.add(packageName);
+        return const AppCenterLocalVersion.installed(7);
+      },
+    );
+    addTearDown(service.dispose);
+    final item = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.vibekits.vibekits.component.builder',
+      'download_url': 'https://cdn.example.test/builder.apk',
+      'version_code': 8,
+    });
+    expect(item.isTrustedAndroidHostComponent, isTrue);
+    expect(item.componentId, 'android_builder');
+    expect(item.hostPackageName, 'com.vibekits.vibekits');
+    final local = await service.localVersion(item);
+    expect(queried, ['com.vibekits.vibekits.component.builder']);
+    expect(local.versionCode, 7);
+    expect(service.updateStatus(item, local), AppCenterUpdateStatus.update);
+
+    final spoofed = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.vibekits.vibekits.component.builder',
+      'android_package_name': 'com.attacker.builder',
+      'download_url': 'https://cdn.example.test/builder.apk',
+    });
+    expect(spoofed.isTrustedAndroidHostComponent, isFalse);
+    await expectLater(service.installComponent(spoofed), throwsFormatException);
+    expect((await service.localVersion(spoofed)).installed, isNull);
+    expect(queried, hasLength(1));
+  });
+
   test('Android 模型组件归属实际 PAD 包名且不能伪装宿主', () async {
     final service = AppCenterService(platformOverride: 'android');
     addTearDown(service.dispose);

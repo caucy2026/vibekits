@@ -110,6 +110,7 @@
     <queries>
         <package android:name="com.newlink.kemi.kboard" />
         <package android:name="com.vibekits.vibekits.component.adb" />
+        <package android:name="com.vibekits.vibekits.component.builder" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

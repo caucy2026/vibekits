@@ -334,6 +334,34 @@ open class MainActivity : FlutterActivity() {
                     }
                     try {
                         val installed = packageManager.getPackageInfo(queriedPackage, 0)
+                        if (queriedPackage in setOf(
+                                "com.vibekits.vibekits.component.models",
+                                "com.caucy.vibekits.component.network_proxy",
+                                "com.vibekits.vibekits.component.builder",
+                            )) {
+                            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                PackageManager.GET_SIGNING_CERTIFICATES
+                            } else {
+                                @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
+                            }
+                            val ownInfo = packageManager.getPackageInfo(packageName, flags)
+                            val componentInfo = packageManager.getPackageInfo(queriedPackage, flags)
+                            val ownSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                ownInfo.signingInfo?.apkContentsSigners.orEmpty()
+                            } else {
+                                @Suppress("DEPRECATION") ownInfo.signatures.orEmpty()
+                            }
+                            val componentSigners = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                componentInfo.signingInfo?.apkContentsSigners.orEmpty()
+                            } else {
+                                @Suppress("DEPRECATION") componentInfo.signatures.orEmpty()
+                            }
+                            if (ownSigners.size != 1 || componentSigners.size != 1 ||
+                                !ownSigners[0].toByteArray().contentEquals(componentSigners[0].toByteArray())) {
+                                result.success(mapOf("installed" to null))
+                                return@setMethodCallHandler
+                            }
+                        }
                         val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             installed.longVersionCode
                         } else {
@@ -414,6 +442,7 @@ open class MainActivity : FlutterActivity() {
                         require(expectedPackage in setOf(
                             "com.vibekits.vibekits.component.models",
                             "com.caucy.vibekits.component.network_proxy",
+                            "com.vibekits.vibekits.component.builder",
                         )) {
                             "Unknown host component"
                         }

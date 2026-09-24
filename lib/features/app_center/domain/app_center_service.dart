@@ -79,11 +79,12 @@ class AppCenterItem {
     'com.caucy.vibekits.component.virtual_machine': 'virtual_machine',
     'com.caucy.vibekits.component.network_proxy': 'network_proxy',
     'com.vibekits.vibekits.component.models': 'android_models',
+    'com.vibekits.vibekits.component.builder': 'android_builder',
   };
 
   factory AppCenterItem.fromJson(Map<String, Object?> json) {
     // The current market contract stores package identity, but does not yet
-    // expose component metadata. Only these two exact reserved IDs opt in.
+    // expose component metadata. Only exact reserved IDs opt in.
     final component = componentPackages['${json['package_name'] ?? ''}'.trim()];
     return AppCenterItem(
       appId: _asInt(json['app_id']),
@@ -116,7 +117,7 @@ class AppCenterItem {
           ? 'component'
           : '${json['artifact_type'] ?? 'app'}'.trim().toLowerCase(),
       hostPackageName:
-          '${json['host_package_name'] ?? (component == 'android_models'
+          '${json['host_package_name'] ?? (component == 'android_models' || component == 'android_builder'
                       ? 'com.vibekits.vibekits'
                       : component == 'network_proxy' && '${json['os_type'] ?? ''}'.trim().toLowerCase() == 'android'
                       ? 'com.vibekits.vibekits'
@@ -163,6 +164,19 @@ class AppCenterItem {
   final bool standalone;
 
   bool get isComponent => artifactType == 'component';
+
+  bool get isTrustedAndroidHostComponent =>
+      isComponent &&
+      hostPackageName == 'com.vibekits.vibekits' &&
+      !standalone &&
+      androidInstallPackageName == packageName &&
+      const <String, String>{
+            'com.vibekits.vibekits.component.models': 'android_models',
+            'com.caucy.vibekits.component.network_proxy': 'network_proxy',
+            'com.vibekits.vibekits.component.builder': 'android_builder',
+          }[packageName] ==
+          componentId &&
+      supportsPlatform('android');
 
   bool supportsPlatform(String platform) {
     final String normalized = platform.trim().toLowerCase();
@@ -251,14 +265,7 @@ class AppCenterService {
 
   Future<AppCenterLocalVersion> localVersion(AppCenterItem item) async {
     if (item.isComponent && platformName == 'android') {
-      if (!((item.componentId == 'android_models' &&
-                  item.packageName ==
-                      'com.vibekits.vibekits.component.models') ||
-              (item.componentId == 'network_proxy' &&
-                  item.packageName ==
-                      'com.caucy.vibekits.component.network_proxy')) ||
-          item.hostPackageName != 'com.vibekits.vibekits' ||
-          !item.supportsPlatform('android')) {
+      if (!item.isTrustedAndroidHostComponent) {
         return const AppCenterLocalVersion.unknown();
       }
     } else if (item.isComponent) {
@@ -563,17 +570,8 @@ class AppCenterService {
     ValueChanged<double>? onProgress,
   }) async {
     if (platformName == 'android') {
-      if (!item.isComponent ||
-          !((item.componentId == 'android_models' &&
-                  item.packageName ==
-                      'com.vibekits.vibekits.component.models') ||
-              (item.componentId == 'network_proxy' &&
-                  item.packageName ==
-                      'com.caucy.vibekits.component.network_proxy')) ||
-          item.hostPackageName != 'com.vibekits.vibekits' ||
-          item.standalone ||
-          !item.supportsPlatform('android')) {
-        throw const FormatException('不是 VibeKits Android 模型组件');
+      if (!item.isTrustedAndroidHostComponent) {
+        throw const FormatException('不是可信的 VibeKits Android 宿主组件');
       }
       return downloadAndOpen(item, onProgress: onProgress);
     }

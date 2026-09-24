@@ -7,9 +7,9 @@
 - 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：241。
+- Harness 定义接口：243。
 - Harness 当前可执行接口：214。
-- 当前不可公开接口：27。
+- 当前不可公开接口：29。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 89 |
+| 系统诊断 | 91 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,13 +108,15 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 89）
+## 系统诊断（定义 91）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
 | `vibekits.advanced.capabilities` | `advanced__capabilities` | 查看高级设备能力 | 是 | 只读返回远程协助、远程仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。 | `readOnly` | `{}` |
 | `vibekits.agent_cli` | `agent_cli` | 智能体 CLI 编排 | 否（环境/接线门禁） | 统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。 适合：用户明确需要“智能体 CLI 编排”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
+| `vibekits.android.builder_component_install` | `android__builder_component_install` | 从 KEMI 商城安装 PAD 编译组件 | 否（环境/接线门禁） | 仅在用户明确需要 PAD 本机原生编译时调用。验证商城 HTTPS、精确大小、SHA-256、包名、版本和同签名后打开 Android 系统安装确认；须随后重新检查安装状态。 | `writesData` | `{}` |
+| `vibekits.android.builder_component_status` | `android__builder_component_status` | 检查 PAD 本机编译组件 | 否（环境/接线门禁） | 查询本机 Android 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。 | `readOnly` | `{}` |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.cleaner.analyze_drive` | `cleaner__analyze_drive` | 分析磁盘占用 | 是 | 同步分析较小的磁盘或目录并返回有界结果；大磁盘必须使用 analyze_drive_start/status，避免 MCP 超时和重复扫描。不删除任何文件。 | `readOnly` | `root`* (string), `maxResults` (integer；默认=50；最小=10；最大=200) |
@@ -183,7 +185,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.simulator.download_file` | `simulator__download_file` | 从远程仿真机下载文件 | 是 | 通过已验证的 SSH 隧道下载目标机上的单个文件到本机受控临时目录，返回字节数和 SHA-256。 | `writesData` | `routingId`* (string), `remotePath`* (string) |
 | `vibekits.simulator.install_candidate` | `simulator__install_candidate` | 安装远程仿真机 VibeKits 候选 | 是 | 通过已连接 ID 的加密隧道上传本机签名 ZIP；远端只接受同包名、同 Developer ID 团队、版本更高且同时包含 Intel/Apple Silicon 的 VibeKits。 | `controlsDevice` | `routingId`* (string), `packagePath`* (string), `apply` (boolean) |
 | `vibekits.simulator.screenshot` | `simulator__screenshot` | 查看远程仿真机当前屏幕 | 是 | 只需设备 ID；在目标 VibeKits 内截取一帧，再通过已验证通道下载到本机。不启动远程桌面，不持续录屏。 | `controlsDevice` | `routingId`* (string) |
-| `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关远程仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 不提供被调试端。写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean) |
+| `vibekits.simulator.set_enabled` | `simulator__set_enabled` | 开关远程仿真机 | 是 | 打开或关闭本机受控仿真机端点。Android PAD 也可通过显式授权作为被调试端；写操作仍需批准。 | `controlsDevice` | `enabled`* (boolean), `password` (string) |
 | `vibekits.simulator.ssh_exec` | `simulator__ssh_exec` | 在远程仿真机执行命令 | 是 | 通过已经完成主机指纹校验和首次公钥授权的 SSH 隧道，在指定设备 ID 上执行调试命令；返回有界标准输出、错误输出和退出码。 | `controlsDevice` | `routingId`* (string), `command`* (string) |
 | `vibekits.simulator.status` | `simulator__status` | 查看仿真机状态 | 是 | 只读返回本机作为远程仿真机的权限和真实运行阶段。 | `readOnly` | `{}` |
 | `vibekits.simulator.upload_file` | `simulator__upload_file` | 上传文件到远程仿真机 | 是 | 通过已验证的 SSH 隧道上传本机文件到目标设备的 VibeKits 专用暂存目录，并在两端计算 SHA-256；不接受目录或相对路径。 | `writesData` | `routingId`* (string), `localPath`* (string) |

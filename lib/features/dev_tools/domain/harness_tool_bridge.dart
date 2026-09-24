@@ -45,6 +45,7 @@ import 'network_virtualization_service.dart';
 import 'native_app_debug_service.dart';
 import 'network_download_service.dart';
 import 'packet_capture_service.dart';
+import 'pad_builder_component_service.dart';
 import 'system_proxy_service.dart';
 import 'system_resource_service.dart';
 import 'programmer_calculator.dart';
@@ -492,6 +493,10 @@ class VibekitsHarnessToolBridge {
   static const String projectIterationInspectId =
       'vibekits.project.iteration_inspect';
   static const String projectBuildId = 'vibekits.project.build';
+  static const String padBuilderStatusId =
+      'vibekits.android.builder_component_status';
+  static const String padBuilderInstallId =
+      'vibekits.android.builder_component_install';
   static const String captureStatusId = 'vibekits.capture.status';
   static const String captureStartId = 'vibekits.capture.start';
   static const String captureStopId = 'vibekits.capture.stop';
@@ -1301,6 +1306,23 @@ class VibekitsHarnessToolBridge {
         'runTests': <String, Object?>{'type': 'boolean'},
       },
       required: <String>['workspace', 'target'],
+    ),
+    padBuilderStatusId: _definition(
+      id: padBuilderStatusId,
+      name: '检查 PAD 本机编译组件',
+      description:
+          '查询本机 Android 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。',
+      properties: const <String, Object?>{},
+      available: Platform.isAndroid,
+    ),
+    padBuilderInstallId: _definition(
+      id: padBuilderInstallId,
+      name: '从 KEMI 商城安装 PAD 编译组件',
+      description:
+          '仅在用户明确需要 PAD 本机原生编译时调用。验证商城 HTTPS、精确大小、SHA-256、包名、版本和同签名后打开 Android 系统安装确认；须随后重新检查安装状态。',
+      risk: HarnessToolRisk.writesData,
+      properties: const <String, Object?>{},
+      available: Platform.isAndroid,
     ),
     captureStatusId: _definition(
       id: captureStatusId,
@@ -3144,6 +3166,8 @@ class VibekitsHarnessToolBridge {
     if (toolId == clusterSetEnabledId) return _setClusterEnabled;
     if (toolId == projectIterationInspectId) return _inspectProjectIteration;
     if (toolId == projectBuildId) return _buildProjectIteration;
+    if (toolId == padBuilderStatusId) return _padBuilderStatus;
+    if (toolId == padBuilderInstallId) return _padBuilderInstall;
     if (toolId == captureStatusId) return _captureStatus;
     if (toolId == captureStartId) return _captureStart;
     if (toolId == captureStopId) return _captureStop;
@@ -3174,6 +3198,50 @@ class VibekitsHarnessToolBridge {
           throw FormatException(message, null, position),
       };
     };
+  }
+
+  Future<Map<String, Object?>> _padBuilderStatus(
+    Map<String, Object?> arguments,
+  ) async {
+    final component = PadBuilderComponentService();
+    try {
+      final status = await component.check();
+      return <String, Object?>{
+        'packageName': PadBuilderComponentService.packageName,
+        'state': status.state.name,
+        'installedVersionCode': status.versionCode,
+        'marketVersionCode': status.item?.versionCode,
+        'buildReady': false,
+        'reason': '编译工具链服务尚未通过 PAD 真机构建握手，不能声明可编译 APK',
+      };
+    } finally {
+      component.dispose();
+    }
+  }
+
+  Future<Map<String, Object?>> _padBuilderInstall(
+    Map<String, Object?> arguments,
+  ) async {
+    final component = PadBuilderComponentService();
+    try {
+      final status = await component.check();
+      if (status.state != PadBuilderComponentState.availableInMarket) {
+        return <String, Object?>{
+          'installerOpened': false,
+          'state': status.state.name,
+          'reason': '编译组件已安装、未上架或商城安装信息不完整',
+        };
+      }
+      await component.requestInstall(status);
+      return <String, Object?>{
+        'installerOpened': true,
+        'packageName': PadBuilderComponentService.packageName,
+        'installedConfirmed': false,
+        'nextAction': '等待用户在 Android 系统安装界面确认，然后重新检查组件状态',
+      };
+    } finally {
+      component.dispose();
+    }
   }
 
   Future<Map<String, Object?>> _captureStatus(

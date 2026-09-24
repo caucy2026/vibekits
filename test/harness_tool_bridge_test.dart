@@ -19,6 +19,19 @@ import 'package:vibekits/features/dev_tools/domain/tool_registry.dart';
 import 'package:vibekits/features/dev_tools/domain/windows_node_device_service.dart';
 
 void main() {
+  test('PAD 本机编译先查商城组件，安装需要写入审批且不宣传构建就绪', () {
+    final bridge = VibekitsHarnessToolBridge();
+    final tools = {for (final tool in bridge.fullCatalog) tool.id: tool};
+    final status = tools[VibekitsHarnessToolBridge.padBuilderStatusId]!;
+    final install = tools[VibekitsHarnessToolBridge.padBuilderInstallId]!;
+    expect(status.risk, HarnessToolRisk.readOnly);
+    expect(install.risk, HarnessToolRisk.writesData);
+    expect(status.description, contains('已安装不等于工具链可用'));
+    expect(install.description, contains('Android 系统安装确认'));
+    expect(status.available, Platform.isAndroid);
+    expect(install.available, Platform.isAndroid);
+  });
+
   test('远程仿真目录公开 Harness 全自动会话闭环', () async {
     final StreamController<Map<String, Object?>> changes =
         StreamController<Map<String, Object?>>.broadcast();
