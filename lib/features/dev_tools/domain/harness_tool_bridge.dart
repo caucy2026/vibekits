@@ -1305,7 +1305,7 @@ class VibekitsHarnessToolBridge {
     ),
     projectBuildId: _definition(
       id: projectBuildId,
-      name: '验证并编译 Vibekits APP',
+      name: Platform.isAndroid ? '查询 PAD 商城编译组件' : '验证并编译 Vibekits APP',
       description:
           '桌面端在指定源码工作区执行 Analyze、合同测试和 Release 构建；PAD 端只返回 KEMI 商城专用编译组件状态与下一步操作，不运行通用构建。',
       risk: Platform.isAndroid
@@ -1320,7 +1320,9 @@ class VibekitsHarnessToolBridge {
         'flutterExecutable': _string('可选；Flutter 可执行文件绝对路径'),
         'runTests': <String, Object?>{'type': 'boolean'},
       },
-      required: <String>['workspace', 'target'],
+      required: Platform.isAndroid
+          ? const <String>[]
+          : const <String>['workspace', 'target'],
     ),
     padBuilderStatusId: _definition(
       id: padBuilderStatusId,

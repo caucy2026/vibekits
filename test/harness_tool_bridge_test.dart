@@ -45,6 +45,10 @@ void main() {
           : HarnessToolRisk.writesData,
     );
     expect(genericBuild.description, contains('商城专用编译组件'));
+    expect(
+      genericBuild.inputSchema['required'],
+      Platform.isAndroid ? isNull : <String>['workspace', 'target'],
+    );
     expect(status.risk, HarnessToolRisk.readOnly);
     expect(install.risk, HarnessToolRisk.writesData);
     expect(waitInstall.risk, HarnessToolRisk.readOnly);
