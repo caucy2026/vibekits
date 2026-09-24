@@ -36,10 +36,22 @@ void main() {
               'cursor': 7,
               'records': [
                 {
-                  'type': 'user/message',
-                  'seq': 7,
-                  'time': 1,
-                  'data': {'text': 'hello'},
+                  'type': 'event',
+                  'event': {
+                    'type': 'user/message',
+                    'seq': 6,
+                    'time': 1,
+                    'data': {'text': 'old'},
+                  },
+                },
+                {
+                  'type': 'event',
+                  'event': {
+                    'type': 'assistant/message',
+                    'seq': 7,
+                    'time': 2,
+                    'data': {'text': 'hello'},
+                  },
                 },
               ],
               'hasMore': false,
@@ -54,11 +66,13 @@ void main() {
           'type': 'client-request',
           'rpcId': 'history-1',
           'method': 'session.history',
-          'payload': {'sessionId': 'session-1', 'cursor': 7},
+          'payload': {'sessionId': 'session-1', 'cursor': 6},
         });
         final value = ((result['result'] as Map)['value'] as Map);
         expect(value['cursor'], 7);
-        expect((value['records'] as List), isEmpty);
+        final records = value['records'] as List;
+        expect(records, hasLength(1));
+        expect(((records.single as Map)['event'] as Map)['seq'], 7);
       } finally {
         await adapter.close();
         await server.close(force: true);

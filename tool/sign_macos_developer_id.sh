@@ -91,15 +91,15 @@ while IFS= read -r -d '' ITEM; do
   case "$KIND" in
     Mach-O*)
       DETAILS="$(codesign -dv --verbose=4 "$ITEM" 2>&1)"
-      if ! printf '%s\n' "$DETAILS" | grep -Fqx "Authority=$IDENTITY"; then
+      if ! grep -Fqx "Authority=$IDENTITY" <<< "$DETAILS"; then
         echo "Unexpected signing authority: $ITEM" >&2
         exit 5
       fi
-      if ! printf '%s\n' "$DETAILS" | grep -Fqx "TeamIdentifier=$EXPECTED_TEAM_ID"; then
+      if ! grep -Fqx "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$DETAILS"; then
         echo "Nested code TeamIdentifier mismatch: $ITEM" >&2
         exit 5
       fi
-      if ! printf '%s\n' "$DETAILS" | grep -Eq '^CodeDirectory .*flags=.*runtime'; then
+      if ! grep -Eq '^CodeDirectory .*flags=.*runtime' <<< "$DETAILS"; then
         echo "Nested code is missing Hardened Runtime: $ITEM" >&2
         exit 5
       fi

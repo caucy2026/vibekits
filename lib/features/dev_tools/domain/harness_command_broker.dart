@@ -96,16 +96,20 @@ final class HarnessCommandBroker {
       for (final item in source) {
         if (item is! Map) continue;
         final record = Map<String, Object?>.from(item);
-        final seq = record['seq'];
+        final event = record['event'];
+        final seq = record['seq'] ?? (event is Map ? event['seq'] : null);
         if (seq is! int || seq <= afterCursor) continue;
         Object? output = record;
         var encoded = utf8.encode(jsonEncode(output));
         if (encoded.length > _maxRecordBytes) {
           final raw = jsonEncode(record);
           output = <String, Object?>{
-            'type': record['type']?.toString() ?? 'record',
+            'type':
+                (event is Map ? event['type'] : record['type'])?.toString() ??
+                'record',
             'seq': seq,
-            if (record['time'] != null) 'time': record['time'],
+            if ((event is Map ? event['time'] : record['time']) != null)
+              'time': event is Map ? event['time'] : record['time'],
             'truncated': true,
             'preview': raw.length <= 8192 ? raw : raw.substring(0, 8192),
           };

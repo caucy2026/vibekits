@@ -478,10 +478,7 @@ class HarnessOfficialRemoteAdapter
       }
       final records = <dynamic>[
         for (final record in frame['records'] as List)
-          if (record is! Map ||
-              record['seq'] is! int ||
-              (record['seq'] as int) > afterCursor)
-            record,
+          if (_sessionRecordSeq(record) > afterCursor) record,
       ];
       return Map<String, dynamic>.unmodifiable(<String, dynamic>{
         'sessionId': sessionId,
@@ -494,6 +491,13 @@ class HarnessOfficialRemoteAdapter
       });
     }
     throw StateError('REMOTE_SESSION_UNAVAILABLE');
+  }
+
+  static int _sessionRecordSeq(Object? record) {
+    if (record is! Map) return -1;
+    final event = record['event'];
+    final seq = event is Map ? event['seq'] : record['seq'];
+    return seq is int ? seq : -1;
   }
 
   Stream<Map<String, dynamic>> _openStream(

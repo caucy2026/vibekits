@@ -135,4 +135,40 @@ void main() {
     expect(result, isNot(contains('projections')));
     expect(utf8.encode(jsonEncode(result)).length, lessThan(300 * 1024));
   });
+
+  test('history returns official event envelopes after cursor', () async {
+    final controller = StreamController<Map<String, Object?>>.broadcast();
+    final registration = HarnessCommandBroker.instance.register(
+      prompt: (_, requestId) async => <String, Object?>{'requestId': requestId},
+      status: (_) async => <String, Object?>{},
+      history: (_, _) async => <String, Object?>{
+        'records': <Object?>[
+          <String, Object?>{
+            'type': 'event',
+            'event': <String, Object?>{
+              'type': 'assistant/message',
+              'seq': 12,
+              'time': 123,
+              'data': <String, Object?>{'text': 'done'},
+            },
+          },
+        ],
+        'hasMore': false,
+      },
+      cancel: (_) async => <String, Object?>{},
+      changes: controller.stream,
+    );
+    addTearDown(() async {
+      registration.unregister();
+      await controller.close();
+    });
+
+    final result = await HarnessCommandBroker.instance.history('s', 11);
+    expect(result['cursor'], 12);
+    expect(result['records'], hasLength(1));
+    expect(
+      (((result['records'] as List).single as Map)['event'] as Map)['data'],
+      <String, Object?>{'text': 'done'},
+    );
+  });
 }

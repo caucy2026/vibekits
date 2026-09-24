@@ -19,6 +19,7 @@ import '../../dev_tools/domain/harness_session_store.dart';
 import '../../dev_tools/domain/harness_legacy_modules.dart';
 import '../../dev_tools/domain/harness_message_queue.dart';
 import '../../dev_tools/domain/harness_command_broker.dart';
+import '../../dev_tools/domain/harness_official_command_dispatcher.dart';
 import '../../dev_tools/domain/harness_continuation_coordinator.dart';
 import '../../dev_tools/domain/harness_continuation_summarizer.dart';
 import '../../dev_tools/domain/harness_continuation_source_resolver.dart';
@@ -1627,23 +1628,16 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String text,
     String requestId,
   ) async {
-    final scheduler = _messageQueueScheduler;
-    if (scheduler == null || !_queueContextReady) {
+    final adapter = _commandAdapter;
+    if (adapter == null || !_queueContextReady) {
       throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     }
-    await _messageQueue.enqueue(
-      workspaceId: _queueWorkspaceId,
+    await HarnessOfficialCommandDispatcher(adapter).prompt(
       sessionId: _queueSessionId,
+      requestId: requestId,
       text: text,
-      source: HarnessMessageSource.remotePeer,
-      approvedCallerId: requestId,
     );
-    await _refreshQueueCount();
-    final bool dispatched = !_harnessBusy && !_harnessApprovalWaiting
-        ? await scheduler.dispatchNext()
-        : false;
-    await _refreshQueueCount();
-    _commandState = dispatched ? 'accepted' : 'queued';
+    _commandState = 'accepted';
     final event = _commandSnapshot(requestId: requestId, advance: true);
     _commandChanges.add(event);
     return <String, Object?>{'accepted': true, ...event};
