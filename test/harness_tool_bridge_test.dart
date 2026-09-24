@@ -24,6 +24,8 @@ void main() {
     final tools = {for (final tool in bridge.fullCatalog) tool.id: tool};
     final status = tools[VibekitsHarnessToolBridge.padBuilderStatusId]!;
     final install = tools[VibekitsHarnessToolBridge.padBuilderInstallId]!;
+    final waitInstall =
+        tools[VibekitsHarnessToolBridge.padBuilderWaitInstallId]!;
     final termux = tools[VibekitsHarnessToolBridge.padTermuxProbeId]!;
     final build = tools[VibekitsHarnessToolBridge.padBuilderBuildId]!;
     final taskStatus = tools[VibekitsHarnessToolBridge.padBuilderTaskStatusId]!;
@@ -31,6 +33,8 @@ void main() {
     final installApk = tools[VibekitsHarnessToolBridge.padBuilderInstallApkId]!;
     expect(status.risk, HarnessToolRisk.readOnly);
     expect(install.risk, HarnessToolRisk.writesData);
+    expect(waitInstall.risk, HarnessToolRisk.readOnly);
+    expect(waitInstall.description, contains('最多等待 90 秒'));
     expect(termux.risk, HarnessToolRisk.readOnly);
     expect(status.description, contains('已安装不等于工具链可用'));
     expect(status.description, contains('Termux 不能代替此组件'));
@@ -38,6 +42,7 @@ void main() {
     expect(install.description, contains('Termux 不能代替此组件'));
     expect(status.available, Platform.isAndroid);
     expect(install.available, Platform.isAndroid);
+    expect(waitInstall.available, Platform.isAndroid);
     expect(termux.available, Platform.isAndroid);
     expect(build.risk, HarnessToolRisk.writesData);
     expect(taskStatus.risk, HarnessToolRisk.readOnly);

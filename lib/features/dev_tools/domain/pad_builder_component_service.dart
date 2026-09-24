@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../app_center/domain/app_center_service.dart';
@@ -98,6 +100,41 @@ class PadBuilderComponentService {
       throw StateError('编译组件未上架或市场安装信息不完整');
     }
     return _market.installComponent(status.item!, onProgress: onProgress);
+  }
+
+  /// Waits only for the exact package to appear in PackageManager. This does
+  /// not access the catalog again or treat an opened installer as success.
+  Future<PadBuilderComponentStatus?> waitForInstall({
+    Duration timeout = const Duration(seconds: 90),
+    Duration pollInterval = const Duration(seconds: 2),
+  }) async {
+    if (_market.platformName != 'android') {
+      throw UnsupportedError('PAD 编译组件仅适用于 Android');
+    }
+    if (timeout < Duration.zero || pollInterval <= Duration.zero) {
+      throw ArgumentError('安装等待时间无效');
+    }
+    final probe = AppCenterItem.fromJson(const <String, Object?>{
+      'package_name': packageName,
+      'os_type': 'android',
+    });
+    final watch = Stopwatch()..start();
+    while (true) {
+      final local = await _market.localVersion(probe);
+      if (local.installed == true &&
+          local.versionCode != null &&
+          local.versionCode! > 0) {
+        return PadBuilderComponentStatus(
+          PadBuilderComponentState.installed,
+          versionCode: local.versionCode,
+        );
+      }
+      final remaining = timeout - watch.elapsed;
+      if (remaining <= Duration.zero) return null;
+      await Future<void>.delayed(
+        remaining < pollInterval ? remaining : pollInterval,
+      );
+    }
   }
 
   void dispose() {

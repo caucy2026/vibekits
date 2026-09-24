@@ -499,6 +499,8 @@ class VibekitsHarnessToolBridge {
       'vibekits.android.builder_component_status';
   static const String padBuilderInstallId =
       'vibekits.android.builder_component_install';
+  static const String padBuilderWaitInstallId =
+      'vibekits.android.builder_component_wait_install';
   static const String padBuilderBuildId =
       'vibekits.android.builder_component_build';
   static const String padBuilderTaskStatusId =
@@ -1332,6 +1334,14 @@ class VibekitsHarnessToolBridge {
       description:
           '仅在用户明确需要 PAD 本机原生编译时调用。只安装同签名的完整 PAD 编译组件；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查组件自检状态。Termux 不能代替此组件。',
       risk: HarnessToolRisk.writesData,
+      properties: const <String, Object?>{},
+      available: Platform.isAndroid,
+    ),
+    padBuilderWaitInstallId: _definition(
+      id: padBuilderWaitInstallId,
+      name: '等待 PAD 编译组件完成安装',
+      description:
+          '打开 Android 系统安装确认后调用；最多等待 90 秒，只查询专用组件的 PackageManager 版本，再做编译服务自检。超时不等于安装成功；保留当前任务与源码。',
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
     ),
@@ -3227,6 +3237,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == projectBuildId) return _buildProjectIteration;
     if (toolId == padBuilderStatusId) return _padBuilderStatus;
     if (toolId == padBuilderInstallId) return _padBuilderInstall;
+    if (toolId == padBuilderWaitInstallId) return _padBuilderWaitInstall;
     if (toolId == padBuilderBuildId) return _padBuilderBuild;
     if (toolId == padBuilderTaskStatusId) return _padBuilderTaskStatus;
     if (toolId == padBuilderCancelId) return _padBuilderCancel;
@@ -3399,7 +3410,37 @@ class VibekitsHarnessToolBridge {
         'installerOpened': true,
         'packageName': status.item!.androidInstallPackageName,
         'installedConfirmed': false,
-        'nextAction': '等待用户在 Android 系统安装界面确认，然后重新检查组件状态',
+        'nextAction':
+            '调用 vibekits.android.builder_component_wait_install 等待用户在 Android 系统界面确认，再检查组件自检',
+      };
+    } finally {
+      component.dispose();
+    }
+  }
+
+  Future<Map<String, Object?>> _padBuilderWaitInstall(
+    Map<String, Object?> arguments,
+  ) async {
+    final component = PadBuilderComponentService();
+    try {
+      final installed = await component.waitForInstall();
+      if (installed == null) {
+        return <String, Object?>{
+          'installedConfirmed': false,
+          'buildReady': false,
+          'reason': '90 秒内未确认专用 PAD 编译组件安装；当前任务与源码已保留',
+          'nextAction':
+              '用户完成系统安装后重新调用 vibekits.android.builder_component_status',
+        };
+      }
+      final runtime = await _padBuilderNative('componentStatus');
+      return <String, Object?>{
+        'installedConfirmed': true,
+        'installedVersionCode': installed.versionCode,
+        ...runtime,
+        'nextAction': runtime['buildReady'] == true
+            ? '现在可调用 vibekits.android.builder_component_build 在 PAD 本机编译'
+            : '组件已安装但未通过自检；查看 state/error，不能改用其他构建环境',
       };
     } finally {
       component.dispose();

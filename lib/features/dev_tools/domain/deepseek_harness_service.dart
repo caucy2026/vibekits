@@ -232,7 +232,7 @@ abstract final class DeepSeekHarnessService {
 
 用户给出设备 ID，要求调试远程电脑、查看远端 App/日志/系统、安装测试软件或进行远程仿真时，即使没有说出技能名，也要读取随 App 安装的 `vibekits-remote-simulator` 技能，直接调用内置 `vibekits.simulator.*` MCP 在后台连接、核验、执行任务并断开；不要依赖开发机的 Codex 技能目录、外部 SSH 客户端或远程桌面界面。
 
-PAD 端 Harness 收到“在 PAD 本机编译代码或原生 APK”要求时，先调用 `vibekits.android.builder_component_status`。缺少组件且市场条目完整时，调用 `vibekits.android.builder_component_install`，等待用户完成 Android 系统安装确认后再次查询。只有独立组件自检回报 `buildReady=true` 时，才在当前 PAD 工作区生成 `app/src/main` 源码，调用 `vibekits.android.builder_component_build`，再用 `vibekits.android.builder_component_task_status` 有界查询各步结果；产物 `verified=true` 后，如任务要求安装或运行，调用 `vibekits.android.builder_component_install_apk` 并等系统确认。失败时保留源码与原会话，报告具体步骤和错误。`termux_probe` 只能诊断已有 Termux，不能取代完整商城编译组件。不得把桌面 `project.build`、控制端代编译、临时 Termux HTTP 桥或下载其他未核验工具说成 PAD 本机编译成功。
+PAD 端 Harness 收到“在 PAD 本机编译代码或原生 APK”要求时，先调用 `vibekits.android.builder_component_status`。缺少组件且市场条目完整时，调用 `vibekits.android.builder_component_install`，随后调用 `vibekits.android.builder_component_wait_install` 有界等待用户完成 Android 系统安装确认；超时保留当前任务与源码，用户确认后重新查状态。只有独立组件自检回报 `buildReady=true` 时，才调用 `vibekits.android.builder_component_build`，再用 `vibekits.android.builder_component_task_status` 有界查询各步结果；源码可提前在当前 PAD 工作区生成，但不得提前编译。产物 `verified=true` 后，如任务要求安装或运行，调用 `vibekits.android.builder_component_install_apk` 并等系统确认。失败时保留源码与原会话，报告具体步骤和错误。`termux_probe` 只能诊断已有 Termux，不能取代完整商城编译组件。不得把桌面 `project.build`、控制端代编译、临时 Termux HTTP 桥或下载其他未核验工具说成 PAD 本机编译成功。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
 
@@ -1418,7 +1418,8 @@ class _MobileHarnessAgent
               '全部 APP 工具都会显式提供给你。Android 本地可执行的工具直接执行；'
               '用户要求在 PAD 本机编译代码或 APK 时，先调用 '
               'vibekits.android.builder_component_status；缺失且商城条目可安装时调用 '
-              'vibekits.android.builder_component_install，系统安装确认后重新检查。'
+              'vibekits.android.builder_component_install，再调用 '
+              'vibekits.android.builder_component_wait_install 有界等待系统安装确认。'
               '只有 buildReady=true 才在 PAD 工作区生成源码，调用 '
               'vibekits.android.builder_component_build 并以 '
               'vibekits.android.builder_component_task_status 跟踪至 verified=true。'

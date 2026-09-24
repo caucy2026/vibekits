@@ -19,6 +19,47 @@ void main() {
     expect(status.item, isNull);
   });
 
+  test('PAD 系统安装确认后只查询专用包并恢复原任务', () async {
+    var checks = 0;
+    final queried = <String>[];
+    final market = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (packageName) async {
+        queried.add(packageName);
+        return ++checks < 3
+            ? const AppCenterLocalVersion.uninstalled()
+            : const AppCenterLocalVersion.installed(2);
+      },
+      loader: ({category, keyword = ''}) async =>
+          throw StateError('等待安装不得重新查商城'),
+    );
+    addTearDown(market.dispose);
+    final status = await PadBuilderComponentService(market: market)
+        .waitForInstall(
+          timeout: const Duration(milliseconds: 100),
+          pollInterval: const Duration(milliseconds: 1),
+        );
+    expect(status?.state, PadBuilderComponentState.installed);
+    expect(status?.versionCode, 2);
+    expect(queried, List.filled(3, PadBuilderComponentService.packageName));
+  });
+
+  test('PAD 安装器未确认时有界退出，不把打开安装器当成功', () async {
+    final market = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
+      loader: ({category, keyword = ''}) async =>
+          throw StateError('等待安装不得重新查商城'),
+    );
+    addTearDown(market.dispose);
+    final status = await PadBuilderComponentService(market: market)
+        .waitForInstall(
+          timeout: const Duration(milliseconds: 10),
+          pollInterval: const Duration(milliseconds: 1),
+        );
+    expect(status, isNull);
+  });
+
   test('PAD 编译组件缺失时只接受完整且可信的商城记录', () async {
     AppCenterItem builder(String url) => AppCenterItem.fromJson({
       ..._itemJson(os: 'android'),
