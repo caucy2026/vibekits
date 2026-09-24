@@ -7,6 +7,7 @@ plugins {
 
 android {
     namespace = "com.vibekits.vibekits"
+    testBuildType = "release"
     buildFeatures { aidl = true }
     sourceSets.getByName("main").assets.srcDir(
         layout.buildDirectory.dir("generated/adb-helper-assets")
@@ -31,6 +32,7 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.vibekits.vibekits"
+        testInstrumentationRunner = "com.vibekits.vibekits.PadBuilderBridgeInstrumentation"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -76,6 +78,7 @@ android {
             // Without explicit signing inputs produce an unsigned artifact for
             // the documented external signer; never silently use a debug key.
             signingConfig = signingConfigs.findByName("kemiRelease")
+            proguardFiles("pad-builder-bridge-test.pro")
         }
     }
 }
