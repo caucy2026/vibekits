@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
@@ -130,8 +131,16 @@ internal class PadAdbFallbackServer {
                     "tools/call" -> {
                         if (request.optJSONObject("params")?.optString("name") !=
                             "vibekits.simulator.status") return
+                        val adbReady = try {
+                            Socket().use { it.connect(InetSocketAddress("127.0.0.1", 5555), 300) }
+                            true
+                        } catch (_: Exception) { false }
                         JSONObject().put("content", JSONArray().put(JSONObject()
-                            .put("type", "text").put("text", "PAD 后台服务在线，远程 ADB 可连接")))
+                            .put("type", "text").put("text", if (adbReady)
+                                "PAD 后台服务在线，远程 ADB 已就绪"
+                            else "PAD 后台服务在线，远程 ADB 尚未就绪，正在尝试恢复")))
+                            .put("structuredContent", JSONObject()
+                                .put("serviceReady", true).put("adbReady", adbReady))
                     }
                     else -> return
                 }
