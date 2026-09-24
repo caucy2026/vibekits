@@ -29,3 +29,50 @@ final class HarnessOfficialCommandDispatcher {
     }
   }
 }
+
+/// Tracks one remotely submitted prompt against official session-log events.
+/// A completion from an earlier turn must never complete a newer queued prompt.
+final class HarnessOfficialCommandProgress {
+  HarnessOfficialCommandProgress(this.requestId);
+
+  final String requestId;
+  bool acceptedInHistory = false;
+  int? turn;
+  String state = 'accepted';
+
+  void addRecords(List<dynamic> records) {
+    for (final record in records) {
+      if (record is! Map) continue;
+      final envelope = record['event'];
+      final event = envelope is Map ? envelope : record;
+      final type = event['type'];
+      final data = event['data'];
+      if (data is! Map) continue;
+      if (type == 'user/message' &&
+          data['source'] is Map &&
+          (data['source'] as Map)['rpcId'] == requestId) {
+        acceptedInHistory = true;
+        continue;
+      }
+      if (!acceptedInHistory) continue;
+      final eventTurn = data['turn'];
+      if (turn == null && eventTurn is int && type != 'turn/end') {
+        turn = eventTurn;
+      }
+      if (turn == null || eventTurn != turn) continue;
+      if (type == 'turn/end') {
+        final reason = data['reason'];
+        final kind = reason is Map ? reason['kind'] : null;
+        state = kind == 'completed'
+            ? 'completed'
+            : kind == 'cancelled'
+            ? 'stopped'
+            : 'failed';
+      } else if (type == 'tool/call') {
+        state = 'tool_running';
+      } else if (type == 'assistant/message' || type == 'step/start') {
+        state = 'running';
+      }
+    }
+  }
+}

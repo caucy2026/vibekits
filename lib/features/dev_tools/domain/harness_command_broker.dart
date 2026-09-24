@@ -146,23 +146,53 @@ final class HarnessCommandBroker {
     final changes = _changes;
     if (changes == null) throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     final id = _sessionId(sessionId);
-    try {
-      final event = await changes
-          .firstWhere(
-            (item) =>
-                item['sessionId'] == id &&
-                (item['cursor'] is int) &&
-                (item['cursor'] as int) > afterCursor,
-          )
-          .timeout(timeout);
-      return <String, Object?>{'changed': true, ...event};
-    } on TimeoutException {
-      return <String, Object?>{
-        'changed': false,
-        'sessionId': id,
-        'cursor': afterCursor,
-      };
+    final statusHandler = _status;
+    if (statusHandler == null) {
+      throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     }
+    final deadline = DateTime.now().add(timeout);
+    final event = Completer<Map<String, Object?>>();
+    final subscription = changes.listen((item) {
+      if (!event.isCompleted &&
+          item['sessionId'] == id &&
+          item['cursor'] is int &&
+          (item['cursor'] as int) > afterCursor) {
+        event.complete(item);
+      }
+    });
+    try {
+      while (true) {
+        if (event.isCompleted) {
+          return <String, Object?>{'changed': true, ...await event.future};
+        }
+        final remaining = deadline.difference(DateTime.now());
+        if (remaining <= Duration.zero) break;
+        final snapshot = await statusHandler(id).timeout(remaining);
+        if (snapshot['cursor'] is int &&
+            (snapshot['cursor'] as int) > afterCursor) {
+          return <String, Object?>{'changed': true, ...snapshot};
+        }
+        final pause = deadline.difference(DateTime.now());
+        if (pause <= Duration.zero) break;
+        await Future.any<Object?>(<Future<Object?>>[
+          event.future,
+          Future<void>.delayed(
+            pause < const Duration(milliseconds: 250)
+                ? pause
+                : const Duration(milliseconds: 250),
+          ),
+        ]);
+      }
+    } on TimeoutException {
+      // The bounded wait expired while reading the official status.
+    } finally {
+      await subscription.cancel();
+    }
+    return <String, Object?>{
+      'changed': false,
+      'sessionId': id,
+      'cursor': afterCursor,
+    };
   }
 
   Future<Map<String, Object?>> _requireSession(

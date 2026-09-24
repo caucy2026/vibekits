@@ -97,6 +97,37 @@ void main() {
     expect(result, containsPair('changed', false));
   });
 
+  test(
+    'wait observes a completed status even if its event already passed',
+    () async {
+      final controller = StreamController<Map<String, Object?>>.broadcast();
+      final registration = HarnessCommandBroker.instance.register(
+        prompt: (_, requestId) async => <String, Object?>{
+          'requestId': requestId,
+        },
+        status: (sessionId) async => <String, Object?>{
+          'sessionId': sessionId,
+          'cursor': 2,
+          'state': 'completed',
+        },
+        history: (_, _) async => <String, Object?>{},
+        cancel: (_) async => <String, Object?>{},
+        changes: controller.stream,
+      );
+      addTearDown(() async {
+        registration.unregister();
+        await controller.close();
+      });
+      final result = await HarnessCommandBroker.instance.waitForChange(
+        's',
+        1,
+        const Duration(seconds: 1),
+      );
+      expect(result, containsPair('changed', true));
+      expect(result, containsPair('state', 'completed'));
+    },
+  );
+
   test('history is cursor scoped and bounded for remote transport', () async {
     final controller = StreamController<Map<String, Object?>>.broadcast();
     final registration = HarnessCommandBroker.instance.register(

@@ -234,6 +234,8 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
       StreamController<Map<String, Object?>>.broadcast();
   int _commandCursor = 0;
   String _commandState = 'idle';
+  HarnessOfficialCommandProgress? _officialCommandProgress;
+  int _officialHistoryCursor = 0;
 
   @override
   void initState() {
@@ -1193,6 +1195,9 @@ class _OfficialHarnessWorkspaceState extends State<OfficialHarnessWorkspace> {
     _pendingQueueIdempotencyKey = '';
     _queueWorkspaceId = workspace;
     _queueSessionId = session;
+    _officialCommandProgress = null;
+    _officialHistoryCursor = 0;
+    _commandState = 'idle';
     final oldQuery = _sourceContextQuery;
     if (oldQuery != null) {
       HarnessSourceContextBroker.instance.unregister(oldQuery);
@@ -1632,11 +1637,10 @@ window.__vibekitsHarnessQueueBridge?.submit(
     if (adapter == null || !_queueContextReady) {
       throw StateError('HARNESS_WORKSPACE_UNAVAILABLE');
     }
-    await HarnessOfficialCommandDispatcher(adapter).prompt(
-      sessionId: _queueSessionId,
-      requestId: requestId,
-      text: text,
-    );
+    await HarnessOfficialCommandDispatcher(
+      adapter,
+    ).prompt(sessionId: _queueSessionId, requestId: requestId, text: text);
+    _officialCommandProgress = HarnessOfficialCommandProgress(requestId);
     _commandState = 'accepted';
     final event = _commandSnapshot(requestId: requestId, advance: true);
     _commandChanges.add(event);
@@ -1647,7 +1651,47 @@ window.__vibekitsHarnessQueueBridge?.submit(
     String sessionId,
   ) async {
     _requireCurrentCommandSession(sessionId);
+    await _refreshOfficialCommandProgress(sessionId);
     return _commandSnapshot();
+  }
+
+  Future<void> _refreshOfficialCommandProgress(String sessionId) async {
+    final progress = _officialCommandProgress;
+    if (progress == null ||
+        progress.state == 'completed' ||
+        progress.state == 'failed' ||
+        progress.state == 'stopped') {
+      return;
+    }
+    var cursor = _officialHistoryCursor;
+    for (var page = 0; page < 24; page++) {
+      final history = await _readRemoteHarnessHistory(sessionId, cursor);
+      if (!identical(progress, _officialCommandProgress)) return;
+      final records = history['records'];
+      if (records is List) progress.addRecords(records);
+      var nextCursor = cursor;
+      if (records is List) {
+        for (final record in records) {
+          if (record is! Map) continue;
+          final event = record['event'];
+          final seq = event is Map ? event['seq'] : record['seq'];
+          if (seq is int && seq > nextCursor) nextCursor = seq;
+        }
+      }
+      if (nextCursor <= cursor) break;
+      cursor = nextCursor;
+      _officialHistoryCursor = cursor;
+      if (progress.state == 'completed' ||
+          progress.state == 'failed' ||
+          progress.state == 'stopped' ||
+          history['hasMore'] != true) {
+        break;
+      }
+    }
+    if (progress.state != _commandState) {
+      _commandState = progress.state;
+      _commandChanges.add(_commandSnapshot(advance: true));
+    }
   }
 
   Future<Map<String, Object?>> _readRemoteHarnessHistory(
@@ -2337,17 +2381,19 @@ window.__vibekitsHarnessQueueBridge?.submit(
     _queueAdapterCompatible = payload['compatible'] == true;
     _harnessBusy = payload['busy'] == true;
     _harnessApprovalWaiting = payload['approvalWaiting'] == true;
-    _commandState = _harnessApprovalWaiting
-        ? 'waiting_approval'
-        : _harnessBusy
-        ? 'running'
-        : event == 'turn.failed'
-        ? 'failed'
-        : event == 'turn.cancelled'
-        ? 'stopped'
-        : event == 'turn.completed'
-        ? 'completed'
-        : 'idle';
+    if (_officialCommandProgress == null) {
+      _commandState = _harnessApprovalWaiting
+          ? 'waiting_approval'
+          : _harnessBusy
+          ? 'running'
+          : event == 'turn.failed'
+          ? 'failed'
+          : event == 'turn.cancelled'
+          ? 'stopped'
+          : event == 'turn.completed'
+          ? 'completed'
+          : 'idle';
+    }
     final commandEvent = _commandSnapshot(advance: true);
     _commandChanges.add(commandEvent);
     _messageQueueScheduler?.updateHarnessState(
@@ -5219,7 +5265,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
             subtitle: Text(state.message),
             // Keep a failed restore retryable from the same switch. A saved
             // authorization alone does not mean the simulator is available.
-            value: state.enabled && state.phase != HarnessSimulatorTargetPhase.error,
+            value:
+                state.enabled &&
+                state.phase != HarnessSimulatorTargetPhase.error,
             onChanged: host.available && !changing
                 ? (enabled) async {
                     if (enabled) {
