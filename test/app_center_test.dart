@@ -46,6 +46,37 @@ void main() {
     expect(() => component.requestInstall(unsafe), throwsStateError);
   });
 
+  test('专用组件未上架时只从商城识别原包名 Termux', () async {
+    var listing = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.termux',
+      'android_package_name': 'com.termux',
+      'download_url': 'https://cdn.example.test/termux.apk',
+      'version_code': 1002,
+    });
+    final market = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (_) async => const AppCenterLocalVersion.uninstalled(),
+      loader: ({category, keyword = ''}) async =>
+          AppCenterCatalog(categories: const [], apps: [listing], total: 1),
+    );
+    addTearDown(market.dispose);
+    final component = PadBuilderComponentService(market: market);
+    final termux = await component.check();
+    expect(termux.state, PadBuilderComponentState.termuxAvailableInMarket);
+    expect(termux.item?.packageName, 'com.termux');
+
+    listing = AppCenterItem.fromJson({
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.termux',
+      'android_package_name': 'com.attacker.termux',
+      'download_url': 'https://cdn.example.test/termux.apk',
+    });
+    final spoofed = await component.check();
+    expect(spoofed.state, PadBuilderComponentState.incompleteMarketRecord);
+    expect(() => component.requestInstall(spoofed), throwsStateError);
+  });
+
   test('PAD 编译组件按独立包名查询重启后版本并拒绝伪装条目', () async {
     final queried = <String>[];
     final service = AppCenterService(

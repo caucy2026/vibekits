@@ -1311,7 +1311,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderStatusId,
       name: '检查 PAD 本机编译组件',
       description:
-          '查询本机 Android 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。',
+          '查询本机 Android 编译组件或官方 Termux 的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。',
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
     ),
@@ -1319,7 +1319,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderInstallId,
       name: '从 KEMI 商城安装 PAD 编译组件',
       description:
-          '仅在用户明确需要 PAD 本机原生编译时调用。验证商城 HTTPS、精确大小、SHA-256、包名、版本和同签名后打开 Android 系统安装确认；须随后重新检查安装状态。',
+          '仅在用户明确需要 PAD 本机原生编译时调用。优先同签名构建组件，商城未上架时可安装原签名 Termux；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查安装状态与工具链权限。',
       risk: HarnessToolRisk.writesData,
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
@@ -3206,13 +3206,20 @@ class VibekitsHarnessToolBridge {
     final component = PadBuilderComponentService();
     try {
       final status = await component.check();
+      final isTermux =
+          status.state == PadBuilderComponentState.termuxInstalled ||
+          status.state == PadBuilderComponentState.termuxAvailableInMarket;
       return <String, Object?>{
-        'packageName': PadBuilderComponentService.packageName,
+        'packageName': isTermux
+            ? PadBuilderComponentService.termuxPackageName
+            : PadBuilderComponentService.packageName,
         'state': status.state.name,
         'installedVersionCode': status.versionCode,
         'marketVersionCode': status.item?.versionCode,
         'buildReady': false,
-        'reason': '编译工具链服务尚未通过 PAD 真机构建握手，不能声明可编译 APK',
+        'reason': isTermux
+            ? 'Termux 已安装或可从商城安装，但 RUN_COMMAND 授权、工具链与 PAD 构建尚未验收'
+            : '编译工具链服务尚未通过 PAD 真机构建握手，不能声明可编译 APK',
       };
     } finally {
       component.dispose();
@@ -3225,7 +3232,8 @@ class VibekitsHarnessToolBridge {
     final component = PadBuilderComponentService();
     try {
       final status = await component.check();
-      if (status.state != PadBuilderComponentState.availableInMarket) {
+      if (status.state != PadBuilderComponentState.availableInMarket &&
+          status.state != PadBuilderComponentState.termuxAvailableInMarket) {
         return <String, Object?>{
           'installerOpened': false,
           'state': status.state.name,
@@ -3235,7 +3243,7 @@ class VibekitsHarnessToolBridge {
       await component.requestInstall(status);
       return <String, Object?>{
         'installerOpened': true,
-        'packageName': PadBuilderComponentService.packageName,
+        'packageName': status.item!.androidInstallPackageName,
         'installedConfirmed': false,
         'nextAction': '等待用户在 Android 系统安装界面确认，然后重新检查组件状态',
       };

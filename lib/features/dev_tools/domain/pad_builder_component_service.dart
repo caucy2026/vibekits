@@ -5,6 +5,8 @@ import '../../app_center/domain/app_center_service.dart';
 enum PadBuilderComponentState {
   installed,
   availableInMarket,
+  termuxInstalled,
+  termuxAvailableInMarket,
   notListed,
   incompleteMarketRecord,
   unknownLocalState,
@@ -27,6 +29,7 @@ class PadBuilderComponentService {
       _ownsMarket = market == null;
 
   static const String packageName = 'com.vibekits.vibekits.component.builder';
+  static const String termuxPackageName = 'com.termux';
 
   final AppCenterService _market;
   final bool _ownsMarket;
@@ -53,13 +56,51 @@ class PadBuilderComponentService {
         PadBuilderComponentState.unknownLocalState,
       );
     }
+    final termuxProbe = AppCenterItem.fromJson(const <String, Object?>{
+      'package_name': termuxPackageName,
+      'os_type': 'android',
+    });
+    final termuxLocal = await _market.localVersion(termuxProbe);
+    if (termuxLocal.installed == true &&
+        termuxLocal.versionCode != null &&
+        termuxLocal.versionCode! > 0) {
+      return PadBuilderComponentStatus(
+        PadBuilderComponentState.termuxInstalled,
+        versionCode: termuxLocal.versionCode,
+      );
+    }
+    if (termuxLocal.installed != false) {
+      return const PadBuilderComponentStatus(
+        PadBuilderComponentState.unknownLocalState,
+      );
+    }
     final catalog = await _market.load();
     final matching = catalog.apps.where(
       (item) => item.packageName == packageName,
     );
     if (matching.isEmpty) {
-      return const PadBuilderComponentStatus(
-        PadBuilderComponentState.notListed,
+      final termux = catalog.apps.where(
+        (item) => item.packageName == termuxPackageName,
+      );
+      if (termux.isEmpty) {
+        return const PadBuilderComponentStatus(
+          PadBuilderComponentState.notListed,
+        );
+      }
+      final item = termux.first;
+      if (item.isComponent ||
+          item.androidInstallPackageName != termuxPackageName ||
+          !item.supportsPlatform('android') ||
+          !item.hasVerifiedInstaller ||
+          item.versionCode <= 0 ||
+          !Uri.parse(item.downloadUrl).path.toLowerCase().endsWith('.apk')) {
+        return const PadBuilderComponentStatus(
+          PadBuilderComponentState.incompleteMarketRecord,
+        );
+      }
+      return PadBuilderComponentStatus(
+        PadBuilderComponentState.termuxAvailableInMarket,
+        item: item,
       );
     }
     final item = matching.first;
@@ -81,9 +122,15 @@ class PadBuilderComponentService {
     PadBuilderComponentStatus status, {
     ValueChanged<double>? onProgress,
   }) {
-    if (status.state != PadBuilderComponentState.availableInMarket ||
-        status.item == null) {
+    if (status.item == null ||
+        !const <PadBuilderComponentState>{
+          PadBuilderComponentState.availableInMarket,
+          PadBuilderComponentState.termuxAvailableInMarket,
+        }.contains(status.state)) {
       throw StateError('编译组件未上架或市场安装信息不完整');
+    }
+    if (status.state == PadBuilderComponentState.termuxAvailableInMarket) {
+      return _market.downloadAndOpen(status.item!, onProgress: onProgress);
     }
     return _market.installComponent(status.item!, onProgress: onProgress);
   }
