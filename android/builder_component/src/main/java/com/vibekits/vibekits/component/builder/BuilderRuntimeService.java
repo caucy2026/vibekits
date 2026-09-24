@@ -38,7 +38,7 @@ import java.util.zip.ZipInputStream;
 public final class BuilderRuntimeService extends Service {
     private static final String ARCHIVE = "pad-builder-toolchain-arm64.zip";
     private static final String ARCHIVE_SHA256 =
-        "66c86874552908ba76ef9ebb76de6a620407e6be935847df6396a0b643fc1b80";
+        "599349bf9191997632814b3dcc7d596c764672356891c8f140923194ee48483a";
     private static final Pattern TASK_ID = Pattern.compile("[A-Za-z0-9_-]{1,64}");
     private static final Pattern PACKAGE = Pattern.compile("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+");
     private static final Pattern APK_PACKAGE = Pattern.compile("package: name='([^']+)'");

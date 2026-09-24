@@ -5,7 +5,7 @@ plugins {
 }
 
 val toolchainArchive = System.getenv("VIBEKITS_ANDROID_BUILDER_TOOLCHAIN_ARCHIVE")
-val expectedToolchainSha256 = "66c86874552908ba76ef9ebb76de6a620407e6be935847df6396a0b643fc1b80"
+val expectedToolchainSha256 = "599349bf9191997632814b3dcc7d596c764672356891c8f140923194ee48483a"
 val stageToolchain = tasks.register<Copy>("stageBuilderToolchain") {
     if (!toolchainArchive.isNullOrBlank()) from(toolchainArchive)
     into(layout.buildDirectory.dir("generated/builder-assets"))
@@ -33,8 +33,8 @@ android {
         // PAD63 is API 31. Executing the unpacked arm64 aapt tool and its
         // private libraries was verified in a non-debuggable SDK 35 app.
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
