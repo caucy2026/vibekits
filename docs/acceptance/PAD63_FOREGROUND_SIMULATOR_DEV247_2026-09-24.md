@@ -11,6 +11,7 @@
 
 ## 当前阻塞与未通过项
 
-- 安装 dev.247 前 PAD63 的 LAN ADB 连接变为 `device offline`，重连 192.168.3.63:5555 超时；设备 ID `6795854383` 返回远端离线；同一 LAN 地址两次 ICMP 均超时。dev.247 **尚未装入 PAD63，也未真机验收**。当前设备最后确认安装的是 dev.246，且当时仿真门禁未恢复。
-- 前台常驻改动只保证独立中继进程约 30 MB 的生命周期；MCP 与仿真控制监听仍在 Flutter 主进程。若系统杀死主进程，不能宣称完整 MCP 仿真仍在线。要满足“只有低内存服务常驻且完整仿真可用”，还需把这两个监听和必要工具执行能力迁入服务进程，并测量内存及真机杀进程恢复。
-- PAD63 恢复在线后，先覆盖安装 dev.247，再验证开启、通知/`isForeground`、返回桌面、主进程退出后的按 ID 连接与实际 MCP/ADB、关闭门禁撤销、进程 PSS。未通过前不发布此候选。
+- 早先安装 dev.247 前 PAD63 短暂离线，随后恢复 LAN ADB。已在 PAD63 覆盖安装 dev.247，`versionCode=2247`，不清数据。启动后设备 ID `6795854383` 返回 `connected=true`、`mcpReady=true`、`adbReady=true`。
+- 服务在约 17 秒后成功提升为 Android 前台服务，`isForeground=true`、通知 ID 32148。按 HOME 后，独立中继进程 PSS 约 30–31 MB，远程 `vibekits.simulator.status` 和 ADB shell 均实际成功。此项后台保活通过。
+- **完整仿真仅靠服务常驻仍未通过**：按 HOME 后用 `am kill com.vibekits.vibekits` 模拟系统回收 Flutter 界面进程，中继服务进程仍在、`isForeground=true`，但新设备 ID 会话无法访问 `127.0.0.1:32148`，返回 `Failed to access remote ...32148`。根因是仿真控制与 MCP HTTP 监听仍属 Flutter 主进程。重新打开 APP 后约数秒按 ID 连接恢复 `mcpReady=true`、`adbReady=true`；测试结束已返回桌面，服务仍在前台。
+- 要满足“只有低内存服务常驻且完整仿真可用”，还需把控制/MCP 监听及其所需工具执行能力迁入服务进程，或实现经过真机验证的后台按需启动机制；不得用仅有中继存活冒充完整仿真通过。关闭门禁撤销、进程被回收后的完整 MCP/ADB、服务内存上限均是发布门禁，未通过前不发布此候选。
