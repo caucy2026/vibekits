@@ -17,6 +17,19 @@ from pathlib import Path
 BASE_SHA256 = "367d0f2327bf28b57509351fd06afb38656e7e9b2562a9ad46e72720c91f1452"
 DEX2JAR_SHA256 = "ee7c45eb3c1d2474a6145d8d447e651a736a22d9664b6d3d3be5a5a817dda23a"
 DEX_PREFIX = "dex-tools-v2.4/"
+DEX_JARS = {
+    "asm-9.5.jar",
+    "asm-analysis-9.5.jar",
+    "asm-commons-9.5.jar",
+    "asm-tree-9.5.jar",
+    "asm-util-9.5.jar",
+    "d2j-base-cmd-v2.4.jar",
+    "dex-ir-v2.4.jar",
+    "dex-reader-api-v2.4.jar",
+    "dex-reader-v2.4.jar",
+    "dex-tools-v2.4.jar",
+    "dex-translator-v2.4.jar",
+}
 
 
 def sha256(path: Path) -> str:
@@ -61,7 +74,7 @@ def main() -> None:
                 add(base, name, output, name)
                 names.add(name)
             for name in dex.namelist():
-                if not (name.startswith(DEX_PREFIX + "lib/") and name.endswith(".jar")) and name not in {
+                if name not in {DEX_PREFIX + "lib/" + jar for jar in DEX_JARS} and name not in {
                     DEX_PREFIX + "lib/open-source-license.txt",
                     DEX_PREFIX + "LICENSE.txt",
                     DEX_PREFIX + "NOTICE.txt",
@@ -77,7 +90,8 @@ def main() -> None:
         tmp.unlink(missing_ok=True)
     with zipfile.ZipFile(args.output) as output:
         assert "android.jar" not in output.namelist()
-        assert "dex2jar/lib/dex-tools-v2.4.jar" in output.namelist()
+        assert {"dex2jar/lib/" + jar for jar in DEX_JARS}.issubset(output.namelist())
+        assert len([name for name in output.namelist() if name.startswith("dex2jar/lib/") and name.endswith(".jar")]) == len(DEX_JARS)
         print(f"entries={len(output.namelist())} bytes={args.output.stat().st_size} sha256={sha256(args.output)}")
 
 
