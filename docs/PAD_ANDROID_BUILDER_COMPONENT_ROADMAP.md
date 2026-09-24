@@ -45,4 +45,5 @@ Termux 的[官方 RUN_COMMAND 契约](https://github.com/termux/termux-app/wiki/
 - 宿主已将 `com.vibekits.vibekits.component.builder` 作为保留组件 ID 识别，按真实 PackageManager versionCode 查询；同签名宿主安装白名单已加入该精确包名。伪造原生包名会在下载前被拒绝。商城回归测试 28/28 通过。
 - PAD Harness 的移动端任务规则与 MCP 工具已接入：收到“在 PAD 编译”先查组件状态，只有完整可信的商城条目才能发起下载并打开系统安装确认；安装动作不冒充构建完成。查询工具会明确标记 `buildReady=false`，直到受限服务在真机完成原生构建握手。商城、Harness 桥接、能力目录和 DeepSeek 相关回归通过（既有 1 项按条件跳过）；Dart 静态分析与 Android Kotlin 编译通过。
 - 当专用构建组件未上架时，商城发现支持原包名 `com.termux` 的独立 APK；伪造 `android_package_name` 的条目在下载前被拒绝。Termux 安装只解决依赖入口，不代表其权限、包集和构建结果已经验收。
+- 2026-09-24 公共商城 `api/store/apps?os=android` 分别搜索 `Termux` 和 `VibeKits 编译组件`，两次均返回 `status=200, total=0, list=[]`。因此目前只能证明客户端路由，不能在 PAD63 演示“从商城安装”；发布前须有真实签名包、完整条目和设备端验收。
 - 这只完成第一阶段的宿主接线。组件 APK、编译服务、真机原生 APK 构建和商城条目均未完成；P06/P12/P13 仍为 BLOCK。下一道实机门禁是：确定工具链在 API 31 非 system-UID 独立 APK 中的可执行方式，然后完成受限构建接口和原生样例。
