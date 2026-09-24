@@ -1420,7 +1420,7 @@ class _MobileHarnessAgent
               'vibekits.android.builder_component_status；缺失且商城条目可安装时调用 '
               'vibekits.android.builder_component_install，再调用 '
               'vibekits.android.builder_component_wait_install 有界等待系统安装确认。'
-              '只有 buildReady=true 才在 PAD 工作区生成源码，调用 '
+              '可先在当前 PAD 工作区生成并保留源码；只有 buildReady=true 才调用 '
               'vibekits.android.builder_component_build 并以 '
               'vibekits.android.builder_component_task_status 跟踪至 verified=true。'
               '用户要求安装时再调用 vibekits.android.builder_component_install_apk。'

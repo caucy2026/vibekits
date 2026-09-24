@@ -1324,7 +1324,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderStatusId,
       name: '检查 PAD 本机编译组件',
       description:
-          '查询专用 PAD 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包，并按 nextAction 处理。已安装不等于工具链可用，Termux 不能代替此组件。',
+          '查询专用 PAD 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包，并按 nextAction 处理。已安装不等于工具链可用，只有 buildReady=true 才能在 PAD 本机编译；Termux 不能代替此组件，仅供独立诊断。',
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
     ),
@@ -1332,7 +1332,7 @@ class VibekitsHarnessToolBridge {
       id: padBuilderInstallId,
       name: '从 KEMI 商城安装 PAD 编译组件',
       description:
-          '仅在用户明确需要 PAD 本机原生编译时调用。只安装同签名的完整 PAD 编译组件；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查组件自检状态。Termux 不能代替此组件。',
+          '仅在用户明确需要 PAD 本机原生编译时调用。只安装固定包名、同签名的完整 PAD 编译组件；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后等待安装并检查 buildReady=true。商城未上架时保留任务与源码，不安装 Termux 或从其他来源现场拼装工具链；Termux 不能代替此组件。',
       risk: HarnessToolRisk.writesData,
       properties: const <String, Object?>{},
       available: Platform.isAndroid,

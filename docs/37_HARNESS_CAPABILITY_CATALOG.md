@@ -7,9 +7,9 @@
 - 产品一级页面：7（智能体、解压缩、系统清理、文档阅读、开发工具、应用中心、关于我们）。
 - 开发工具业务能力条目：82。
 - 开发工具独立工作区入口：21。
-- Harness 定义接口：244。
+- Harness 定义接口：249。
 - Harness 当前可执行接口：214。
-- 当前不可公开接口：30。
+- 当前不可公开接口：35。
 
 不要把以上数字相加称为“总功能数”：页面、业务条目和机器接口是三种不同层级。Harness 回答时先调用 `vibekits.system.capability_check` 获取本次运行的动态数字。
 
@@ -78,7 +78,7 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | 模块 | 定义接口数 |
 | --- | ---: |
 | 时间文本 | 11 |
-| 系统诊断 | 92 |
+| 系统诊断 | 97 |
 | 网络开发 | 29 |
 | 文件工具 | 7 |
 | 格式处理 | 10 |
@@ -108,15 +108,20 @@ MCP 对外名称会去掉 `vibekits.` 前缀并把点转换为双下划线，例
 | `vibekits.text_statistics` | `text_statistics` | 文本统计 | 是 | 统计字符、UTF-8 字节、单词和行数。 适合：需要确定、离线地完成文本统计时。 不适合：输入格式不明确、需要联网验证或需要修改源文件时不要使用。 示例：使用文本统计处理当前输入 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.timestamp_to_date` | `timestamp_to_date` | 时间戳转日期 | 是 | 将 Unix 秒/毫秒时间戳转为本地时间和 UTC。 适合：用户明确需要“时间戳转日期”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 
-## 系统诊断（定义 92）
+## 系统诊断（定义 97）
 
 | 内部工具 ID | MCP 名称 | 名称 | 当前可用 | 用途 | 风险 | 参数 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vibekits.adb_workspace` | `adb_workspace` | 安卓调试（ADB） | 否（环境/接线门禁） | 管理 Android USB/无线设备、Shell、文件、Logcat、截图和 APK。 适合：用户明确需要“安卓调试（ADB）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `controlsDevice` | `input`* (string), `params` (string) |
 | `vibekits.advanced.capabilities` | `advanced__capabilities` | 查看高级设备能力 | 是 | 只读返回远程协助、远程仿真机和集群任务中心的真实开关、运行状态、平台角色和下一步。回答“有哪些特殊功能”时必须先调用并优先报告这三项。 | `readOnly` | `{}` |
 | `vibekits.agent_cli` | `agent_cli` | 智能体 CLI 编排 | 否（环境/接线门禁） | 统一发现和调用 Codex、Claude Code、GitHub Copilot、Cursor Agent、Gemini、Aider 与 OpenCode，并管理可等待、可取消的长任务。 适合：用户明确需要“智能体 CLI 编排”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
-| `vibekits.android.builder_component_install` | `android__builder_component_install` | 从 KEMI 商城安装 PAD 编译组件 | 否（环境/接线门禁） | 仅在用户明确需要 PAD 本机原生编译时调用。优先同签名构建组件，商城未上架时可安装原签名 Termux；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查安装状态与工具链权限。 | `writesData` | `{}` |
-| `vibekits.android.builder_component_status` | `android__builder_component_status` | 检查 PAD 本机编译组件 | 否（环境/接线门禁） | 查询本机 Android 编译组件或官方 Termux 的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包。已安装不等于工具链可用。 | `readOnly` | `{}` |
+| `vibekits.android.builder_component_build` | `android__builder_component_build` | 在 PAD 本机编译原生 APK | 否（环境/接线门禁） | 仅调用已安装、同签名且自检成功的 KEMI PAD 编译组件。源码必须在 PAD Harness 工作区，编译、DEX 和签名全在 PAD 上完成；返回任务 ID 后按状态工具查询，不由控制端代编。 | `writesData` | `sourceDirectory`* (string), `packageName`* (string) |
+| `vibekits.android.builder_component_cancel` | `android__builder_component_cancel` | 取消 PAD 本机编译 | 否（环境/接线门禁） | 仅取消指定编译任务，不影响其他 Harness 会话或仿真服务。 | `writesData` | `taskId`* (string) |
+| `vibekits.android.builder_component_install` | `android__builder_component_install` | 从 KEMI 商城安装 PAD 编译组件 | 否（环境/接线门禁） | 仅在用户明确需要 PAD 本机原生编译时调用。只安装固定包名、同签名的完整 PAD 编译组件；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后等待安装并检查 buildReady=true。商城未上架时保留任务与源码，不安装 Termux 或从其他来源现场拼装工具链；Termux 不能代替此组件。 | `writesData` | `{}` |
+| `vibekits.android.builder_component_install_apk` | `android__builder_component_install_apk` | 安装 PAD 编译出的 APK | 否（环境/接线门禁） | 重新校验指定任务的 APK 包名、大小和 SHA-256 后打开 Android 系统安装确认；打开安装器不等于安装成功。 | `controlsDevice` | `taskId`* (string) |
+| `vibekits.android.builder_component_status` | `android__builder_component_status` | 检查 PAD 本机编译组件 | 否（环境/接线门禁） | 查询专用 PAD 编译组件的真实安装版本；缺失时检查 KEMI 商城是否有可验证的安装包，并按 nextAction 处理。已安装不等于工具链可用，只有 buildReady=true 才能在 PAD 本机编译；Termux 不能代替此组件，仅供独立诊断。 | `readOnly` | `{}` |
+| `vibekits.android.builder_component_task_status` | `android__builder_component_task_status` | 查看 PAD 本机编译进度与产物 | 否（环境/接线门禁） | 读取每个编译阶段、有限日志和完成后经宿主复核的 APK 包名、字节与 SHA-256。 | `readOnly` | `taskId`* (string) |
+| `vibekits.android.builder_component_wait_install` | `android__builder_component_wait_install` | 等待 PAD 编译组件完成安装 | 否（环境/接线门禁） | 打开 Android 系统安装确认后调用；最多等待 90 秒，只查询专用组件的 PackageManager 版本，再做编译服务自检。超时不等于安装成功；保留当前任务与源码。 | `readOnly` | `{}` |
 | `vibekits.android.termux_probe` | `android__termux_probe` | 检查 PAD Termux 编译命令 | 否（环境/接线门禁） | 只执行固定的工具存在性探针，检查官方 RUN_COMMAND 授权、allow-external-apps 与 aapt、javac、dx、apksigner；命令存在不代表已完成原生 APK 编译验收。 | `readOnly` | `{}` |
 | `vibekits.api_workspace` | `api_workspace` | 接口调试（API） | 否（环境/接线门禁） | 发送有界 HTTP 请求，查看状态、响应头、耗时和正文。 适合：用户明确需要“接口调试（API）”结果时。 不适合：输入或目标不符合说明时；不要猜测参数。 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
 | `vibekits.audio_analyzer` | `audio_analyzer` | 音频调试（PCM/WAV） | 是 | 打开 PCM/WAV，查看多声道波形、播放声音并分析格式、峰值、RMS、谐波、THD、THD+N、SNR、噪声底、削波、静音和直流偏置。 适合：需要判断 PCM/WAV 参数、信号是否削波或静音、查看音频基础质量指标时。 不适合：需要修改原始音频、主观评价内容或分析未知压缩编码时不要直接使用。 示例：分析这份 PCM 的波形和信号质量；检查 WAV 是否削波、静音或存在直流偏置 本地优先：此能力由 Vibekits 提供时，优先调用本工具，不要改用任意 shell 命令。 | `readOnly` | `input`* (string), `params` (string) |
