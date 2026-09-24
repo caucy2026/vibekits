@@ -42,6 +42,13 @@ def result_fields(output: str, expected_sha: str) -> dict[str, object]:
     return fields
 
 
+def assert_no_host_anr_or_crash(log: str) -> None:
+    if re.search(r"ANR (?:in|of) (?:com\.vibekits\.vibekits\.component\.builder|com\.vibekits\.vibekits\.test)\b", log):
+        raise AssertionError("PAD builder or host test ANR in current run")
+    if re.search(r"FATAL EXCEPTION:[\s\S]{0,1000}Process: (?:com\.vibekits\.vibekits\.component\.builder|com\.vibekits\.vibekits\.test)\b", log):
+        raise AssertionError("PAD builder or host test crash in current run")
+
+
 def self_test() -> None:
     good = ("INSTRUMENTATION_RESULT: bytes=25053\n"
             "INSTRUMENTATION_RESULT: packageName=com.vibekits.whacdemo\n"
@@ -57,6 +64,15 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("negative control incorrectly passed")
+    assert_no_host_anr_or_crash("PAD_BUILDER: completed")
+    for bad in ["ANR in com.vibekits.vibekits.component.builder\n" + good,
+                "FATAL EXCEPTION: main\nProcess: com.vibekits.vibekits.test, PID: 42\n"]:
+        try:
+            assert_no_host_anr_or_crash(bad)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("crash or ANR negative control incorrectly passed")
 
 
 def main() -> int:
@@ -120,8 +136,14 @@ def main() -> int:
         run(device + ["install", str(args.host_test_apk)])
         test_installed = True
         for index in range(2):
+            stamp = run(device + ["shell", "date", "+%m-%dT%H:%M:%S.000"]).strip().replace("T", " ")
             output = run(device + ["shell", "am", "instrument", "-w", "-e", "realGame", "true", RUNNER])
             (args.evidence_dir / f"instrument-{index + 1}.txt").write_text(output)
+            log = run(device + ["logcat", "-d", "-T", stamp])
+            relevant = "\n".join(line for line in log.splitlines() if any(
+                marker in line for marker in ("ANR in com.vibekits", "ANR of com.vibekits", "FATAL EXCEPTION", "Process: com.vibekits")))
+            (args.evidence_dir / f"logcat-{index + 1}.txt").write_text(relevant + "\n")
+            assert_no_host_anr_or_crash(log)
             receipt["runs"].append(result_fields(output, args.expected_game_sha256))
         receipt["state"] = "passed"
     except Exception as error:

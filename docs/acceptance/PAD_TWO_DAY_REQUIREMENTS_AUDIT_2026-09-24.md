@@ -60,4 +60,6 @@ PAD75 又以正式同签名候选 `1.0.4+5`（67,392,855 字节，SHA-256 `6ca9f
 
 固化 `tool/test_pad_host_builder_bridge.py` 后在 PAD75 重新跑两轮，收据位于外盘 `pad-builder-provenance-license-20260924/pad75-host-bridge/receipt.json`：设备内取回的 1.0.5 APK SHA-256 与本地候选完全相同，版本码 6，两轮 `status=passed`，临时测试 APK 已移除。测试自身的错误状态、错误退出码和错误哈希负控制全部触发失败。该收据覆盖精确安装字节和原生桥编译，仍不覆盖模型会话自主选择组件或商场交付。
 
+针对“构建完成后仍 ANR”的历史缺陷，回归脚本增加本轮 logcat 目标进程 ANR/FATAL 门禁及两项负控制；PAD75 用同一 1.0.5 精确字节再次两轮实跑，`pad75-host-bridge-anr-gate/receipt.json` 为 `passed`，目标日志无新 ANR/FATAL，临时测试包移除。历史 PAD75 仿真 ID `9464730211` 的控制连接当前返回 `Remote desktop is offline`，设备 ADB 仍在线且用户前台为笔记/游戏，因此没有擅自切换界面或代用户开启仿真。真实模型会话与市场组件链路继续待验。
+
 **BLOCK。** P06、P12、P13、P20 尚未实现或交付；P15 未做首装冷态闭环；P03、P09、P17 等仍缺用户要求的实机正向证据。不能把当前 PAD63 远程 ADB 子目标已通过写成“两天需求全部解决”。
