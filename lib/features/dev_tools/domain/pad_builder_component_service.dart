@@ -61,24 +61,38 @@ class PadBuilderComponentService {
       'os_type': 'android',
     });
     final termuxLocal = await _market.localVersion(termuxProbe);
-    if (termuxLocal.installed == true &&
+    final installedTermux = termuxLocal.installed == true &&
         termuxLocal.versionCode != null &&
-        termuxLocal.versionCode! > 0) {
-      return PadBuilderComponentStatus(
-        PadBuilderComponentState.termuxInstalled,
-        versionCode: termuxLocal.versionCode,
-      );
-    }
-    if (termuxLocal.installed != false) {
+        termuxLocal.versionCode! > 0;
+    if (!installedTermux && termuxLocal.installed != false) {
       return const PadBuilderComponentStatus(
         PadBuilderComponentState.unknownLocalState,
       );
     }
-    final catalog = await _market.load();
+    // A pre-existing Termux installation must not hide a purpose-built
+    // component that has since become available in the KEMI market.
+    final AppCenterCatalog catalog;
+    try {
+      catalog = await _market.load();
+    } catch (_) {
+      if (installedTermux) {
+        return PadBuilderComponentStatus(
+          PadBuilderComponentState.termuxInstalled,
+          versionCode: termuxLocal.versionCode,
+        );
+      }
+      rethrow;
+    }
     final matching = catalog.apps.where(
       (item) => item.packageName == packageName,
     );
     if (matching.isEmpty) {
+      if (installedTermux) {
+        return PadBuilderComponentStatus(
+          PadBuilderComponentState.termuxInstalled,
+          versionCode: termuxLocal.versionCode,
+        );
+      }
       final termux = catalog.apps.where(
         (item) => item.packageName == termuxPackageName,
       );
