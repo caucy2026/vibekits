@@ -53,6 +53,7 @@ open class MainActivity : FlutterActivity() {
     private val harnessKeyboardChannelName = "vibekits/harness-keyboard"
     private val remoteAdbChannelName = "vibekits/remote-adb"
     private val proxyComponentChannelName = "vibekits/proxy-component"
+    private val padBuilderChannelName = "vibekits/pad-builder"
     private val systemProxyChannelName = "vibekits/android-system-proxy"
     private val keyAlias = "VibekitsAndroidCredentialKey"
     private val preferencesName = "vibekits_secure_credentials"
@@ -230,6 +231,11 @@ open class MainActivity : FlutterActivity() {
                     val client = proxyComponent ?: ProxyComponentClient(this).also { proxyComponent = it }
                     client.handle(call.method, call.argument<String>("configPath"), result)
                 }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, padBuilderChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "inspectTermux") TermuxBuildProbe(this).inspect(result)
+                else result.notImplemented()
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, remoteAdbChannelName)
             .setMethodCallHandler { call, result ->

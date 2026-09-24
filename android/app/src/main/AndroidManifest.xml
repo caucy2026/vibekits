@@ -11,6 +11,7 @@
     <uses-permission android:name="com.newlink.kemi.kboard.permission.IPC" />
     <uses-permission android:name="com.vibekits.vibekits.permission.REMOTE_ADB" />
     <uses-permission android:name="com.vibekits.vibekits.permission.PROXY_RUNTIME" />
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <application
         android:label="vibekits"
         android:name="${applicationName}"
@@ -54,6 +55,9 @@
         </receiver>
         <receiver
             android:name=".RemoteAdbInstallReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".TermuxProbeReceiver"
             android:exported="false" />
         <activity
             android:name=".MainActivity"
@@ -111,6 +115,7 @@
         <package android:name="com.newlink.kemi.kboard" />
         <package android:name="com.vibekits.vibekits.component.adb" />
         <package android:name="com.vibekits.vibekits.component.builder" />
+        <package android:name="com.termux" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

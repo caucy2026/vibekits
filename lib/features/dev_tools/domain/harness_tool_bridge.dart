@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
+
 import '../../../app/app_settings.dart';
 import '../../../app/platform_storage_layout.dart';
 import '../../cleaner/domain/cleanup_platform_policy.dart';
@@ -497,6 +499,7 @@ class VibekitsHarnessToolBridge {
       'vibekits.android.builder_component_status';
   static const String padBuilderInstallId =
       'vibekits.android.builder_component_install';
+  static const String padTermuxProbeId = 'vibekits.android.termux_probe';
   static const String captureStatusId = 'vibekits.capture.status';
   static const String captureStartId = 'vibekits.capture.start';
   static const String captureStopId = 'vibekits.capture.stop';
@@ -1321,6 +1324,14 @@ class VibekitsHarnessToolBridge {
       description:
           '仅在用户明确需要 PAD 本机原生编译时调用。优先同签名构建组件，商城未上架时可安装原签名 Termux；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查安装状态与工具链权限。',
       risk: HarnessToolRisk.writesData,
+      properties: const <String, Object?>{},
+      available: Platform.isAndroid,
+    ),
+    padTermuxProbeId: _definition(
+      id: padTermuxProbeId,
+      name: '检查 PAD Termux 编译命令',
+      description:
+          '只执行固定的工具存在性探针，检查官方 RUN_COMMAND 授权、allow-external-apps 与 aapt、javac、dx、apksigner；命令存在不代表已完成原生 APK 编译验收。',
       properties: const <String, Object?>{},
       available: Platform.isAndroid,
     ),
@@ -3168,6 +3179,7 @@ class VibekitsHarnessToolBridge {
     if (toolId == projectBuildId) return _buildProjectIteration;
     if (toolId == padBuilderStatusId) return _padBuilderStatus;
     if (toolId == padBuilderInstallId) return _padBuilderInstall;
+    if (toolId == padTermuxProbeId) return _padTermuxProbe;
     if (toolId == captureStatusId) return _captureStatus;
     if (toolId == captureStartId) return _captureStart;
     if (toolId == captureStopId) return _captureStop;
@@ -3250,6 +3262,23 @@ class VibekitsHarnessToolBridge {
     } finally {
       component.dispose();
     }
+  }
+
+  Future<Map<String, Object?>> _padTermuxProbe(
+    Map<String, Object?> arguments,
+  ) async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError('Termux 探针仅适用于 Android PAD');
+    }
+    final response = await const MethodChannel('vibekits/pad-builder')
+        .invokeMapMethod<String, Object?>('inspectTermux')
+        .timeout(const Duration(seconds: 20));
+    if (response == null) throw StateError('PAD 编译探针未返回结果');
+    return <String, Object?>{
+      ...response,
+      'buildReady': false,
+      'nextAction': '只有 PAD 本机完成源码编译、签名和安装的真机验收后才能声明构建可用',
+    };
   }
 
   Future<Map<String, Object?>> _captureStatus(

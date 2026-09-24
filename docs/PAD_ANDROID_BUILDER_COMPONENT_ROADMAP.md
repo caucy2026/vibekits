@@ -40,6 +40,8 @@ PAD63 实测：现有 `com.termux` APK 33 MB，但 `/data/data/com.termux/files/
 
 用户说“在 PAD 上编译代码或 APK”时，PAD Harness 先调用 `vibekits.android.builder_component_status`。优先精确包名的专用构建组件；若尚未上架，检查商城中的原签名 `com.termux` 作为受权限约束的过渡依赖。已安装但 `buildReady=false` 表示只有包名/versionCode，工具链仍未验收；缺失且市场记录可信时调用 `vibekits.android.builder_component_install`，该工具会下载校验并打开 Android 系统安装确认，不能把“打开安装器”说成“安装成功”。用户确认后重查版本，再做构建服务握手。商城没有包、元数据缺 HTTPS/字节/SHA-256、签名不符或权限被拒绝时，保留原会话和源码并报告准确状态，不转去控制端代编、临时 HTTP 桥或现场重建 Android 工具链。
 
+对已安装的 Termux，Harness 继续调用 `vibekits.android.termux_probe`。此探针只通过官方 `RUN_COMMAND` API 执行固定的 `aapt/javac/dx/apksigner` 存在性检查，返回包版本、权限状态、命令是否齐全和有界错误；它不运行用户任意文本，不替代实际 APK 构建验收。接收结果使用一次性 PendingIntent，最多等待 15 秒，不启动常驻桥服务。
+
 Termux 的[官方 RUN_COMMAND 契约](https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent)明确要求第三方调用权限和 `allow-external-apps`；[官方执行环境说明](https://github.com/termux/termux-packages/wiki/Termux-execution-environment)说明固定包前缀。它可以作为独立商城商品或受限过渡方案，但不能冒充同签名宿主组件。商城组件方案的完成标准是 PAD 自身获取源码、编译、签名、安装原生 APK，而不只是能找到市场条目。
 
 ## 当前推进记录

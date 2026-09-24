@@ -24,12 +24,15 @@ void main() {
     final tools = {for (final tool in bridge.fullCatalog) tool.id: tool};
     final status = tools[VibekitsHarnessToolBridge.padBuilderStatusId]!;
     final install = tools[VibekitsHarnessToolBridge.padBuilderInstallId]!;
+    final termux = tools[VibekitsHarnessToolBridge.padTermuxProbeId]!;
     expect(status.risk, HarnessToolRisk.readOnly);
     expect(install.risk, HarnessToolRisk.writesData);
+    expect(termux.risk, HarnessToolRisk.readOnly);
     expect(status.description, contains('已安装不等于工具链可用'));
     expect(install.description, contains('Android 系统安装确认'));
     expect(status.available, Platform.isAndroid);
     expect(install.available, Platform.isAndroid);
+    expect(termux.available, Platform.isAndroid);
   });
 
   test('远程仿真目录公开 Harness 全自动会话闭环', () async {
