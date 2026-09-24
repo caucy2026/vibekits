@@ -5223,7 +5223,9 @@ class _HarnessRemoteShareDialogState extends State<HarnessRemoteShareDialog> {
             secondary: const Icon(Icons.developer_mode_rounded),
             title: const Text('允许作为仿真机'),
             subtitle: Text(state.message),
-            value: state.enabled,
+            // Keep a failed restore retryable from the same switch. A saved
+            // authorization alone does not mean the simulator is available.
+            value: state.enabled && state.phase != HarnessSimulatorTargetPhase.error,
             onChanged: host.available && !changing
                 ? (enabled) async {
                     if (enabled) {

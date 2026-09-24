@@ -219,7 +219,7 @@ open class MainActivity : FlutterActivity() {
                     return@setMethodCallHandler
                 }
                 val enable = call.method == "ensureAdbd"
-                if (!RemoteAdbBootstrap.installed(this)) {
+                if (!RemoteAdbBootstrap.installed(this, 5L)) {
                     if (!enable) {
                         result.success(mapOf("accepted" to true, "message" to "No ADB helper installed"))
                         return@setMethodCallHandler

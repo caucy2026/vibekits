@@ -56,7 +56,11 @@ public final class RemoteAdbReceiver extends BroadcastReceiver {
     static boolean ensure(Context context) throws Exception {
         boolean alreadyListening = listening();
         boolean port = setProperty("service.adb.tcp.port", "5555");
-        boolean start = port && setProperty("ctl.start", "adbd");
+        // ctl.start is a no-op if adbd is already running in USB-only mode.
+        // Restart it after changing the TCP property so init actually opens
+        // the requested listener. Leave a healthy TCP connection untouched.
+        boolean start = port && (alreadyListening || setProperty("ctl.stop", "adbd"))
+                && setProperty("ctl.start", "adbd");
         if (start) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                     .putBoolean("enabled", true)
