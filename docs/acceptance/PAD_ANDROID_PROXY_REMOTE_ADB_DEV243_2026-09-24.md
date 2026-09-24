@@ -16,9 +16,10 @@
 - 真机导入仅用于测试的 DIRECT 配置后，Binder 启动 Mihomo，PAD 端回环代理监听成功；控制端通过 ADB 端口转发向 `https://example.com` 发起 HTTP CONNECT，收到 200 和上游 HTTP/2 200。关闭后核心退出、监听端口消失，原先为 `null` 的 `Settings.Global.HTTP_PROXY` 恢复为 `null`；测试配置已删除。
 - PAD75 点击扫码入口，手机端方式通过二维码提供的一次性地址提交测试 HTTPS 订阅 URL，PAD 输入框自动回填；取消后未保存测试订阅。重复/错误令牌、Harness Key 原有流程及订阅流程的自动化测试通过。
 - PAD75 已安装系统 UID 辅助组件 v4，实测 UID 1000。仿真开关开启后，以设备 ID `9464730211` 通过 VibeKits P2P/中继控制协议取得远端 ADB 隧道 `127.0.0.1:56288`，执行 `getprop ro.product.model` 返回 `huanglong`。测试完成已关闭该隧道。
+- 09:04 进行缺组件断链实测：预置 45 秒本地独立救援后，卸载 `com.vibekits.vibekits.component.adb` 返回 `Success`，写入 `service.adb.tcp.port=-1` 并停止 `adbd`，原 ADB shell 被断开。约 10 秒后 5555 已恢复，辅助组件重新安装为 v4/UID 1000，安装时间为 09:04:44；救援触发标记不存在，故这次恢复不是救援脚本完成的。随后仅凭设备 ID `9464730211` 建立新的远程仿真 ADB 隧道 `127.0.0.1:64962`，远端 `getprop ro.product.model` 返回 `huanglong`，`getprop service.adb.tcp.port` 返回 `5555`。测试连接已关闭，临时脚本已移除。这证明仿真已开启期间辅助组件和 adbd 同时缺失时能自恢复，再通过设备 ID 远程 ADB。
 - `app_center_test.dart`、`lan_harness_key_receiver_test.dart`、`harness_simulator_target_runtime_test.dart` 共 41 项通过。主包与组件分别按正式平台证书签名；未使用无签名 APK。
 
 ## 尚未满足的发布与冷态门禁
 
-- 还没有在“全新 PAD、原本关闭 ADB、尚未安装辅助组件”状态下，仅靠用户开启仿真，再以设备 ID 建立远程 ADB 的完整闭环。现有证据覆盖已安装辅助组件的运行中断线恢复（PAD63 既往实测）和 PAD75 的设备 ID 远程 ADB。不能把这些替代为首装冷态验收。测试前必须预置独立救援，以免关掉唯一的 ADB 连接。
+- 还没有在“全新 PAD、仿真原本关闭、ADB 原本关闭、尚未安装辅助组件”的首装状态下，由用户手动开启仿真再通过 ID 连接的完整闭环。已通过的实测覆盖“仿真已开启时，卸载辅助组件并关闭 ADB 后自动恢复且远程 ADB 可用”；不能把它等同于首次手动开启。首装测试前仍须预置独立救援，以免关掉唯一的 ADB 连接。
 - 商城主程序 dev.243 和网络代理组件尚未完成开发者记录、公开详情、CDN 校验和商城内实际安装。没有这些证据不能写“正式发布完成”。
