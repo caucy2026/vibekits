@@ -1,6 +1,6 @@
 # PAD 编译组件第三方许可
 
-本组件离线携带 OpenJDK 21、Android 构建工具及所需运行库。OpenJDK 的原始 `legal/` 目录保留在 `pad-builder-toolchain-arm64.zip` 中。
+本组件离线携带 Termux `openjdk-21` 与 `openjdk-21-x` 21.0.12、Android 构建工具及所需运行库。OpenJDK 的原始 `legal/` 目录保留在 `pad-builder-toolchain-arm64.zip` 中。
 
 | 内容 | 来源与版本 | 随包许可文本 |
 | --- | --- | --- |
