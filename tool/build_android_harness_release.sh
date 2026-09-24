@@ -31,7 +31,9 @@ for symbol in Java_ffi_FFI_harnessSetSimulatorAccess Java_ffi_FFI_harnessConnect
 done
 cp "$core" "$repo_root/android/app/src/main/jniLibs/arm64-v8a/librustdesk.so"
 cd "$repo_root"
-"$flutter_bin" build apk --release --target-platform android-arm64 --no-pub
+# Keep the complete icon font: font-subset stalled on an otherwise idle clean
+# PAD release build, while the same source completed with this option.
+"$flutter_bin" build apk --release --target-platform android-arm64 --no-tree-shake-icons --no-pub
 (cd "$repo_root/android" && ./gradlew :model_component:assembleRelease --no-daemon)
 python3 - "$repo_root/build/app/outputs/flutter-apk/app-release.apk" \
   "$repo_root/build/model_component/outputs/apk/release/model_component-release.apk" \
