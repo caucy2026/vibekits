@@ -30,3 +30,7 @@
 - 该极端试验中辅助组件被人为设为 `disabled-user`，预置的独立救援脚本未恢复它；PAD75 当前 ADB 仍不可用，须在设备本地重新启用辅助组件/ADB。**不能据此宣称已具备无条件远程重启 ADB。**普通 USB-only 的 adbd 端口故障由辅助组件 v5 自动恢复，前节 PAD75 实测通过。
 - 当前 Android 没有 SSH 服务端，连接状态 `sshReady=false`。现有 SSH 工具是控制端客户端，不能当作 PAD 的备用 SSH。若要求在辅助组件也被禁用时完全远程自救，需要另行交付经鉴权的、独立于 ADB 的 PAD 端系统控制服务，并在真机上验证；不得把 MCP 只读诊断冒充系统命令执行。
 - dev.245 签名候选：`dist/candidates/Vibekits-1.9.0-dev.245+2245-android-pad63-kemi-signed.apk`，86,829,813 字节，SHA-256 `a70c608b1571d22c82a14acd676b487ceb7f41fb1e119e2fa1cc2b57fb196f87`。`harness_simulator_target_runtime_test.dart` 12 项通过。
+
+## PAD63 关闭 ADB 后恢复实测
+
+2026-09-24 在 PAD63 dev.245 / 辅助组件 v5 / 仿真已开启状态下，通过已鉴权 ADB shell 将 `service.adb.tcp.port` 设为 `-1` 并重启 `adbd`，原远程 shell 按预期断开。随后同一设备 ID 的仿真连接仍返回 `mcpReady=true` 和 `adbReady=true`；在新远程 ADB shell 中实际读到 `service.adb.tcp.port=5555`、`init.svc.adbd=running`、设备型号 `KEMI Vibe Pads S1`。这是 PAD63 本机的 ADB TCP 关闭后自动恢复闭环。该测试没有卸载或停用系统辅助组件；辅助组件被禁用时的无条件远程自救仍未实现。
