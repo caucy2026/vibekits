@@ -54,6 +54,6 @@ Termux 的[官方 RUN_COMMAND 契约](https://github.com/termux/termux-app/wiki/
 - 当专用构建组件未上架时，商城发现支持原包名 `com.termux` 的独立 APK；伪造 `android_package_name` 的条目在下载前被拒绝。Termux 安装只解决依赖入口，不代表其权限、包集和构建结果已经验收。
 - 2026-09-24 公共商城 `api/store/apps?os=android` 分别搜索 `Termux` 和 `VibeKits 编译组件`，两次均返回 `status=200, total=0, list=[]`。因此目前只能证明客户端路由，不能在 PAD63 演示“从商城安装”；发布前须有真实签名包、完整条目和设备端验收。
 - 2026-09-24 实机候选 dev.253+2253：Release APK 85,027,740 字节，以既有 PAD 签名编译并安装到 63 号 PAD，PackageManager 回报已安装 dev.253。应用可以启动。安装传输后仿真 ADB 隧道离线；用已验证的同一设备 LAN ADB 查询确认安装成功，仿真重连报告托管 Harness 访问被禁用，故此轮不能声称完成远程 Harness 工具调用。
-- 实机 Termux 已安装，但 VibeKits 的 `com.termux.permission.RUN_COMMAND` 初始为 `granted=false`，Termux 的 `allow-external-apps` 仍是注释状态。测试时临时授予了前一权限，后一配置仍未开启；因此工具命令实际执行、原生 APK 编译和从商城安装均未通过。专用组件必须避免让用户自行搭建整套 Termux 环境。
+- 实机 Termux 已安装，但 VibeKits 的 `com.termux.permission.RUN_COMMAND` 初始为 `granted=false`，Termux 的 `allow-external-apps` 仍是注释状态。测试时临时授予了前一权限，随后已撤销恢复原状；后一配置始终未开启。因此工具命令实际执行、原生 APK 编译和从商城安装均未通过。专用组件必须避免让用户自行搭建整套 Termux 环境。
 - 修正组件查询优先级：即使设备已有 Termux，也先检查 KEMI 商城是否上架可信的专用组件，避免 Termux 抢先返回遮蔽升级路径；商城不可用时仍报告已安装 Termux。新增对应回归，`app_center_test.dart` 31 项通过，Dart 静态分析通过。
 - 这只完成第一阶段的宿主接线。组件 APK、编译服务、真机原生 APK 构建和商城条目均未完成；P06/P12/P13 仍为 BLOCK。下一道实机门禁是：确定工具链在 API 31 非 system-UID 独立 APK 中的可执行方式，然后完成受限构建接口和原生样例。
