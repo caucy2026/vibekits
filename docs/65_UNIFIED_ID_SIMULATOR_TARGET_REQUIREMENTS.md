@@ -167,6 +167,10 @@ Windows 控制端可以复用**同一个 VibeKits SSH 隧道和 rclone SFTP 后�
 
 操作说明只记录目录、流程和非敏感参数；不保存隧道令牌、SSH 私钥、凭据、临时端口或用户文件内容。rclone 的 Windows 挂载依赖与权限边界见 [rclone mount 文档](https://rclone.org/commands/rclone_mount/#installing-on-windows)，WebDAV 服务及 Windows 客户端限制见 [rclone serve webdav 文档](https://rclone.org/commands/rclone_serve_webdav/#access-webdav-on-windows)。本次实际验收细节见 [dev.236 远程目录映射记录](acceptance/V1_9_0_DEV236_MAC_RELEASE_REMOTE_MAP_2026-09-24.md)。
 
+#### SMB 方案的适用边界
+
+SMB 可以作为另一种文件共享方案：目标机先创建有明确读写权限的共享目录，控制端再用 Finder 或 Windows 资源管理器挂载。它更贴合 Windows 原生文件共享和多用户共享习惯，不依赖 rclone 的 SFTP 目录缓存；但需要目标端运行并授权 SMB 服务、配置共享账户/权限，并能访问目标的 SMB 端点。常规 SMB 使用 TCP `445`。**当前远程仿真只允许转发固定回环 SSH `22`、MCP `32147` 和 Android ADB `5555`，没有 SMB `445` 隧道**；因此不能把现有 ID 连接直接改成 SMB 挂载，也不应将目标机 `445` 暴露到公网。若将来要支持“只凭设备 ID 挂载 SMB”，必须另立受管 `445` 转发和授权设计，按 macOS/Windows 分别验证共享权限、断线回收及端口冲突。SMB over QUIC 也属于不同部署路径，需特定服务端、证书和网络配置，不是本次现有仿真通道的替换开关。端口和平台要求见 [Microsoft SMB over TCP 文档](https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/direct-hosting-of-smb-over-tcpip)及 [SMB over QUIC 文档](https://learn.microsoft.com/en-us/windows-server/storage/file-server/smb-over-quic)。
+
 面向大模型的连接器只接收 `routingId`；`forceRelay` 只允许在内部验收接口使用。本地空闲端口由连接器自动分配，远端目标固定为 `127.0.0.1:32147`、桌面系统 `127.0.0.1:22`，以及 Android 设备 `127.0.0.1:5555`；任何调用方都不能传入，防止把该能力滥用为任意代理。连接过程必须依次产生：
 
 1. `listener_ready`：控制端回环监听已建立，但尚不能调用；
