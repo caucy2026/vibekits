@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <permission android:name="com.vibekits.vibekits.permission.BUILDER_RUNTIME"
+        android:protectionLevel="signature" />
+    <application android:label="VibeKits PAD 编译组件" android:allowBackup="false"
+        android:usesCleartextTraffic="false">
+        <activity android:name=".BuilderStatusActivity" android:exported="true" />
+        <service android:name=".BuilderRuntimeService" android:exported="true"
+            android:foregroundServiceType="dataSync"
+            android:permission="com.vibekits.vibekits.permission.BUILDER_RUNTIME" />
+    </application>
+</manifest>

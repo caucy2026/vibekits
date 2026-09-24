@@ -232,7 +232,7 @@ abstract final class DeepSeekHarnessService {
 
 用户给出设备 ID，要求调试远程电脑、查看远端 App/日志/系统、安装测试软件或进行远程仿真时，即使没有说出技能名，也要读取随 App 安装的 `vibekits-remote-simulator` 技能，直接调用内置 `vibekits.simulator.*` MCP 在后台连接、核验、执行任务并断开；不要依赖开发机的 Codex 技能目录、外部 SSH 客户端或远程桌面界面。
 
-PAD 端 Harness 收到“在 PAD 本机编译代码或原生 APK”要求时，先调用 `vibekits.android.builder_component_status`。缺少组件且市场条目完整时，调用 `vibekits.android.builder_component_install`，等待用户完成 Android 系统安装确认后再次查询。如果返回 `termuxInstalled`，再调用 `vibekits.android.termux_probe` 核实官方 RUN_COMMAND 授权与工具命令。只有本机编译服务握手证明 `buildReady=true` 才能执行原生构建；若组件未上架、安装未完成或工具链未就绪，准确报告当前状态和下一步。不得把桌面 `project.build`、控制端代编译、临时 Termux HTTP 桥或下载其他未核验工具说成 PAD 本机编译成功。
+PAD 端 Harness 收到“在 PAD 本机编译代码或原生 APK”要求时，先调用 `vibekits.android.builder_component_status`。缺少组件且市场条目完整时，调用 `vibekits.android.builder_component_install`，等待用户完成 Android 系统安装确认后再次查询。只有独立组件自检回报 `buildReady=true` 时，才在当前 PAD 工作区生成 `app/src/main` 源码，调用 `vibekits.android.builder_component_build`，再用 `vibekits.android.builder_component_task_status` 有界查询各步结果；产物 `verified=true` 后，如任务要求安装或运行，调用 `vibekits.android.builder_component_install_apk` 并等系统确认。失败时保留源码与原会话，报告具体步骤和错误。`termux_probe` 只能诊断已有 Termux，不能取代完整商城编译组件。不得把桌面 `project.build`、控制端代编译、临时 Termux HTTP 桥或下载其他未核验工具说成 PAD 本机编译成功。
 
 从当前 MCP 工具目录选择 `vibekits.*` 接口；每个工具的 `description` 与 `inputSchema` 是参数唯一权威来源。需要精确列出参数时，先调用 `vibekits.system.describe_tool`，逐项报告类型、必填、默认值、枚举与范围。参数必须是符合 Schema 的 JSON 对象。有 VibeKits 专用接口时优先调用它，不得用 shell、PowerShell、系统 ADB、系统 Git 或第三方程序绕过 APP。
 
@@ -1419,8 +1419,11 @@ class _MobileHarnessAgent
               '用户要求在 PAD 本机编译代码或 APK 时，先调用 '
               'vibekits.android.builder_component_status；缺失且商城条目可安装时调用 '
               'vibekits.android.builder_component_install，系统安装确认后重新检查。'
-              '若已安装 Termux，再调用 vibekits.android.termux_probe 检查授权与编译命令。'
-              '只有 buildReady=true 才能声称 PAD 本机可编译；不得用桌面代编译或临时桥冒充。'
+              '只有 buildReady=true 才在 PAD 工作区生成源码，调用 '
+              'vibekits.android.builder_component_build 并以 '
+              'vibekits.android.builder_component_task_status 跟踪至 verified=true。'
+              '用户要求安装时再调用 vibekits.android.builder_component_install_apk。'
+              'Termux 探针仅供诊断；不得用桌面代编译或临时桥冒充。'
               '需要 Windows/macOS 二进制、主机端口或驱动的工具会返回结构化的“需要桌面节点”结果。'
               '你必须如实告知用户，不能伪造执行成功。当前工作区：${_request.workspace}',
         },
@@ -1601,19 +1604,23 @@ class _MobileHarnessAgent
         }
         if (reasoningDelta.length > remaining && !reasoningTruncated) {
           reasoningTruncated = true;
-          _events.add(const HarnessAgentEvent(
-            HarnessAgentEventKind.reasoning,
-            '\n（早期推理已折叠，继续显示最新过程。）\n',
-          ));
+          _events.add(
+            const HarnessAgentEvent(
+              HarnessAgentEventKind.reasoning,
+              '\n（早期推理已折叠，继续显示最新过程。）\n',
+            ),
+          );
         }
         // Keep forwarding current reasoning after the bounded context buffer
         // fills. A long model thought must not freeze the visible progress.
-        _events.add(HarnessAgentEvent(
-          HarnessAgentEventKind.reasoning,
-          reasoningDelta.length <= 8192
-              ? reasoningDelta
-              : reasoningDelta.substring(reasoningDelta.length - 8192),
-        ));
+        _events.add(
+          HarnessAgentEvent(
+            HarnessAgentEventKind.reasoning,
+            reasoningDelta.length <= 8192
+                ? reasoningDelta
+                : reasoningDelta.substring(reasoningDelta.length - 8192),
+          ),
+        );
       }
       final String contentDelta = '${rawDelta['content'] ?? ''}';
       if (contentDelta.isNotEmpty) {

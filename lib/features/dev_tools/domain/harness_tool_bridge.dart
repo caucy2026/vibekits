@@ -499,6 +499,14 @@ class VibekitsHarnessToolBridge {
       'vibekits.android.builder_component_status';
   static const String padBuilderInstallId =
       'vibekits.android.builder_component_install';
+  static const String padBuilderBuildId =
+      'vibekits.android.builder_component_build';
+  static const String padBuilderTaskStatusId =
+      'vibekits.android.builder_component_task_status';
+  static const String padBuilderCancelId =
+      'vibekits.android.builder_component_cancel';
+  static const String padBuilderInstallApkId =
+      'vibekits.android.builder_component_install_apk';
   static const String padTermuxProbeId = 'vibekits.android.termux_probe';
   static const String captureStatusId = 'vibekits.capture.status';
   static const String captureStartId = 'vibekits.capture.start';
@@ -1325,6 +1333,46 @@ class VibekitsHarnessToolBridge {
           '仅在用户明确需要 PAD 本机原生编译时调用。优先同签名构建组件，商城未上架时可安装原签名 Termux；验证 HTTPS、精确大小、SHA-256、包名和版本后打开 Android 系统安装确认；须随后重新检查安装状态与工具链权限。',
       risk: HarnessToolRisk.writesData,
       properties: const <String, Object?>{},
+      available: Platform.isAndroid,
+    ),
+    padBuilderBuildId: _definition(
+      id: padBuilderBuildId,
+      name: '在 PAD 本机编译原生 APK',
+      description:
+          '仅调用已安装、同签名且自检成功的 KEMI PAD 编译组件。源码必须在 PAD Harness 工作区，编译、DEX 和签名全在 PAD 上完成；返回任务 ID 后按状态工具查询，不由控制端代编。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{
+        'sourceDirectory': _string('PAD 工作区内含 app/src/main 的项目绝对路径'),
+        'packageName': _string('预期 APK 包名，例如 com.example.game'),
+      },
+      required: <String>['sourceDirectory', 'packageName'],
+      available: Platform.isAndroid,
+    ),
+    padBuilderTaskStatusId: _definition(
+      id: padBuilderTaskStatusId,
+      name: '查看 PAD 本机编译进度与产物',
+      description: '读取每个编译阶段、有限日志和完成后经宿主复核的 APK 包名、字节与 SHA-256。',
+      properties: <String, Object?>{'taskId': _string('构建工具返回的任务 ID')},
+      required: <String>['taskId'],
+      available: Platform.isAndroid,
+    ),
+    padBuilderCancelId: _definition(
+      id: padBuilderCancelId,
+      name: '取消 PAD 本机编译',
+      description: '仅取消指定编译任务，不影响其他 Harness 会话或仿真服务。',
+      risk: HarnessToolRisk.writesData,
+      properties: <String, Object?>{'taskId': _string('需要取消的任务 ID')},
+      required: <String>['taskId'],
+      available: Platform.isAndroid,
+    ),
+    padBuilderInstallApkId: _definition(
+      id: padBuilderInstallApkId,
+      name: '安装 PAD 编译出的 APK',
+      description:
+          '重新校验指定任务的 APK 包名、大小和 SHA-256 后打开 Android 系统安装确认；打开安装器不等于安装成功。',
+      risk: HarnessToolRisk.controlsDevice,
+      properties: <String, Object?>{'taskId': _string('已完成并核验的构建任务 ID')},
+      required: <String>['taskId'],
       available: Platform.isAndroid,
     ),
     padTermuxProbeId: _definition(
@@ -3179,6 +3227,10 @@ class VibekitsHarnessToolBridge {
     if (toolId == projectBuildId) return _buildProjectIteration;
     if (toolId == padBuilderStatusId) return _padBuilderStatus;
     if (toolId == padBuilderInstallId) return _padBuilderInstall;
+    if (toolId == padBuilderBuildId) return _padBuilderBuild;
+    if (toolId == padBuilderTaskStatusId) return _padBuilderTaskStatus;
+    if (toolId == padBuilderCancelId) return _padBuilderCancel;
+    if (toolId == padBuilderInstallApkId) return _padBuilderInstallApk;
     if (toolId == padTermuxProbeId) return _padTermuxProbe;
     if (toolId == captureStatusId) return _captureStatus;
     if (toolId == captureStartId) return _captureStart;
@@ -3221,6 +3273,20 @@ class VibekitsHarnessToolBridge {
       final isTermux =
           status.state == PadBuilderComponentState.termuxInstalled ||
           status.state == PadBuilderComponentState.termuxAvailableInMarket;
+      if (status.state == PadBuilderComponentState.installed) {
+        final runtime = await _padBuilderNative('componentStatus');
+        return <String, Object?>{
+          'packageName': PadBuilderComponentService.packageName,
+          'state': runtime['state'],
+          'installedVersionCode': status.versionCode,
+          'buildReady': runtime['buildReady'] == true,
+          'toolchainSha256': runtime['toolchainSha256'],
+          'error': runtime['error'],
+          'nextAction': runtime['buildReady'] == true
+              ? '可调用 vibekits.android.builder_component_build 在 PAD 本机编译'
+              : '编译组件正在准备或自检失败；查看 state/error 后重试或修复',
+        };
+      }
       return <String, Object?>{
         'packageName': isTermux
             ? PadBuilderComponentService.termuxPackageName
@@ -3236,6 +3302,81 @@ class VibekitsHarnessToolBridge {
     } finally {
       component.dispose();
     }
+  }
+
+  Future<Map<String, Object?>> _padBuilderNative(
+    String method, [
+    Map<String, Object?> arguments = const <String, Object?>{},
+  ]) async {
+    if (!Platform.isAndroid) throw UnsupportedError('PAD 编译组件仅适用于 Android');
+    final response = await const MethodChannel('vibekits/pad-builder')
+        .invokeMapMethod<String, Object?>(method, arguments)
+        .timeout(const Duration(seconds: 30));
+    if (response == null) throw StateError('PAD 编译组件未返回结果');
+    return <String, Object?>{...response};
+  }
+
+  Future<Map<String, Object?>> _padBuilderBuild(
+    Map<String, Object?> arguments,
+  ) async {
+    final source = (arguments['sourceDirectory'] ?? '').toString().trim();
+    final packageName = (arguments['packageName'] ?? '').toString().trim();
+    if (source.isEmpty || packageName.isEmpty) {
+      throw const FormatException('必须提供 PAD 源码目录和预期 APK 包名');
+    }
+    final taskId = 'pad${DateTime.now().microsecondsSinceEpoch}';
+    final result = await _padBuilderNative('startBuild', <String, Object?>{
+      'sourceDirectory': source,
+      'expectedPackageName': packageName,
+      'taskId': taskId,
+    });
+    return <String, Object?>{
+      ...result,
+      'nextAction': result['accepted'] == true
+          ? '调用 vibekits.android.builder_component_task_status 查询进度和经核验的产物'
+          : '检查编译组件状态、源码路径和包名',
+    };
+  }
+
+  Future<Map<String, Object?>> _padBuilderTaskStatus(
+    Map<String, Object?> arguments,
+  ) => _padBuilderNative('buildStatus', <String, Object?>{
+    'taskId': (arguments['taskId'] ?? '').toString(),
+  });
+
+  Future<Map<String, Object?>> _padBuilderCancel(
+    Map<String, Object?> arguments,
+  ) => _padBuilderNative('cancelBuild', <String, Object?>{
+    'taskId': (arguments['taskId'] ?? '').toString(),
+  });
+
+  Future<Map<String, Object?>> _padBuilderInstallApk(
+    Map<String, Object?> arguments,
+  ) async {
+    final taskId = (arguments['taskId'] ?? '').toString();
+    final prepared = await _padBuilderNative(
+      'prepareInstall',
+      <String, Object?>{'taskId': taskId},
+    );
+    if (prepared['verified'] != true) {
+      return <String, Object?>{
+        'installerOpened': false,
+        'reason': prepared['error'] ?? '构建产物未通过核验',
+      };
+    }
+    await const MethodChannel('vibekits/app-installer').invokeMethod<void>(
+      'openApkInstaller',
+      <String, Object?>{
+        'path': prepared['path'],
+        'packageName': prepared['packageName'],
+      },
+    );
+    return <String, Object?>{
+      'installerOpened': true,
+      'installedConfirmed': false,
+      'packageName': prepared['packageName'],
+      'nextAction': '等待 Android 系统安装确认，再检查 PackageManager 中的安装版本',
+    };
   }
 
   Future<Map<String, Object?>> _padBuilderInstall(

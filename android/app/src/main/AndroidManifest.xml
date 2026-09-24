@@ -11,6 +11,7 @@
     <uses-permission android:name="com.newlink.kemi.kboard.permission.IPC" />
     <uses-permission android:name="com.vibekits.vibekits.permission.REMOTE_ADB" />
     <uses-permission android:name="com.vibekits.vibekits.permission.PROXY_RUNTIME" />
+    <uses-permission android:name="com.vibekits.vibekits.permission.BUILDER_RUNTIME" />
     <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <application
         android:label="vibekits"

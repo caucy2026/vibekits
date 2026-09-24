@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="com.vibekits.vibekits.permission.BUILDER_RUNTIME" />
+    <queries><package android:name="com.vibekits.vibekits.component.builder" /></queries>
+    <application android:label="PAD Builder IPC Probe" android:allowBackup="false">
+        <activity android:name=".ProbeClientActivity" android:exported="true" />
+    </application>
+</manifest>

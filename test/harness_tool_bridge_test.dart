@@ -25,6 +25,10 @@ void main() {
     final status = tools[VibekitsHarnessToolBridge.padBuilderStatusId]!;
     final install = tools[VibekitsHarnessToolBridge.padBuilderInstallId]!;
     final termux = tools[VibekitsHarnessToolBridge.padTermuxProbeId]!;
+    final build = tools[VibekitsHarnessToolBridge.padBuilderBuildId]!;
+    final taskStatus = tools[VibekitsHarnessToolBridge.padBuilderTaskStatusId]!;
+    final cancel = tools[VibekitsHarnessToolBridge.padBuilderCancelId]!;
+    final installApk = tools[VibekitsHarnessToolBridge.padBuilderInstallApkId]!;
     expect(status.risk, HarnessToolRisk.readOnly);
     expect(install.risk, HarnessToolRisk.writesData);
     expect(termux.risk, HarnessToolRisk.readOnly);
@@ -33,6 +37,11 @@ void main() {
     expect(status.available, Platform.isAndroid);
     expect(install.available, Platform.isAndroid);
     expect(termux.available, Platform.isAndroid);
+    expect(build.risk, HarnessToolRisk.writesData);
+    expect(taskStatus.risk, HarnessToolRisk.readOnly);
+    expect(cancel.risk, HarnessToolRisk.writesData);
+    expect(installApk.risk, HarnessToolRisk.controlsDevice);
+    expect(build.available, Platform.isAndroid);
   });
 
   test('远程仿真目录公开 Harness 全自动会话闭环', () async {

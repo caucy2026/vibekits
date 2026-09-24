@@ -61,6 +61,7 @@ open class MainActivity : FlutterActivity() {
     private var harnessRelayClient: HarnessRelayClient? = null
     private var harnessKeyboard: HarnessCrossDisplayKeyboard? = null
     private var proxyComponent: ProxyComponentClient? = null
+    private var padBuilderComponent: PadBuilderComponentClient? = null
     private var pendingSimulatorForeground = false
 
     protected val isDualMode: Boolean
@@ -134,6 +135,8 @@ open class MainActivity : FlutterActivity() {
         harnessKeyboard = null
         proxyComponent?.close()
         proxyComponent = null
+        padBuilderComponent?.close()
+        padBuilderComponent = null
         harnessRelayClient?.close()
         harnessRelayClient = null
         continuousDisplay?.release()
@@ -234,8 +237,18 @@ open class MainActivity : FlutterActivity() {
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, padBuilderChannelName)
             .setMethodCallHandler { call, result ->
-                if (call.method == "inspectTermux") TermuxBuildProbe(this).inspect(result)
-                else result.notImplemented()
+                when (call.method) {
+                    "inspectTermux" -> TermuxBuildProbe(this).inspect(result)
+                    "componentStatus", "startBuild", "buildStatus", "cancelBuild",
+                    "prepareInstall" -> {
+                        val client = padBuilderComponent
+                            ?: PadBuilderComponentClient(this).also { padBuilderComponent = it }
+                        client.handle(call.method, call.argument<String>("sourceDirectory"),
+                            call.argument<String>("expectedPackageName"),
+                            call.argument<String>("taskId"), result)
+                    }
+                    else -> result.notImplemented()
+                }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, remoteAdbChannelName)
             .setMethodCallHandler { call, result ->
