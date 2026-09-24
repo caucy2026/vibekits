@@ -33,8 +33,8 @@ android {
         // PAD63 is API 31. Executing the unpacked arm64 aapt tool and its
         // private libraries was verified in a non-debuggable SDK 35 app.
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.4"
+        versionCode = 6
+        versionName = "1.0.5"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -11,7 +11,7 @@
 | libandroid-spawn 0.3 | Termux 官方包 | `libandroid-spawn-LICENSE` |
 | libexpat 2.8.5 | Termux 官方包 | `libexpat-copyright` |
 | libpng 1.6.58 | Termux 官方包 | `libpng-copyright` |
-| zlib 1.3.1 | Termux 历史镜像包 | `zlib131-LICENSE` |
-| libc++ 运行库 | Android NDK r27c；经 Termux 的 strip 与 ELF 清理后与快照逐字节一致 | `termux-licenses-NCSA.txt` |
+| zlib 1.3.2 | Termux `zlib_1.3.2_aarch64.deb`，包哈希与固定索引一致 | `zlib132-copyright`（直接取自该包的 `share/doc/zlib/copyright`） |
+| libc++ 运行库 30 | Termux `libc++_30_aarch64.deb`，包哈希与固定索引一致 | `termux-licenses-NCSA.txt` |
 
 官方包索引：<https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-aarch64/Packages.gz>。源码配方：<https://github.com/termux/termux-packages>。本文件是许可声明，不代表当前开发快照已通过正式发布验收。
