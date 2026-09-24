@@ -76,7 +76,7 @@ final class DeviceFrameworkClasspath {
         builder.environment().put("JAVA_HOME", root + "/java-21-openjdk");
         builder.environment().put("HOME", work.getAbsolutePath());
         Process process = builder.start();
-        if (!process.waitFor(180, TimeUnit.SECONDS)) {
+        if (!process.waitFor(120, TimeUnit.SECONDS)) {
             process.destroyForcibly();
             throw new IOException("device framework conversion timed out");
         }

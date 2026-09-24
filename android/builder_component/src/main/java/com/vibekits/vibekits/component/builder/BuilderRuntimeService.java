@@ -57,7 +57,9 @@ public final class BuilderRuntimeService extends Service {
     private final IBuilderRuntime.Stub binder = new IBuilderRuntime.Stub() {
         @Override public String getRuntimeStatus() {
             if ("preparing".equals(phase)) {
-                try { prepared.await(90, TimeUnit.SECONDS); }
+                // Keep the bound service alive through first-use conversion;
+                // returning early would let the caller unbind and restart it.
+                try { prepared.await(190, TimeUnit.SECONDS); }
                 catch (InterruptedException error) { Thread.currentThread().interrupt(); }
             }
             JSONObject value = new JSONObject();

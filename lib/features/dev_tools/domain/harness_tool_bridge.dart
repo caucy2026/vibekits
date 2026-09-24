@@ -3323,7 +3323,7 @@ class VibekitsHarnessToolBridge {
     if (!Platform.isAndroid) throw UnsupportedError('PAD 编译组件仅适用于 Android');
     final response = await const MethodChannel('vibekits/pad-builder')
         .invokeMapMethod<String, Object?>(method, arguments)
-        .timeout(Duration(seconds: method == 'componentStatus' ? 110 : 30));
+        .timeout(Duration(seconds: method == 'componentStatus' ? 210 : 30));
     if (response == null) throw StateError('PAD 编译组件未返回结果');
     return <String, Object?>{...response};
   }

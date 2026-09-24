@@ -56,10 +56,14 @@ def main():
     parser.add_argument("--probe-apk", type=Path, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=120)
+    parser.add_argument("--runs", type=int, default=1,
+                        help="run again after force-stopping the probe to verify cached component startup")
     args = parser.parse_args()
     self_test()
     if args.timeout_seconds < 10 or args.timeout_seconds > 300:
         parser.error("timeout must be between 10 and 300 seconds")
+    if args.runs not in (1, 2):
+        parser.error("runs must be 1 or 2")
 
     sdk = Path(os.environ.get("ANDROID_HOME", "/Users/newlink/android-sdk"))
     adb = str(sdk / "platform-tools/adb")
@@ -91,6 +95,7 @@ def main():
         "artifacts": [{"package": package, "path": str(path), "bytes": path.stat().st_size,
                        "sha256": digest(path)} for package, path in artifacts],
         "state": "incomplete",
+        "runs": [],
     }
     installed = []
     try:
@@ -98,21 +103,35 @@ def main():
             if "Success" not in run(target + ["install", str(path)]):
                 raise RuntimeError("install did not succeed: " + package)
             installed.append(package)
-        stamp = run(target + ["shell", "date", "+%m-%dT%H:%M:%S.000"]).strip().replace("T", " ")
-        run(target + ["shell", "am", "start", "-n", PROBE + "/.ProbeClientActivity"])
-        deadline = time.monotonic() + args.timeout_seconds
-        while True:
-            log = run(target + ["logcat", "-d", "-T", stamp])
-            relevant = "\n".join(
-                line for line in log.splitlines()
-                if "PAD_BUILDER_IPC_PROBE" in line or "ANR of " + PROBE in line
-            )
-            state = classify(relevant)
-            if state != "running" or time.monotonic() >= deadline:
-                receipt["state"] = state if state != "running" else "timeout"
-                (args.evidence_dir / "pad-builder-ipc.log").write_text(relevant + "\n")
+        all_logs = []
+        for index in range(args.runs):
+            if index:
+                time.sleep(2)  # device logcat timestamps have one-second precision
+            stamp = run(target + ["shell", "date", "+%m-%dT%H:%M:%S.000"]).strip().replace("T", " ")
+            started = time.monotonic()
+            run(target + ["shell", "am", "start", "-n", PROBE + "/.ProbeClientActivity"])
+            deadline = started + args.timeout_seconds
+            while True:
+                log = run(target + ["logcat", "-d", "-T", stamp])
+                relevant = "\n".join(
+                    line for line in log.splitlines()
+                    if "PAD_BUILDER_IPC_PROBE" in line or "ANR of " + PROBE in line
+                )
+                state = classify(relevant)
+                if state != "running" or time.monotonic() >= deadline:
+                    state = state if state != "running" else "timeout"
+                    receipt["runs"].append({"index": index + 1, "state": state,
+                                            "elapsedSeconds": round(time.monotonic() - started, 2)})
+                    all_logs.append("=== run {} ===\n{}".format(index + 1, relevant))
+                    break
+                time.sleep(2)
+            run(target + ["shell", "am", "force-stop", PROBE], check=False)
+            if state != "passed":
                 break
-            time.sleep(2)
+        receipt["state"] = "passed" if len(receipt["runs"]) == args.runs and all(
+            item["state"] == "passed" for item in receipt["runs"]
+        ) else "failed"
+        (args.evidence_dir / "pad-builder-ipc.log").write_text("\n".join(all_logs) + "\n")
     except Exception as error:
         receipt["state"] = "infrastructure_failure"
         receipt["error"] = str(error)
