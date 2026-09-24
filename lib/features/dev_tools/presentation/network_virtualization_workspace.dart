@@ -3,11 +3,13 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app_center/presentation/app_center_tab.dart';
+import '../domain/android_proxy_component_service.dart';
 import '../domain/mihomo_controller_service.dart';
+import '../domain/lan_harness_key_receiver.dart';
 import '../domain/mihomo_profile_service.dart';
 import '../domain/network_virtualization_service.dart';
 import '../domain/system_proxy_service.dart';
@@ -30,7 +32,6 @@ class NetworkVirtualizationWorkspace extends StatefulWidget {
 
 class _NetworkVirtualizationWorkspaceState
     extends State<NetworkVirtualizationWorkspace> {
-  static const MethodChannel _qrScanner = MethodChannel('vibekits/qr-scanner');
   BundledRuntimeStatus? _mihomo;
   BundledRuntimeStatus? _qemu;
   SystemProxySnapshot? _systemProxy;
@@ -38,6 +39,7 @@ class _NetworkVirtualizationWorkspaceState
   late final MihomoProfileService _profileService;
   String? _androidProxyDataDirectory;
   bool _profilesReady = false;
+  bool _androidProxyRunning = false;
   List<MihomoProfile> _profiles = const <MihomoProfile>[];
   List<String> _subscriptionLog = const <String>[];
   MihomoProfile? _activeProfile;
@@ -69,8 +71,9 @@ class _NetworkVirtualizationWorkspaceState
       : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}tmp'
             '${Platform.pathSeparator}mihomo';
 
-  bool get _proxyRunning =>
-      NetworkVirtualizationService.status()['mihomoRunning'] == true;
+  bool get _proxyRunning => Platform.isAndroid
+      ? _androidProxyRunning
+      : NetworkVirtualizationService.status()['mihomoRunning'] == true;
 
   MihomoControllerService? get _controller {
     final MihomoConfigSummary? summary = _runningConfig?.summary;
@@ -97,10 +100,13 @@ class _NetworkVirtualizationWorkspaceState
         final Directory support = await getApplicationSupportDirectory();
         _androidProxyDataDirectory = '${support.path}/mihomo';
       }
-      _profileService = MihomoProfileService(dataDirectory: _proxyDataDirectory);
+      _profileService = MihomoProfileService(
+        dataDirectory: _proxyDataDirectory,
+      );
       await _loadProfiles();
-      if (!Platform.isAndroid) await _refresh();
-      if (_activeProfile != null &&
+      await _refresh();
+      if (!Platform.isAndroid &&
+          _activeProfile != null &&
           _mihomo?.available == true &&
           !_proxyRunning) {
         try {
@@ -130,6 +136,29 @@ class _NetworkVirtualizationWorkspaceState
   }
 
   Future<void> _refresh() async {
+    if (Platform.isAndroid) {
+      final Map<String, Object?> status =
+          await AndroidProxyComponentService.inspect();
+      SystemProxySnapshot? systemProxy;
+      try {
+        systemProxy = await _systemProxyService.inspect();
+      } on Object {
+        systemProxy = null;
+      }
+      if (!mounted) return;
+      setState(() {
+        _androidProxyRunning = status['running'] == true;
+        _systemProxy = systemProxy;
+        _mihomo = BundledRuntimeStatus(
+          name: 'Mihomo Android 组件',
+          executable: '',
+          available: status['available'] == true,
+          version: '${status['version'] ?? status['message'] ?? '组件未安装'}',
+        );
+      });
+      if (_proxyRunning) await _refreshController();
+      return;
+    }
     final List<BundledRuntimeStatus> status =
         await Future.wait(<Future<BundledRuntimeStatus>>[
           NetworkVirtualizationService.inspectMihomo(),
@@ -162,6 +191,7 @@ class _NetworkVirtualizationWorkspaceState
     await _run(() async {
       final MihomoProfile profile = await _profileService.importConfig(
         sourcePath: file.path,
+        displayName: file.name,
       );
       await _loadProfiles();
       if (mounted) setState(() => _activeProfile = profile);
@@ -206,71 +236,17 @@ class _NetworkVirtualizationWorkspaceState
                       if (Platform.isAndroid) ...<Widget>[
                         const SizedBox(width: 8),
                         IconButton.filledTonal(
-                          key: const Key('mihomo-scan-subscription'),
-                          tooltip: '扫码输入订阅地址',
-                          icon: const Icon(Icons.qr_code_scanner_rounded),
+                          key: const Key('mihomo-phone-subscription'),
+                          tooltip: '用手机扫码输入订阅地址',
+                          icon: const Icon(Icons.qr_code_rounded),
                           onPressed: () async {
-                            try {
-                              final String? scanned = await _qrScanner
-                                  .invokeMethod<String>('scan');
-                              if (scanned == null || !dialogContext.mounted) {
-                                return;
-                              }
-                              final Uri uri =
-                                  MihomoProfileService.validatedSubscriptionUri(
-                                    scanned,
-                                  );
-                              final bool useAddress =
-                                  await showDialog<bool>(
-                                    context: dialogContext,
-                                    builder: (BuildContext previewContext) =>
-                                        AlertDialog(
-                                          title: const Text('确认扫码结果'),
-                                          content: Text(
-                                            '识别到 ${uri.host} 的订阅地址。确认后只填入输入框，仍需点击“下载并添加”才会保存。',
-                                          ),
-                                          actions: <Widget>[
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(
-                                                previewContext,
-                                                false,
-                                              ),
-                                              child: const Text('取消'),
-                                            ),
-                                            FilledButton(
-                                              key: const Key(
-                                                'mihomo-use-scanned-url',
-                                              ),
-                                              onPressed: () => Navigator.pop(
-                                                previewContext,
-                                                true,
-                                              ),
-                                              child: const Text('填入地址'),
-                                            ),
-                                          ],
-                                        ),
-                                  ) ??
-                                  false;
-                              if (useAddress) url.text = scanned.trim();
-                            } on Object {
-                              if (!dialogContext.mounted) return;
-                              await showDialog<void>(
-                                context: dialogContext,
-                                builder: (BuildContext errorContext) =>
-                                    AlertDialog(
-                                      title: const Text('无法使用扫码结果'),
-                                      content: const Text(
-                                        '请扫描有效的 HTTPS 订阅二维码，并检查相机权限。',
-                                      ),
-                                      actions: <Widget>[
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(errorContext),
-                                          child: const Text('知道了'),
-                                        ),
-                                      ],
-                                    ),
-                              );
+                            final String? received = await showDialog<String>(
+                              context: dialogContext,
+                              builder: (BuildContext context) =>
+                                  const _LanSubscriptionDialog(),
+                            );
+                            if (received != null && dialogContext.mounted) {
+                              url.text = received;
                             }
                           },
                         ),
@@ -310,7 +286,17 @@ class _NetworkVirtualizationWorkspaceState
 
   Future<void> _selectProfile(MihomoProfile profile) async {
     if (_proxyRunning) {
-      await NetworkVirtualizationService.stopMihomo();
+      if (Platform.isAndroid && _systemProxy?.enabled == true) {
+        _systemProxy = await _systemProxyService.restore(
+          dataDirectory: _proxyDataDirectory,
+        );
+      }
+      if (Platform.isAndroid) {
+        await AndroidProxyComponentService.stop();
+        _androidProxyRunning = false;
+      } else {
+        await NetworkVirtualizationService.stopMihomo();
+      }
       _runningConfig = null;
       _controllerSnapshot = null;
     }
@@ -318,7 +304,7 @@ class _NetworkVirtualizationWorkspaceState
     if (mounted) setState(() => _activeProfile = profile);
     if (Platform.isAndroid && _mihomo?.available != true) {
       if (mounted) {
-        setState(() => _message = '订阅已保存；PAD 代理核心尚未安装，未启用系统代理');
+        setState(() => _message = '代理组件未安装；请先到应用中心安装网络代理组件');
       }
       return;
     }
@@ -366,16 +352,26 @@ class _NetworkVirtualizationWorkspaceState
     if (profile == null) throw StateError('请先添加订阅或导入 Clash YAML');
     final MihomoManagedConfig config = await _profileService
         .prepareManagedConfig(profile);
-    await NetworkVirtualizationService.startMihomo(
-      configPath: config.path,
-      dataDirectory: _proxyDataDirectory,
-    );
+    if (Platform.isAndroid) {
+      await AndroidProxyComponentService.start(config.path);
+      _androidProxyRunning = true;
+    } else {
+      await NetworkVirtualizationService.startMihomo(
+        configPath: config.path,
+        dataDirectory: _proxyDataDirectory,
+      );
+    }
     _runningConfig = config;
     try {
       await _waitForController();
       _startDashboardTimer();
     } on Object {
-      await NetworkVirtualizationService.stopMihomo();
+      if (Platform.isAndroid) {
+        await AndroidProxyComponentService.stop();
+        _androidProxyRunning = false;
+      } else {
+        await NetworkVirtualizationService.stopMihomo();
+      }
       _runningConfig = null;
       rethrow;
     }
@@ -400,7 +396,9 @@ class _NetworkVirtualizationWorkspaceState
         await showDialog<bool>(
           context: context,
           builder: (BuildContext dialogContext) => AlertDialog(
-            title: const Text('启用 Windows 系统代理？'),
+            title: Text(
+              Platform.isAndroid ? '启用 PAD 系统代理？' : '启用 Windows 系统代理？',
+            ),
             content: Text(
               '将把当前用户系统代理切换到“${profile.name}”。'
               '本地核心和节点管理不依赖此开关，原系统设置会先保存并可随时恢复。',
@@ -610,7 +608,12 @@ class _NetworkVirtualizationWorkspaceState
     _systemProxy = await _systemProxyService.restore(
       dataDirectory: _proxyDataDirectory,
     );
-    await NetworkVirtualizationService.stopMihomo();
+    if (Platform.isAndroid) {
+      await AndroidProxyComponentService.stop();
+      _androidProxyRunning = false;
+    } else {
+      await NetworkVirtualizationService.stopMihomo();
+    }
     _runningConfig = null;
     _controllerSnapshot = null;
     _nodeDelays.clear();
@@ -693,13 +696,69 @@ class _NetworkVirtualizationWorkspaceState
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   _mihomo?.available == true
-                      ? 'PAD 代理核心已就绪，可管理和使用订阅。'
-                      : 'PAD 代理核心尚未安装；可先扫码或手动保存订阅，当前不会修改系统网络。',
+                      ? 'PAD 代理组件已就绪：${_mihomo?.version ?? ''}'
+                      : 'PAD 代理组件未安装。大组件从应用中心按需安装，主 APK 不携带 Mihomo。',
                 ),
               ),
             ),
           ),
           if (_message.isNotEmpty) Text(_message),
+          if (_mihomo?.available != true)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.icon(
+                  key: const Key('mihomo-android-install-component'),
+                  onPressed: () async {
+                    await showDialog<void>(
+                      context: context,
+                      builder: (BuildContext dialogContext) => Dialog(
+                        child: SizedBox(
+                          width: 1050,
+                          height: 780,
+                          child: Column(
+                            children: <Widget>[
+                              const Expanded(
+                                child: AppCenterTab(
+                                  initialKeyword: 'VibeKits 代理组件',
+                                ),
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: const Text('返回代理'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                    if (mounted) await _refresh();
+                  },
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('从应用中心安装代理组件'),
+                ),
+              ),
+            ),
+          _proxyToolbar(),
+          if (_proxyRunning)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('mihomo-android-stop-core'),
+                onPressed: _busy
+                    ? null
+                    : () => _run(
+                        _stopProxyAndRestoreSystem,
+                        success: '代理已停止，原系统代理已恢复',
+                      ),
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text('停止核心'),
+              ),
+            ),
           Expanded(child: _profilePane(compact: false)),
         ],
       );
@@ -910,7 +969,7 @@ class _NetworkVirtualizationWorkspaceState
           child: Text(
             _proxyRunning
                 ? '${_activeProfile?.name ?? 'Mihomo'} · 127.0.0.1:${_runningConfig?.summary.mixedPort ?? '-'}'
-                : (_activeProfile == null ? '尚未添加订阅' : '正在准备本地核心'),
+                : (_activeProfile == null ? '尚未添加订阅' : '已选配置 · 点击重新加载'),
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ),
@@ -1936,6 +1995,102 @@ class _NetworkVirtualizationWorkspaceState
     }
     if (value >= 1024) return '${(value / 1024).toStringAsFixed(1)} KiB';
     return '$value B';
+  }
+}
+
+final class _LanSubscriptionDialog extends StatefulWidget {
+  const _LanSubscriptionDialog();
+
+  @override
+  State<_LanSubscriptionDialog> createState() => _LanSubscriptionDialogState();
+}
+
+final class _LanSubscriptionDialogState extends State<_LanSubscriptionDialog> {
+  LanHarnessKeyReceiver? _receiver;
+  String _status = '正在建立局域网页面…';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_start());
+  }
+
+  Future<void> _start() async {
+    try {
+      final LanHarnessKeyReceiver receiver = await LanHarnessKeyReceiver.start(
+        kind: LanInputKind.subscription,
+      );
+      if (!mounted) {
+        await receiver.close();
+        return;
+      }
+      setState(() {
+        _receiver = receiver;
+        _status = '请用同一局域网内的手机扫码，在网页粘贴 HTTPS 订阅地址';
+      });
+      final String received = await receiver.valueReceived;
+      if (mounted) Navigator.of(context).pop(received);
+    } on Object catch (error) {
+      if (mounted) setState(() => _status = '$error');
+    }
+  }
+
+  @override
+  void dispose() {
+    final LanHarnessKeyReceiver? receiver = _receiver;
+    if (receiver != null) unawaited(receiver.close());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final LanHarnessKeyReceiver? receiver = _receiver;
+    return AlertDialog(
+      title: const Text('手机扫码输入代理订阅'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(_status, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            if (receiver == null)
+              const SizedBox.square(
+                dimension: 42,
+                child: CircularProgressIndicator(),
+              )
+            else ...<Widget>[
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(12),
+                child: QrImageView(
+                  key: const Key('mihomo-lan-subscription-qr'),
+                  data: receiver.pageUri.toString(),
+                  version: QrVersions.auto,
+                  size: 210,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                receiver.pageUri.toString(),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '二维码不含订阅地址；收到后只填入输入框，仍需在 Pad 确认下载。',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
   }
 }
 

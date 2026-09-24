@@ -1,11 +1,10 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'package:flutter/services.dart';
 
-typedef SystemProxyProcessRunner = Future<ProcessResult> Function(
-  String executable,
-  List<String> arguments,
-);
+typedef SystemProxyProcessRunner =
+    Future<ProcessResult> Function(String executable, List<String> arguments);
 
 class SystemProxySnapshot {
   const SystemProxySnapshot({
@@ -39,8 +38,20 @@ class SystemProxyService {
   static const String _key =
       r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings';
   final SystemProxyProcessRunner _runner;
+  static const MethodChannel _androidChannel = MethodChannel(
+    'vibekits/android-system-proxy',
+  );
 
   Future<SystemProxySnapshot> inspect() async {
+    if (Platform.isAndroid) {
+      final Map<Object?, Object?>? state = await _androidChannel
+          .invokeMapMethod<Object?, Object?>('inspect');
+      return SystemProxySnapshot(
+        enabled: state?['enabled'] == true,
+        server: '${state?['server'] ?? ''}',
+        bypass: null,
+      );
+    }
     _requireWindows();
     final String? enabled = await _readValue('ProxyEnable');
     return SystemProxySnapshot(
@@ -54,6 +65,31 @@ class SystemProxyService {
     required int port,
     required String dataDirectory,
   }) async {
+    if (Platform.isAndroid) {
+      if (port < 1024 || port > 65535) throw const FormatException('代理端口无效');
+      final Map<Object?, Object?>? result = await _androidChannel
+          .invokeMapMethod<Object?, Object?>('apply', <String, Object?>{
+            'port': port,
+          });
+      if (result?['accepted'] != true) {
+        throw StateError('${result?['message'] ?? 'PAD 系统代理设置失败'}');
+      }
+      final String target = '127.0.0.1:$port';
+      for (var attempt = 0; attempt < 10; attempt++) {
+        final Map<Object?, Object?>? state = await _androidChannel
+            .invokeMapMethod<Object?, Object?>('inspect');
+        if (state?['server'] == target && state?['effective'] == target) {
+          return SystemProxySnapshot(
+            enabled: true,
+            server: target,
+            bypass: null,
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      await _androidChannel.invokeMethod<Object?>('restore');
+      throw StateError('PAD 已写入系统代理，但系统网络栈未实际采用；已恢复原设置');
+    }
     _requireWindows();
     if (port < 1 || port > 65535) throw const FormatException('代理端口无效');
     final Directory data = _absoluteDataDirectory(dataDirectory);
@@ -80,6 +116,14 @@ class SystemProxyService {
   }
 
   Future<SystemProxySnapshot> restore({required String dataDirectory}) async {
+    if (Platform.isAndroid) {
+      final Map<Object?, Object?>? result = await _androidChannel
+          .invokeMapMethod<Object?, Object?>('restore');
+      if (result?['accepted'] != true) {
+        throw StateError('${result?['message'] ?? 'PAD 系统代理恢复失败'}');
+      }
+      return inspect();
+    }
     _requireWindows();
     final File backup = File(
       '${_absoluteDataDirectory(dataDirectory).path}${Platform.pathSeparator}system-proxy-backup.json',

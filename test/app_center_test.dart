@@ -25,6 +25,48 @@ void main() {
     );
   });
 
+  test('Android 网络代理组件按签名宿主和精确市场记录安装', () async {
+    final AppCenterService service = AppCenterService(
+      platformOverride: 'android',
+      versionLookup: (String packageName) async {
+        expect(packageName, 'com.caucy.vibekits.component.network_proxy');
+        return const AppCenterLocalVersion.uninstalled();
+      },
+    );
+    addTearDown(service.dispose);
+    final AppCenterItem item = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.caucy.vibekits.component.network_proxy',
+      'download_url': 'https://cdn.example.test/network-proxy.apk',
+      'version_code': 1,
+    });
+    expect(item.isComponent, isTrue);
+    expect(item.componentId, 'network_proxy');
+    expect(item.hostPackageName, 'com.vibekits.vibekits');
+    expect(
+      await service.localVersion(item),
+      isA<AppCenterLocalVersion>().having(
+        (value) => value.installed,
+        'installed',
+        false,
+      ),
+    );
+    expect(
+      service.canDownload(item, const AppCenterLocalVersion.uninstalled()),
+      isTrue,
+    );
+    final AppCenterItem wrongHost = AppCenterItem.fromJson(<String, Object?>{
+      ..._itemJson(os: 'android'),
+      'package_name': 'com.caucy.vibekits.component.network_proxy',
+      'host_package_name': 'com.caucy.vibekits',
+      'download_url': 'https://cdn.example.test/network-proxy.apk',
+    });
+    await expectLater(
+      service.installComponent(wrongHost),
+      throwsFormatException,
+    );
+  });
+
   test('旧商城接口按精确包名识别两个 Windows 组件', () {
     for (final id in ['virtual_machine', 'network_proxy']) {
       final item = AppCenterItem.fromJson({

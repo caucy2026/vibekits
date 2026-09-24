@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 typedef LanAddressLister = Future<List<NetworkInterface>> Function();
 
+enum LanInputKind { harnessKey, subscription }
+
 /// Receives one Harness API Key from a short-lived page on the trusted LAN.
 ///
 /// The QR contains only a private-network URL and a random one-time token. The
@@ -16,6 +18,7 @@ final class LanHarnessKeyReceiver {
     this.pageUri,
     this.expiresAt,
     this._token,
+    this._kind,
   ) {
     _subscription = _server.listen(_handleRequest);
     _expiryTimer = Timer(expiresAt.difference(DateTime.now()), () {
@@ -30,18 +33,21 @@ final class LanHarnessKeyReceiver {
   final Uri pageUri;
   final DateTime expiresAt;
   final String _token;
+  final LanInputKind _kind;
   final Completer<String> _keyCompleter = Completer<String>();
   late final StreamSubscription<HttpRequest> _subscription;
   late final Timer _expiryTimer;
   bool _closed = false;
 
   Future<String> get keyReceived => _keyCompleter.future;
+  Future<String> get valueReceived => _keyCompleter.future;
 
   static Future<LanHarnessKeyReceiver> start({
     Duration lifetime = const Duration(minutes: 5),
     LanAddressLister? listInterfaces,
     InternetAddress? bindAddress,
     InternetAddress? advertisedAddress,
+    LanInputKind kind = LanInputKind.harnessKey,
   }) async {
     final InternetAddress advertised =
         advertisedAddress ?? await _findPrivateAddress(listInterfaces);
@@ -55,7 +61,7 @@ final class LanHarnessKeyReceiver {
       scheme: 'http',
       host: advertised.address,
       port: server.port,
-      path: '/harness-key',
+      path: kind == LanInputKind.harnessKey ? '/harness-key' : '/subscription',
       queryParameters: <String, String>{'token': token},
     );
     return LanHarnessKeyReceiver._(
@@ -63,6 +69,7 @@ final class LanHarnessKeyReceiver {
       uri,
       DateTime.now().add(lifetime),
       token,
+      kind,
     );
   }
 
@@ -138,7 +145,7 @@ final class LanHarnessKeyReceiver {
         "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
       );
     if (_closed ||
-        request.uri.path != '/harness-key' ||
+        request.uri.path != pageUri.path ||
         request.uri.queryParameters['token'] != _token) {
       await _reply(
         response,
@@ -173,15 +180,34 @@ final class LanHarnessKeyReceiver {
         body,
         encoding: utf8,
       );
-      final String key = (fields['apiKey'] ?? '').trim();
-      if (key.length < 8 ||
-          key.length > 4096 ||
-          key.contains(RegExp(r'[\r\n]'))) {
+      final String key =
+          (fields[_kind == LanInputKind.harnessKey
+                      ? 'apiKey'
+                      : 'subscriptionUrl'] ??
+                  '')
+              .trim();
+      final Uri? subscription = Uri.tryParse(key);
+      final bool valid = _kind == LanInputKind.harnessKey
+          ? key.length >= 8 &&
+                key.length <= 4096 &&
+                !key.contains(RegExp(r'[\r\n]'))
+          : key.length <= 4096 &&
+                !key.contains(RegExp(r'[\r\n]')) &&
+                subscription != null &&
+                subscription.scheme == 'https' &&
+                subscription.host.isNotEmpty &&
+                subscription.userInfo.isEmpty;
+      if (!valid) {
         await _reply(
           response,
           HttpStatus.badRequest,
           'text/html; charset=utf-8',
-          _resultPage('Key 格式无效，请返回重试', success: false),
+          _resultPage(
+            _kind == LanInputKind.harnessKey
+                ? 'Key 格式无效，请返回重试'
+                : '订阅地址必须是有效的 HTTPS 链接，请返回重试',
+            success: false,
+          ),
         );
         return;
       }
@@ -189,7 +215,7 @@ final class LanHarnessKeyReceiver {
         response,
         HttpStatus.ok,
         'text/html; charset=utf-8',
-        _resultPage('已安全发送到 Vibekits，可以关闭此页面', success: true),
+        _resultPage('已发送到 Vibekits，可以关闭此页面', success: true),
       );
       if (!_keyCompleter.isCompleted) _keyCompleter.complete(key);
       unawaited(close());
@@ -229,8 +255,10 @@ final class LanHarnessKeyReceiver {
     await response.close();
   }
 
-  String _page() =>
-      '''<!doctype html>
+  String _page() => _kind == LanInputKind.subscription
+      ? '''<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VibeKits 订阅输入</title><style>body{font-family:system-ui,sans-serif;background:#f5f5f3;margin:0;padding:24px;color:#20211f}.card{max-width:460px;margin:8vh auto;background:white;border:1px solid #ddd;border-radius:18px;padding:26px}input{box-sizing:border-box;width:100%;font-size:17px;padding:14px;border:1px solid #bbb;border-radius:12px}button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;background:#20211f;color:white;font-size:17px}.tip{font-size:13px;color:#777}</style></head><body><main class="card"><h1>输入代理订阅</h1><p>请确认手机和 Pad 在同一局域网。粘贴 HTTPS 订阅地址后，它只会填入 Pad 的输入框；仍需在 Pad 确认下载。</p><form method="post" action="${pageUri.path}?token=$_token"><input name="subscriptionUrl" type="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://…" required autofocus><button type="submit">发送到 Pad</button></form><p class="tip">二维码不含订阅地址，页面 5 分钟后失效。</p></main></body></html>'''
+      : '''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vibekits Harness 登录</title><style>
 body{font-family:system-ui,sans-serif;background:#f5f5f3;margin:0;padding:24px;color:#20211f}.card{max-width:460px;margin:8vh auto;background:white;border:1px solid #ddd;border-radius:18px;padding:26px;box-shadow:0 10px 40px #0001}h1{font-size:24px;margin:0 0 8px}p{color:#666;line-height:1.6}label{display:block;font-weight:650;margin:22px 0 8px}input{box-sizing:border-box;width:100%;font-size:17px;padding:14px;border:1px solid #bbb;border-radius:12px}button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;background:#20211f;color:white;font-size:17px;font-weight:650}.tip{font-size:13px;color:#777}</style></head>

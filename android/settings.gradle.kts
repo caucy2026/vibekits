@@ -28,3 +28,4 @@ plugins {
 include(":app")
 include(":model_component")
 include(":adb_helper")
+include(":proxy_component")

@@ -18,13 +18,13 @@ internal object RemoteAdbBootstrap {
     private val callbacks = ConcurrentHashMap<Int, (Boolean, String) -> Unit>()
     private val main = Handler(Looper.getMainLooper())
 
-    fun installed(context: Context): Boolean = try {
+    fun installed(context: Context, minimumVersion: Long = 2L): Boolean = try {
         val packageInfo = context.packageManager.getPackageInfo(helperPackage, 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            packageInfo.longVersionCode >= 2L
+            packageInfo.longVersionCode >= minimumVersion
         } else {
             @Suppress("DEPRECATION")
-            packageInfo.versionCode >= 2
+            packageInfo.versionCode.toLong() >= minimumVersion
         }
     } catch (_: PackageManager.NameNotFoundException) {
         false

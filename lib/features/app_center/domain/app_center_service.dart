@@ -118,6 +118,8 @@ class AppCenterItem {
       hostPackageName:
           '${json['host_package_name'] ?? (component == 'android_models'
                       ? 'com.vibekits.vibekits'
+                      : component == 'network_proxy' && '${json['os_type'] ?? ''}'.trim().toLowerCase() == 'android'
+                      ? 'com.vibekits.vibekits'
                       : component != null
                       ? AppUpdateService.packageName
                       : '')}'
@@ -249,8 +251,12 @@ class AppCenterService {
 
   Future<AppCenterLocalVersion> localVersion(AppCenterItem item) async {
     if (item.isComponent && platformName == 'android') {
-      if (item.componentId != 'android_models' ||
-          item.packageName != 'com.vibekits.vibekits.component.models' ||
+      if (!((item.componentId == 'android_models' &&
+                  item.packageName ==
+                      'com.vibekits.vibekits.component.models') ||
+              (item.componentId == 'network_proxy' &&
+                  item.packageName ==
+                      'com.caucy.vibekits.component.network_proxy')) ||
           item.hostPackageName != 'com.vibekits.vibekits' ||
           !item.supportsPlatform('android')) {
         return const AppCenterLocalVersion.unknown();
@@ -558,8 +564,12 @@ class AppCenterService {
   }) async {
     if (platformName == 'android') {
       if (!item.isComponent ||
-          item.componentId != 'android_models' ||
-          item.packageName != 'com.vibekits.vibekits.component.models' ||
+          !((item.componentId == 'android_models' &&
+                  item.packageName ==
+                      'com.vibekits.vibekits.component.models') ||
+              (item.componentId == 'network_proxy' &&
+                  item.packageName ==
+                      'com.caucy.vibekits.component.network_proxy')) ||
           item.hostPackageName != 'com.vibekits.vibekits' ||
           item.standalone ||
           !item.supportsPlatform('android')) {

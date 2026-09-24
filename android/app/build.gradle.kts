@@ -5,10 +5,6 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-dependencies {
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
-}
-
 android {
     namespace = "com.vibekits.vibekits"
     buildFeatures { aidl = true }
@@ -87,10 +83,18 @@ android {
 val stageAdbHelperRelease = tasks.register<Copy>("stageAdbHelperRelease") {
     dependsOn(":adb_helper:assembleRelease")
     from(project(":adb_helper").layout.buildDirectory.file(
-        "outputs/apk/release/adb_helper-release.apk"
+        if (System.getenv("KEMI_ANDROID_KEYSTORE").isNullOrBlank())
+            "outputs/apk/release/adb_helper-release-unsigned.apk"
+        else
+            "outputs/apk/release/adb_helper-release.apk"
     ))
     into(layout.buildDirectory.dir("generated/adb-helper-assets"))
     rename { "vibekits-adb-helper.apk" }
+    doLast {
+        check(layout.buildDirectory.file("generated/adb-helper-assets/vibekits-adb-helper.apk").get().asFile.isFile) {
+            "ADB helper APK was not staged; refusing an Android package without remote ADB bootstrap"
+        }
+    }
 }
 tasks.matching { it.name == "mergeReleaseAssets" }.configureEach {
     dependsOn(stageAdbHelperRelease)

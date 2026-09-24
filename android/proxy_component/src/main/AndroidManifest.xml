@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <permission android:name="com.vibekits.vibekits.permission.PROXY_RUNTIME"
+        android:protectionLevel="signature" />
+    <application android:label="VibeKits 代理组件" android:hasCode="true"
+        android:extractNativeLibs="true" android:allowBackup="false">
+        <service android:name=".ProxyRuntimeService" android:exported="true"
+            android:foregroundServiceType="dataSync"
+            android:permission="com.vibekits.vibekits.permission.PROXY_RUNTIME" />
+    </application>
+</manifest>

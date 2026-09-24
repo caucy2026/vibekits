@@ -1,12 +1,12 @@
 package com.vibekits.vibekits
 
 import android.app.Presentation
-import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.hardware.display.DisplayManager
@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -38,7 +39,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import com.google.zxing.integration.android.IntentIntegrator
 
 /**
  * The only authoritative Flutter window. In dual-display mode its FlutterView
@@ -52,14 +52,14 @@ open class MainActivity : FlutterActivity() {
     private val appInstallerChannelName = "vibekits/app-installer"
     private val harnessKeyboardChannelName = "vibekits/harness-keyboard"
     private val remoteAdbChannelName = "vibekits/remote-adb"
-    private val qrScannerChannelName = "vibekits/qr-scanner"
-    private val qrCameraRequestCode = 8432
+    private val proxyComponentChannelName = "vibekits/proxy-component"
+    private val systemProxyChannelName = "vibekits/android-system-proxy"
     private val keyAlias = "VibekitsAndroidCredentialKey"
     private val preferencesName = "vibekits_secure_credentials"
     private var continuousDisplay: ContinuousDisplayCoordinator? = null
     private var harnessRelayClient: HarnessRelayClient? = null
     private var harnessKeyboard: HarnessCrossDisplayKeyboard? = null
-    private var qrScanResult: MethodChannel.Result? = null
+    private var proxyComponent: ProxyComponentClient? = null
 
     protected val isDualMode: Boolean
         get() = intent?.getBooleanExtra(EXTRA_DUAL_MODE, false) == true
@@ -110,56 +110,15 @@ open class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
-        qrScanResult?.success(null)
-        qrScanResult = null
         harnessKeyboard?.close()
         harnessKeyboard = null
+        proxyComponent?.close()
+        proxyComponent = null
         harnessRelayClient?.close()
         harnessRelayClient = null
         continuousDisplay?.release()
         continuousDisplay = null
         super.onDestroy()
-    }
-
-    @Deprecated("Deprecated in Android")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == IntentIntegrator.REQUEST_CODE) {
-            val pending = qrScanResult
-            qrScanResult = null
-            pending?.success(IntentIntegrator.parseActivityResult(requestCode, resultCode, data)?.contents)
-            return
-        }
-        super.onActivityResult(requestCode, resultCode, data)
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != qrCameraRequestCode) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            launchQrScanner()
-        } else {
-            qrScanResult?.error("CAMERA_DENIED", "相机权限未授予", null)
-            qrScanResult = null
-        }
-    }
-
-    private fun launchQrScanner() {
-        val pending = qrScanResult ?: return
-        try {
-            IntentIntegrator(this)
-                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                .setPrompt("扫描代理订阅二维码")
-                .setBeepEnabled(false)
-                .setOrientationLocked(false)
-                .initiateScan()
-        } catch (error: Exception) {
-            qrScanResult = null
-            pending.error("SCANNER_FAILED", error.message, null)
-        }
     }
 
     private fun requestRemoteAdb(result: MethodChannel.Result, enable: Boolean) {
@@ -195,22 +154,62 @@ open class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun requestSystemProxy(result: MethodChannel.Result, port: Int?) {
+        val action = if (port == null) "com.vibekits.vibekits.action.RESTORE_SYSTEM_PROXY"
+            else "com.vibekits.vibekits.action.APPLY_SYSTEM_PROXY"
+        val intent = Intent(action)
+            .setClassName(RemoteAdbBootstrap.helperPackage,
+                "com.vibekits.vibekits.component.adb.RemoteAdbReceiver")
+            .putExtra("port", port ?: 0)
+        try {
+            sendOrderedBroadcast(intent, "com.vibekits.vibekits.permission.REMOTE_ADB",
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context?, intent: Intent?) {
+                        result.success(mapOf("accepted" to (resultCode == RESULT_OK),
+                            "message" to (resultData ?: "Proxy helper unavailable")))
+                    }
+                }, Handler(Looper.getMainLooper()), RESULT_CANCELED, null, null)
+        } catch (error: Exception) {
+            result.success(mapOf("accepted" to false,
+                "message" to (error.message ?: error.javaClass.simpleName)))
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, qrScannerChannelName)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, systemProxyChannelName)
             .setMethodCallHandler { call, result ->
-                if (call.method != "scan") {
-                    result.notImplemented()
-                } else if (qrScanResult != null) {
-                    result.error("SCANNER_BUSY", "扫码界面已经打开", null)
-                } else {
-                    qrScanResult = result
-                    if (checkSelfPermission(Manifest.permission.CAMERA) !=
-                        PackageManager.PERMISSION_GRANTED) {
-                        requestPermissions(arrayOf(Manifest.permission.CAMERA), qrCameraRequestCode)
-                    } else {
-                        launchQrScanner()
+                when (call.method) {
+                    "inspect" -> {
+                        val saved = Settings.Global.getString(contentResolver, Settings.Global.HTTP_PROXY)
+                        val effective = getSystemService(ConnectivityManager::class.java).defaultProxy
+                        result.success(mapOf("enabled" to !saved.isNullOrBlank(),
+                            "server" to (saved ?: ""),
+                            "effective" to (effective?.let { "${it.host}:${it.port}" } ?: "")))
                     }
+                    "apply", "restore" -> {
+                        val port = if (call.method == "apply") call.argument<Int>("port") else null
+                        if (call.method == "apply" && (port == null || port !in 1024..65535)) {
+                            result.error("INVALID_PORT", "代理端口无效", null)
+                            return@setMethodCallHandler
+                        }
+                        if (!RemoteAdbBootstrap.installed(this, 4L)) {
+                            RemoteAdbBootstrap.installBundled(this) { installed, message ->
+                                if (installed) requestSystemProxy(result, port)
+                                else result.success(mapOf("accepted" to false, "message" to message))
+                            }
+                        } else requestSystemProxy(result, port)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, proxyComponentChannelName)
+            .setMethodCallHandler { call, result ->
+                if (call.method !in setOf("inspect", "start", "stop")) {
+                    result.notImplemented()
+                } else {
+                    val client = proxyComponent ?: ProxyComponentClient(this).also { proxyComponent = it }
+                    client.handle(call.method, call.argument<String>("configPath"), result)
                 }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, remoteAdbChannelName)
@@ -393,7 +392,10 @@ open class MainActivity : FlutterActivity() {
                     }
                     require(hasSigner) { "APK signing certificate is missing" }
                     if (call.argument<Boolean>("hostComponent") == true) {
-                        require(expectedPackage == "com.vibekits.vibekits.component.models") {
+                        require(expectedPackage in setOf(
+                            "com.vibekits.vibekits.component.models",
+                            "com.caucy.vibekits.component.network_proxy",
+                        )) {
                             "Unknown host component"
                         }
                         val ownInfo = packageManager.getPackageInfo(packageName, archiveFlags)
