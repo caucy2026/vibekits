@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
@@ -27,16 +28,19 @@ public final class ProbeClientActivity extends Activity {
     private static final String TAG = "PAD_BUILDER_IPC_PROBE";
     private static final String PACKAGE = "com.vibekits.builderipcprobe";
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private HandlerThread workerThread;
+    private Handler worker;
     private TextView label;
-    private IBuilderRuntime runtime;
+    private volatile IBuilderRuntime runtime;
     private String taskId;
     private boolean bound;
     private int polls;
+    private volatile boolean stopped;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
             runtime = IBuilderRuntime.Stub.asInterface(binder);
-            poll();
+            worker.post(ProbeClientActivity.this::poll);
         }
         @Override public void onServiceDisconnected(ComponentName name) {
             runtime = null;
@@ -50,6 +54,9 @@ public final class ProbeClientActivity extends Activity {
         label.setTextSize(23);
         label.setPadding(24, 24, 24, 24);
         setContentView(label);
+        workerThread = new HandlerThread("PadBuilderIpcProbe");
+        workerThread.start();
+        worker = new Handler(workerThread.getLooper());
         Intent service = new Intent().setClassName("com.vibekits.vibekits.component.builder",
             "com.vibekits.vibekits.component.builder.BuilderRuntimeService");
         bound = bindService(service, connection, BIND_AUTO_CREATE);
@@ -57,7 +64,7 @@ public final class ProbeClientActivity extends Activity {
     }
 
     private void poll() {
-        if (runtime == null || isFinishing()) return;
+        if (runtime == null || stopped) return;
         try {
             if (taskId == null) {
                 JSONObject status = new JSONObject(runtime.getRuntimeStatus());
@@ -66,7 +73,7 @@ public final class ProbeClientActivity extends Activity {
                     if ("failed".equals(state) || ++polls > 180) {
                         show("runtime_" + state + ": " + status.optString("error"));
                     } else {
-                        handler.postDelayed(this::poll, 500);
+                        worker.postDelayed(this::poll, 500);
                     }
                     return;
                 }
@@ -102,7 +109,7 @@ public final class ProbeClientActivity extends Activity {
                 show("task_timeout state=" + phase);
             } else {
                 if (polls % 10 == 0) show("progress=" + phase + " step=" + state.optString("step"));
-                handler.postDelayed(this::poll, 500);
+                worker.postDelayed(this::poll, 500);
             }
         } catch (Exception error) {
             show("client_error=" + error.getClass().getSimpleName() + ": " + error.getMessage());
@@ -127,13 +134,18 @@ public final class ProbeClientActivity extends Activity {
     }
 
     private void show(String text) {
-        label.setText(text);
         Log.i(TAG, text);
+        handler.post(() -> {
+            if (!stopped) label.setText(text);
+        });
     }
 
     @Override protected void onDestroy() {
+        stopped = true;
         handler.removeCallbacksAndMessages(null);
         if (bound) unbindService(connection);
+        worker.removeCallbacksAndMessages(null);
+        workerThread.quitSafely();
         super.onDestroy();
     }
 }
