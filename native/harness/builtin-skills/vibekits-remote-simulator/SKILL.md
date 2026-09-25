@@ -1,6 +1,6 @@
 ---
 name: vibekits-remote-simulator
-description: "Use when the user gives a 6–16 digit VibeKits device ID and asks to debug that remote computer/device, inspect its apps, logs or system, transfer files, install, uninstall or test software, or says 远程仿真. Natural requests such as 帮我调试远程 ID should invoke this skill automatically; connect silently with VibeKits built-in P2P/relay and device tools, never a remote-desktop UI."
+description: "Use when the user gives a 6–16 digit VibeKits device ID and asks to debug that remote computer/device, especially Mac-to-Android-PAD remote ADB, or inspect apps, logs, system, transfers and software through 远程仿真. Connect through VibeKits P2P/relay, never a remote-desktop UI."
 ---
 
 # VibeKits remote simulator
@@ -22,4 +22,4 @@ After the Windows device ID is connected and SSH is ready, use `vibekits.simulat
 
 Keep the whole workflow silent in the background and independent of Harness chat rendering. Never expose bridge tokens, credentials, private keys or authorization headers. Do not claim to have clicked a button when only a screenshot or source review was possible.
 
-For an external macOS controller that lacks registered Harness MCP tools, read [references/tool-contract.md](references/tool-contract.md) and use the bundled `scripts/invoke.rb` against the local loopback VibeKits bridge. This fallback is not the Harness path and does not require the remote-desktop UI.
+For an external macOS controller that lacks registered Harness MCP tools, read [references/tool-contract.md](references/tool-contract.md) and use the bundled `scripts/invoke.rb` against the local loopback VibeKits bridge. This fallback is not the Harness path and does not require the remote-desktop UI. For an Android PAD controlled from that Mac, follow the tested end-to-end [Mac → PAD remote ADB guide](references/mac-pad-remote-adb.md), including the dynamic local ADB serial, dual-screen targeting, reconnect after a host APK upgrade, and disconnect.
