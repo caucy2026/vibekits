@@ -2163,6 +2163,14 @@ window.__vibekitsHarnessQueueBridge?.submit(
         : message is String
         ? (jsonDecode(message) as Map?)?.cast<String, dynamic>()
         : null;
+    if (Platform.isWindows && payload?['type'] == 'vibekits.editing.copy') {
+      unawaited(_copyFromFocusedWebSelection());
+      return;
+    }
+    if (Platform.isWindows && payload?['type'] == 'vibekits.editing.paste') {
+      unawaited(_pasteIntoFocusedWebField());
+      return;
+    }
     if (payload?['type'] == 'vibekits.harnessEvent') {
       unawaited(_handleHarnessEvent(payload!));
       return;

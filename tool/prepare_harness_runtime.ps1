@@ -1,7 +1,7 @@
 param(
   [string]$NodeDirectory = "C:\Program Files\nodejs",
   [string]$OutputDirectory = "native\harness\windows\runtime",
-  [string]$PackageVersion = "0.1.6-alpha.2"
+  [string]$PackageVersion = "0.1.7-rc.2"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,6 +85,8 @@ New-Item -ItemType Directory -Path $target | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $target 'profile') | Out-Null
 Copy-Item -LiteralPath (Join-Path $NodeDirectory 'node.exe') -Destination $target
 Copy-Item -LiteralPath (Join-Path $staging 'node_modules') -Destination $target -Recurse
+& (Join-Path $target 'node.exe') (Join-Path $projectRoot 'tool\patch_harness_windows_model_menu.mjs') $target
+if ($LASTEXITCODE -ne 0) { throw 'Harness Windows model menu patch failed' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-mcp-server.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-codex-mcp.mjs') -Destination $target
 Copy-Item -LiteralPath (Join-Path $projectRoot 'native\harness\vibekits-approval.mjs') -Destination $target

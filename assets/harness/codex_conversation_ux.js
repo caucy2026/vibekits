@@ -1,6 +1,71 @@
 (() => {
   if (window.__vibekitsConversationUxInstalled) return;
   window.__vibekitsConversationUxInstalled = true;
+  // webview_windows disables WebView2's native context menu. Restore the
+  // editing actions only for Windows text fields; macOS keeps its native menu.
+  if (/Windows/i.test(navigator.userAgent)) {
+    let editingMenu = null;
+    const closeEditingMenu = () => {
+      editingMenu?.remove();
+      editingMenu = null;
+    };
+    document.addEventListener('contextmenu', (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')
+        : null;
+      if (!(target instanceof HTMLElement) ||
+          (target instanceof HTMLInputElement && (target.disabled || target.readOnly)) ||
+          (target instanceof HTMLTextAreaElement && (target.disabled || target.readOnly))) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeEditingMenu();
+      target.focus();
+      const menu = document.createElement('div');
+      menu.className = 'vibekits-editing-context-menu';
+      Object.assign(menu.style, {
+        position: 'fixed', zIndex: '2147483647', minWidth: '112px',
+        background: '#fff', color: '#222', border: '1px solid #ddd',
+        borderRadius: '8px', padding: '4px', boxShadow: '0 6px 20px #0002',
+      });
+      const send = (type) => window.chrome?.webview?.postMessage(
+        JSON.stringify({ type }),
+      );
+      for (const [label, type] of [
+        ['复制', 'vibekits.editing.copy'],
+        ['粘贴', 'vibekits.editing.paste'],
+        ['全选', 'vibekits.editing.selectAll'],
+      ]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        Object.assign(button.style, {
+          display: 'block', width: '100%', border: '0', background: 'transparent',
+          color: 'inherit', padding: '6px 12px', textAlign: 'left', cursor: 'pointer',
+        });
+        button.addEventListener('mousedown', (mouseEvent) => mouseEvent.preventDefault());
+        button.addEventListener('click', () => {
+          target.focus();
+          if (type === 'vibekits.editing.selectAll') {
+            document.execCommand('selectAll');
+          } else {
+            send(type);
+          }
+          closeEditingMenu();
+        });
+        menu.appendChild(button);
+      }
+      document.body.appendChild(menu);
+      menu.style.left = `${Math.max(0, Math.min(event.clientX, innerWidth - menu.offsetWidth - 4))}px`;
+      menu.style.top = `${Math.max(0, Math.min(event.clientY, innerHeight - menu.offsetHeight - 4))}px`;
+      editingMenu = menu;
+    }, true);
+    document.addEventListener('pointerdown', (event) => {
+      if (editingMenu && !editingMenu.contains(event.target)) closeEditingMenu();
+    }, true);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeEditingMenu();
+    }, true);
+  }
   let contextSessionRow = null;
   let continuationRelations = [];
   let pendingContinuation = null;
